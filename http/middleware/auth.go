@@ -8,11 +8,10 @@ import (
 	"strings"
 
 	"github.com/alextanhongpin/go-core-microservice/http/types"
-	"github.com/alextanhongpin/go-core-microservice/types/contextkey"
 	jwt "github.com/golang-jwt/jwt/v5"
 )
 
-var AuthContext contextkey.Key[jwt.Claims] = "auth_ctx"
+var AuthContext types.ContextKey[jwt.Claims] = "auth_ctx"
 
 const (
 	AuthBearer = "Bearer"
@@ -36,7 +35,7 @@ type Middleware func(next http.Handler) http.Handler
 
 func RequireAuth(verifyKey []byte) Middleware {
 	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fn := func(w http.ResponseWriter, r *http.Request) {
 			authHeader := r.Header.Get("Authorization")
 
 			claims, err := parseAndValidateAuthorizationHeader(verifyKey, authHeader)
@@ -58,7 +57,9 @@ func RequireAuth(verifyKey []byte) Middleware {
 			ctx = AuthContext.WithValue(ctx, claims)
 			r = r.WithContext(ctx)
 			next.ServeHTTP(w, r)
-		})
+		}
+
+		return http.HandlerFunc(fn)
 	}
 }
 
