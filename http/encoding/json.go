@@ -1,4 +1,4 @@
-package types
+package encoding
 
 import (
 	"bytes"
@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 
+	"github.com/alextanhongpin/go-core-microservice/http/types"
 	"github.com/alextanhongpin/go-core-microservice/types/errors"
 	validator "github.com/go-playground/validator/v10"
 )
@@ -41,51 +42,15 @@ func Decode[T any](w http.ResponseWriter, r *http.Request) (t T, err error) {
 
 // EncodeError encodes the error as json response.
 // Status code is inferred from the error kind.
-func EncodeError(w http.ResponseWriter, r *http.Request, err error) {
-	w.Header().Set("Content-Type", "application/json")
-
-	var result any
-
-	var validationErrors validator.ValidationErrors
-
-	var cause *errors.Error
-
-	switch {
-	case errors.As(err, &cause):
-		underlying := cause.Unwrap()
-		if underlying == nil {
-			underlying = cause
-		}
-
-		if statusCode, found := statusCodeByErrorKind[errors.Kind(cause.Kind)]; found {
-			w.WriteHeader(statusCode)
-		} else {
-			w.WriteHeader(http.StatusInternalServerError)
-		}
-
-		// Expose only domain error.
-		result = Error{
-			Code:    cause.Code,
-			Message: cause.Error(),
-		}
-
-	case errors.As(err, &validationErrors):
-		w.WriteHeader(http.StatusBadRequest)
-
-		result = Error{
-			Code:    http.StatusText(http.StatusBadRequest),
-			Message: err.Error(),
-		}
-	default:
-		w.WriteHeader(http.StatusInternalServerError)
-
-		// Avoid exposing internal error.
-		result = Error{
-			Code:    errors.ErrInternal.Code,
-			Message: errors.ErrInternal.Message,
-		}
+func EncodeError(w http.ResponseWriter, err error) {
+	appErr, statusCode := errorToAppError(err)
+	result := types.Error{
+		Code:    appErr.Code,
+		Message: appErr.Error(),
 	}
 
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(statusCode)
 	if err := json.NewEncoder(w).Encode(result); err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
@@ -94,10 +59,34 @@ func EncodeError(w http.ResponseWriter, r *http.Request, err error) {
 
 // EncodeResult only encodes dto as json response.
 func EncodeResult[T any](w http.ResponseWriter, statusCode int, res T) {
+	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(statusCode)
 
 	if err := json.NewEncoder(w).Encode(res); err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+	}
+}
+
+func errorToAppError(err error) (*errors.Error, int) {
+	var cause *errors.Error
+	var validationErrors validator.ValidationErrors
+
+	switch {
+	case errors.As(err, &cause):
+		statusCode, found := types.ErrorKindToStatusCode[errors.Kind(cause.Kind)]
+		if !found {
+			statusCode = http.StatusInternalServerError
+		}
+
+		return cause, statusCode
+	case errors.As(err, &validationErrors):
+		apiErr := types.ErrBadRequest.Copy()
+		apiErr.Message = err.Error()
+
+		return apiErr, http.StatusBadRequest
+	default:
+		// Avoid exposing internal error.
+		return types.ErrInternal, http.StatusInternalServerError
 	}
 }

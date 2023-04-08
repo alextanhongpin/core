@@ -1,0 +1,6 @@
+[internal]
+"api.internal" = "Oops, something went wrong. Please try again later."
+
+
+[bad_request]
+"api.bad_request" = "The request provided is invalid."
