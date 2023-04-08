@@ -18,7 +18,7 @@ var (
 	ErrBadRequest = errors.Get("api.bad_request")
 )
 
-var ErrorKindToStatusCode = map[errors.Kind]int{
+var errorKindToStatusCode = map[errors.Kind]int{
 	errors.AlreadyExists: http.StatusConflict,
 	errors.BadInput:      http.StatusBadRequest,
 	errors.Conflict:      http.StatusConflict,
@@ -28,4 +28,13 @@ var ErrorKindToStatusCode = map[errors.Kind]int{
 	errors.Unauthorized:  http.StatusUnauthorized,
 	errors.Unknown:       http.StatusInternalServerError,
 	errors.Unprocessable: http.StatusUnprocessableEntity,
+}
+
+func ErrorStatusCode(kind errors.Kind) int {
+	statusCode, ok := errorKindToStatusCode[kind]
+	if !ok {
+		return http.StatusInternalServerError
+	}
+
+	return statusCode
 }

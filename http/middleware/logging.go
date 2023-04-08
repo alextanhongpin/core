@@ -18,9 +18,11 @@ func clientIPFromRequest(r *http.Request) string {
 	if clientIP == "" {
 		clientIP = strings.TrimSpace(r.Header.Get("X-Real-Ip"))
 	}
+
 	if clientIP != "" {
 		return clientIP
 	}
+
 	if ip, _, err := net.SplitHostPort(strings.TrimSpace(r.RemoteAddr)); err != nil {
 		return ip
 	}

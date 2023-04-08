@@ -40,8 +40,8 @@ func Decode[T any](w http.ResponseWriter, r *http.Request) (t T, err error) {
 	return t, nil
 }
 
-// EncodeError encodes the error as json response.
-// Status code is inferred from the error kind.
+// EncodeError encodes the error as json response. Status code is inferred from
+// the error kind.
 func EncodeError(w http.ResponseWriter, err error) {
 	appErr, statusCode := errorToAppError(err)
 	result := types.Error{
@@ -70,23 +70,18 @@ func EncodeResult[T any](w http.ResponseWriter, statusCode int, res T) {
 
 func errorToAppError(err error) (*errors.Error, int) {
 	var cause *errors.Error
+	if errors.As(err, &cause) {
+		return cause, types.ErrorStatusCode(errors.Kind(cause.Kind))
+	}
+
 	var validationErrors validator.ValidationErrors
-
-	switch {
-	case errors.As(err, &cause):
-		statusCode, found := types.ErrorKindToStatusCode[errors.Kind(cause.Kind)]
-		if !found {
-			statusCode = http.StatusInternalServerError
-		}
-
-		return cause, statusCode
-	case errors.As(err, &validationErrors):
+	if errors.As(err, &validationErrors) {
 		apiErr := types.ErrBadRequest.Copy()
 		apiErr.Message = err.Error()
 
 		return apiErr, http.StatusBadRequest
-	default:
-		// Avoid exposing internal error.
-		return types.ErrInternal, http.StatusInternalServerError
 	}
+
+	// Avoid exposing internal error.
+	return types.ErrInternal, http.StatusInternalServerError
 }
