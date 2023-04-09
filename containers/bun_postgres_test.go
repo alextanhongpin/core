@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/alextanhongpin/go-core-microservice/containers"
+	_ "github.com/uptrace/bun/dialect/pgdialect"
 )
 
 func TestBunPostgres(t *testing.T) {

@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"sync"
 	"testing"
 	"time"
 
@@ -12,9 +13,17 @@ import (
 	_ "github.com/lib/pq"
 	"github.com/ory/dockertest/v3"
 	"github.com/ory/dockertest/v3/docker"
+	"github.com/uptrace/bun/driver/pgdriver"
 )
 
+var dsn string
+
+var registerPgDB sync.Once
+
 func PostgresDB(t *testing.T) *sql.DB {
+	registerPgDB.Do(func() {
+		txdb.Register("txdb", "postgres", dsn)
+	})
 	db, err := sql.Open("txdb", uuid.New().String())
 	if err != nil {
 		t.Error(err)
@@ -58,9 +67,9 @@ func StartPostgres(tag string, hooks ...postgresHook) func() {
 		log.Fatal("could not start resources:", err)
 	}
 	hostAndPort := resource.GetHostPort("5432/tcp")
-	databaseURL := fmt.Sprintf("postgres://john:123456@%s/test?sslmode=disable", hostAndPort)
+	dsn = fmt.Sprintf("postgres://john:123456@%s/test?sslmode=disable", hostAndPort)
 
-	log.Println("connecting to database on url:", databaseURL)
+	log.Println("connecting to database on url:", dsn)
 
 	resource.Expire(120) // Tell docker to kill the container in 120 seconds.
 
@@ -69,7 +78,7 @@ func StartPostgres(tag string, hooks ...postgresHook) func() {
 	// not be ready to accept connections yet.
 	pool.MaxWait = 120 * time.Second
 	if err = pool.Retry(func() error {
-		db, err = sql.Open("postgres", databaseURL)
+		db, err = sql.Open("postgres", dsn)
 		if err != nil {
 			return fmt.Errorf("failed to open: %w", err)
 		}
@@ -78,24 +87,36 @@ func StartPostgres(tag string, hooks ...postgresHook) func() {
 			return fmt.Errorf("failed to ping: %w", err)
 		}
 
-		// Run db migrations, seed etc.
+		// Run migrations, seed, fixtures etc.
 		for _, hook := range hooks {
 			if err := hook(db); err != nil {
 				return err
 			}
 		}
 
+		// NOTE: We need to run this once to register the sql driver `pg`.
+		// Otherwise txdb will not be able to register this driver.
+		bunDB := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn)))
+		if err := bunDB.Ping(); err != nil {
+			return fmt.Errorf("failed to ping: %w", err)
+		}
+
+		// NOTE: We can close this connection immediately, since we will be
+		// creating a new one for every test.
+		if err := bunDB.Close(); err != nil {
+			return fmt.Errorf("failed to close bun: %w", err)
+		}
+
+		if err := db.Close(); err != nil {
+			return fmt.Errorf("failed to close db: %w", err)
+		}
+
 		return nil
 	}); err != nil {
 		log.Fatal("could not connect to docker:", err)
 	}
-	txdb.Register("txdb", "postgres", databaseURL)
 
 	return func() {
-		if err := db.Close(); err != nil {
-			log.Println("could not close db:", err)
-		}
-
 		if err := pool.Purge(resource); err != nil {
 			log.Fatal("could not purge resource:", err)
 		}
