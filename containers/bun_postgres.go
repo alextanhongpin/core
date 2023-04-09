@@ -9,16 +9,25 @@ import (
 
 	"github.com/DATA-DOG/go-txdb"
 	"github.com/google/uuid"
-	_ "github.com/lib/pq"
 	"github.com/ory/dockertest/v3"
 	"github.com/ory/dockertest/v3/docker"
+	"github.com/uptrace/bun"
+	"github.com/uptrace/bun/dialect/pgdialect"
+	"github.com/uptrace/bun/driver/pgdriver"
+	"github.com/uptrace/bun/extra/bundebug"
 )
 
-func PostgresDB(t *testing.T) *sql.DB {
-	db, err := sql.Open("txdb", uuid.New().String())
+func PostgresBunDB(t *testing.T) *bun.DB {
+	// Create a unique transaction for each connection.
+	sqldb, err := sql.Open("bun_txdb", uuid.NewString())
 	if err != nil {
-		t.Error(err)
+		t.Errorf("failed to open tx: %v", err)
 	}
+
+	db := bun.NewDB(sqldb, pgdialect.New())
+	db.AddQueryHook(bundebug.NewQueryHook(
+		bundebug.WithVerbose(true),
+	))
 	t.Cleanup(func() {
 		db.Close()
 	})
@@ -26,9 +35,9 @@ func PostgresDB(t *testing.T) *sql.DB {
 	return db
 }
 
-type postgresHook func(db *sql.DB) error
+type postgresBunHook func(db *bun.DB) error
 
-func StartPostgres(tag string, hooks ...postgresHook) func() {
+func StartPostgresBun(tag string, hooks ...postgresBunHook) func() {
 	pool, err := dockertest.NewPool("")
 	if err != nil {
 		log.Fatal("could not construct pool:", err)
@@ -64,23 +73,20 @@ func StartPostgres(tag string, hooks ...postgresHook) func() {
 
 	resource.Expire(120) // Tell docker to kill the container in 120 seconds.
 
-	var db *sql.DB
+	var bunDB *bun.DB
 	// Exponential backoff-retry, because the application in the container might
 	// not be ready to accept connections yet.
 	pool.MaxWait = 120 * time.Second
 	if err = pool.Retry(func() error {
-		db, err = sql.Open("postgres", databaseURL)
-		if err != nil {
-			return fmt.Errorf("failed to open: %w", err)
-		}
-
-		if err := db.Ping(); err != nil {
-			return fmt.Errorf("failed to ping: %w", err)
+		sqlDB := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(databaseURL)))
+		bunDB = bun.NewDB(sqlDB, pgdialect.New())
+		if err := bunDB.Ping(); err != nil {
+			return fmt.Errorf("failed to ping db: %w", err)
 		}
 
 		// Run db migrations, seed etc.
 		for _, hook := range hooks {
-			if err := hook(db); err != nil {
+			if err := hook(bunDB); err != nil {
 				return err
 			}
 		}
@@ -89,10 +95,12 @@ func StartPostgres(tag string, hooks ...postgresHook) func() {
 	}); err != nil {
 		log.Fatal("could not connect to docker:", err)
 	}
-	txdb.Register("txdb", "postgres", databaseURL)
+
+	// Note the `pg` driver, which bun uses instead of `postgres`.
+	txdb.Register("bun_txdb", "pg", databaseURL)
 
 	return func() {
-		if err := db.Close(); err != nil {
+		if err := bunDB.Close(); err != nil {
 			log.Println("could not close db:", err)
 		}
 
