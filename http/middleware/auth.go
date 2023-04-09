@@ -1,26 +1,19 @@
 package middleware
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"strings"
 
+	"github.com/alextanhongpin/go-core-microservice/http/encoding"
 	"github.com/alextanhongpin/go-core-microservice/http/types"
 	jwt "github.com/golang-jwt/jwt/v5"
 )
 
 var AuthContext types.ContextKey[jwt.Claims] = "auth_ctx"
 
-const (
-	AuthBearer = "Bearer"
-	AuthBasic  = "Basic"
-)
-
-const (
-	ErrorCodeUnauthorized = "UNAUTHORIZED"
-)
+const AuthBearer = "Bearer"
 
 var (
 	ErrAuthorizationHeaderInvalid = errors.New("authorization header is invalid")
@@ -28,7 +21,6 @@ var (
 	ErrTokenInvalid               = errors.New("token is invalid")
 	ErrTokenMissing               = errors.New("token is missing")
 	ErrTokenExpired               = errors.New("token expired")
-	ErrUnexpectedSigningMethod    = errors.New("unexpected signing method")
 )
 
 type Middleware func(next http.Handler) http.Handler
@@ -40,16 +32,14 @@ func RequireAuth(verifyKey []byte) Middleware {
 
 			claims, err := parseAndValidateAuthorizationHeader(verifyKey, authHeader)
 			if err != nil {
-				res := types.Error{
-					Code:    ErrorCodeUnauthorized,
-					Message: err.Error(),
+				res := types.Result[any]{
+					Error: &types.Error{
+						Code:    types.ErrUnauthorized.Code,
+						Message: types.ErrUnauthorized.Error(),
+					},
 				}
 
-				w.WriteHeader(http.StatusUnauthorized)
-				if err := json.NewEncoder(w).Encode(res); err != nil {
-					http.Error(w, err.Error(), http.StatusInternalServerError)
-				}
-
+				encoding.EncodeJSON(w, http.StatusUnauthorized, res)
 				return
 			}
 
@@ -83,7 +73,7 @@ func ParseAuthorizationHeader(authHeader string) (string, error) {
 func ValidateAuthorizationHeader(verifyKey []byte, bearerToken string) (jwt.MapClaims, error) {
 	token, err := jwt.Parse(bearerToken, func(token *jwt.Token) (any, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-			return nil, fmt.Errorf("%w: %v", ErrUnexpectedSigningMethod, token.Header["alg"])
+			return nil, fmt.Errorf("%w: unexpected signing method %s", ErrTokenInvalid, token.Header["alg"])
 		}
 
 		return verifyKey, nil

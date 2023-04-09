@@ -14,8 +14,9 @@ var (
 	errorBytes []byte
 	_          = errors.MustLoad(errorBytes, toml.Unmarshal)
 
-	ErrInternal   = errors.Get("api.internal")
-	ErrBadRequest = errors.Get("api.bad_request")
+	ErrInternal     = errors.Get("api.internal")
+	ErrBadRequest   = errors.Get("api.bad_request")
+	ErrUnauthorized = errors.Get("api.unauthorized")
 )
 
 var errorKindToStatusCode = map[errors.Kind]int{

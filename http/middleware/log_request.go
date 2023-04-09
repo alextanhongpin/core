@@ -11,25 +11,6 @@ import (
 	"golang.org/x/exp/slog"
 )
 
-// The implementation is similar to gin-gonic's .ClientIP method.
-func clientIPFromRequest(r *http.Request) string {
-	clientIP := r.Header.Get("X-Forwarded-For")
-	clientIP = strings.TrimSpace(strings.Split(clientIP, ",")[0])
-	if clientIP == "" {
-		clientIP = strings.TrimSpace(r.Header.Get("X-Real-Ip"))
-	}
-
-	if clientIP != "" {
-		return clientIP
-	}
-
-	if ip, _, err := net.SplitHostPort(strings.TrimSpace(r.RemoteAddr)); err != nil {
-		return ip
-	}
-
-	return ""
-}
-
 func LogRequest(logger *slog.Logger) Middleware {
 	return func(next http.Handler) http.Handler {
 		fn := func(w http.ResponseWriter, r *http.Request) {
@@ -38,7 +19,10 @@ func LogRequest(logger *slog.Logger) Middleware {
 			reqID, _ := RequestIDContext.Value(ctx)
 			rw := newStatusResponseWriter(w)
 
-			body, _ := io.ReadAll(r.Body)
+			var body []byte
+			if r.Body != nil {
+				body, _ = io.ReadAll(r.Body)
+			}
 
 			args := []any{
 				slog.String("method", r.Method),
@@ -65,7 +49,19 @@ func LogRequest(logger *slog.Logger) Middleware {
 			next.ServeHTTP(rw, r)
 			args = append(args, slog.Int("status", rw.statusCode))
 
-			logger.With(args...).Info("server request")
+			switch {
+			case rw.statusCode >= 200 && rw.statusCode < 300:
+				logger.With(args...).Info("request success")
+			case
+				rw.statusCode == 400,
+				rw.statusCode == 401:
+				// Ignore bad request and unauthorized.
+			case rw.statusCode > 401 && rw.statusCode < 500:
+				args = append(args, slog.String("err", string(rw.body)))
+				logger.With(args...).Error("request failed")
+			default:
+				// Ignore the rest.
+			}
 		}
 
 		return http.HandlerFunc(fn)
@@ -75,6 +71,7 @@ func LogRequest(logger *slog.Logger) Middleware {
 type statusResponseWriter struct {
 	http.ResponseWriter
 	statusCode    int
+	body          []byte
 	headerWritten bool
 }
 
@@ -96,11 +93,31 @@ func (w *statusResponseWriter) WriteHeader(statusCode int) {
 
 }
 
-func (mw *statusResponseWriter) Write(b []byte) (int, error) {
-	mw.headerWritten = true
-	return mw.ResponseWriter.Write(b)
+func (w *statusResponseWriter) Write(b []byte) (int, error) {
+	w.headerWritten = true
+	w.body = b
+	return w.ResponseWriter.Write(b)
 }
 
-func (mw *statusResponseWriter) Unwrap() http.ResponseWriter {
-	return mw.ResponseWriter
+func (w *statusResponseWriter) Unwrap() http.ResponseWriter {
+	return w.ResponseWriter
+}
+
+// The implementation is similar to gin-gonic's .ClientIP method.
+func clientIPFromRequest(r *http.Request) string {
+	clientIP := r.Header.Get("X-Forwarded-For")
+	clientIP = strings.TrimSpace(strings.Split(clientIP, ",")[0])
+	if clientIP == "" {
+		clientIP = strings.TrimSpace(r.Header.Get("X-Real-Ip"))
+	}
+
+	if clientIP != "" {
+		return clientIP
+	}
+
+	if ip, _, err := net.SplitHostPort(strings.TrimSpace(r.RemoteAddr)); err != nil {
+		return ip
+	}
+
+	return ""
 }

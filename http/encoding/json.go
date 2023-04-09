@@ -17,48 +17,33 @@ func init() {
 	validate = validator.New()
 }
 
-// Decode decodes and validates the body.
-func Decode[T any](w http.ResponseWriter, r *http.Request) (t T, err error) {
+// DecodeJSON decodes the json to struct and performs
+// validation.
+func DecodeJSON[T any](w http.ResponseWriter, r *http.Request) (T, error) {
 	// Duplicate the request to a buffer.
+	var t T
 	var buf bytes.Buffer
 	rr := io.TeeReader(r.Body, &buf)
 
-	if err = json.NewDecoder(rr).Decode(&t); err != nil && !errors.Is(err, io.EOF) {
+	if err := json.NewDecoder(rr).Decode(&t); err != nil && !errors.Is(err, io.EOF) {
 		// Set back to the body as if it was never read before.
 		// This allows us to log the request body.
 		r.Body = io.NopCloser(&buf)
 
-		return
+		return t, err
 	}
 
 	r.Body = io.NopCloser(&buf)
 
-	if err = validate.Struct(&t); err != nil {
-		return
+	if err := validate.Struct(&t); err != nil {
+		return t, err
 	}
 
 	return t, nil
 }
 
-// EncodeError encodes the error as json response. Status code is inferred from
-// the error kind.
-func EncodeError(w http.ResponseWriter, err error) {
-	appErr, statusCode := errorToAppError(err)
-	result := types.Error{
-		Code:    appErr.Code,
-		Message: appErr.Error(),
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(statusCode)
-	if err := json.NewEncoder(w).Encode(result); err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
-	}
-}
-
-// EncodeResult only encodes dto as json response.
-func EncodeResult[T any](w http.ResponseWriter, statusCode int, res T) {
+// EncodeJSON encodes the result to json representation.
+func EncodeJSON[T any](w http.ResponseWriter, statusCode int, res T) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(statusCode)
 
@@ -66,6 +51,20 @@ func EncodeResult[T any](w http.ResponseWriter, statusCode int, res T) {
 		w.WriteHeader(http.StatusInternalServerError)
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 	}
+}
+
+// EncodeError encodes the error as json response. Status code is inferred from
+// the error kind.
+func EncodeJSONError(w http.ResponseWriter, err error) {
+	appErr, statusCode := errorToAppError(err)
+	result := types.Result[any]{
+		Error: &types.Error{
+			Code:    appErr.Code,
+			Message: appErr.Error(),
+		},
+	}
+
+	EncodeJSON(w, statusCode, result)
 }
 
 func errorToAppError(err error) (*errors.Error, int) {
