@@ -12,9 +12,23 @@ $ go run github.com/alextanhongpin/go-core-microservice/cmd/make -name docker
 Currently available Makefiles:
 
 - `docker`: easily start and stop docker-compose
+- `atlas`: manage database migration declaratively and through versioning
 
 WIP:
-- `atlas`: manage database migration declaratively and through versioning
 - `test`: executes golang tests, view test coverage
 - `database`: other command database operations
 - `air`: hot-reload for golang application
+
+
+## Combining Makefiles
+
+
+You can create a root `Makefile` and include the other makefiles:
+
+```Makefile
+include .env
+export
+
+
+include Makefile.*.mk
+```
