@@ -17,6 +17,10 @@ func init() {
 	validate = validator.New()
 }
 
+func SetValidator(val *validator.Validate) {
+	validate = val
+}
+
 // DecodeJSON decodes the json to struct and performs
 // validation.
 func DecodeJSON[T any](w http.ResponseWriter, r *http.Request) (T, error) {
