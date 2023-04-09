@@ -6,10 +6,12 @@ require golang.org/x/exp v0.0.0-20230321023759-10a507213a29
 
 require (
 	github.com/BurntSushi/toml v0.3.1
+	github.com/DATA-DOG/go-txdb v0.1.6
 	github.com/alextanhongpin/errors v0.14.0
 	github.com/go-playground/validator/v10 v10.12.0
 	github.com/golang-jwt/jwt/v5 v5.0.0-rc.2
 	github.com/google/go-cmp v0.5.8
+	github.com/google/uuid v1.3.0
 	github.com/lib/pq v1.10.7
 	github.com/ory/dockertest/v3 v3.9.1
 	github.com/rs/xid v1.4.0

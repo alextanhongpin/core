@@ -6,12 +6,18 @@ import (
 	"log"
 	"time"
 
+	"github.com/DATA-DOG/go-txdb"
+	"github.com/google/uuid"
 	_ "github.com/lib/pq"
 	"github.com/ory/dockertest/v3"
 	"github.com/ory/dockertest/v3/docker"
 )
 
-func Postgres(tag string) (*sql.DB, func()) {
+func DB() (*sql.DB, error) {
+	return sql.Open("txdb", uuid.New().String())
+}
+
+func Postgres(tag string) func() {
 	pool, err := dockertest.NewPool("")
 	if err != nil {
 		log.Fatal("could not construct pool:", err)
@@ -61,8 +67,9 @@ func Postgres(tag string) (*sql.DB, func()) {
 	}); err != nil {
 		log.Fatal("could not connect to docker:", err)
 	}
+	txdb.Register("txdb", "postgres", databaseURL)
 
-	return db, func() {
+	return func() {
 		if err := db.Close(); err != nil {
 			log.Println("could not close db:", err)
 		}

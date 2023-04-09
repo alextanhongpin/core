@@ -9,11 +9,11 @@ import (
 )
 
 func New() *sql.DB {
-	user := os.Getenv("DB_USER")
-	pass := os.Getenv("DB_PASS")
-	host := os.Getenv("DB_HOST")
-	port := os.Getenv("DB_PORT")
-	name := os.Getenv("DB_NAME")
+	user := mustEnv("DB_USER")
+	pass := mustEnv("DB_PASS")
+	host := mustEnv("DB_HOST")
+	port := mustEnv("DB_PORT")
+	name := mustEnv("DB_NAME")
 
 	dsn := fmt.Sprintf("postgres://%s:%s@%s:%s/%s?sslmode=disable", user, pass, host, port, name)
 
@@ -33,4 +33,13 @@ func New() *sql.DB {
 	}
 
 	return db
+}
+
+func mustEnv(name string) string {
+	env, ok := os.LookupEnv(name)
+	if !ok {
+		log.Fatalf("%q not set", name)
+	}
+
+	return env
 }
