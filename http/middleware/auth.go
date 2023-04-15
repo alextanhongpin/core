@@ -39,7 +39,7 @@ func RequireAuth(verifyKey []byte) Middleware {
 					},
 				}
 
-				encoding.EncodeJSON(w, http.StatusUnauthorized, res)
+				encoding.EncodeJSON(w, res, http.StatusUnauthorized)
 				return
 			}
 

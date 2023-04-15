@@ -113,7 +113,7 @@ func TestEncodeError(t *testing.T) {
 
 func TestEncode(t *testing.T) {
 	w := httptest.NewRecorder()
-	encoding.EncodeJSON(w, http.StatusOK, types.Result[loginRequest]{
+	encoding.EncodeJSON(w, types.Result[loginRequest]{
 		Data: &loginRequest{
 			Email: "john.appleseed@mail.com",
 		},
@@ -121,7 +121,7 @@ func TestEncode(t *testing.T) {
 			Prev: "prev-link",
 			Next: "next-link",
 		},
-	})
+	}, http.StatusOK)
 
 	res := w.Result()
 	defer res.Body.Close()

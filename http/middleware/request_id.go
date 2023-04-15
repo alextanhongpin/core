@@ -11,7 +11,12 @@ var RequestIDContext types.ContextKey[string] = "request_id_ctx"
 
 func RequestID(next http.Handler) http.Handler {
 	fn := func(w http.ResponseWriter, r *http.Request) {
-		requestID := xid.New().String()
+		requestID := r.Header.Get("x-request-id")
+		if requestID == "" {
+			requestID = xid.New().String()
+			w.Header().Set("X-Request-ID", requestID)
+		}
+
 		ctx := r.Context()
 		ctx = RequestIDContext.WithValue(ctx, requestID)
 		r = r.WithContext(ctx)

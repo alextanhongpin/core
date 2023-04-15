@@ -47,7 +47,7 @@ func DecodeJSON[T any](w http.ResponseWriter, r *http.Request) (T, error) {
 }
 
 // EncodeJSON encodes the result to json representation.
-func EncodeJSON[T any](w http.ResponseWriter, statusCode int, res T) {
+func EncodeJSON[T any](w http.ResponseWriter, res T, statusCode int) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(statusCode)
 
@@ -68,7 +68,7 @@ func EncodeJSONError(w http.ResponseWriter, err error) {
 		},
 	}
 
-	EncodeJSON(w, statusCode, result)
+	EncodeJSON(w, result, statusCode)
 }
 
 func errorToAppError(err error) (*errors.Error, int) {
