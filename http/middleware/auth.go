@@ -6,12 +6,10 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/alextanhongpin/core/http/contextkey"
 	"github.com/alextanhongpin/core/http/response"
+	"github.com/alextanhongpin/core/http/security"
 	jwt "github.com/golang-jwt/jwt/v5"
 )
-
-var AuthContext contextkey.ContextKey[jwt.Claims] = "auth_ctx"
 
 const AuthBearer = "Bearer"
 
@@ -36,7 +34,7 @@ func BearerAuth(verifyKey []byte) Middleware {
 				}
 
 				ctx := r.Context()
-				ctx = AuthContext.WithValue(ctx, claims)
+				ctx = security.AuthContext.WithValue(ctx, claims)
 				r = r.WithContext(ctx)
 			}
 
