@@ -1,4 +1,4 @@
-#  cores
+#  core
 
 
 Useful collection of dependencies required to build microservices.
