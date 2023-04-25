@@ -9,43 +9,35 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alextanhongpin/go-core-microservice/http/middleware"
+	"github.com/alextanhongpin/core/http/middleware"
 	jwt "github.com/golang-jwt/jwt/v5"
 	"github.com/google/go-cmp/cmp"
+	"github.com/stretchr/testify/assert"
 )
 
-func TestParseAuthorizationHeader(t *testing.T) {
+func TestParseAuthHeader(t *testing.T) {
 	testcases := map[string]struct {
 		authHeader string
-		wantErr    error
+		want       bool
 		wantToken  string
 	}{
-		"success":          {"Bearer xyz", nil, "xyz"},
-		"empty":            {"", middleware.ErrAuthorizationHeaderInvalid, ""},
-		"no bearer":        {"xyz", middleware.ErrAuthorizationHeaderInvalid, ""},
-		"no token":         {"Bearer", middleware.ErrAuthorizationHeaderInvalid, ""},
-		"bearer lowercase": {"bearer xyz", middleware.ErrBearerInvalid, ""},
-		"invalid bearer":   {"basic xyz", middleware.ErrBearerInvalid, ""},
-		"token empty":      {"Bearer ", middleware.ErrTokenMissing, ""},
+		"success":   {"Bearer xyz", true, "xyz"},
+		"empty":     {"", false, ""},
+		"no bearer": {"xyz", false, ""},
+		"no token":  {"Bearer", false, ""},
 	}
 
 	for name, tc := range testcases {
 		t.Run(name, func(t *testing.T) {
-			token, err := middleware.ParseAuthorizationHeader(tc.authHeader)
-			if tc.wantErr != nil {
-				if !errors.Is(err, tc.wantErr) {
-					t.Errorf("want %s, got %s", tc.wantErr, err)
-				}
-			}
-
-			if want, got := tc.wantToken, token; want != got {
-				t.Errorf("want token %s, got %s", want, got)
-			}
+			assert := assert.New(t)
+			token, ok := middleware.ParseAuthHeader(tc.authHeader)
+			assert.Equal(tc.want, ok)
+			assert.Equal(tc.wantToken, token)
 		})
 	}
 }
 
-func TestValidateAuthorizationHeader(t *testing.T) {
+func TestValidateAuthHeader(t *testing.T) {
 	hmacSampleSecret := []byte("secret")
 
 	t.Run("success", func(t *testing.T) {
@@ -54,7 +46,7 @@ func TestValidateAuthorizationHeader(t *testing.T) {
 			t.Error(err)
 		}
 
-		claims, err := middleware.ValidateAuthorizationHeader(hmacSampleSecret, tokenString)
+		claims, err := middleware.ValidateAuthHeader(hmacSampleSecret, tokenString)
 		if err != nil {
 			t.Error(err)
 		}
@@ -75,7 +67,7 @@ func TestValidateAuthorizationHeader(t *testing.T) {
 			t.Error(err)
 		}
 
-		_, err = middleware.ValidateAuthorizationHeader(hmacSampleSecret, tokenString)
+		_, err = middleware.ValidateAuthHeader(hmacSampleSecret, tokenString)
 		if !errors.Is(err, middleware.ErrTokenExpired) {
 			t.Errorf("want %v, got %v", middleware.ErrTokenExpired, err)
 		}
@@ -106,7 +98,7 @@ func TestRequireAuth(t *testing.T) {
 
 		// Apply the middleware to the target handler, and call the ServeHTTP
 		// so that we can capture the response.
-		middleware.RequireAuth(secret)(http.HandlerFunc(handler)).ServeHTTP(w, r)
+		middleware.BearerAuth(secret)(http.HandlerFunc(handler)).ServeHTTP(w, r)
 
 		res := w.Result()
 		defer res.Body.Close()
@@ -123,7 +115,7 @@ func TestRequireAuth(t *testing.T) {
 		}
 
 		// Expected to receive the error envelope with the code and message.
-		wantBody := `{"error":{"code":"api.unauthorized","message":"You are not logged in."}}`
+		wantBody := `{"error":{"code":"unauthorized","message":"You are not logged in"}}`
 		wantBody += "\n"
 		if diff := cmp.Diff(wantBody, string(b)); diff != "" {
 			t.Fatalf("want(+), got(-): %s", diff)

@@ -1,9 +1,0 @@
-[internal]
-"api.internal" = "Oops, something went wrong. Please try again later."
-
-
-[bad_input]
-"api.bad_request" = "The request provided is invalid."
-
-[unauthorized]
-"api.unauthorized" = "You are not logged in."

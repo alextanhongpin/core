@@ -1,4 +1,4 @@
-#  go-core-microservices
+#  cores
 
 
 Useful collection of dependencies required to build microservices.
@@ -16,9 +16,9 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/alextanhongpin/go-core-microservice/http/middleware"
-	"github.com/alextanhongpin/go-core-microservice/http/server"
-	"github.com/alextanhongpin/go-core-microservice/http/types"
+	"github.com/alextanhongpin/core/http/middleware"
+	"github.com/alextanhongpin/core/http/server"
+	"github.com/alextanhongpin/core/http/types"
 	chi "github.com/go-chi/chi/v5"
 	"golang.org/x/exp/slog"
 )

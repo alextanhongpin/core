@@ -3,7 +3,7 @@ package sets_test
 import (
 	"testing"
 
-	"github.com/alextanhongpin/go-core-microservice/types/sets"
+	"github.com/alextanhongpin/core/types/sets"
 	"github.com/stretchr/testify/assert"
 )
 

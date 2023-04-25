@@ -11,7 +11,7 @@ import (
 	"golang.org/x/exp/slog"
 )
 
-func LogRequest(logger *slog.Logger) Middleware {
+func Logger(logger *slog.Logger) Middleware {
 	return func(next http.Handler) http.Handler {
 		fn := func(w http.ResponseWriter, r *http.Request) {
 			start := time.Now()

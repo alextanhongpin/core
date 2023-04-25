@@ -1,4 +1,4 @@
-package types
+package contextkey
 
 import (
 	"context"
@@ -6,7 +6,7 @@ import (
 	"fmt"
 )
 
-var ErrContextNotFound = errors.New("ContextKey: not found")
+var ErrNotFound = errors.New("contextkey: key not found")
 
 type ContextKey[T any] string
 
@@ -17,7 +17,7 @@ func (k ContextKey[T]) WithValue(ctx context.Context, t T) context.Context {
 func (k ContextKey[T]) Value(ctx context.Context) (T, error) {
 	t, ok := ctx.Value(k).(T)
 	if !ok {
-		return t, fmt.Errorf("%w: %s", ErrContextNotFound, k)
+		return t, fmt.Errorf("%w: %s", ErrNotFound, k)
 	}
 
 	return t, nil

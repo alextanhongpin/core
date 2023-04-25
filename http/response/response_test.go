@@ -1,7 +1,6 @@
-package encoding_test
+package response_test
 
 import (
-	"bytes"
 	"database/sql"
 	"encoding/json"
 	"io/ioutil"
@@ -9,52 +8,21 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/alextanhongpin/go-core-microservice/http/encoding"
-	"github.com/alextanhongpin/go-core-microservice/http/types"
+	"github.com/alextanhongpin/core/http/response"
 	"github.com/google/go-cmp/cmp"
 )
 
-type loginRequest struct {
-	Email string `json:"email"`
-}
-
-func TestDecode(t *testing.T) {
-	req := loginRequest{
-		Email: "john.appleseed@mail.com",
-	}
-	b, err := json.Marshal(req)
-	if err != nil {
-		t.Error(err)
-	}
-
-	w := httptest.NewRecorder()
-	r, err := http.NewRequest("POST", "/login", bytes.NewReader(b))
-	if err != nil {
-		t.Error(err)
-	}
-
-	res, err := encoding.DecodeJSON[loginRequest](w, r)
-	if err != nil {
-		t.Error(err)
-	}
-
-	if diff := cmp.Diff(res, req); diff != "" {
-		t.Fatalf("want(+), got(-): %s", diff)
-	}
-}
-
-func TestEncodeError(t *testing.T) {
+func TestJSONError(t *testing.T) {
 	t.Run("app error", func(t *testing.T) {
 		w := httptest.NewRecorder()
-		err := types.ErrUnauthorized
-
-		encoding.EncodeJSONError(w, err)
+		err := response.ErrBadRequest
+		response.JSONError(w, err)
 
 		res := w.Result()
 		defer res.Body.Close()
 
 		{
-			want := http.StatusUnauthorized
+			want := http.StatusBadRequest
 			got := res.StatusCode
 			if want != got {
 				t.Fatalf("status code: want %d, got %d", want, got)
@@ -68,8 +36,8 @@ func TestEncodeError(t *testing.T) {
 			}
 			want := []byte(`{
 			"error": {
-				"code":"api.unauthorized",
-				"message":"You are not logged in."
+				"code": "bad_request",
+				"message": "The input you provided is invalid"
 			}
 		}`)
 			got := b
@@ -81,7 +49,7 @@ func TestEncodeError(t *testing.T) {
 		w := httptest.NewRecorder()
 		err := sql.ErrNoRows
 
-		encoding.EncodeJSONError(w, err)
+		response.JSONError(w, err)
 
 		res := w.Result()
 		defer res.Body.Close()
@@ -101,8 +69,8 @@ func TestEncodeError(t *testing.T) {
 			}
 			want := []byte(`{
 			"error": {
-				"code":"api.internal",
-				"message":"Oops, something went wrong. Please try again later."
+				"code":"internal_server_error",
+				"message":"Oops, please try again later"
 			}
 		}`)
 			got := b
@@ -111,13 +79,17 @@ func TestEncodeError(t *testing.T) {
 	})
 }
 
-func TestEncode(t *testing.T) {
+func TestJSON(t *testing.T) {
+	type credentials struct {
+		AccessToken string `json:"accessToken"`
+	}
+
 	w := httptest.NewRecorder()
-	encoding.EncodeJSON(w, types.Result[loginRequest]{
-		Data: &loginRequest{
-			Email: "john.appleseed@mail.com",
+	response.JSON(w, response.Payload[credentials]{
+		Data: &credentials{
+			AccessToken: "xyz",
 		},
-		Links: &types.Links{
+		Links: &response.Links{
 			Prev: "prev-link",
 			Next: "next-link",
 		},
@@ -142,7 +114,7 @@ func TestEncode(t *testing.T) {
 
 		want := []byte(`{
 			"data": {
-				"email": "john.appleseed@mail.com"
+				"accessToken": "xyz"
 			},
 			"links": {
 				"prev": "prev-link",

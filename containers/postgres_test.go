@@ -3,7 +3,7 @@ package containers_test
 import (
 	"testing"
 
-	"github.com/alextanhongpin/go-core-microservice/containers"
+	"github.com/alextanhongpin/core/containers"
 )
 
 func TestPostgres(t *testing.T) {

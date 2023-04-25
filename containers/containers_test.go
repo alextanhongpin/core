@@ -4,7 +4,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/alextanhongpin/go-core-microservice/containers"
+	"github.com/alextanhongpin/core/containers"
 )
 
 const postgresVersion = "15.1-alpine"

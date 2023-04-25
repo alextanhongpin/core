@@ -1,6 +1,6 @@
-# http.encoding
+# HTTP Response
 
-HTTP Encoding package provides a convenient way of marhshalling struct to JSON, and vice-versa.
+HTTP Response package provides a convenient way of marhshalling struct to JSON, and vice-versa.
 
 
 ## DecodeJSON

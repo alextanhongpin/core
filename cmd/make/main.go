@@ -18,7 +18,7 @@ func main() {
 	flag.Parse()
 
 	if name == "" {
-		log.Fatalf("missing flag 'name'. Try running with go run github.com/alextanhongpin/go-core-microservice/cmd/make -name docker")
+		log.Fatalf("missing flag 'name'. Try running with go run github.com/alextanhongpin/core/cmd/make -name docker")
 	}
 
 	fileName := fmt.Sprintf("Makefile.%s.mk", name)
