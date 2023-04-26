@@ -98,7 +98,7 @@ func TestRequireAuth(t *testing.T) {
 
 		// Apply the middleware to the target handler, and call the ServeHTTP
 		// so that we can capture the response.
-		middleware.BearerAuth(secret)(http.HandlerFunc(handler)).ServeHTTP(w, r)
+		middleware.RequireAuth(secret)(http.HandlerFunc(handler)).ServeHTTP(w, r)
 
 		res := w.Result()
 		defer res.Body.Close()

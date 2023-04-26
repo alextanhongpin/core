@@ -21,22 +21,25 @@ var (
 
 type Middleware func(next http.Handler) http.Handler
 
-func BearerAuth(verifyKey []byte) Middleware {
+func RequireAuth(verifyKey []byte) Middleware {
 	return func(next http.Handler) http.Handler {
 		fn := func(w http.ResponseWriter, r *http.Request) {
 			authHeader := r.Header.Get("Authorization")
 			token, ok := ParseAuthHeader(authHeader)
-			if ok {
-				claims, err := ValidateAuthHeader(verifyKey, token)
-				if err != nil {
-					response.JSONError(w, response.ErrUnauthorized)
-					return
-				}
-
-				ctx := r.Context()
-				ctx = security.AuthContext.WithValue(ctx, claims)
-				r = r.WithContext(ctx)
+			if !ok {
+				response.JSONError(w, response.ErrUnauthorized)
+				return
 			}
+
+			claims, err := ValidateAuthHeader(verifyKey, token)
+			if err != nil {
+				response.JSONError(w, response.ErrUnauthorized)
+				return
+			}
+
+			ctx := r.Context()
+			ctx = security.AuthContext.WithValue(ctx, claims)
+			r = r.WithContext(ctx)
 
 			next.ServeHTTP(w, r)
 		}
