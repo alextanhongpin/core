@@ -1,4 +1,4 @@
-package snapshottest_test
+package testutil_test
 
 import (
 	"encoding/json"
@@ -7,11 +7,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alextanhongpin/core/test/snapshottest"
+	"github.com/alextanhongpin/core/test/testutil"
 	"github.com/google/go-cmp/cmp/cmpopts"
 )
 
-func TestCaptureTest(t *testing.T) {
+func TestDump(t *testing.T) {
 	type Person struct {
 		Name      string    `json:"name"`
 		Age       int64     `json:"age"`
@@ -33,18 +33,21 @@ func TestCaptureTest(t *testing.T) {
 		if k == "bornAt" {
 			// We just check the expected type can be marshalled
 			// to golang's time.
-			return snapshottest.IsJsonTime(t, v)
+			return testutil.IsJSONTime(t, v)
 		}
 
 		// Don't skip by default.
 		return false
 	})
+
 	// It is recommended to keep the snapshot data in
 	// testdata directory.
-	snapshottest.Capture(t, p, "./testdata/person.json", opt)
+	if err := testutil.Dump(p, "./testdata/person.json", opt); err != nil {
+		t.Error(err)
+	}
 }
 
-func TestCaptureHTTPTest(t *testing.T) {
+func TestHTTPDump(t *testing.T) {
 	type Person struct {
 		Name      string    `json:"name"`
 		Age       int64     `json:"age"`
@@ -71,13 +74,18 @@ func TestCaptureHTTPTest(t *testing.T) {
 		if k == "bornAt" {
 			// We just check the expected type can be marshalled
 			// to golang's time.
-			return snapshottest.IsJsonTime(t, v)
+			return testutil.IsJSONTime(t, v)
 		}
 
 		// Don't skip by default.
 		return false
 	})
 
-	out := "./testdata/get_user_response.json"
-	snapshottest.CaptureHTTP(t, r, handler, out, http.StatusOK, opt)
+	if err := testutil.HTTPDump(r, handler, "./testdata/get_user_response.json", http.StatusOK, opt); err != nil {
+		t.Error(err)
+	}
+
+	if err := testutil.DotHTTPDump(r, handler, "./testdata/get_user_response.http", http.StatusOK, opt); err != nil {
+		t.Error(err)
+	}
 }
