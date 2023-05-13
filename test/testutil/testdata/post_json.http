@@ -1,0 +1,16 @@
+POST http://example.com/register
+Content-Type: application/json;charset=utf-8
+
+{
+ "email": "john.doe@mail.com",
+ "password": "p@$$w0rd"
+}
+
+HTTP/1.1 201 - Created
+Content-Type: application/json
+
+{
+ "data": {
+  "accessToken": "@cc3$$T0k3n"
+ }
+}

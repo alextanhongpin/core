@@ -87,8 +87,4 @@ func TestHTTPDump(t *testing.T) {
 	if err := testutil.HTTPDump(r, handler, "./testdata/get_user_response.json", http.StatusOK, opt); err != nil {
 		t.Error(err)
 	}
-
-	if err := testutil.DotHTTPDump(r, handler, "./testdata/get_user_response.http", http.StatusOK, opt); err != nil {
-		t.Error(err)
-	}
 }

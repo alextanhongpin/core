@@ -1,0 +1,13 @@
+POST http://example.com/register-form
+Content-Type: application/x-www-form-urlencoded
+
+?password=123456
+&username=john.doe%40mail.com
+
+HTTP/1.1 201 - Created
+
+{
+ "data": {
+  "accessToken": "@cc3$$T0k3n"
+ }
+}

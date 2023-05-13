@@ -3,7 +3,6 @@ package testutil
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"mime"
@@ -21,30 +20,33 @@ func DotHTTPDump(r *http.Request, handler http.HandlerFunc, out string, statusCo
 	w := httptest.NewRecorder()
 
 	handler(w, r)
-	res := w.Result()
-	defer res.Body.Close()
+	ws := w.Result()
+	defer ws.Body.Close()
 
-	if want, got := statusCode, res.StatusCode; want != got {
+	// We need to assign the header.
+	ws.Header = w.Header()
+
+	if want, got := statusCode, ws.StatusCode; want != got {
 		return fmt.Errorf("want status code %d, got %d", want, got)
 	}
 
-	got, err := io.ReadAll(res.Body)
+	got, err := io.ReadAll(ws.Body)
 	if err != nil {
 		return err
 	}
-	res.Body = io.NopCloser(bytes.NewReader(got))
+	ws.Body = io.NopCloser(bytes.NewReader(got))
 
-	dothttpRes := format(res, r)
-	if err := writeIfNotExists([]byte(dothttpRes), out); err != nil {
+	newDotHTTP := format(ws, r)
+	if err := writeIfNotExists([]byte(newDotHTTP), out); err != nil {
 		return err
 	}
 
-	dothttp, err := os.ReadFile(out)
+	dotHTTP, err := os.ReadFile(out)
 	if err != nil {
 		return err
 	}
 
-	want, err := parseResponse(res, string(dothttp))
+	want, err := parseResponse(ws, string(dotHTTP))
 	if err != nil {
 		return err
 	}
@@ -91,7 +93,9 @@ func formatRequest(r *http.Request) []string {
 	}
 
 	if len(b) != 0 && string(b) != "<nil>" {
+		// Newline.
 		output = append(output, "")
+
 		// Get Request body, which can be either
 		// - form
 		// - json
@@ -105,51 +109,14 @@ func formatRequest(r *http.Request) []string {
 		case "application/x-www-form-urlencoded":
 			output = append(output, formatQuery(string(b)))
 		default:
-			// Newline.
-			output = append(output, "")
-
 			var bb bytes.Buffer
 			if err := json.Indent(&bb, b, "", " "); err != nil {
-				panic(err)
+				panic(fmt.Errorf("%w: failed to indent %q", err, b))
 			}
 			output = append(output, bb.String())
 		}
 	}
 	return output
-}
-
-// parseResponse attempts to extract the json body from
-// the dothttp file format.
-func parseResponse(w *http.Response, response string) (string, error) {
-	contentType := w.Header.Get("Content-Type")
-	if contentType == "" {
-		contentType = "application/json"
-	}
-
-	mediaType, params, err := mime.ParseMediaType(contentType)
-	if err != nil {
-		panic(err)
-	}
-	_ = params
-
-	if mediaType != "application/json" {
-		return "", errors.New("expected content-type to be application/json")
-	}
-
-	var output []string
-
-	// E.g. HTTP/1.1 200 - OK
-	output = append(output, fmt.Sprintf("%s %d - %s", w.Proto, w.StatusCode, http.StatusText(w.StatusCode)))
-	if len(w.Header) > 0 {
-		output = append(output, formatHeader(w.Header))
-	}
-
-	responseWithoutBody := strings.Join(output, "\n")
-	if _, after, ok := strings.Cut(response, responseWithoutBody); ok {
-		return strings.TrimSpace(after), nil
-	}
-
-	return "", nil
 }
 
 func formatResponse(w *http.Response) []string {
@@ -166,13 +133,13 @@ func formatResponse(w *http.Response) []string {
 	tee := io.TeeReader(w.Body, buf)
 	defer w.Body.Close()
 
-	respb, err := io.ReadAll(tee)
+	b, err := io.ReadAll(tee)
 	if err != nil {
 		panic(err)
 	}
 
 	w.Body = io.NopCloser(buf)
-	if len(respb) != 0 && string(respb) != "<nil>" {
+	if len(b) != 0 && string(b) != "<nil>" {
 		contentType := w.Header.Get("Content-Type")
 		if contentType == "" {
 			contentType = "application/json"
@@ -188,15 +155,15 @@ func formatResponse(w *http.Response) []string {
 			// Newline.
 			output = append(output, "")
 			var bb bytes.Buffer
-			if err := json.Indent(&bb, respb, "", " "); err != nil {
-				panic(err)
+			if err := json.Indent(&bb, b, "", " "); err != nil {
+				panic(fmt.Errorf("%w: failed to indent %q", err, b))
 			}
 			output = append(output, bb.String())
 		default:
 			// Assume it is text.
 			// Newline.
 			output = append(output, "")
-			output = append(output, string(respb))
+			output = append(output, string(b))
 		}
 	}
 
@@ -242,4 +209,38 @@ func formatQuery(rawQuery string) string {
 	parts := strings.Split(rawQuery, "&")
 	parts[0] = "?" + parts[0]
 	return strings.Join(parts, "\n&")
+}
+
+// parseResponse attempts to extract the json body from
+// the dotHTTP file format.
+func parseResponse(w *http.Response, response string) (string, error) {
+	contentType := w.Header.Get("Content-Type")
+	if contentType == "" {
+		contentType = "application/json"
+	}
+
+	mediaType, params, err := mime.ParseMediaType(contentType)
+	if err != nil {
+		panic(err)
+	}
+	_ = params
+
+	if mediaType != "application/json" {
+		return "", nil
+	}
+
+	var output []string
+
+	// E.g. HTTP/1.1 200 - OK
+	output = append(output, fmt.Sprintf("%s %d - %s", w.Proto, w.StatusCode, http.StatusText(w.StatusCode)))
+	if len(w.Header) > 0 {
+		output = append(output, formatHeader(w.Header))
+	}
+
+	responseWithoutBody := strings.Join(output, "\n")
+	if _, after, ok := strings.Cut(response, responseWithoutBody); ok {
+		return strings.TrimSpace(after), nil
+	}
+
+	return "", nil
 }
