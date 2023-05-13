@@ -31,7 +31,7 @@ func CmpJSON(t *testing.T, a, b []byte, opts ...cmp.Option) {
 	}
 }
 
-func HTTPSnapshot(t *testing.T, r *http.Request, handler http.HandlerFunc, out string, statusCode int, opts ...cmp.Option) {
+func CaptureHTTP(t *testing.T, r *http.Request, handler http.HandlerFunc, out string, statusCode int, opts ...cmp.Option) {
 	w := httptest.NewRecorder()
 
 	handler(w, r)
@@ -42,11 +42,11 @@ func HTTPSnapshot(t *testing.T, r *http.Request, handler http.HandlerFunc, out s
 		t.Error(err)
 	}
 
-	Snapshot(t, b, out, opts...)
+	Capture(t, b, out, opts...)
 }
 
-func Snapshot(t *testing.T, v any, name string, opts ...cmp.Option) {
-	if err := snapshot(v, name); err != nil {
+func Capture(t *testing.T, v any, name string, opts ...cmp.Option) {
+	if err := capture(v, name); err != nil {
 		t.Error(err)
 	}
 
@@ -63,7 +63,7 @@ func Snapshot(t *testing.T, v any, name string, opts ...cmp.Option) {
 	CmpJSON(t, want, got, opts...)
 }
 
-func snapshot(v any, name string) error {
+func capture(v any, name string) error {
 	b, err := marshal(v)
 	if err != nil {
 		return err

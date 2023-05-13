@@ -11,7 +11,7 @@ import (
 	"github.com/google/go-cmp/cmp/cmpopts"
 )
 
-func TestSnapshotTest(t *testing.T) {
+func TestCaptureTest(t *testing.T) {
 	type Person struct {
 		Name      string    `json:"name"`
 		Age       int64     `json:"age"`
@@ -41,10 +41,10 @@ func TestSnapshotTest(t *testing.T) {
 	})
 	// It is recommended to keep the snapshot data in
 	// testdata directory.
-	snapshottest.Snapshot(t, p, "./testdata/person.json", opt)
+	snapshottest.Capture(t, p, "./testdata/person.json", opt)
 }
 
-func TestHTTPSnapshotTest(t *testing.T) {
+func TestCaptureHTTPTest(t *testing.T) {
 	type Person struct {
 		Name      string    `json:"name"`
 		Age       int64     `json:"age"`
@@ -79,5 +79,5 @@ func TestHTTPSnapshotTest(t *testing.T) {
 	})
 
 	out := "./testdata/get_user_response.json"
-	snapshottest.HTTPSnapshot(t, r, handler, out, http.StatusOK, opt)
+	snapshottest.CaptureHTTP(t, r, handler, out, http.StatusOK, opt)
 }
