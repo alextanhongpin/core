@@ -8,8 +8,53 @@ import (
 	"io"
 	"mime"
 	"net/http"
+	"net/http/httptest"
+	"os"
 	"strings"
+
+	"github.com/google/go-cmp/cmp"
 )
+
+// DotHTTPDump captures the HTTP response and saves it into a file in .http
+// format for comparison.
+func DotHTTPDump(r *http.Request, handler http.HandlerFunc, out string, statusCode int, opts ...cmp.Option) error {
+	w := httptest.NewRecorder()
+
+	handler(w, r)
+	res := w.Result()
+	defer res.Body.Close()
+
+	if want, got := statusCode, res.StatusCode; want != got {
+		return fmt.Errorf("want status code %d, got %d", want, got)
+	}
+
+	got, err := io.ReadAll(res.Body)
+	if err != nil {
+		return err
+	}
+	res.Body = io.NopCloser(bytes.NewReader(got))
+
+	dothttpRes := format(res, r)
+	if err := writeIfNotExists([]byte(dothttpRes), out); err != nil {
+		return err
+	}
+
+	dothttp, err := os.ReadFile(out)
+	if err != nil {
+		return err
+	}
+
+	want, err := parseResponse(res, string(dothttp))
+	if err != nil {
+		return err
+	}
+
+	if want == "" {
+		return nil
+	}
+
+	return CmpJSON([]byte(want), got, opts...)
+}
 
 func format(w *http.Response, r *http.Request) string {
 	var output []string

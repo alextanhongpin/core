@@ -9,6 +9,7 @@ import (
 
 	"github.com/alextanhongpin/core/test/testutil"
 	"github.com/google/go-cmp/cmp/cmpopts"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestDump(t *testing.T) {
@@ -33,7 +34,8 @@ func TestDump(t *testing.T) {
 		if k == "bornAt" {
 			// We just check the expected type can be marshalled
 			// to golang's time.
-			return testutil.IsJSONTime(t, v)
+			err := testutil.IsJSONTime(v)
+			return assert.Nil(t, err)
 		}
 
 		// Don't skip by default.
@@ -74,7 +76,8 @@ func TestHTTPDump(t *testing.T) {
 		if k == "bornAt" {
 			// We just check the expected type can be marshalled
 			// to golang's time.
-			return testutil.IsJSONTime(t, v)
+			err := testutil.IsJSONTime(v)
+			return assert.Nil(t, err)
 		}
 
 		// Don't skip by default.

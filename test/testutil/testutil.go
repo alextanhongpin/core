@@ -10,70 +10,10 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"testing"
 	"time"
 
 	"github.com/google/go-cmp/cmp"
 )
-
-func CmpJSON(a, b []byte, opts ...cmp.Option) error {
-	var want, got map[string]any
-	if err := json.Unmarshal(a, &want); err != nil {
-		return err
-	}
-
-	if err := json.Unmarshal(b, &got); err != nil {
-		return err
-	}
-
-	// NOTE: The want and got is reversed here.
-	if diff := cmp.Diff(got, want, opts...); diff != "" {
-		return fmt.Errorf("want(+), got(-): %s", diff)
-	}
-
-	return nil
-}
-
-// DotHTTPDump captures the HTTP response and saves it into a file in .http
-// format for comparison.
-func DotHTTPDump(r *http.Request, handler http.HandlerFunc, out string, statusCode int, opts ...cmp.Option) error {
-	w := httptest.NewRecorder()
-
-	handler(w, r)
-	res := w.Result()
-	defer res.Body.Close()
-
-	if want, got := statusCode, res.StatusCode; want != got {
-		return fmt.Errorf("want status code %d, got %d", want, got)
-	}
-
-	got, err := io.ReadAll(res.Body)
-	if err != nil {
-		return err
-	}
-	res.Body = io.NopCloser(bytes.NewReader(got))
-
-	dothttpRes := format(res, r)
-	if err := writeIfNotExists([]byte(dothttpRes), out); err != nil {
-		return err
-	}
-
-	dothttp, err := os.ReadFile(out)
-	if err != nil {
-		return err
-	}
-
-	want, err := parseResponse(res, string(dothttp))
-	if err != nil {
-		return err
-	}
-
-	if want == "" {
-		return nil
-	}
-
-	return CmpJSON([]byte(want), got, opts...)
-}
 
 // HTTPDump captures the HTTP response and saves it into a file for
 // comparison.
@@ -115,22 +55,32 @@ func Dump(v any, name string, opts ...cmp.Option) error {
 	return CmpJSON(want, got, opts...)
 }
 
-func IsJSONTime(t *testing.T, v any) bool {
+func CmpJSON(a, b []byte, opts ...cmp.Option) error {
+	var want, got map[string]any
+	if err := json.Unmarshal(a, &want); err != nil {
+		return err
+	}
+
+	if err := json.Unmarshal(b, &got); err != nil {
+		return err
+	}
+
+	// NOTE: The want and got is reversed here.
+	if diff := cmp.Diff(got, want, opts...); diff != "" {
+		return fmt.Errorf("want(+), got(-): %s", diff)
+	}
+
+	return nil
+}
+
+func IsJSONTime(v any) error {
 	ts, ok := v.(string)
 	if !ok {
-		t.Errorf("want time string, got %v", v)
-
-		return false
+		return fmt.Errorf("want time string, got %v", v)
 	}
 
 	_, err := time.Parse(time.RFC3339, ts)
-	if err != nil {
-		t.Error(err)
-
-		return false
-	}
-
-	return true
+	return err
 }
 
 func writeIfNotExists(body []byte, name string) error {
