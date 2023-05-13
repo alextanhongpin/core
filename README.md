@@ -47,3 +47,26 @@ func main() {
 	server.New(logger, r, 8080)
 }
 ```
+
+
+## Project structure for Microservice
+
+```mermaid
+---
+title: Go package structure
+---
+flowchart
+    p0[User]
+
+
+    subgraph b0[microservice]
+        adapter
+        presentation
+        domain
+        usecase
+    end
+
+    p0 --> presentation
+    presentation --> usecase
+    usecase --> adapter & domain
+```
