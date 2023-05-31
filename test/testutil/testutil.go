@@ -15,9 +15,9 @@ import (
 	"github.com/google/go-cmp/cmp"
 )
 
-// HTTPDump captures the HTTP response and saves it into a file for
+// JSONDump captures the HTTP response and saves it into a file for
 // comparison.
-func HTTPDump(r *http.Request, handler http.HandlerFunc, out string, statusCode int, opts ...cmp.Option) error {
+func JSONDump(r *http.Request, handler http.HandlerFunc, out string, statusCode int, opts ...cmp.Option) error {
 	w := httptest.NewRecorder()
 
 	handler(w, r)

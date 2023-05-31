@@ -49,7 +49,7 @@ func TestDump(t *testing.T) {
 	}
 }
 
-func TestHTTPDump(t *testing.T) {
+func TestJSONDump(t *testing.T) {
 	type Person struct {
 		Name      string    `json:"name"`
 		Age       int64     `json:"age"`
@@ -84,7 +84,7 @@ func TestHTTPDump(t *testing.T) {
 		return false
 	})
 
-	if err := testutil.HTTPDump(r, handler, "./testdata/get_user_response.json", http.StatusOK, opt); err != nil {
+	if err := testutil.JSONDump(r, handler, "./testdata/get_user_response.json", http.StatusOK, opt); err != nil {
 		t.Error(err)
 	}
 }
