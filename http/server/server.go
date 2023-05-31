@@ -3,15 +3,12 @@ package server
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
-
-	"golang.org/x/exp/slog"
 )
 
 const (
@@ -21,7 +18,8 @@ const (
 	handlerTimeout  = 5 * time.Second
 )
 
-func New(logger *slog.Logger, handler http.Handler, port int) {
+// ListenAndServe starts the HTTP server with some sane defaults.
+func ListenAndServe(port string, handler http.Handler) {
 
 	// SIGINT: When a process is interrupted from keyboard by pressing CTRL+C.
 	//         Use os.Interrupt instead for OS-agnostic interrupt.
@@ -37,7 +35,7 @@ func New(logger *slog.Logger, handler http.Handler, port int) {
 	// Also limit the payload size to 1 MB.
 	handler = http.MaxBytesHandler(handler, MaxBytesSize)
 	srv := &http.Server{
-		Addr:              fmt.Sprintf(":%d", port),
+		Addr:              port,
 		ReadHeaderTimeout: readTimeout,
 		ReadTimeout:       readTimeout,
 		Handler:           handler,
@@ -51,9 +49,8 @@ func New(logger *slog.Logger, handler http.Handler, port int) {
 	// Initializing the srv in a goroutine so that
 	// it won't block the graceful shutdown handling below
 	go func() {
-		logger.Info("server is running", slog.Int("port", port))
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			logger.Error("listen and serve error", slog.String("err", err.Error()))
+			panic(err)
 		}
 	}()
 
@@ -69,8 +66,6 @@ func New(logger *slog.Logger, handler http.Handler, port int) {
 	defer cancel()
 
 	if err := srv.Shutdown(ctx); err != nil {
-		logger.Error("server forced to shut down", slog.String("err", err.Error()))
-	} else {
-		logger.Info("server exiting")
+		panic(err)
 	}
 }
