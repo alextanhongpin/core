@@ -1,0 +1,17 @@
+GET /user.json?limit=10&offset=0&q=hello+world HTTP/1.1
+Host: example.com
+User-Agent: Go-http-client/1.1
+Accept-Encoding: gzip
+
+---
+
+HTTP/1.1 200 OK
+Connection: close
+
+{
+ "data": {
+  "name": "John Appleseed",
+  "age": 10,
+  "isMarried": true
+ }
+}
