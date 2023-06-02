@@ -9,7 +9,7 @@ import (
 )
 
 func TestContextKey(t *testing.T) {
-	var userCtx = contextkey.Value[int]("hello")
+	var userCtx = contextkey.Value[int]("user_ctx")
 
 	ctx := context.Background()
 	ctx = userCtx.WithValue(ctx, 42)
