@@ -9,9 +9,9 @@ import (
 )
 
 var (
-	ErrAlreadyExists      = errcodes.New(errcodes.AlreadyExists, "already_exists", "There may be duplicate entries")
 	ErrBadRequest         = errcodes.New(errcodes.BadRequest, "bad_request", "The input you provided is invalid")
 	ErrConflict           = errcodes.New(errcodes.Conflict, "conflict", "The action may have conflict")
+	ErrExists             = errcodes.New(errcodes.Exists, "exists", "There may be duplicate entries")
 	ErrForbidden          = errcodes.New(errcodes.Forbidden, "forbidden", "You do not have permission to perform this action")
 	ErrInternal           = errcodes.New(errcodes.Internal, "internal_server_error", "Oops, please try again later")
 	ErrNotFound           = errcodes.New(errcodes.NotFound, "not_found", "The thing you are looking for does not exist or may have been deleted")
@@ -58,17 +58,16 @@ func JSONError(w http.ResponseWriter, err error) {
 	var errCode *errcodes.Error
 	if !errors.As(err, &errCode) {
 		errCode = ErrInternal
-
 	}
 
 	res := &Payload[any]{
 		Error: &Error{
-			Code:    errCode.Reason,
-			Message: errCode.Description,
+			Code:    string(errCode.Code),
+			Message: errCode.Message,
 		},
 	}
 
-	JSON(w, res, errcodes.HTTPStatusCode(errCode.Code))
+	JSON(w, res, errcodes.HTTPStatusCode(errCode.Kind))
 }
 
 func OK[T any](t *T) *Payload[T] {

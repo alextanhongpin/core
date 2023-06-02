@@ -35,12 +35,12 @@ func DumpJSON(t *testing.T, v any, opts ...Option) {
 		opt(o)
 	}
 
-	if err := cmpJSON(want, got, o.bodyopts...); err != nil {
+	if err := DiffJSON(want, got, o.bodyopts...); err != nil {
 		t.Fatal(err)
 	}
 }
 
-func cmpJSON(a, b []byte, opts ...cmp.Option) error {
+func DiffJSON(a, b []byte, opts ...cmp.Option) error {
 	var want, got map[string]any
 	if err := json.Unmarshal(a, &want); err != nil {
 		return err

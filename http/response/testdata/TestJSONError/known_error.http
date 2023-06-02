@@ -1,0 +1,17 @@
+GET /user/1 HTTP/1.1
+Host: example.com
+User-Agent: Go-http-client/1.1
+Accept-Encoding: gzip
+
+---
+
+HTTP/1.1 400 Bad Request
+Connection: close
+Content-Type: application/json
+
+{
+ "error": {
+  "code": "bad_request",
+  "message": "The input you provided is invalid"
+ }
+}

@@ -187,7 +187,7 @@ func (s *Snapshot) Diff(other *Snapshot, opts *Options) error {
 	// Headers may contain `Content-Length`, which depends on the body.
 	if json.Valid(s.Body) && json.Valid(other.Body) {
 		// Convert the json to map[string]any for better diff.
-		if err := cmpJSON(s.Body, other.Body, opts.bodyopts...); err != nil {
+		if err := DiffJSON(s.Body, other.Body, opts.bodyopts...); err != nil {
 			return err
 		}
 	} else {

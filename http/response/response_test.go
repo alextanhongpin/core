@@ -2,81 +2,38 @@ package response_test
 
 import (
 	"database/sql"
-	"encoding/json"
-	"io/ioutil"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/alextanhongpin/core/http/response"
-	"github.com/google/go-cmp/cmp"
+	"github.com/alextanhongpin/core/test/testutil"
 )
 
 func TestJSONError(t *testing.T) {
-	t.Run("app error", func(t *testing.T) {
-		w := httptest.NewRecorder()
-		err := response.ErrBadRequest
-		response.JSONError(w, err)
-
-		res := w.Result()
-		defer res.Body.Close()
-
+	tests := []struct {
+		name string
+		err  error
+	}{
 		{
-			want := http.StatusBadRequest
-			got := res.StatusCode
-			if want != got {
-				t.Fatalf("status code: want %d, got %d", want, got)
-			}
-		}
-
+			name: "known error",
+			err:  response.ErrBadRequest,
+		},
 		{
-			b, err := ioutil.ReadAll(res.Body)
-			if err != nil {
-				t.Error(err)
-			}
-			want := []byte(`{
-			"error": {
-				"code": "bad_request",
-				"message": "The input you provided is invalid"
-			}
-		}`)
-			got := b
-			cmpJSON(t, want, got)
-		}
-	})
+			name: "unknown error",
+			err:  sql.ErrNoRows,
+		},
+	}
 
-	t.Run("non-app error", func(t *testing.T) {
-		w := httptest.NewRecorder()
-		err := sql.ErrNoRows
-
-		response.JSONError(w, err)
-
-		res := w.Result()
-		defer res.Body.Close()
-
-		{
-			want := http.StatusInternalServerError
-			got := res.StatusCode
-			if want != got {
-				t.Fatalf("status code: want %d, got %d", want, got)
+	for _, ts := range tests {
+		t.Run(ts.name, func(t *testing.T) {
+			r := httptest.NewRequest("GET", "/user/1", nil)
+			h := func(w http.ResponseWriter, r *http.Request) {
+				response.JSONError(w, ts.err)
 			}
-		}
-
-		{
-			b, err := ioutil.ReadAll(res.Body)
-			if err != nil {
-				t.Error(err)
-			}
-			want := []byte(`{
-			"error": {
-				"code":"internal_server_error",
-				"message":"Oops, please try again later"
-			}
-		}`)
-			got := b
-			cmpJSON(t, want, got)
-		}
-	})
+			testutil.DumpHTTP(t, r, h)
+		})
+	}
 }
 
 func TestJSON(t *testing.T) {
@@ -84,59 +41,19 @@ func TestJSON(t *testing.T) {
 		AccessToken string `json:"accessToken"`
 	}
 
-	w := httptest.NewRecorder()
-	response.JSON(w, response.Payload[credentials]{
-		Data: &credentials{
-			AccessToken: "xyz",
-		},
-		Links: &response.Links{
-			Prev: "prev-link",
-			Next: "next-link",
-		},
-	}, http.StatusOK)
-
-	res := w.Result()
-	defer res.Body.Close()
-
-	{
-		want := http.StatusOK
-		got := res.StatusCode
-		if want != got {
-			t.Fatalf("status code: want %d, got %d", want, got)
-		}
-	}
-
-	{
-		b, err := ioutil.ReadAll(res.Body)
-		if err != nil {
-			t.Error(err)
-		}
-
-		want := []byte(`{
-			"data": {
-				"accessToken": "xyz"
+	r := httptest.NewRequest("GET", "/user/1", nil)
+	h := func(w http.ResponseWriter, r *http.Request) {
+		payload := response.Payload[credentials]{
+			Data: &credentials{
+				AccessToken: "xyz",
 			},
-			"links": {
-				"prev": "prev-link",
-				"next": "next-link"
-			}
-		}`)
-		got := b
-		cmpJSON(t, want, got)
-	}
-}
+			Links: &response.Links{
+				Prev: "prev-link",
+				Next: "next-link",
+			},
+		}
 
-func cmpJSON(t *testing.T, lhs, rhs []byte) {
-	var lhsMap, rhsMap map[string]any
-	if err := json.Unmarshal(lhs, &lhsMap); err != nil {
-		t.Error(err)
+		response.JSON(w, payload, http.StatusOK)
 	}
-
-	if err := json.Unmarshal(rhs, &rhsMap); err != nil {
-		t.Error(err)
-	}
-
-	if diff := cmp.Diff(lhsMap, rhsMap); diff != "" {
-		t.Fatalf("want(+), got(-): %s", diff)
-	}
+	testutil.DumpHTTP(t, r, h)
 }
