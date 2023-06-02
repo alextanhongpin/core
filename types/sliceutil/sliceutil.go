@@ -1,4 +1,4 @@
-package iter
+package sliceutil
 
 func Map[K, V any](ks []K, fn func(i int) V) []V {
 	vs := make([]V, len(ks))
