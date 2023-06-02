@@ -1,3 +1,4 @@
+// package request handles the parsing and validation for the request body.
 package request
 
 import (
@@ -16,10 +17,10 @@ func init() {
 	validate = validator.New()
 }
 
-func SetValidator(val *validator.Validate) {
-	validate = val
-}
-
+// Validator returns the instance of the global validator.
+// Custom validation function can be registered using this instance.
+// There is no way to override the validator, to avoid concurrent replacement
+// of the global validator.
 func Validator() *validator.Validate {
 	return validate
 }
