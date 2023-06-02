@@ -1,4 +1,4 @@
-package middlewareutil_test
+package httputil_test
 
 import (
 	"fmt"
@@ -6,7 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/alextanhongpin/core/http/middleware/middlewareutil"
+	"github.com/alextanhongpin/core/http/httputil"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -20,7 +20,7 @@ func (h *handler) ServeHTTP() {
 func TestResponseWriterRecorder(t *testing.T) {
 	mw := func(next http.Handler) http.Handler {
 		fn := func(w http.ResponseWriter, r *http.Request) {
-			rw := middlewareutil.NewResponseWriterRecorder(w)
+			rw := httputil.NewResponseWriterRecorder(w)
 			next.ServeHTTP(rw, r)
 
 			assert := assert.New(t)

@@ -1,15 +1,15 @@
-package contextkey_test
+package httputil_test
 
 import (
 	"context"
 	"testing"
 
-	"github.com/alextanhongpin/core/http/contextkey"
+	"github.com/alextanhongpin/core/http/httputil"
 	"github.com/stretchr/testify/assert"
 )
 
 func TestContextKey(t *testing.T) {
-	var userCtx = contextkey.Value[int]("user_ctx")
+	var userCtx = httputil.Context[int]("user_ctx")
 
 	ctx := context.Background()
 	ctx = userCtx.WithValue(ctx, 42)

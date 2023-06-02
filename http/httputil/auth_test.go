@@ -1,11 +1,11 @@
-package middlewareutil_test
+package httputil_test
 
 import (
 	"net/http/httptest"
 	"testing"
 	"time"
 
-	"github.com/alextanhongpin/core/http/middleware/middlewareutil"
+	"github.com/alextanhongpin/core/http/httputil"
 	jwt "github.com/golang-jwt/jwt/v5"
 	"github.com/stretchr/testify/assert"
 )
@@ -28,7 +28,7 @@ func TestParseAuthHeader(t *testing.T) {
 			r := httptest.NewRequest("POST", "/userinfo", nil)
 			r.Header.Set("Authorization", ts.auth)
 
-			token, ok := middlewareutil.BearerAuth(r)
+			token, ok := httputil.BearerAuth(r)
 			assert.Equal(ts.ok, ok)
 			assert.Equal(ts.want, token)
 		})
@@ -39,14 +39,14 @@ func TestSignAndVerifyJWT(t *testing.T) {
 	assert := assert.New(t)
 
 	secret := []byte("secret")
-	token, err := middlewareutil.SignJWT(secret, jwt.MapClaims{
+	token, err := httputil.SignJWT(secret, jwt.MapClaims{
 		"sub": "john.appleseed@mail.com",
 	}, 1*time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	claims, err := middlewareutil.VerifyJWT(secret, token)
+	claims, err := httputil.VerifyJWT(secret, token)
 	assert.Nil(err)
 	assert.Equal("john.appleseed@mail.com", claims["sub"])
 }
