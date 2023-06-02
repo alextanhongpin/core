@@ -9,7 +9,6 @@ import (
 	"net/http/httptest"
 	"net/http/httputil"
 	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
@@ -235,34 +234,6 @@ func parseHeaders(headers []byte) (http.Header, error) {
 	}
 
 	return h, nil
-}
-
-func writeToNewFile2(fileName string, content []byte) error {
-	// Get the dir name.
-	dir := filepath.Dir(fileName)
-	if err := createDirectoryIfNotExist(dir); err != nil {
-		return err
-	}
-
-	// Create the file if not exists.
-	f, err := os.OpenFile(fileName, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0644)
-	// Don't overwrite if exists.
-	if os.IsExist(err) {
-		return nil
-	}
-	defer f.Close()
-
-	_, err = f.Write(content)
-	return err
-}
-
-func createDirectoryIfNotExist(name string) error {
-	err := os.Mkdir(name, 0700)
-	if os.IsExist(err) {
-		return nil
-	}
-
-	return err
 }
 
 func dumpRequest(r *http.Request) ([]byte, error) {

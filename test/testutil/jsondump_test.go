@@ -7,7 +7,7 @@ import (
 	"github.com/alextanhongpin/core/test/testutil"
 )
 
-func TestDump(t *testing.T) {
+func TestDumpJSON(t *testing.T) {
 	type Person struct {
 		Name      string    `json:"name"`
 		Age       int64     `json:"age"`
@@ -22,5 +22,5 @@ func TestDump(t *testing.T) {
 		BornAt:    time.Now(),
 	}
 
-	testutil.Dump(t, p, testutil.IgnoreFields("bornAt"))
+	testutil.DumpJSON(t, p, testutil.IgnoreFields("bornAt"))
 }

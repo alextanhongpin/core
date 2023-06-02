@@ -12,8 +12,8 @@ import (
 	"github.com/google/go-cmp/cmp"
 )
 
-// Dump dumps a struct as json.
-func Dump(t *testing.T, v any, opts ...Option) {
+// DumpJSON dumps a type as json.
+func DumpJSON(t *testing.T, v any, opts ...Option) {
 	t.Helper()
 
 	got, err := marshal(v)
