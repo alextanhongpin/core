@@ -3,10 +3,7 @@ package testutil
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
@@ -16,20 +13,17 @@ import (
 func DumpJSON(t *testing.T, v any, opts ...Option) {
 	t.Helper()
 
-	got, err := marshal(v)
-	if err != nil {
-		t.Fatal(err)
+	if !isStruct(v) {
+		t.Fatalf("DumpJSON value must be a struct: %#v", v)
 	}
 
+	dumper := &jsonDumper{v}
 	fileName := fmt.Sprintf("./testdata/%s.json", t.Name())
-	if err := writeToNewFile(fileName, got); err != nil {
-		t.Fatal(err)
-	}
-
-	want, err := os.ReadFile(fileName)
+	want, got, err := dump(fileName, dumper)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	o := new(Options)
 	for _, opt := range opts {
 		opt(o)
@@ -50,32 +44,15 @@ func DiffJSON(a, b []byte, opts ...cmp.Option) error {
 		return err
 	}
 
-	// NOTE: The want and got is reversed here.
-	if diff := cmp.Diff(got, want, opts...); diff != "" {
-		return diffError(diff)
-	}
-
-	return nil
+	return cmpDiff(want, got, opts...)
 }
 
-func writeToNewFile(name string, body []byte) error {
-	f, err := os.OpenFile(name, os.O_RDONLY, 0644)
-	if errors.Is(err, os.ErrNotExist) {
-		dir := filepath.Dir(name)
+type jsonDumper struct {
+	v any
+}
 
-		if err := os.MkdirAll(dir, 0700); err != nil && !os.IsExist(err) {
-			return err
-		} // Create your file
-
-		return os.WriteFile(name, body, 0644)
-	}
-	if err != nil {
-		return err
-	}
-
-	defer f.Close()
-
-	return nil
+func (d *jsonDumper) Dump() ([]byte, error) {
+	return marshal(d.v)
 }
 
 func marshal(v any) ([]byte, error) {
@@ -94,12 +71,4 @@ func marshal(v any) ([]byte, error) {
 	}
 
 	return json.MarshalIndent(v, "", " ")
-}
-
-func diffError(diff string) error {
-	if diff == "" {
-		return nil
-	}
-
-	return fmt.Errorf("want(+), got(-):\n\n%s", diff)
 }

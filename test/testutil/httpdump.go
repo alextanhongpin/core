@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/http/httputil"
-	"os"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
@@ -66,39 +65,39 @@ func InspectHeaders(fn func(http.Header)) Option {
 	}
 }
 
+type httpDumper struct {
+	w *http.Response
+	r *http.Request
+}
+
+func (d *httpDumper) Dump() ([]byte, error) {
+	req, err := dumpRequest(d.r)
+	if err != nil {
+		return nil, err
+	}
+
+	res, err := dumpResponse(d.w)
+	if err != nil {
+		return nil, err
+	}
+
+	return bytes.Join([][]byte{req, Separator, res}, bytes.Repeat(LineBreak, 2)), nil
+}
+
 func DumpHTTP(t *testing.T, r *http.Request, handler http.HandlerFunc, opts ...Option) {
 	t.Helper()
 
 	// Execute.
 	wr := httptest.NewRecorder()
 	handler(wr, r)
-
 	w := wr.Result()
-
-	// Prepare dump.
-	req, err := dumpRequest(r)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	res, err := dumpResponse(w)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Dump in this format.
-	got := bytes.Join([][]byte{req, Separator, res}, bytes.Repeat(LineBreak, 2))
+	dumper := &httpDumper{w, r}
 
 	// Save in testdata directory
 	// Save as .http files.
 	// Skip if file exists.
 	fileName := fmt.Sprintf("./testdata/%s.http", t.Name())
-	if err := writeToNewFile(fileName, got); err != nil {
-		t.Fatal(err)
-	}
-
-	// Read existing snapshot.
-	want, err := os.ReadFile(fileName)
+	want, got, err := dump(fileName, dumper)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -179,25 +178,26 @@ type Snapshot struct {
 }
 
 func (s *Snapshot) Diff(other *Snapshot, opts *Options) error {
-	if diff := cmp.Diff(s.Line, other.Line); diff != "" {
-		return diffError(diff)
+	if err := cmpDiff(other.Line, s.Line); err != nil {
+		return err
 	}
 
 	// Compare body before header.
 	// Headers may contain `Content-Length`, which depends on the body.
-	if json.Valid(s.Body) && json.Valid(other.Body) {
-		// Convert the json to map[string]any for better diff.
-		if err := DiffJSON(s.Body, other.Body, opts.bodyopts...); err != nil {
-			return err
+	if err := func(isJSON bool) error {
+		if isJSON {
+			// Convert the json to map[string]any for better diff.
+			// This does not work on JSON array.
+			// Ensure that only structs are passed in.
+			return DiffJSON(other.Body, s.Body, opts.bodyopts...)
 		}
-	} else {
-		if diff := cmp.Diff(s.Body, other.Body, opts.bodyopts...); diff != "" {
-			return diffError(diff)
-		}
+
+		return cmpDiff(other.Body, s.Body, opts.bodyopts...)
+	}(json.Valid(s.Body) && json.Valid(other.Body)); err != nil {
+		return err
 	}
 
-	diff := cmp.Diff(s.Headers, other.Headers, opts.headopts...)
-	return diffError(diff)
+	return cmpDiff(other.Headers, s.Headers, opts.headopts...)
 }
 
 func parseSection(req []byte) (*Snapshot, error) {
