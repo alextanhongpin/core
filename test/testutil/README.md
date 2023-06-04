@@ -37,3 +37,7 @@ func dump(w *http.Response, r *http.Request) (string, error) {
 	return strings.Join(output, "\n"), nil
 }
 ```
+
+## Reference
+
+https://solidstudio.io/blog/snapshot-testing
