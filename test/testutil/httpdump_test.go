@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"math/rand"
 	"mime"
@@ -186,6 +187,13 @@ func TestHTTP(t *testing.T) {
 		fmt.Fprint(w, "foo")
 	}
 	barHandler := func(w http.ResponseWriter, r *http.Request) {
+		_, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		defer r.Body.Close()
+
 		fmt.Fprint(w, "bar")
 	}
 
@@ -207,7 +215,7 @@ func TestHTTP(t *testing.T) {
 		t.Fatalf("want %s, got %s", "foo", foo)
 	}
 
-	bar, err := client.GetBar(ctx)
+	bar, err := client.PostBar(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -239,14 +247,14 @@ func (c *YourClient) GetFoo(ctx context.Context) (string, error) {
 	return string(b), nil
 }
 
-func (c *YourClient) GetBar(ctx context.Context) (string, error) {
+func (c *YourClient) PostBar(ctx context.Context) (string, error) {
 	endpoint, err := url.JoinPath(c.url, "/bar")
 	if err != nil {
 		return "", err
 	}
 
 	fmt.Println("calling", endpoint)
-	resp, err := http.Get(endpoint)
+	resp, err := http.Post(endpoint, "application/json", strings.NewReader(`{"bar": "baz"}`))
 	if err != nil {
 		return "", err
 	}

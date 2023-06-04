@@ -36,9 +36,22 @@ func DumpHTTPHandler(t *testing.T, opts ...Option) func(http.Handler) http.Handl
 	return func(next http.Handler) http.Handler {
 		fn := func(w http.ResponseWriter, r *http.Request) {
 			rw := httptest.NewRecorder()
-			next.ServeHTTP(rw, r) // Serve to the mock.
-			next.ServeHTTP(w, r)  // Serve to the actual.
 
+			b, err := io.ReadAll(r.Body)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			r.Body.Close()
+			r.Body = io.NopCloser(bytes.NewReader(b))
+			next.ServeHTTP(rw, r) // Serve to the mock.
+
+			// Restore to original body.
+			r.Body = io.NopCloser(bytes.NewReader(b))
+			next.ServeHTTP(w, r) // Serve to the actual.
+
+			// Restore to original body.
+			r.Body = io.NopCloser(bytes.NewReader(b))
 			dumpHTTP(t, rw.Result(), r, opts...)
 		}
 
