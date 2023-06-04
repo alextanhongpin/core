@@ -42,16 +42,19 @@ func DumpHTTPHandler(t *testing.T, opts ...Option) func(http.Handler) http.Handl
 				t.Fatal(err)
 			}
 
+			br := bytes.NewReader(b)
 			r.Body.Close()
-			r.Body = io.NopCloser(bytes.NewReader(b))
+			r.Body = io.NopCloser(br)
 			next.ServeHTTP(rw, r) // Serve to the mock.
 
 			// Restore to original body.
-			r.Body = io.NopCloser(bytes.NewReader(b))
+			br.Seek(0, 0)
+			r.Body = io.NopCloser(br)
 			next.ServeHTTP(w, r) // Serve to the actual.
 
 			// Restore to original body.
-			r.Body = io.NopCloser(bytes.NewReader(b))
+			br.Seek(0, 0)
+			r.Body = io.NopCloser(br)
 			dumpHTTP(t, rw.Result(), r, opts...)
 		}
 
