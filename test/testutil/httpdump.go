@@ -198,7 +198,7 @@ type Snapshot struct {
 }
 
 func (s *Snapshot) Diff(other *Snapshot, opts *Options) error {
-	if err := cmpDiff(other.Line, s.Line); err != nil {
+	if err := cmpDiff(s.Line, other.Line); err != nil {
 		return err
 	}
 
@@ -209,15 +209,15 @@ func (s *Snapshot) Diff(other *Snapshot, opts *Options) error {
 			// Convert the json to map[string]any for better diff.
 			// This does not work on JSON array.
 			// Ensure that only structs are passed in.
-			return DiffJSON(other.Body, s.Body, opts.bodyopts...)
+			return DiffJSON(s.Body, other.Body, opts.bodyopts...)
 		}
 
-		return cmpDiff(other.Body, s.Body, opts.bodyopts...)
+		return cmpDiff(s.Body, other.Body, opts.bodyopts...)
 	}(json.Valid(s.Body) && json.Valid(other.Body)); err != nil {
 		return err
 	}
 
-	return cmpDiff(other.Headers, s.Headers, opts.headopts...)
+	return cmpDiff(s.Headers, other.Headers, opts.headopts...)
 }
 
 func parseSection(req []byte) (*Snapshot, error) {

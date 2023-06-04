@@ -29,8 +29,7 @@ func DumpStruct(t *testing.T, v any, opts ...cmp.Option) {
 		t.Fatal(err)
 	}
 
-	// NOTE: The want and got is reversed here.
-	if err := cmpDiff(got, want, opts...); err != nil {
+	if err := cmpDiff(want, got, opts...); err != nil {
 		t.Fatal(err)
 	}
 
