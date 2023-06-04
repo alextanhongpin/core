@@ -68,6 +68,17 @@ func TestHTTPDump(t *testing.T) {
 				return r
 			}(),
 			handler: func(w http.ResponseWriter, r *http.Request) {
+				type loginRequest struct {
+					Email    string `json:"email"`
+					Password string `json:"password"`
+				}
+
+				var req loginRequest
+				if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+					http.Error(w, err.Error(), http.StatusBadRequest)
+					return
+				}
+
 				w.WriteHeader(http.StatusCreated)
 				w.Header().Set("Content-Type", "application/json")
 				fmt.Fprint(w, `{"data": {"accessToken": "@cc3$$T0k3n"}}`)
