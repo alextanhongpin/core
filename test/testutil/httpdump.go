@@ -20,6 +20,50 @@ var (
 	SemiColon = []byte(":")
 )
 
+func DumpHTTP(t *testing.T, r *http.Request, handler http.HandlerFunc, opts ...Option) {
+	t.Helper()
+
+	// Execute.
+	wr := httptest.NewRecorder()
+	handler(wr, r)
+	w := wr.Result()
+
+	dumpHTTP(t, w, r, opts...)
+}
+
+func DumpHTTPHandler(t *testing.T, opts ...Option) func(http.Handler) http.Handler {
+	t.Helper()
+	return func(next http.Handler) http.Handler {
+		fn := func(w http.ResponseWriter, r *http.Request) {
+			rw := httptest.NewRecorder()
+			next.ServeHTTP(rw, r) // Serve to the mock.
+			next.ServeHTTP(w, r)  // Serve to the actual.
+
+			dumpHTTP(t, rw.Result(), r, opts...)
+		}
+
+		return http.HandlerFunc(fn)
+	}
+}
+
+func dumpHTTP(t *testing.T, w *http.Response, r *http.Request, opts ...Option) {
+	dumper := &httpDumper{w, r}
+
+	// Save in testdata directory
+	// Save as .http files.
+	// Skip if file exists.
+	fileName := fmt.Sprintf("./testdata/%s.http", t.Name())
+	want, got, err := dump(fileName, dumper)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Compare the new snapshot with existing snapshot.
+	if err := compareSnapshot(want, got, opts...); err != nil {
+		t.Fatal(err)
+	}
+}
+
 type Options struct {
 	headopts []cmp.Option
 	bodyopts []cmp.Option
@@ -82,30 +126,6 @@ func (d *httpDumper) Dump() ([]byte, error) {
 	}
 
 	return bytes.Join([][]byte{req, Separator, res}, bytes.Repeat(LineBreak, 2)), nil
-}
-
-func DumpHTTP(t *testing.T, r *http.Request, handler http.HandlerFunc, opts ...Option) {
-	t.Helper()
-
-	// Execute.
-	wr := httptest.NewRecorder()
-	handler(wr, r)
-	w := wr.Result()
-	dumper := &httpDumper{w, r}
-
-	// Save in testdata directory
-	// Save as .http files.
-	// Skip if file exists.
-	fileName := fmt.Sprintf("./testdata/%s.http", t.Name())
-	want, got, err := dump(fileName, dumper)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Compare the new snapshot with existing snapshot.
-	if err := compareSnapshot(want, got, opts...); err != nil {
-		t.Fatal(err)
-	}
 }
 
 func compareSnapshot(want, got []byte, opts ...Option) error {

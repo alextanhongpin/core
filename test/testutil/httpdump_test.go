@@ -1,8 +1,10 @@
 package testutil_test
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"math/rand"
 	"mime"
 	"net/http"
@@ -15,7 +17,7 @@ import (
 	"github.com/alextanhongpin/core/test/testutil"
 )
 
-func TestDotHTTPDump(t *testing.T) {
+func TestHTTPDump(t *testing.T) {
 	testCases := []struct {
 		name    string
 		r       *http.Request
@@ -177,4 +179,81 @@ func TestDotHTTPDump(t *testing.T) {
 			testutil.DumpHTTP(t, tc.r, tc.handler, tc.opts...)
 		})
 	}
+}
+
+func TestHTTP(t *testing.T) {
+	fooHandler := func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, "foo")
+	}
+	barHandler := func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, "bar")
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/foo", fooHandler)
+	mw := testutil.DumpHTTPHandler(t, testutil.IgnoreHeaders("Host"))
+	mux.Handle("/bar", mw(http.HandlerFunc(barHandler)))
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	ctx := context.Background()
+	client := &YourClient{url: ts.URL}
+
+	foo, err := client.GetFoo(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if foo != "foo" {
+		t.Fatalf("want %s, got %s", "foo", foo)
+	}
+
+	bar, err := client.GetBar(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bar != "bar" {
+		t.Fatalf("want %s, got %s", "bar", bar)
+	}
+}
+
+type YourClient struct {
+	url string
+}
+
+func (c *YourClient) GetFoo(ctx context.Context) (string, error) {
+	endpoint, err := url.JoinPath(c.url, "/foo")
+	if err != nil {
+		return "", err
+	}
+
+	fmt.Println("calling", endpoint)
+	resp, err := http.Get(endpoint)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	b, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}
+
+func (c *YourClient) GetBar(ctx context.Context) (string, error) {
+	endpoint, err := url.JoinPath(c.url, "/bar")
+	if err != nil {
+		return "", err
+	}
+
+	fmt.Println("calling", endpoint)
+	resp, err := http.Get(endpoint)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	b, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
 }

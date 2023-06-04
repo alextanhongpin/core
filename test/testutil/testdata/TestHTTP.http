@@ -1,0 +1,12 @@
+GET /bar HTTP/1.1
+Host: 127.0.0.1:61679
+User-Agent: Go-http-client/1.1
+Accept-Encoding: gzip
+
+---
+
+HTTP/1.1 200 OK
+Connection: close
+Content-Type: text/plain; charset=utf-8
+
+bar

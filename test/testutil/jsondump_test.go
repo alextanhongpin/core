@@ -24,3 +24,8 @@ func TestDumpJSON(t *testing.T) {
 
 	testutil.DumpJSON(t, p, testutil.IgnoreFields("bornAt"))
 }
+
+func TestDumpJSONNonStruct(t *testing.T) {
+	nums := []int{1, 2, 3}
+	testutil.DumpJSON(t, nums)
+}
