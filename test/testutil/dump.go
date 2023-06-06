@@ -82,7 +82,7 @@ func writeToNewFile(name string, body []byte) error {
 
 func cmpDiff(x, y any, opts ...cmp.Option) error {
 	if diff := cmp.Diff(x, y, opts...); diff != "" {
-		return fmt.Errorf("\n  Snapshot(-)\n  Received(+):\n\n%s", diff)
+		return fmt.Errorf("\n  Snapshot(-)\n  Received(+)\n\n%s", diff)
 	}
 
 	return nil

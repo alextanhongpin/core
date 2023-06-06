@@ -5,17 +5,14 @@ go 1.20
 require golang.org/x/exp v0.0.0-20230522175609-2e198f4a06a1
 
 require (
-	github.com/BurntSushi/toml v1.2.1
 	github.com/DATA-DOG/go-txdb v0.1.6
 	github.com/alextanhongpin/errcodes v0.0.0-20230602163126-0444dce7a961
-	github.com/alextanhongpin/errors v0.14.0
 	github.com/go-playground/validator/v10 v10.14.0
 	github.com/golang-jwt/jwt/v5 v5.0.0
 	github.com/google/go-cmp v0.5.9
 	github.com/google/uuid v1.3.0
 	github.com/lib/pq v1.10.9
 	github.com/ory/dockertest/v3 v3.10.0
-	github.com/rs/xid v1.5.0
 	github.com/stretchr/testify v1.8.2
 	github.com/uptrace/bun v1.1.14
 	github.com/uptrace/bun/dialect/pgdialect v1.1.14
