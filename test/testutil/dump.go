@@ -19,23 +19,32 @@ type dumper interface {
 	Dump() ([]byte, error)
 }
 
-func dump(fileName string, dump dumper) (want, got []byte, err error) {
-	got, err = dump.Dump()
+type comparer interface {
+	Compare(snapshot, received []byte) error
+}
+
+type dumperAndComparer interface {
+	dumper
+	comparer
+}
+
+func Dump(fileName string, dnc dumperAndComparer) error {
+	received, err := dnc.Dump()
 	if err != nil {
-		return
+		return err
 	}
 
-	err = writeToNewFile(fileName, got)
+	err = writeToNewFile(fileName, received)
 	if err != nil {
-		return
+		return err
 	}
 
-	want, err = os.ReadFile(fileName)
+	snapshot, err := os.ReadFile(fileName)
 	if err != nil {
-		return
+		return err
 	}
 
-	return
+	return dnc.Compare(snapshot, received)
 }
 
 func typeName(v any) []string {

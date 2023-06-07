@@ -23,7 +23,7 @@ func TestHTTPDump(t *testing.T) {
 		name    string
 		r       *http.Request
 		handler http.HandlerFunc
-		opts    []testutil.Option
+		opts    []testutil.HTTPOption
 	}{
 		{
 			name: "get html",
@@ -120,7 +120,7 @@ func TestHTTPDump(t *testing.T) {
 				id := rand.Int63()
 				fmt.Fprintf(w, `{"data": {"id": %d}}`, id)
 			},
-			opts: []testutil.Option{
+			opts: []testutil.HTTPOption{
 				testutil.IgnoreFields("id"),
 			},
 		},
@@ -136,7 +136,7 @@ func TestHTTPDump(t *testing.T) {
 				w.Header().Set("Content-Type", "application/json")
 				fmt.Fprintf(w, `{"data": {"createdAt": %q}}`, time.Now().Format(time.RFC3339))
 			},
-			opts: []testutil.Option{
+			opts: []testutil.HTTPOption{
 				testutil.IgnoreFields("createdAt"),
 				testutil.InspectBody(func(body []byte) {
 					type response struct {
@@ -168,7 +168,7 @@ func TestHTTPDump(t *testing.T) {
 				w.Header().Set("Content-Type", "application/json")
 				fmt.Fprint(w, nil)
 			},
-			opts: []testutil.Option{
+			opts: []testutil.HTTPOption{
 				testutil.InspectHeaders(func(headers http.Header) {
 					contentType, params, err := mime.ParseMediaType(headers.Get("Content-Type"))
 					if err != nil {

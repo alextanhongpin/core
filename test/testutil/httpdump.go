@@ -11,7 +11,6 @@ import (
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
-	"github.com/google/go-cmp/cmp/cmpopts"
 )
 
 var (
@@ -20,15 +19,42 @@ var (
 	SemiColon = []byte(":")
 )
 
-func DumpHTTP(t *testing.T, r *http.Request, handler http.HandlerFunc, opts ...Option) {
-	t.Helper()
+type httpOption struct {
+	headerFn   func(http.Header)
+	headerOpts []cmp.Option
+	bodyFn     func([]byte)
+	bodyOpts   []cmp.Option
+}
 
+func NewHTTPOption(opts ...HTTPOption) *httpOption {
+	h := &httpOption{}
+	for _, opt := range opts {
+		switch o := opt.(type) {
+		case *InspectBodyOption:
+			h.bodyFn = o.fn
+		case *InspectHeadersOption:
+			h.headerFn = o.fn
+		case *IgnoreFieldsOption:
+			h.bodyOpts = append(h.bodyOpts, ignoreMapKeys(o.keys...))
+		case *IgnoreHeadersOption:
+			h.headerOpts = append(h.headerOpts, ignoreMapKeys(o.keys...))
+		default:
+			panic("option not implemented")
+		}
+	}
+
+	return h
+}
+
+func DumpHTTPFile(fileName string, r *http.Request, handler http.HandlerFunc, opts ...HTTPOption) error {
 	// Make a copy of the body.
 	b, err := io.ReadAll(r.Body)
 	if err != nil {
-		t.Fatal(err)
+		return err
 	}
+
 	br := bytes.NewReader(b)
+	defer br.Seek(0, 0)
 
 	r.Body.Close()
 	r.Body = io.NopCloser(br)
@@ -42,110 +68,53 @@ func DumpHTTP(t *testing.T, r *http.Request, handler http.HandlerFunc, opts ...O
 	// Restore to original body.
 	br.Seek(0, 0)
 
-	dumpHTTP(t, w, r, opts...)
+	type dumpAndCompare struct {
+		dumper
+		comparer
+	}
+
+	dnc := &dumpAndCompare{
+		dumper:   NewHTTPDumper(w, r),
+		comparer: NewHTTPComparer(opts...),
+	}
+
+	return Dump(fileName, dnc)
 }
 
-func DumpHTTPHandler(t *testing.T, opts ...Option) func(http.Handler) http.Handler {
+func DumpHTTP(t *testing.T, r *http.Request, handler http.HandlerFunc, opts ...HTTPOption) {
+	t.Helper()
+
+	fileName := fmt.Sprintf("./testdata/%s.http", t.Name())
+	if err := DumpHTTPFile(fileName, r, handler, opts...); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func DumpHTTPHandler(t *testing.T, opts ...HTTPOption) func(http.Handler) http.Handler {
 	t.Helper()
 	return func(next http.Handler) http.Handler {
 		fn := func(w http.ResponseWriter, r *http.Request) {
-			b, err := io.ReadAll(r.Body)
-			if err != nil {
-				t.Fatal(err)
-			}
+			// Serve to the response recorder.
+			DumpHTTP(t, r, next.ServeHTTP, opts...)
 
-			br := bytes.NewReader(b)
-
-			r.Body.Close()
-			r.Body = io.NopCloser(br)
-
-			rw := httptest.NewRecorder()
-			next.ServeHTTP(rw, r) // Serve to the mock.
-
-			// Restore to original body.
-			br.Seek(0, 0)
-			r.Body = io.NopCloser(br)
-			next.ServeHTTP(w, r) // Serve to the actual.
-
-			// Restore to original body.
-			br.Seek(0, 0)
-			r.Body = io.NopCloser(br)
-			dumpHTTP(t, rw.Result(), r, opts...)
+			// Serve to the actual server.
+			next.ServeHTTP(w, r)
 		}
 
 		return http.HandlerFunc(fn)
 	}
 }
 
-func dumpHTTP(t *testing.T, w *http.Response, r *http.Request, opts ...Option) {
-	dumper := &httpDumper{w, r}
-
-	// Save in testdata directory
-	// Save as .http files.
-	// Skip if file exists.
-	fileName := fmt.Sprintf("./testdata/%s.http", t.Name())
-	want, got, err := dump(fileName, dumper)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Compare the new snapshot with existing snapshot.
-	if err := compareSnapshot(want, got, opts...); err != nil {
-		t.Fatal(err)
-	}
-}
-
-type Options struct {
-	headopts []cmp.Option
-	bodyopts []cmp.Option
-	bodyFn   func(body []byte)
-	headerFn func(http.Header)
-}
-
-type Option func(*Options)
-
-func ignoreMapKeys(keys ...string) cmp.Option {
-	return cmpopts.IgnoreMapEntries(func(key string, _ any) bool {
-		for _, k := range keys {
-			if k == key {
-				return true
-			}
-		}
-
-		return false
-	})
-}
-
-func IgnoreHeaders(keys ...string) Option {
-	return func(o *Options) {
-		o.headopts = append(o.headopts, ignoreMapKeys(keys...))
-	}
-}
-
-func IgnoreFields(keys ...string) Option {
-	return func(o *Options) {
-		o.bodyopts = append(o.bodyopts, ignoreMapKeys(keys...))
-	}
-}
-
-func InspectBody(fn func(body []byte)) Option {
-	return func(o *Options) {
-		o.bodyFn = fn
-	}
-}
-
-func InspectHeaders(fn func(http.Header)) Option {
-	return func(o *Options) {
-		o.headerFn = fn
-	}
-}
-
-type httpDumper struct {
+type HTTPDumper struct {
 	w *http.Response
 	r *http.Request
 }
 
-func (d *httpDumper) Dump() ([]byte, error) {
+func NewHTTPDumper(w *http.Response, r *http.Request) *HTTPDumper {
+	return &HTTPDumper{w, r}
+}
+
+func (d *HTTPDumper) Dump() ([]byte, error) {
 	req, err := dumpRequest(d.r)
 	if err != nil {
 		return nil, err
@@ -159,14 +128,19 @@ func (d *httpDumper) Dump() ([]byte, error) {
 	return bytes.Join([][]byte{req, Separator, res}, bytes.Repeat(LineBreak, 2)), nil
 }
 
-func compareSnapshot(want, got []byte, opts ...Option) error {
+type HTTPComparer struct {
+	opt *httpOption
+}
+
+func NewHTTPComparer(opts ...HTTPOption) *HTTPComparer {
+	return &HTTPComparer{
+		opt: NewHTTPOption(opts...),
+	}
+}
+
+func (c *HTTPComparer) Compare(want, got []byte) error {
 	if bytes.Equal(want, got) {
 		return nil
-	}
-
-	o := new(Options)
-	for _, opt := range opts {
-		opt(o)
 	}
 
 	wantReq, wantRes, err := parseDotHTTP(want)
@@ -180,22 +154,22 @@ func compareSnapshot(want, got []byte, opts ...Option) error {
 	}
 
 	// Diff request.
-	if err := wantReq.Diff(gotReq, o); err != nil {
+	if err := wantReq.Diff(gotReq, c.opt.headerOpts, c.opt.bodyOpts); err != nil {
 		return fmt.Errorf("Request does not match snapshot. %w", err)
 	}
 
 	// Diff response.
-	if err := wantRes.Diff(gotRes, o); err != nil {
+	if err := wantRes.Diff(gotRes, c.opt.headerOpts, c.opt.bodyOpts); err != nil {
 		return fmt.Errorf("Response does not match snapshot. %w", err)
 	}
 
 	// Validate response body.
-	if o.bodyFn != nil {
-		o.bodyFn(wantRes.Body)
+	if c.opt.bodyFn != nil {
+		c.opt.bodyFn(wantRes.Body)
 	}
 
-	if o.headerFn != nil {
-		o.headerFn(wantRes.Headers)
+	if c.opt.headerFn != nil {
+		c.opt.headerFn(wantRes.Headers)
 	}
 
 	return nil
@@ -228,7 +202,7 @@ type Snapshot struct {
 	Body    []byte
 }
 
-func (s *Snapshot) Diff(other *Snapshot, opts *Options) error {
+func (s *Snapshot) Diff(other *Snapshot, headerOpts []cmp.Option, bodyOpts []cmp.Option) error {
 	if err := cmpDiff(s.Line, other.Line); err != nil {
 		return err
 	}
@@ -237,18 +211,19 @@ func (s *Snapshot) Diff(other *Snapshot, opts *Options) error {
 	// Headers may contain `Content-Length`, which depends on the body.
 	if err := func(isJSON bool) error {
 		if isJSON {
+			comparer := &JSONComparer{opt: &jsonOption{bodyOpts: bodyOpts}}
 			// Convert the json to map[string]any for better diff.
 			// This does not work on JSON array.
 			// Ensure that only structs are passed in.
-			return DiffJSON(s.Body, other.Body, opts.bodyopts...)
+			return comparer.Compare(s.Body, other.Body)
 		}
 
-		return cmpDiff(s.Body, other.Body, opts.bodyopts...)
+		return cmpDiff(s.Body, other.Body, bodyOpts...)
 	}(json.Valid(s.Body) && json.Valid(other.Body)); err != nil {
 		return err
 	}
 
-	return cmpDiff(s.Headers, other.Headers, opts.headopts...)
+	return cmpDiff(s.Headers, other.Headers, headerOpts...)
 }
 
 func parseSection(req []byte) (*Snapshot, error) {
