@@ -7,9 +7,9 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"net/http/httputil"
 	"testing"
 
+	"github.com/alextanhongpin/core/http/httpdump"
 	"github.com/google/go-cmp/cmp"
 )
 
@@ -115,12 +115,12 @@ func NewHTTPDumper(w *http.Response, r *http.Request) *HTTPDumper {
 }
 
 func (d *HTTPDumper) Dump() ([]byte, error) {
-	req, err := dumpRequest(d.r)
+	req, err := httpdump.DumpRequest(d.r)
 	if err != nil {
 		return nil, err
 	}
 
-	res, err := dumpResponse(d.w)
+	res, err := httpdump.DumpResponse(d.w)
 	if err != nil {
 		return nil, err
 	}
@@ -154,12 +154,12 @@ func (c *HTTPComparer) Compare(want, got []byte) error {
 	}
 
 	// Diff request.
-	if err := wantReq.Diff(gotReq, c.opt.headerOpts, c.opt.bodyOpts); err != nil {
+	if err := Diff(wantReq, gotReq, c.opt.headerOpts, c.opt.bodyOpts); err != nil {
 		return fmt.Errorf("Request does not match snapshot. %w", err)
 	}
 
 	// Diff response.
-	if err := wantRes.Diff(gotRes, c.opt.headerOpts, c.opt.bodyOpts); err != nil {
+	if err := Diff(wantRes, gotRes, c.opt.headerOpts, c.opt.bodyOpts); err != nil {
 		return fmt.Errorf("Response does not match snapshot. %w", err)
 	}
 
@@ -175,19 +175,19 @@ func (c *HTTPComparer) Compare(want, got []byte) error {
 	return nil
 }
 
-func parseDotHTTP(ss []byte) (reqS, resS *Snapshot, err error) {
+func parseDotHTTP(ss []byte) (reqS, resS *httpdump.Dump, err error) {
 	req, res, ok := bytes.Cut(ss, Separator)
 	if !ok {
 		return nil, nil, fmt.Errorf("invalid snapshot: %s", ss)
 	}
 
-	reqS, err = parseSection(req)
+	reqS, err = httpdump.Parse(req)
 	if err != nil {
 		err = fmt.Errorf("failed to parse request: %w", err)
 		return
 	}
 
-	resS, err = parseSection(res)
+	resS, err = httpdump.Parse(res)
 	if err != nil {
 		err = fmt.Errorf("failed to parse response: %w", err)
 		return
@@ -196,14 +196,8 @@ func parseDotHTTP(ss []byte) (reqS, resS *Snapshot, err error) {
 	return
 }
 
-type Snapshot struct {
-	Line    string
-	Headers http.Header
-	Body    []byte
-}
-
-func (s *Snapshot) Diff(other *Snapshot, headerOpts []cmp.Option, bodyOpts []cmp.Option) error {
-	if err := cmpDiff(s.Line, other.Line); err != nil {
+func Diff(x, y *httpdump.Dump, headerOpts []cmp.Option, bodyOpts []cmp.Option) error {
+	if err := cmpDiff(x.Line, y.Line); err != nil {
 		return err
 	}
 
@@ -215,136 +209,13 @@ func (s *Snapshot) Diff(other *Snapshot, headerOpts []cmp.Option, bodyOpts []cmp
 			// Convert the json to map[string]any for better diff.
 			// This does not work on JSON array.
 			// Ensure that only structs are passed in.
-			return comparer.Compare(s.Body, other.Body)
+			return comparer.Compare(x.Body, y.Body)
 		}
 
-		return cmpDiff(s.Body, other.Body, bodyOpts...)
-	}(json.Valid(s.Body) && json.Valid(other.Body)); err != nil {
+		return cmpDiff(x.Body, y.Body, bodyOpts...)
+	}(json.Valid(x.Body) && json.Valid(y.Body)); err != nil {
 		return err
 	}
 
-	return cmpDiff(s.Headers, other.Headers, headerOpts...)
-}
-
-func parseSection(req []byte) (*Snapshot, error) {
-	req = bytes.TrimSpace(req)
-	rawReqLine, rawHeadersAndBody, _ := bytes.Cut(req, LineBreak)
-	rawHeaders, body, _ := bytes.Cut(rawHeadersAndBody, bytes.Repeat(LineBreak, 2))
-	headers, err := parseHeaders(rawHeaders)
-	if err != nil {
-		return nil, err
-	}
-
-	return &Snapshot{
-		Line:    string(bytes.TrimSpace(rawReqLine)),
-		Headers: headers,
-		Body:    bytes.TrimSpace(body),
-	}, nil
-}
-
-// parseHeaders parse the HTTP headers from key-value strings into map of
-// strings.
-func parseHeaders(headers []byte) (http.Header, error) {
-	headers = bytes.TrimSpace(headers)
-
-	h := make(http.Header)
-	kvs := bytes.Split(headers, LineBreak)
-	for _, kv := range kvs {
-		k, v, ok := bytes.Cut(kv, SemiColon)
-		if !ok {
-			return nil, fmt.Errorf("invalid header format: %q", kv)
-		}
-		ks := string(bytes.TrimSpace(k))
-		vs := string(bytes.TrimSpace(v))
-		h[ks] = append(h[ks], vs)
-	}
-
-	return h, nil
-}
-
-func dumpRequest(r *http.Request) ([]byte, error) {
-	b, err := io.ReadAll(r.Body)
-	if err != nil {
-		return nil, err
-	}
-	var br interface {
-		io.Reader
-		Len() int
-	}
-
-	if json.Valid(b) {
-		// Pretty-print the json body.
-		bb := new(bytes.Buffer)
-		if err := json.Indent(bb, b, "", " "); err != nil {
-			return nil, err
-		}
-		br = bb
-	} else {
-		br = bytes.NewReader(b)
-	}
-	// Assign back to the body.
-	r.Body = io.NopCloser(br)
-
-	// Update the content-length after updating body.
-	r.ContentLength = int64(br.Len())
-
-	// `httputil.DumpRequestOut` requires these to be set.
-	if r.URL.Scheme == "" {
-		r.URL.Scheme = "http"
-	}
-	if r.URL.Host == "" {
-		r.URL.Host = "example.com"
-	}
-
-	// Use `DumpRequestOut` instead of `DumpRequest` to preserve the
-	// querystring.
-	req, err := httputil.DumpRequestOut(r, true)
-	if err != nil {
-		return nil, err
-	}
-	req = NormalizeNewlines(req)
-	req = bytes.TrimSpace(req)
-
-	return req, nil
-}
-
-func dumpResponse(w *http.Response) ([]byte, error) {
-	b, err := io.ReadAll(w.Body)
-	if err != nil {
-		return nil, err
-	}
-	if json.Valid(b) {
-		// Pretty-print the json body.
-		bb := new(bytes.Buffer)
-		if err := json.Indent(bb, b, "", " "); err != nil {
-			return nil, err
-		}
-		// Assign back to the body.
-		w.Body = io.NopCloser(bb)
-	} else {
-		// Assign back to the body.
-		w.Body = io.NopCloser(bytes.NewReader(b))
-	}
-
-	res, err := httputil.DumpResponse(w, true)
-	if err != nil {
-		return nil, err
-	}
-
-	res = NormalizeNewlines(res)
-	res = bytes.TrimSpace(res)
-
-	return res, nil
-}
-
-// NormalizeNewlines normalizes \r\n (windows) and \r (mac)
-// into \n (unix)
-// Reference [here].
-// [here]: https://www.programming-books.io/essential/go/normalize-newlines-1d3abcf6f17c4186bb9617fa14074e48
-func NormalizeNewlines(d []byte) []byte {
-	// replace CR LF \r\n (windows) with LF \n (unix)
-	d = bytes.Replace(d, []byte{13, 10}, []byte{10}, -1)
-	// replace CF \r (mac) with LF \n (unix)
-	d = bytes.Replace(d, []byte{13}, []byte{10}, -1)
-	return d
+	return cmpDiff(x.Headers, y.Headers, headerOpts...)
 }
