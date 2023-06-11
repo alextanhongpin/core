@@ -20,13 +20,37 @@ var dsn string
 
 var registerPgDB sync.Once
 
-func PostgresDB(t *testing.T) *sql.DB {
+// PostgresTx runs everything as a single transaction.
+// The operations will be rollbacked at the end, reducing the need to manually
+// create transactions and rollbacking.
+func PostgresTx(t *testing.T) *sql.DB {
+	t.Helper()
+
 	registerPgDB.Do(func() {
 		txdb.Register("txdb", "postgres", dsn)
 	})
+
 	db, err := sql.Open("txdb", uuid.New().String())
 	if err != nil {
-		t.Error(err)
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		db.Close()
+	})
+
+	return db
+}
+
+// PostgresDB returns a non-transaction *sql.DB.
+// The reason is there is a need for testing stuff that should not be in the
+// same transactions, e.g. when generating current_timestamp, or locking in
+// different connection.
+func PostgresDB(t *testing.T) *sql.DB {
+	t.Helper()
+
+	db, err := sql.Open("postgres", dsn)
+	if err != nil {
+		t.Fatal(err)
 	}
 	t.Cleanup(func() {
 		db.Close()
