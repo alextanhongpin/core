@@ -1,4 +1,4 @@
-package containers
+package pgtest
 
 import (
 	"database/sql"
@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/DATA-DOG/go-txdb"
+	"github.com/alextanhongpin/core/storage/pg"
 	"github.com/google/uuid"
 	_ "github.com/lib/pq"
 	"github.com/ory/dockertest/v3"
@@ -18,15 +19,20 @@ import (
 
 var dsn string
 
-var registerPgDB sync.Once
+var once sync.Once
 
-// PostgresTx runs everything as a single transaction.
+func DSN() string {
+	return dsn
+}
+
+// Tx runs everything as a single transaction.
 // The operations will be rollbacked at the end, reducing the need to manually
 // create transactions and rollbacking.
-func PostgresTx(t *testing.T) *sql.DB {
+func Tx(t *testing.T) *sql.DB {
 	t.Helper()
 
-	registerPgDB.Do(func() {
+	// Lazily initialize the txdb.
+	once.Do(func() {
 		txdb.Register("txdb", "postgres", dsn)
 	})
 
@@ -34,26 +40,24 @@ func PostgresTx(t *testing.T) *sql.DB {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	t.Cleanup(func() {
-		db.Close()
+		_ = db.Close()
 	})
 
 	return db
 }
 
-// PostgresDB returns a non-transaction *sql.DB.
+// DB returns a non-transaction *sql.DB.
 // The reason is there is a need for testing stuff that should not be in the
 // same transactions, e.g. when generating current_timestamp, or locking in
 // different connection.
-func PostgresDB(t *testing.T) *sql.DB {
+func DB(t *testing.T) *sql.DB {
 	t.Helper()
 
-	db, err := sql.Open("postgres", dsn)
-	if err != nil {
-		t.Fatal(err)
-	}
+	db := pg.New(dsn)
 	t.Cleanup(func() {
-		db.Close()
+		_ = db.Close()
 	})
 
 	return db
@@ -61,15 +65,47 @@ func PostgresDB(t *testing.T) *sql.DB {
 
 type postgresHook func(db *sql.DB) error
 
-func StartPostgres(tag string, hooks ...postgresHook) func() {
+type Option interface {
+	isOption()
+}
+
+type Hook func(*sql.DB) error
+
+func (h Hook) isOption() {}
+
+type Tag string
+
+func (t Tag) isOption() {}
+
+func InitDB(opts ...Option) func() {
+	stop, err := initDB(opts...)
+	if err != nil {
+		panic(err)
+	}
+
+	return stop
+}
+
+func initDB(opts ...Option) (func(), error) {
+	var fn func(*sql.DB) error
+	tag := "latest"
+
+	for _, opt := range opts {
+		switch v := opt.(type) {
+		case Tag:
+			tag = string(v)
+		case Hook:
+			fn = v
+		}
+	}
 	pool, err := dockertest.NewPool("")
 	if err != nil {
-		log.Fatal("could not construct pool:", err)
+		return nil, fmt.Errorf("could not construct pool: %w", err)
 	}
 
 	err = pool.Client.Ping()
 	if err != nil {
-		log.Fatal("could not connect to docker:", err)
+		return nil, fmt.Errorf("could not connect to docker: %w", err)
 	}
 
 	// Pulls an image, creates a container based on it and run it.
@@ -88,12 +124,11 @@ func StartPostgres(tag string, hooks ...postgresHook) func() {
 		config.RestartPolicy = docker.RestartPolicy{Name: "no"}
 	})
 	if err != nil {
-		log.Fatal("could not start resources:", err)
+		return nil, fmt.Errorf("could not start resources: %w", err)
 	}
+
 	hostAndPort := resource.GetHostPort("5432/tcp")
 	dsn = fmt.Sprintf("postgres://john:123456@%s/test?sslmode=disable", hostAndPort)
-
-	log.Println("connecting to database on url:", dsn)
 
 	resource.Expire(120) // Tell docker to kill the container in 120 seconds.
 
@@ -112,10 +147,8 @@ func StartPostgres(tag string, hooks ...postgresHook) func() {
 		}
 
 		// Run migrations, seed, fixtures etc.
-		for _, hook := range hooks {
-			if err := hook(db); err != nil {
-				return err
-			}
+		if err := fn(db); err != nil {
+			return err
 		}
 
 		// NOTE: We need to run this once to register the sql driver `pg`.
@@ -137,12 +170,12 @@ func StartPostgres(tag string, hooks ...postgresHook) func() {
 
 		return nil
 	}); err != nil {
-		log.Fatal("could not connect to docker:", err)
+		return nil, fmt.Errorf("could not connect to docker: %w", err)
 	}
 
 	return func() {
 		if err := pool.Purge(resource); err != nil {
 			log.Fatal("could not purge resource:", err)
 		}
-	}
+	}, nil
 }

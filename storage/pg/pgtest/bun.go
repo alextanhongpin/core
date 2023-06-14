@@ -1,4 +1,4 @@
-package containers
+package pgtest
 
 import (
 	"database/sql"
@@ -6,16 +6,17 @@ import (
 	"testing"
 
 	"github.com/DATA-DOG/go-txdb"
+	"github.com/alextanhongpin/core/storage/pg"
 	"github.com/google/uuid"
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect/pgdialect"
 	"github.com/uptrace/bun/extra/bundebug"
 )
 
-var registerBunDB sync.Once
+var onceBun sync.Once
 
-func PostgresBunDB(t *testing.T) *bun.DB {
-	registerBunDB.Do(func() {
+func BunTx(t *testing.T) *bun.DB {
+	onceBun.Do(func() {
 		// Note the `pg` driver, which bun uses instead of `postgres`.
 		txdb.Register("bun_txdb", "pg", dsn)
 	})
@@ -31,7 +32,17 @@ func PostgresBunDB(t *testing.T) *bun.DB {
 		bundebug.WithVerbose(true),
 	))
 	t.Cleanup(func() {
-		db.Close()
+		_ = db.Close()
+	})
+
+	return db
+}
+
+func BunDB(t *testing.T) *bun.DB {
+	db := pg.NewBun(dsn)
+
+	t.Cleanup(func() {
+		_ = db.Close()
 	})
 
 	return db
