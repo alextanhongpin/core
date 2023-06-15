@@ -66,6 +66,11 @@ func typeName(v any) []string {
 		res = append(res, name)
 	}
 
+	// For non-struct, like slice, the type does not have a name.
+	if name == "" {
+		res = append(res, t.Kind().String())
+	}
+
 	return res
 }
 

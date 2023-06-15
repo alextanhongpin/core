@@ -2,6 +2,7 @@ package testutil
 
 import (
 	"net/http"
+	"path/filepath"
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
@@ -13,6 +14,52 @@ type HTTPOption interface {
 
 type JSONOption interface {
 	isJSON()
+}
+
+type TestDir string
+
+func (TestDir) isJSON() {}
+func (TestDir) isHTTP() {}
+
+type TestName string
+
+func (TestName) isJSON() {}
+func (TestName) isHTTP() {}
+
+type FileName string
+
+func (FileName) isJSON() {}
+func (FileName) isHTTP() {}
+
+type testOption struct {
+	TestDir  string
+	TestName string
+	FileName string
+}
+
+func newTestOption(opts ...JSONOption) *testOption {
+	to := &testOption{
+		TestDir:  "./testdata",
+		TestName: "",
+		FileName: "",
+	}
+
+	for _, o := range opts {
+		switch v := o.(type) {
+		case TestDir:
+			to.TestDir = string(v)
+		case TestName:
+			to.TestName = string(v)
+		case FileName:
+			to.FileName = string(v)
+		}
+	}
+
+	return to
+}
+
+func (o *testOption) String() string {
+	return filepath.Join(o.TestDir, o.TestName, o.FileName)
 }
 
 type IgnoreHeadersOption struct {

@@ -23,6 +23,15 @@ func TestDumpJSON(t *testing.T) {
 	}
 
 	testutil.DumpJSON(t, p, testutil.IgnoreFields("bornAt"))
+	testutil.DumpJSON(t, p, testutil.IgnoreFields("bornAt"),
+		testutil.FileName("person.json"),
+	)
+	testutil.DumpJSON(t, p, testutil.IgnoreFields("bornAt"),
+		testutil.TestDir("./_testdata"), // Go build ignores directory that starts with underscore.
+	)
+	testutil.DumpJSON(t, p, testutil.IgnoreFields("bornAt"),
+		testutil.TestName("DumpPerson"),
+	)
 }
 
 func TestDumpJSONNonStruct(t *testing.T) {

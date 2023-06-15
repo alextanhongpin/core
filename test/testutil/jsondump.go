@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -24,6 +23,8 @@ func NewJSONOption(opts ...JSONOption) *jsonOption {
 			j.bodyFn = o.fn
 		case *IgnoreFieldsOption:
 			j.bodyOpts = append(j.bodyOpts, ignoreMapKeys(o.keys...))
+		case TestDir, TestName, FileName:
+		// Do nothing.
 		default:
 			panic("option not implemented")
 		}
@@ -50,9 +51,14 @@ func DumpJSONFile(fileName string, v any, opts ...JSONOption) error {
 func DumpJSON(t *testing.T, v any, opts ...JSONOption) {
 	t.Helper()
 
-	typeName := strings.Join(typeName(v), "_")
-	fileName := filepath.Join("./testdata", t.Name(), typeName)
-	fileName = fmt.Sprintf("./%s.json", fileName)
+	testOpt := newTestOption(opts...)
+	if testOpt.TestName == "" {
+		testOpt.TestName = t.Name()
+	}
+	if testOpt.FileName == "" {
+		testOpt.FileName = fmt.Sprintf("%s.json", strings.Join(typeName(v), "."))
+	}
+	fileName := testOpt.String()
 
 	if err := DumpJSONFile(fileName, v, opts...); err != nil {
 		t.Fatal(err)
