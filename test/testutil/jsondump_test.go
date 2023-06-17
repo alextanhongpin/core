@@ -5,6 +5,8 @@ import (
 	"time"
 
 	"github.com/alextanhongpin/core/test/testutil"
+	"github.com/google/go-cmp/cmp"
+	"github.com/google/go-cmp/cmp/cmpopts"
 )
 
 func TestDumpJSON(t *testing.T) {
@@ -35,6 +37,11 @@ func TestDumpJSON(t *testing.T) {
 	testutil.DumpJSON(t, p, testutil.IgnoreFields("bornAt"),
 		testutil.TestName("DumpPerson"),
 	)
+	testutil.DumpJSON(t, p, testutil.CmpOptions([]cmp.Option{
+		cmpopts.IgnoreMapEntries(func(key string, _ any) bool {
+			return key == "bornAt"
+		}),
+	}))
 }
 
 func TestDumpJSONNonStruct(t *testing.T) {

@@ -38,6 +38,10 @@ func NewHTTPOption(opts ...HTTPOption) *httpOption {
 			h.bodyOpts = append(h.bodyOpts, ignoreMapKeys(o.keys...))
 		case *IgnoreHeadersOption:
 			h.headerOpts = append(h.headerOpts, ignoreMapKeys(o.keys...))
+		case BodyCmpOptions:
+			h.bodyOpts = append(h.bodyOpts, o...)
+		case HeaderCmpOptions:
+			h.headerOpts = append(h.headerOpts, o...)
 		default:
 			panic("option not implemented")
 		}

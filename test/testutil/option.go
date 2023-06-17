@@ -119,6 +119,18 @@ func InspectHeaders(fn func(http.Header)) *InspectHeadersOption {
 
 func (o *InspectHeadersOption) isHTTP() {}
 
+type CmpOptions []cmp.Option
+
+func (o CmpOptions) isJSON() {}
+
+type HeaderCmpOptions CmpOptions
+
+func (o HeaderCmpOptions) isHTTP() {}
+
+type BodyCmpOptions CmpOptions
+
+func (o BodyCmpOptions) isHTTP() {}
+
 func ignoreMapKeys(keys ...string) cmp.Option {
 	return cmpopts.IgnoreMapEntries(func(key string, _ any) bool {
 		for _, k := range keys {
