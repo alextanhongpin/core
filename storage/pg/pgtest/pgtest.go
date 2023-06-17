@@ -14,7 +14,6 @@ import (
 	_ "github.com/lib/pq"
 	"github.com/ory/dockertest/v3"
 	"github.com/ory/dockertest/v3/docker"
-	"github.com/uptrace/bun/driver/pgdriver"
 )
 
 var dsn string
@@ -33,7 +32,7 @@ func Tx(t *testing.T) *sql.DB {
 
 	// Lazily initialize the txdb.
 	once.Do(func() {
-		txdb.Register("txdb", "postgres", dsn)
+		txdb.Register("txdb", "postgres", DSN())
 	})
 
 	db, err := sql.Open("txdb", uuid.New().String())
@@ -55,7 +54,7 @@ func Tx(t *testing.T) *sql.DB {
 func DB(t *testing.T) *sql.DB {
 	t.Helper()
 
-	db := pg.New(dsn)
+	db := pg.New(DSN())
 	t.Cleanup(func() {
 		_ = db.Close()
 	})
@@ -147,19 +146,6 @@ func initDB(opts ...Option) (func(), error) {
 		// Run migrations, seed, fixtures etc.
 		if err := fn(db); err != nil {
 			return err
-		}
-
-		// NOTE: We need to run this once to register the sql driver `pg`.
-		// Otherwise txdb will not be able to register this driver.
-		bunDB := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn)))
-		if err := bunDB.Ping(); err != nil {
-			return fmt.Errorf("failed to ping: %w", err)
-		}
-
-		// NOTE: We can close this connection immediately, since we will be
-		// creating a new one for every test.
-		if err := bunDB.Close(); err != nil {
-			return fmt.Errorf("failed to close bun: %w", err)
 		}
 
 		if err := db.Close(); err != nil {
