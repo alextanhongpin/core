@@ -8,10 +8,22 @@ import (
 	"time"
 )
 
-func DSN(user, pass, host, port, name string, opts map[string]string) string {
-	dsn := fmt.Sprintf("postgres://%s:%s@%s:%s/%s", user, pass, host, port, name)
+type Params map[string]string
+
+type Option struct {
+	User     string
+	Password string
+	Host     string
+	Port     string
+	Database string
+	Params   Params
+}
+
+func (o Option) DSN() string {
+	dsn := fmt.Sprintf("postgres://%s:%s@%s:%s/%s", o.User, o.Password, o.Host, o.Port, o.Database)
+
 	u := url.Values{}
-	for k, v := range opts {
+	for k, v := range o.Params {
 		u.Set(k, v)
 	}
 

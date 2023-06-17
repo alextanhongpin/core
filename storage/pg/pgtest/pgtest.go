@@ -63,8 +63,6 @@ func DB(t *testing.T) *sql.DB {
 	return db
 }
 
-type postgresHook func(db *sql.DB) error
-
 type Option interface {
 	isOption()
 }
