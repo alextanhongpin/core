@@ -1,6 +1,7 @@
 package testutil
 
 import (
+	"fmt"
 	"net/http"
 	"path/filepath"
 
@@ -51,7 +52,14 @@ func newTestOption(opts ...JSONOption) *testOption {
 		case TestName:
 			to.TestName = string(v)
 		case FileName:
-			to.FileName = string(v)
+			fileName := string(v)
+			// Automatically suffix the filename with the extension ".json"
+			// if no extension is provided.
+			if ext := filepath.Ext(fileName); ext == "" {
+				fileName = fmt.Sprintf("%s.json", fileName)
+			}
+
+			to.FileName = fileName
 		}
 	}
 
