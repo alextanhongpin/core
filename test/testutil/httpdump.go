@@ -176,7 +176,12 @@ func (c *HTTPComparer) Compare(want, got []byte) error {
 }
 
 func parseDotHTTP(ss []byte) (reqS, resS *httpdump.Dump, err error) {
-	req, res, ok := bytes.Cut(ss, Separator)
+	var sep []byte
+	sep = append(sep, LineBreak...)
+	sep = append(sep, Separator...)
+	sep = append(sep, LineBreak...)
+
+	req, res, ok := bytes.Cut(ss, sep)
 	if !ok {
 		return nil, nil, fmt.Errorf("invalid snapshot: %s", ss)
 	}
