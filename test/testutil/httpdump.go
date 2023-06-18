@@ -20,9 +20,9 @@ var (
 )
 
 type httpOption struct {
-	headerFn   func(http.Header)
+	headerFn   InspectHeaders
 	headerOpts []cmp.Option
-	bodyFn     func([]byte)
+	bodyFn     InspectBody
 	bodyOpts   []cmp.Option
 }
 
@@ -30,14 +30,14 @@ func NewHTTPOption(opts ...HTTPOption) *httpOption {
 	h := &httpOption{}
 	for _, opt := range opts {
 		switch o := opt.(type) {
-		case *InspectBodyOption:
-			h.bodyFn = o.fn
-		case *InspectHeadersOption:
-			h.headerFn = o.fn
-		case *IgnoreFieldsOption:
-			h.bodyOpts = append(h.bodyOpts, ignoreMapKeys(o.keys...))
-		case *IgnoreHeadersOption:
-			h.headerOpts = append(h.headerOpts, ignoreMapKeys(o.keys...))
+		case InspectBody:
+			h.bodyFn = o
+		case InspectHeaders:
+			h.headerFn = o
+		case IgnoreFieldsOption:
+			h.bodyOpts = append(h.bodyOpts, ignoreMapKeys(o...))
+		case IgnoreHeadersOption:
+			h.headerOpts = append(h.headerOpts, ignoreMapKeys(o...))
 		case BodyCmpOptions:
 			h.bodyOpts = append(h.bodyOpts, o...)
 		case HeaderCmpOptions:
@@ -143,10 +143,6 @@ func NewHTTPComparer(opts ...HTTPOption) *HTTPComparer {
 }
 
 func (c *HTTPComparer) Compare(want, got []byte) error {
-	if bytes.Equal(want, got) {
-		return nil
-	}
-
 	wantReq, wantRes, err := parseDotHTTP(want)
 	if err != nil {
 		return fmt.Errorf("failed to parse old snapshot: %w", err)
@@ -168,12 +164,14 @@ func (c *HTTPComparer) Compare(want, got []byte) error {
 	}
 
 	// Validate response body.
+	// The request body is not validated, since that is passed in explicitly.
 	if c.opt.bodyFn != nil {
 		c.opt.bodyFn(wantRes.Body)
 	}
 
 	if c.opt.headerFn != nil {
-		c.opt.headerFn(wantRes.Headers)
+		c.opt.headerFn(wantReq.Headers, true)
+		c.opt.headerFn(wantRes.Headers, false)
 	}
 
 	return nil

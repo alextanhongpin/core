@@ -70,64 +70,45 @@ func (o *testOption) String() string {
 	return filepath.Join(o.TestDir, o.TestName, o.FileName)
 }
 
-type IgnoreHeadersOption struct {
-	keys []string
+type IgnoreHeadersOption []string
+
+func IgnoreHeaders(keys ...string) IgnoreHeadersOption {
+	return IgnoreHeadersOption(keys)
 }
 
-func IgnoreHeaders(keys ...string) *IgnoreHeadersOption {
-	return &IgnoreHeadersOption{
-		keys: keys,
-	}
+func (o IgnoreHeadersOption) isHTTP() {}
+
+type IgnoreFieldsOption []string
+
+func IgnoreFields(keys ...string) IgnoreFieldsOption {
+	return IgnoreFieldsOption(keys)
 }
 
-func (o *IgnoreHeadersOption) isHTTP() {}
+func (o IgnoreFieldsOption) isHTTP() {}
+func (o IgnoreFieldsOption) isJSON() {}
 
-type IgnoreFieldsOption struct {
-	keys []string
+type InspectBody func(body []byte)
+
+func (o InspectBody) isHTTP() {}
+func (o InspectBody) isJSON() {}
+
+type InspectHeaders func(headers http.Header, isRequest bool)
+
+func (o InspectHeaders) isHTTP() {}
+
+type CmpOptionsOptions []cmp.Option
+
+func CmpOptions(opts ...cmp.Option) CmpOptionsOptions {
+	return CmpOptionsOptions(opts)
 }
 
-func IgnoreFields(keys ...string) *IgnoreFieldsOption {
-	return &IgnoreFieldsOption{
-		keys: keys,
-	}
-}
+func (o CmpOptionsOptions) isJSON() {}
 
-func (o *IgnoreFieldsOption) isHTTP() {}
-func (o *IgnoreFieldsOption) isJSON() {}
-
-type InspectBodyOption struct {
-	fn func(body []byte)
-}
-
-func InspectBody(fn func(body []byte)) *InspectBodyOption {
-	return &InspectBodyOption{
-		fn: fn,
-	}
-}
-func (o *InspectBodyOption) isHTTP() {}
-func (o *InspectBodyOption) isJSON() {}
-
-type InspectHeadersOption struct {
-	fn func(http.Header)
-}
-
-func InspectHeaders(fn func(http.Header)) *InspectHeadersOption {
-	return &InspectHeadersOption{
-		fn: fn,
-	}
-}
-
-func (o *InspectHeadersOption) isHTTP() {}
-
-type CmpOptions []cmp.Option
-
-func (o CmpOptions) isJSON() {}
-
-type HeaderCmpOptions CmpOptions
+type HeaderCmpOptions CmpOptionsOptions
 
 func (o HeaderCmpOptions) isHTTP() {}
 
-type BodyCmpOptions CmpOptions
+type BodyCmpOptions CmpOptionsOptions
 
 func (o BodyCmpOptions) isHTTP() {}
 

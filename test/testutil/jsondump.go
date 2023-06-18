@@ -12,18 +12,18 @@ import (
 
 type jsonOption struct {
 	bodyOpts []cmp.Option
-	bodyFn   func([]byte)
+	bodyFn   InspectBody
 }
 
 func NewJSONOption(opts ...JSONOption) *jsonOption {
 	j := &jsonOption{}
 	for _, opt := range opts {
 		switch o := opt.(type) {
-		case *InspectBodyOption:
-			j.bodyFn = o.fn
-		case *IgnoreFieldsOption:
-			j.bodyOpts = append(j.bodyOpts, ignoreMapKeys(o.keys...))
-		case CmpOptions:
+		case InspectBody:
+			j.bodyFn = o
+		case IgnoreFieldsOption:
+			j.bodyOpts = append(j.bodyOpts, ignoreMapKeys(o...))
+		case CmpOptionsOptions:
 			j.bodyOpts = append(j.bodyOpts, o...)
 		case TestDir, TestName, FileName:
 		// Do nothing.

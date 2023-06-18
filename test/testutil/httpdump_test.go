@@ -169,17 +169,54 @@ func TestHTTPDump(t *testing.T) {
 				fmt.Fprint(w, nil)
 			},
 			opts: []testutil.HTTPOption{
-				testutil.InspectHeaders(func(headers http.Header) {
-					t.Log("HEADERS", headers)
+				testutil.InspectHeaders(func(headers http.Header, isRequest bool) {
+					if !isRequest {
+						return
+					}
+
 					contentType, params, err := mime.ParseMediaType(headers.Get("Content-Type"))
 					if err != nil {
 						t.Fatal(err)
 					}
-					if params != nil {
-						t.Fatalf("want params to be nil, got %v", params)
+					if want, got := "utf-8", params["charset"]; want != got {
+						t.Fatalf("want %s, got %s", want, got)
 					}
-					if contentType != "application/json" {
-						t.Fatalf("want content-type to be application/json, got %s", contentType)
+					if want, got := "application/json", contentType; want != got {
+						t.Fatalf("want %s, got %s", want, got)
+					}
+				}),
+			},
+		},
+		{
+			name: "inspect multi header",
+			r: func() *http.Request {
+				r := httptest.NewRequest("GET", "/search?q=John&limit=10", nil)
+				r.Header.Add("Cache-Control", "max-age=604800")
+				r.Header.Add("Cache-Control", "stale-while-revalidate=86400")
+				r.Header.Set("Content-Type", "application/json;charset=utf-8")
+				return r
+			}(),
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusNoContent)
+				w.Header().Set("Content-Type", "application/json")
+				fmt.Fprint(w, nil)
+			},
+			opts: []testutil.HTTPOption{
+				testutil.InspectHeaders(func(headers http.Header, isRequest bool) {
+					if !isRequest {
+						return
+					}
+
+					cacheControl := headers["Cache-Control"]
+
+					maxAge := "max-age=604800"
+					staleWhileRevalidate := "stale-while-revalidate=86400"
+					if want, got := maxAge, cacheControl[0]; want != got {
+						t.Fatalf("want %s, got %s", want, got)
+					}
+
+					if want, got := staleWhileRevalidate, cacheControl[1]; want != got {
+						t.Fatalf("want %s, got %s", want, got)
 					}
 				}),
 			},
