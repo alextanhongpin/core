@@ -50,7 +50,7 @@ func DumpJSONFile(fileName string, v any, opts ...JSONOption) error {
 }
 
 // DumpJSON dumps a type as json.
-func DumpJSON(t *testing.T, v any, opts ...JSONOption) {
+func DumpJSON(t *testing.T, v any, opts ...JSONOption) string {
 	t.Helper()
 
 	testOpt := newTestOption(opts...)
@@ -65,6 +65,8 @@ func DumpJSON(t *testing.T, v any, opts ...JSONOption) {
 	if err := DumpJSONFile(fileName, v, opts...); err != nil {
 		t.Fatal(err)
 	}
+
+	return fileName
 }
 
 type JSONComparer struct {

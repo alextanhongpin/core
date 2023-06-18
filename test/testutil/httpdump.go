@@ -85,13 +85,15 @@ func DumpHTTPFile(fileName string, r *http.Request, handler http.HandlerFunc, op
 	return Dump(fileName, dnc)
 }
 
-func DumpHTTP(t *testing.T, r *http.Request, handler http.HandlerFunc, opts ...HTTPOption) {
+func DumpHTTP(t *testing.T, r *http.Request, handler http.HandlerFunc, opts ...HTTPOption) string {
 	t.Helper()
 
 	fileName := fmt.Sprintf("./testdata/%s.http", t.Name())
 	if err := DumpHTTPFile(fileName, r, handler, opts...); err != nil {
 		t.Fatal(err)
 	}
+
+	return fileName
 }
 
 func DumpHTTPHandler(t *testing.T, opts ...HTTPOption) func(http.Handler) http.Handler {
@@ -99,7 +101,7 @@ func DumpHTTPHandler(t *testing.T, opts ...HTTPOption) func(http.Handler) http.H
 	return func(next http.Handler) http.Handler {
 		fn := func(w http.ResponseWriter, r *http.Request) {
 			// Serve to the response recorder.
-			DumpHTTP(t, r, next.ServeHTTP, opts...)
+			_ = DumpHTTP(t, r, next.ServeHTTP, opts...)
 
 			// Serve to the actual server.
 			next.ServeHTTP(w, r)

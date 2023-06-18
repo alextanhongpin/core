@@ -6,6 +6,7 @@ import (
 
 	"github.com/alextanhongpin/core/test/testutil"
 	"github.com/google/go-cmp/cmp/cmpopts"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestDumpJSON(t *testing.T) {
@@ -23,7 +24,11 @@ func TestDumpJSON(t *testing.T) {
 		BornAt:    time.Now(),
 	}
 
-	testutil.DumpJSON(t, p, testutil.IgnoreFields("bornAt"))
+	fileName := testutil.DumpJSON(t, p, testutil.IgnoreFields("bornAt"))
+	l, err := testutil.LoadJSON[Person](fileName)
+	assert.Nil(t, err)
+	assert.Equal(t, p.Name, l.Name)
+
 	testutil.DumpJSON(t, p, testutil.IgnoreFields("bornAt"),
 		testutil.FileName("person.json"),
 	)
