@@ -15,7 +15,7 @@ import (
 
 var (
 	LineBreak = []byte("\n")
-	Separator = []byte("---")
+	Separator = []byte("###")
 	SemiColon = []byte(":")
 )
 

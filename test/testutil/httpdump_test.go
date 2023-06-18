@@ -170,6 +170,7 @@ func TestHTTPDump(t *testing.T) {
 			},
 			opts: []testutil.HTTPOption{
 				testutil.InspectHeaders(func(headers http.Header) {
+					t.Log("HEADERS", headers)
 					contentType, params, err := mime.ParseMediaType(headers.Get("Content-Type"))
 					if err != nil {
 						t.Fatal(err)
