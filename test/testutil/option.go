@@ -1,15 +1,17 @@
 package testutil
 
 import (
-	"fmt"
 	"net/http"
 	"path/filepath"
+	"strings"
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 )
 
 const TestData = "testdata"
+const ExtJSON = ".json"
+const ExtHTTP = ".http"
 
 type HTTPOption interface {
 	isHTTP()
@@ -18,11 +20,6 @@ type HTTPOption interface {
 type JSONOption interface {
 	isJSON()
 }
-
-type TestDir string
-
-func (TestDir) isJSON() {}
-func (TestDir) isHTTP() {}
 
 type FilePath string
 
@@ -34,67 +31,73 @@ type FileName string
 func (FileName) isJSON() {}
 func (FileName) isHTTP() {}
 
-type FileExt string
-
-func (FileExt) isJSON() {}
-func (FileExt) isHTTP() {}
-
 type PathOption struct {
-	TestDir  TestDir
-	FilePath FilePath
-	FileName FileName
-	FileExt  FileExt
+	TestDir  string
+	FilePath string
+	FileName string
+	FileExt  string
 }
 
-func NewPathOption(opts ...JSONOption) *PathOption {
+func (o *PathOption) String() string {
+	if len(o.FileName) == 0 {
+		return filepath.Join(
+			o.TestDir,
+			o.FilePath+o.FileExt,
+		)
+	}
+
+	// Get the file extension.
+	fileName := string(o.FileName)
+	fileExt := filepath.Ext(fileName)
+	if fileExt != o.FileExt {
+		fileName = fileName + o.FileExt
+	}
+
+	return filepath.Join(
+		o.TestDir,
+		o.FilePath,
+		fileName,
+	)
+}
+
+func NewJSONPath(opts ...JSONOption) *PathOption {
 	opt := &PathOption{
 		TestDir:  TestData,
 		FilePath: "",
-		FileExt:  "",
 		FileName: "",
+		FileExt:  ExtJSON,
 	}
 
 	for _, o := range opts {
 		switch v := o.(type) {
-		case TestDir:
-			opt.TestDir = v
 		case FilePath:
-			opt.FilePath = v
+			opt.FilePath = strings.TrimSuffix(string(v), "/")
 		case FileName:
-			opt.FileName = v
-		case FileExt:
-			if len(v) == 0 {
-				continue
-			}
-
-			if v[0] == '.' {
-				v = v[1:]
-			}
-
-			opt.FileExt = v
+			opt.FileName = string(v)
 		}
 	}
 
 	return opt
 }
 
-func (o *PathOption) String() string {
-	// Get the file extension.
-	fileExt := filepath.Ext(string(o.FileName))
-
-	// Filename without extension.
-	fileName := o.FileName[:len(o.FileName)-len(fileExt)]
-	if len(o.FileExt) > 0 {
-		fileExt = string(o.FileExt)
-	} else if len(fileExt) > 0 {
-		fileExt = fileExt[1:]
+func NewHTTPPath(opts ...HTTPOption) *PathOption {
+	opt := &PathOption{
+		TestDir:  TestData,
+		FilePath: "",
+		FileName: "",
+		FileExt:  ExtHTTP,
 	}
 
-	return filepath.Join(
-		string(o.TestDir),
-		string(o.FilePath),
-		fmt.Sprintf("%s.%s", fileName, fileExt),
-	)
+	for _, o := range opts {
+		switch v := o.(type) {
+		case FilePath:
+			opt.FilePath = strings.TrimSuffix(string(v), "/")
+		case FileName:
+			opt.FileName = string(v)
+		}
+	}
+
+	return opt
 }
 
 type IgnoreHeadersOption []string

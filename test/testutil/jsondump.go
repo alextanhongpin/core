@@ -23,7 +23,7 @@ func NewJSONOption(opts ...JSONOption) *jsonOption {
 			j.bodyOpts = append(j.bodyOpts, ignoreMapKeys(o...))
 		case CmpOptionsOptions:
 			j.bodyOpts = append(j.bodyOpts, o...)
-		case TestDir, FilePath, FileName, FileExt:
+		case FilePath, FileName:
 		// Do nothing.
 		default:
 			panic("option not implemented")
@@ -51,17 +51,16 @@ func DumpJSONFile(fileName string, v any, opts ...JSONOption) error {
 func DumpJSON(t *testing.T, v any, opts ...JSONOption) string {
 	t.Helper()
 
-	pathOpt := NewPathOption(opts...)
-	pathOpt.FileExt = "json"
-	if pathOpt.FilePath == "" {
-		pathOpt.FilePath = FilePath(t.Name())
+	p := NewJSONPath(opts...)
+	if p.FilePath == "" {
+		p.FilePath = t.Name()
 	}
 
-	if pathOpt.FileName == "" {
-		pathOpt.FileName = FileName(typeName(v))
+	if p.FileName == "" {
+		p.FileName = typeName(v)
 	}
 
-	fileName := pathOpt.String()
+	fileName := p.String()
 
 	if err := DumpJSONFile(fileName, v, opts...); err != nil {
 		t.Fatal(err)

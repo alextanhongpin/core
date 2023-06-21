@@ -42,6 +42,7 @@ func NewHTTPOption(opts ...HTTPOption) *httpOption {
 			h.bodyOpts = append(h.bodyOpts, o...)
 		case HeaderCmpOptions:
 			h.headerOpts = append(h.headerOpts, o...)
+		case FilePath, FileName:
 		default:
 			panic("option not implemented")
 		}
@@ -87,8 +88,12 @@ func DumpHTTPFile(fileName string, r *http.Request, handler http.HandlerFunc, op
 
 func DumpHTTP(t *testing.T, r *http.Request, handler http.HandlerFunc, opts ...HTTPOption) string {
 	t.Helper()
+	p := NewHTTPPath(opts...)
+	if p.FileName == "" {
+		p.FileName = t.Name()
+	}
 
-	fileName := fmt.Sprintf("./testdata/%s.http", t.Name())
+	fileName := p.String()
 	if err := DumpHTTPFile(fileName, r, handler, opts...); err != nil {
 		t.Fatal(err)
 	}

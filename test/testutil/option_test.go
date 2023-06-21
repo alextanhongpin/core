@@ -15,25 +15,18 @@ func TestPathOption(t *testing.T) {
 		want string
 	}{
 		{
-			name: "testdir",
-			opts: []testutil.JSONOption{
-				testutil.TestDir("./testdir"),
-			},
-			want: "testdir",
-		},
-		{
 			name: "filepath",
 			opts: []testutil.JSONOption{
 				testutil.FilePath("foo"),
 			},
-			want: "testdata/foo",
+			want: "testdata/foo.json",
 		},
 		{
 			name: "filepath nested",
 			opts: []testutil.JSONOption{
 				testutil.FilePath("foo/bar"),
 			},
-			want: "testdata/foo/bar",
+			want: "testdata/foo/bar.json",
 		},
 		{
 			name: "filename with extension",
@@ -47,35 +40,20 @@ func TestPathOption(t *testing.T) {
 			opts: []testutil.JSONOption{
 				testutil.FileName("baz"),
 			},
-			want: "testdata/baz.",
+			want: "testdata/baz.json",
 		},
 		{
-			name: "file extension with leading dot",
+			name: "filename with non-json extension",
 			opts: []testutil.JSONOption{
-				testutil.FileExt(".json"),
+				testutil.FileName("baz.yaml"),
 			},
-			want: "testdata/.json",
-		},
-		{
-			name: "file extension without leading dot",
-			opts: []testutil.JSONOption{
-				testutil.FileExt("json"),
-			},
-			want: "testdata.json",
-		},
-		{
-			name: "file ext takes precedence over filename with extension",
-			opts: []testutil.JSONOption{
-				testutil.FileName("foo.yaml"),
-				testutil.FileExt("json"),
-			},
-			want: "testdata/foo.json",
+			want: "testdata/baz.yaml.json",
 		},
 	}
 
 	for _, ts := range tests {
 		t.Run(ts.name, func(t *testing.T) {
-			path := testutil.NewPathOption(ts.opts...).String()
+			path := testutil.NewJSONPath(ts.opts...).String()
 			assert.Equal(t, ts.want, path)
 		})
 	}
