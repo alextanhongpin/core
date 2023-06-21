@@ -39,7 +39,8 @@ func TestDumpJSON(t *testing.T) {
 		testutil.TestDir("./_testdata"), // Go build ignores directory that starts with underscore.
 	)
 	testutil.DumpJSON(t, p, testutil.IgnoreFields("bornAt"),
-		testutil.TestName("DumpPerson"),
+		testutil.FilePath("DumpPerson"),
+		testutil.FileExt("json"),
 	)
 	testutil.DumpJSON(t, p, testutil.CmpOptions(
 		cmpopts.IgnoreMapEntries(func(key string, _ any) bool {

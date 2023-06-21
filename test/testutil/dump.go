@@ -6,14 +6,9 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"regexp"
-	"strings"
 
 	"github.com/google/go-cmp/cmp"
 )
-
-// Validate if the package name is valid.
-var pkgRe = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9_]*$`)
 
 type dumper interface {
 	Dump() ([]byte, error)
@@ -47,31 +42,17 @@ func Dump(fileName string, dnc dumperAndComparer) error {
 	return dnc.Compare(snapshot, received)
 }
 
-func typeName(v any) []string {
+func typeName(v any) string {
 	t := reflect.TypeOf(v)
 	if t.Kind() == reflect.Ptr {
 		t = t.Elem()
 	}
 
-	var res []string
-	pkg := t.PkgPath()
-	pkg = filepath.Base(pkg)
-	pkg = strings.TrimSpace(pkg)
-	if pkg != "" && pkgRe.MatchString(pkg) {
-		res = append(res, pkg)
+	if t.Kind() == reflect.Struct {
+		return t.String()
 	}
 
-	name := strings.TrimSpace(t.Name())
-	if name != "" {
-		res = append(res, name)
-	}
-
-	// For non-struct, like slice, the type does not have a name.
-	if name == "" {
-		res = append(res, t.Kind().String())
-	}
-
-	return res
+	return t.Kind().String()
 }
 
 func writeToNewFile(name string, body []byte) error {

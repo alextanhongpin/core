@@ -9,6 +9,8 @@ import (
 	"github.com/google/go-cmp/cmp/cmpopts"
 )
 
+const TestData = "testdata"
+
 type HTTPOption interface {
 	isHTTP()
 }
@@ -22,52 +24,77 @@ type TestDir string
 func (TestDir) isJSON() {}
 func (TestDir) isHTTP() {}
 
-type TestName string
+type FilePath string
 
-func (TestName) isJSON() {}
-func (TestName) isHTTP() {}
+func (FilePath) isJSON() {}
+func (FilePath) isHTTP() {}
 
 type FileName string
 
 func (FileName) isJSON() {}
 func (FileName) isHTTP() {}
 
-type testOption struct {
-	TestDir  string
-	TestName string
-	FileName string
+type FileExt string
+
+func (FileExt) isJSON() {}
+func (FileExt) isHTTP() {}
+
+type PathOption struct {
+	TestDir  TestDir
+	FilePath FilePath
+	FileName FileName
+	FileExt  FileExt
 }
 
-func newTestOption(opts ...JSONOption) *testOption {
-	to := &testOption{
-		TestDir:  "./testdata",
-		TestName: "",
+func NewPathOption(opts ...JSONOption) *PathOption {
+	opt := &PathOption{
+		TestDir:  TestData,
+		FilePath: "",
+		FileExt:  "",
 		FileName: "",
 	}
 
 	for _, o := range opts {
 		switch v := o.(type) {
 		case TestDir:
-			to.TestDir = string(v)
-		case TestName:
-			to.TestName = string(v)
+			opt.TestDir = v
+		case FilePath:
+			opt.FilePath = v
 		case FileName:
-			fileName := string(v)
-			// Automatically suffix the filename with the extension ".json"
-			// if no extension is provided.
-			if ext := filepath.Ext(fileName); ext == "" {
-				fileName = fmt.Sprintf("%s.json", fileName)
+			opt.FileName = v
+		case FileExt:
+			if len(v) == 0 {
+				continue
 			}
 
-			to.FileName = fileName
+			if v[0] == '.' {
+				v = v[1:]
+			}
+
+			opt.FileExt = v
 		}
 	}
 
-	return to
+	return opt
 }
 
-func (o *testOption) String() string {
-	return filepath.Join(o.TestDir, o.TestName, o.FileName)
+func (o *PathOption) String() string {
+	// Get the file extension.
+	fileExt := filepath.Ext(string(o.FileName))
+
+	// Filename without extension.
+	fileName := o.FileName[:len(o.FileName)-len(fileExt)]
+	if len(o.FileExt) > 0 {
+		fileExt = string(o.FileExt)
+	} else if len(fileExt) > 0 {
+		fileExt = fileExt[1:]
+	}
+
+	return filepath.Join(
+		string(o.TestDir),
+		string(o.FilePath),
+		fmt.Sprintf("%s.%s", fileName, fileExt),
+	)
 }
 
 type IgnoreHeadersOption []string
