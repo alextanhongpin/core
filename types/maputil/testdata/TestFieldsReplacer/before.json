@@ -1,0 +1,19 @@
+{
+ "age": 10,
+ "hobbies": [
+  {
+   "name": "dancing"
+  },
+  {
+   "name": "coding"
+  }
+ ],
+ "meta": {
+  "foo": "bar"
+ },
+ "name": "john",
+ "tags": [
+  "user",
+  "name"
+ ]
+}
