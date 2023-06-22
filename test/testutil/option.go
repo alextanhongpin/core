@@ -12,6 +12,7 @@ import (
 const TestData = "testdata"
 const ExtJSON = ".json"
 const ExtHTTP = ".http"
+const ExtSQL = ".sql"
 
 type HTTPOption interface {
 	isHTTP()
@@ -21,15 +22,21 @@ type JSONOption interface {
 	isJSON()
 }
 
+type SQLOption interface {
+	isSQL()
+}
+
 type FilePath string
 
 func (FilePath) isJSON() {}
 func (FilePath) isHTTP() {}
+func (FilePath) isSQL()  {}
 
 type FileName string
 
 func (FileName) isJSON() {}
 func (FileName) isHTTP() {}
+func (FileName) isSQL()  {}
 
 type PathOption struct {
 	TestDir  string
@@ -86,6 +93,26 @@ func NewHTTPPath(opts ...HTTPOption) *PathOption {
 		FilePath: "",
 		FileName: "",
 		FileExt:  ExtHTTP,
+	}
+
+	for _, o := range opts {
+		switch v := o.(type) {
+		case FilePath:
+			opt.FilePath = strings.TrimSuffix(string(v), "/")
+		case FileName:
+			opt.FileName = string(v)
+		}
+	}
+
+	return opt
+}
+
+func NewSQLPath(opts ...SQLOption) *PathOption {
+	opt := &PathOption{
+		TestDir:  TestData,
+		FilePath: "",
+		FileName: "",
+		FileExt:  ExtSQL,
 	}
 
 	for _, o := range opts {
