@@ -143,6 +143,7 @@ func IgnoreFields(keys ...string) IgnoreFieldsOption {
 
 func (o IgnoreFieldsOption) isHTTP() {}
 func (o IgnoreFieldsOption) isJSON() {}
+func (o IgnoreFieldsOption) isSQL()  {}
 
 type InspectBody func(body []byte)
 
@@ -152,6 +153,10 @@ func (o InspectBody) isJSON() {}
 type InspectHeaders func(headers http.Header, isRequest bool)
 
 func (o InspectHeaders) isHTTP() {}
+
+type InspectQuery func(query string)
+
+func (o InspectQuery) isSQL() {}
 
 type CmpOptionsOptions []cmp.Option
 
@@ -168,6 +173,14 @@ func (o HeaderCmpOptions) isHTTP() {}
 type BodyCmpOptions CmpOptionsOptions
 
 func (o BodyCmpOptions) isHTTP() {}
+
+type ArgsCmpOptions CmpOptionsOptions
+
+func (o ArgsCmpOptions) isSQL() {}
+
+type RowsCmpOptions CmpOptionsOptions
+
+func (o RowsCmpOptions) isSQL() {}
 
 func ignoreMapKeys(keys ...string) cmp.Option {
 	return cmpopts.IgnoreMapEntries(func(key string, _ any) bool {

@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/cockroachdb/cockroachdb-parser/pkg/sql/sem/tree"
+	"github.com/google/go-cmp/cmp"
 	"github.com/mjibson/sqlfmt"
 	pg_query "github.com/pganalyze/pg_query_go/v4"
 )
@@ -16,6 +17,37 @@ import (
 const queryStmtSection = "-- Query"
 const argsStmtSection = "-- Args"
 const rowsStmtSection = "-- Rows"
+
+type sqlOption struct {
+	queryFn  InspectQuery
+	argsOpts []cmp.Option
+	rowsOpts []cmp.Option
+}
+
+func NewSQLOption(opts ...SQLOption) *sqlOption {
+	s := &sqlOption{}
+	for _, opt := range opts {
+		switch o := opt.(type) {
+		case InspectQuery:
+			s.queryFn = o
+		case IgnoreFieldsOption:
+			// We share the same options, with the assumptions that there are no
+			// keys-collision - args are using keys numbered from $1 to $n.
+			s.argsOpts = append(s.argsOpts, ignoreMapKeys(o...))
+			s.rowsOpts = append(s.rowsOpts, ignoreMapKeys(o...))
+		case ArgsCmpOptions:
+			s.argsOpts = append(s.argsOpts, o...)
+		case RowsCmpOptions:
+			s.rowsOpts = append(s.rowsOpts, o...)
+		case FilePath, FileName:
+		// Do nothing.
+		default:
+			panic("option not implemented")
+		}
+	}
+
+	return s
+}
 
 func DumpSQL(t *testing.T, dump *SQLDump, opts ...SQLOption) {
 	t.Helper()
@@ -31,7 +63,7 @@ func DumpSQL(t *testing.T, dump *SQLDump, opts ...SQLOption) {
 	}
 }
 
-func DumpSQLFile(fileName string, dump *SQLDump) error {
+func DumpSQLFile(fileName string, dump *SQLDump, opts ...SQLOption) error {
 	type dumpAndCompare struct {
 		dumper
 		comparer
@@ -125,10 +157,14 @@ func (d *SQLDump) Dump() ([]byte, error) {
 	return []byte(strings.Join(res, string(LineBreak))), nil
 }
 
-type SQLComparer struct{}
+type SQLComparer struct {
+	opt *sqlOption
+}
 
-func NewSQLComparer() *SQLComparer {
-	return &SQLComparer{}
+func NewSQLComparer(opts ...SQLOption) *SQLComparer {
+	return &SQLComparer{
+		opt: NewSQLOption(opts...),
+	}
 }
 
 func (c *SQLComparer) Compare(a, b []byte) error {
@@ -145,7 +181,23 @@ func (c *SQLComparer) Compare(a, b []byte) error {
 		return err
 	}
 
-	return cmpDiff(l, r)
+	if c.opt.queryFn != nil {
+		c.opt.queryFn(r.Stmt)
+	}
+
+	if err := cmpDiff(l.Stmt, r.Stmt); err != nil {
+		return err
+	}
+
+	if err := cmpDiff(l.Args, r.Args, c.opt.argsOpts...); err != nil {
+		return err
+	}
+
+	if err := cmpDiff(l.Rows, r.Rows, c.opt.rowsOpts...); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func parseSQLDump(b []byte) (*SQLDump, error) {
