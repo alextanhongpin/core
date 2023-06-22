@@ -159,32 +159,33 @@ func parseSQLDump(b []byte) (*SQLDump, error) {
 
 		switch line {
 		case queryStmtSection:
-			var tmp []string
+			var tmp [][]byte
 
 			for s.Scan() {
-				line := s.Text()
-				if line == "" {
+				line := s.Bytes()
+				if len(line) == 0 {
 					break
 				}
 
 				tmp = append(tmp, line)
 			}
-			dump.Stmt = strings.Join(tmp, string(LineBreak))
+			dump.Stmt = string(bytes.Join(tmp, LineBreak))
 		case argsStmtSection:
-			var tmp []string
+			var tmp [][]byte
 
 			for s.Scan() {
-				line := s.Text()
-				if line == "" {
+				line := s.Bytes()
+				if len(line) == 0 {
 					break
 				}
 
 				tmp = append(tmp, line)
 			}
 
-			jsonStr := strings.Join(tmp, string(LineBreak))
+			jsonBytes := bytes.Join(tmp, LineBreak)
+
 			var m map[string]any
-			if err := json.Unmarshal([]byte(jsonStr), &m); err != nil {
+			if err := json.Unmarshal(jsonBytes, &m); err != nil {
 				return nil, err
 			}
 
@@ -196,41 +197,41 @@ func parseSQLDump(b []byte) (*SQLDump, error) {
 
 			dump.Args = args
 		case rowsStmtSection:
-			var tmp []string
+			var tmp [][]byte
 
 			for s.Scan() {
-				line := s.Text()
-				if line == "" {
+				line := s.Bytes()
+				if len(line) == 0 {
 					break
 				}
 
 				tmp = append(tmp, line)
 			}
 
-			jsonStr := strings.Join(tmp, string(LineBreak))
-			if json.Valid([]byte(jsonStr)) {
-				switch jsonStr[0] {
+			jsonBytes := bytes.Join(tmp, LineBreak)
+			if json.Valid(jsonBytes) {
+				switch jsonBytes[0] {
 				case '{':
 					var m map[string]any
-					if err := json.Unmarshal([]byte(jsonStr), &m); err != nil {
+					if err := json.Unmarshal(jsonBytes, &m); err != nil {
 						return nil, err
 					}
 					dump.Rows = m
 				case '[':
 					var m []map[string]any
-					if err := json.Unmarshal([]byte(jsonStr), &m); err != nil {
+					if err := json.Unmarshal(jsonBytes, &m); err != nil {
 						return nil, err
 					}
 					dump.Rows = m
 				default:
 					var m any
-					if err := json.Unmarshal([]byte(jsonStr), &m); err != nil {
+					if err := json.Unmarshal(jsonBytes, &m); err != nil {
 						return nil, err
 					}
 					dump.Rows = m
 				}
 			} else {
-				dump.Rows = jsonStr
+				dump.Rows = string(jsonBytes)
 			}
 		}
 	}
