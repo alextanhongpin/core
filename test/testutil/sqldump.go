@@ -4,9 +4,12 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"testing"
+	"unicode"
 
 	"github.com/cockroachdb/cockroachdb-parser/pkg/sql/sem/tree"
 	"github.com/google/go-cmp/cmp"
@@ -19,9 +22,10 @@ const argsStmtSection = "-- Args"
 const rowsStmtSection = "-- Rows"
 
 type sqlOption struct {
-	queryFn  InspectQuery
-	argsOpts []cmp.Option
-	rowsOpts []cmp.Option
+	queryFn      InspectQuery
+	argsOpts     []cmp.Option
+	rowsOpts     []cmp.Option
+	parameterize bool
 }
 
 func NewSQLOption(opts ...SQLOption) *sqlOption {
@@ -41,6 +45,8 @@ func NewSQLOption(opts ...SQLOption) *sqlOption {
 			s.rowsOpts = append(s.rowsOpts, o...)
 		case FilePath, FileName:
 		// Do nothing.
+		case *ParameterizeOption:
+			s.parameterize = true
 		default:
 			panic("option not implemented")
 		}
@@ -58,7 +64,7 @@ func DumpSQL(t *testing.T, dump *SQLDump, opts ...SQLOption) {
 
 	fileName := opt.String()
 
-	if err := DumpSQLFile(fileName, dump); err != nil {
+	if err := DumpSQLFile(fileName, dump, opts...); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -70,8 +76,8 @@ func DumpSQLFile(fileName string, dump *SQLDump, opts ...SQLOption) error {
 	}
 
 	dnc := dumpAndCompare{
-		dumper:   dump,
-		comparer: NewSQLComparer(),
+		dumper:   NewSQLDumper(dump, opts...),
+		comparer: NewSQLComparer(opts...),
 	}
 
 	return Dump(fileName, dnc)
@@ -91,8 +97,20 @@ func NewSQLDump(stmt string, args []any, rows any) *SQLDump {
 	}
 }
 
-func (d *SQLDump) Dump() ([]byte, error) {
-	result, err := pg_query.Parse(d.Stmt)
+type SQLDumper struct {
+	dump *SQLDump
+	opts *sqlOption
+}
+
+func NewSQLDumper(dump *SQLDump, opts ...SQLOption) *SQLDumper {
+	return &SQLDumper{
+		dump: dump,
+		opts: NewSQLOption(opts...),
+	}
+}
+
+func (d *SQLDumper) Dump() ([]byte, error) {
+	result, err := pg_query.Parse(d.dump.Stmt)
 	if err != nil {
 		return nil, err
 	}
@@ -102,20 +120,16 @@ func (d *SQLDump) Dump() ([]byte, error) {
 		return nil, err
 	}
 
-	// Conditionally determine the line width so that the text is not a single
-	// line when it is too short.
-	n := len(query)
-	if n < 120 {
-		n = n / 2
-	} else {
-		n = 80
-	}
-	if n < 32 {
-		n = 32
+	args := make(map[string]any)
+	if d.opts.parameterize {
+		query, args, err = parameterizeSQL(query)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	prettyStmt, err := sqlfmt.FmtSQL(tree.PrettyCfg{
-		LineWidth: n,
+		LineWidth: d.dynamicLineWidth(query),
 		TabWidth:  2,
 		JSONFmt:   true,
 	}, []string{query})
@@ -123,8 +137,7 @@ func (d *SQLDump) Dump() ([]byte, error) {
 		return nil, err
 	}
 
-	args := make(map[string]any)
-	for i, arg := range d.Args {
+	for i, arg := range d.dump.Args {
 		// For Postgres, it starts from 1.
 		key := fmt.Sprintf("$%d", i+1)
 		args[key] = arg
@@ -135,7 +148,7 @@ func (d *SQLDump) Dump() ([]byte, error) {
 		return nil, err
 	}
 
-	rows, err := json.MarshalIndent(d.Rows, "", " ")
+	rows, err := json.MarshalIndent(d.dump.Rows, "", " ")
 	if err != nil {
 		return nil, err
 	}
@@ -155,6 +168,22 @@ func (d *SQLDump) Dump() ([]byte, error) {
 	}
 
 	return []byte(strings.Join(res, string(LineBreak))), nil
+}
+
+func (d *SQLDumper) dynamicLineWidth(query string) int {
+	// Conditionally determine the line width so that the text is not a single
+	// line when it is too short.
+	n := len(query)
+	if n < 120 {
+		n = n / 2
+	} else {
+		n = 80
+	}
+	if n < 32 {
+		n = 32
+	}
+
+	return n
 }
 
 type SQLComparer struct {
@@ -289,4 +318,91 @@ func parseSQLDump(b []byte) (*SQLDump, error) {
 	}
 
 	return dump, nil
+}
+
+func tokenizeSQL(s string) []string {
+	quoted := false
+	a := strings.FieldsFunc(s, func(r rune) bool {
+		if r == '\'' {
+			quoted = !quoted
+		}
+		return !quoted && r == ' '
+	})
+
+	return a
+}
+
+func extractSQLVariables(orig, norm string) (string, string) {
+	normr := []rune(norm)
+	origr := []rune(orig)
+
+	for i := 0; i < len(normr); i++ {
+		if norm[i] == '$' {
+			normr = normr[i:]
+			origr = origr[i:]
+			break
+		}
+	}
+
+	for i := len(normr); i > -1; i-- {
+		if unicode.IsDigit(normr[i-1]) {
+			n := len(normr) - i
+			normr = normr[:len(normr)-n]
+			origr = origr[:len(origr)-n]
+			break
+		}
+	}
+
+	orig = string(origr)
+	norm = string(normr)
+
+	return orig, norm
+}
+
+func parameterizeSQL(query string) (norm string, args map[string]any, err error) {
+	norm, err = pg_query.Normalize(query)
+	if err != nil {
+		return
+	}
+
+	origTokens := tokenizeSQL(query)
+	normTokens := tokenizeSQL(norm)
+	if len(origTokens) != len(normTokens) {
+		return "", nil, errors.New("sql not normalized")
+	}
+
+	args = make(map[string]any)
+
+	for i := 0; i < len(origTokens); i++ {
+		o, n := origTokens[i], normTokens[i]
+		if o != n {
+			orig, norm := extractSQLVariables(o, n)
+			args[norm] = parseSQLType(orig)
+		}
+	}
+
+	return
+}
+
+func parseSQLType(v string) any {
+	// Remove null characters.
+	v = strings.Trim(v, "\x00")
+
+	isQuote := v[0] == '\''
+	isString := isQuote && len(v) > 1 && v[0] == v[len(v)-1]
+	if isString {
+		return v[1 : len(v)-1]
+	}
+
+	n, err := strconv.ParseInt(v, 10, 64)
+	if err == nil {
+		return n
+	}
+
+	b, err := strconv.ParseBool(v)
+	if err == nil {
+		return b
+	}
+
+	return v
 }

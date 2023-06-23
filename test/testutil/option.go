@@ -182,6 +182,14 @@ type RowsCmpOptions CmpOptionsOptions
 
 func (o RowsCmpOptions) isSQL() {}
 
+type ParameterizeOption struct{}
+
+func (o *ParameterizeOption) isSQL() {}
+
+// Parameterize extracts all constant values from the
+// query and injects them into the args.
+func Parameterize() *ParameterizeOption { return new(ParameterizeOption) }
+
 func ignoreMapKeys(keys ...string) cmp.Option {
 	return cmpopts.IgnoreMapEntries(func(key string, _ any) bool {
 		for _, k := range keys {
