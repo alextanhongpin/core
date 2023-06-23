@@ -4,11 +4,15 @@ import (
 	"fmt"
 )
 
-func ReplaceStringFunc(m map[string]any, fn func(k, v string) string) map[string]any {
+type JSONType interface {
+	float64 | bool | string | any
+}
+
+func ReplaceFunc[T JSONType](m map[string]any, fn func(k string, v T) T) map[string]any {
 	var transformer func(string, any) any
 	transformer = func(k string, v any) any {
 		switch t := v.(type) {
-		case string:
+		case T:
 			return fn(k, t)
 		case map[string]any:
 			res := make(map[string]any)

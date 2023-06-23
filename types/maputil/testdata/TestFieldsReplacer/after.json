@@ -1,5 +1,6 @@
 {
- "age": 10,
+ "age": 20,
+ "height": 178,
  "hobbies": [
   {
    "name": "EDITED:dancing"
@@ -8,6 +9,7 @@
    "name": "EDITED:coding"
   }
  ],
+ "isMarried": false,
  "meta": {
   "foo": "bar"
  },

@@ -1,5 +1,6 @@
 {
  "age": 10,
+ "height": 168,
  "hobbies": [
   {
    "name": "dancing"
@@ -8,6 +9,7 @@
    "name": "coding"
   }
  ],
+ "isMarried": true,
  "meta": {
   "foo": "bar"
  },
