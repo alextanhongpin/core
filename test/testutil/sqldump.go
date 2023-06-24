@@ -6,14 +6,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"strconv"
 	"strings"
 	"testing"
 	"unicode"
 
-	"github.com/cockroachdb/cockroachdb-parser/pkg/sql/sem/tree"
 	"github.com/google/go-cmp/cmp"
-	"github.com/mjibson/sqlfmt"
 	pg_query "github.com/pganalyze/pg_query_go/v4"
 )
 
@@ -55,7 +54,7 @@ func NewSQLOption(opts ...SQLOption) *sqlOption {
 	return s
 }
 
-func DumpSQL(t *testing.T, dump *SQLDump, opts ...SQLOption) {
+func DumpSQL(t *testing.T, dump *SQLDump, dialect DialectOption, opts ...SQLOption) {
 	t.Helper()
 	opt := NewSQLPath(opts...)
 	if opt.FilePath == "" {
@@ -64,19 +63,29 @@ func DumpSQL(t *testing.T, dump *SQLDump, opts ...SQLOption) {
 
 	fileName := opt.String()
 
-	if err := DumpSQLFile(fileName, dump, opts...); err != nil {
+	if err := DumpSQLFile(fileName, dump, dialect, opts...); err != nil {
 		t.Fatal(err)
 	}
 }
 
-func DumpSQLFile(fileName string, dump *SQLDump, opts ...SQLOption) error {
+func DumpSQLFile(fileName string, dump *SQLDump, dialect DialectOption, opts ...SQLOption) error {
 	type dumpAndCompare struct {
 		dumper
 		comparer
 	}
 
+	var d dumper
+	switch dialect {
+	case Postgres():
+		d = NewPostgresSQLDumper(dump, opts...)
+	case MySQL():
+		d = NewMySQLDumper(dump, opts...)
+	default:
+		log.Fatalf(`sqldump: dialect must be one of "postgres" or "mysql", got %q`, d)
+	}
+
 	dnc := dumpAndCompare{
-		dumper:   NewSQLDumper(dump, opts...),
+		dumper:   d,
 		comparer: NewSQLComparer(opts...),
 	}
 
@@ -95,77 +104,6 @@ func NewSQLDump(stmt string, args []any, rows any) *SQLDump {
 		Args: args,
 		Rows: rows,
 	}
-}
-
-type SQLDumper struct {
-	dump *SQLDump
-	opts *sqlOption
-}
-
-func NewSQLDumper(dump *SQLDump, opts ...SQLOption) *SQLDumper {
-	return &SQLDumper{
-		dump: dump,
-		opts: NewSQLOption(opts...),
-	}
-}
-
-func (d *SQLDumper) Dump() ([]byte, error) {
-	result, err := pg_query.Parse(d.dump.Stmt)
-	if err != nil {
-		return nil, err
-	}
-
-	query, err := pg_query.Deparse(result)
-	if err != nil {
-		return nil, err
-	}
-
-	args := make(map[string]any)
-	if d.opts.parameterize {
-		query, args, err = parameterizeSQL(query)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	prettyStmt, err := sqlfmt.FmtSQL(tree.PrettyCfg{
-		LineWidth: dynamicLineWidth(query),
-		TabWidth:  2,
-		JSONFmt:   true,
-	}, []string{query})
-	if err != nil {
-		return nil, err
-	}
-
-	for k, v := range toArgsMap(d.dump.Args) {
-		args[k] = v
-	}
-
-	argsBytes, err := json.MarshalIndent(args, "", " ")
-	if err != nil {
-		return nil, err
-	}
-
-	rows, err := json.MarshalIndent(d.dump.Rows, "", " ")
-	if err != nil {
-		return nil, err
-	}
-
-	lineBreak := string(LineBreak)
-	res := []string{
-		queryStmtSection,
-		prettyStmt,
-		lineBreak,
-
-		argsStmtSection,
-		string(argsBytes),
-		lineBreak,
-
-		rowsStmtSection,
-		string(rows),
-	}
-
-	return []byte(strings.Join(res, string(LineBreak))), nil
 }
 
 func dynamicLineWidth(query string) int {

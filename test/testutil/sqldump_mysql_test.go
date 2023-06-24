@@ -19,10 +19,9 @@ func TestMySQLDumper(t *testing.T) {
 		limit ?
 	`
 
-	dump := testutil.NewSQLDump(stmt, []any{13, 10}, nil)
-	b, err := testutil.NewMySQLDumper(dump, testutil.Parameterize()).Dump()
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Log(string(b))
+	testutil.DumpSQL(t,
+		testutil.NewSQLDump(stmt, []any{13, 10}, nil),
+		testutil.MySQL(),
+		testutil.Parameterize(),
+	)
 }

@@ -20,7 +20,7 @@ func TestSQLDump(t *testing.T) {
 			Rows: []User{{ID: 1, Name: "John"}},
 		}
 
-		testutil.DumpSQL(t, dump)
+		testutil.DumpSQL(t, dump, testutil.Postgres())
 	})
 
 	t.Run("complex", func(t *testing.T) {
@@ -40,7 +40,7 @@ func TestSQLDump(t *testing.T) {
 			Args: []any{"2023-06-23"},
 		}
 
-		testutil.DumpSQL(t, dump)
+		testutil.DumpSQL(t, dump, testutil.Postgres())
 	})
 }
 
@@ -57,7 +57,7 @@ func TestSQLDumpParameterize(t *testing.T) {
 			[]User{{ID: 1, Name: "John"}},
 		)
 
-		testutil.DumpSQL(t, dump, testutil.Parameterize())
+		testutil.DumpSQL(t, dump, testutil.Postgres(), testutil.Parameterize())
 	})
 
 	t.Run("complex", func(t *testing.T) {
@@ -77,7 +77,7 @@ func TestSQLDumpParameterize(t *testing.T) {
 			Args: []any{"2023-06-23"},
 		}
 
-		testutil.DumpSQL(t, dump, testutil.Parameterize())
+		testutil.DumpSQL(t, dump, testutil.Postgres(), testutil.Parameterize())
 	})
 
 	t.Run("skip comparison", func(t *testing.T) {
@@ -89,6 +89,6 @@ func TestSQLDumpParameterize(t *testing.T) {
 		)
 
 		// Args are mapped to $1, $2 ...
-		testutil.DumpSQL(t, dump, testutil.IgnoreFields("$1"))
+		testutil.DumpSQL(t, dump, testutil.Postgres(), testutil.IgnoreFields("$1"))
 	})
 }

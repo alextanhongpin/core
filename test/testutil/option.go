@@ -186,6 +186,18 @@ type ParameterizeOption struct{}
 
 func (o *ParameterizeOption) isSQL() {}
 
+type DialectOption string
+
+func (o DialectOption) isSQL() {}
+
+func Postgres() DialectOption {
+	return DialectOption("postgres")
+}
+
+func MySQL() DialectOption {
+	return DialectOption("mysql")
+}
+
 // Parameterize extracts all constant values from the
 // query and injects them into the args.
 func Parameterize() *ParameterizeOption { return new(ParameterizeOption) }
