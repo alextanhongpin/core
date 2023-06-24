@@ -5,15 +5,16 @@ import (
 )
 
 type JSONType interface {
-	float64 | bool | string | any
+	float64 | bool | string
 }
 
+// ReplaceFunc iterates over every key-value pairs that
+// matches the type.
+// Null values will be skipped.
 func ReplaceFunc[T JSONType](m map[string]any, fn func(k string, v T) T) map[string]any {
 	var transformer func(string, any) any
 	transformer = func(k string, v any) any {
 		switch t := v.(type) {
-		case T:
-			return fn(k, t)
 		case map[string]any:
 			res := make(map[string]any)
 			for kk, vv := range t {
@@ -30,6 +31,8 @@ func ReplaceFunc[T JSONType](m map[string]any, fn func(k string, v T) T) map[str
 				res[i] = transformer(key, v)
 			}
 			return res
+		case T:
+			return fn(k, t)
 		default:
 			return v
 		}

@@ -1,0 +1,28 @@
+{
+ "age": 10,
+ "height": 168,
+ "hobbies": [
+  {
+   "name": "EDITED: dancing"
+  },
+  {
+   "name": "EDITED: coding"
+  }
+ ],
+ "isMarried": true,
+ "meta": {
+  "age": 10,
+  "ids": [
+   1,
+   2,
+   3
+  ],
+  "isActive": true,
+  "name": "EDITED: bar"
+ },
+ "name": "EDITED: john",
+ "tags": [
+  "EDITED: user",
+  "EDITED: name"
+ ]
+}

@@ -9,9 +9,16 @@
    "name": "coding"
   }
  ],
- "isMarried": true,
+ "isMarried": false,
  "meta": {
-  "foo": "bar"
+  "age": 10,
+  "ids": [
+   1,
+   2,
+   3
+  ],
+  "isActive": false,
+  "name": "bar"
  },
  "name": "john",
  "tags": [

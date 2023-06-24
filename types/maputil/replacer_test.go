@@ -9,7 +9,79 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestFieldsReplacer(t *testing.T) {
+func TestReplace(t *testing.T) {
+	t.Run("bool", func(t *testing.T) {
+		m := testReplaceFixture(t)
+
+		var keys []string
+		got := maputil.ReplaceFunc(m, func(k string, v bool) bool {
+			keys = append(keys, k)
+			return !v
+		})
+
+		want := []string{"isMarried", "meta.isActive"}
+		sort.Strings(want)
+		sort.Strings(keys)
+
+		assert.Equal(t, want, keys)
+		testutil.DumpJSON(t, m, testutil.FileName("before"))
+		testutil.DumpJSON(t, got, testutil.FileName("after"))
+	})
+
+	t.Run("string", func(t *testing.T) {
+		m := testReplaceFixture(t)
+
+		var keys []string
+		got := maputil.ReplaceFunc(m, func(k, v string) string {
+			keys = append(keys, k)
+			return "EDITED: " + v
+		})
+
+		want := []string{
+			"name",
+			"hobbies[_].name",
+			"hobbies[_].name",
+			"meta.name",
+			"tags[_]",
+			"tags[_]",
+		}
+		sort.Strings(want)
+		sort.Strings(keys)
+
+		assert.Equal(t, want, keys)
+		testutil.DumpJSON(t, m, testutil.FileName("before"))
+		testutil.DumpJSON(t, got, testutil.FileName("after"))
+	})
+
+	t.Run("float64", func(t *testing.T) {
+		m := testReplaceFixture(t)
+
+		var keys []string
+		got := maputil.ReplaceFunc(m, func(k string, v float64) float64 {
+			keys = append(keys, k)
+			return v + 10.0
+
+		})
+		want := []string{
+			"age",
+			"height",
+			"meta.age",
+			"meta.ids[_]",
+			"meta.ids[_]",
+			"meta.ids[_]",
+		}
+
+		sort.Strings(want)
+		sort.Strings(keys)
+		assert.Equal(t, want, keys)
+		testutil.DumpJSON(t, m, testutil.FileName("before"))
+		testutil.DumpJSON(t, got, testutil.FileName("after"))
+	})
+}
+
+func testReplaceFixture(t *testing.T) map[string]any {
+	t.Helper()
+
 	type Name string
 
 	type Hobby struct {
@@ -17,84 +89,37 @@ func TestFieldsReplacer(t *testing.T) {
 	}
 
 	type User struct {
-		Name      Name            `json:"name"`
-		Age       int             `json:"age"`
-		Hobbies   []Hobby         `json:"hobbies"`
-		IsMarried bool            `json:"isMarried"`
-		Height    int64           `json:"height"`
-		Meta      map[string]Name `json:"meta"`
-		Tags      []string        `json:"tags"`
+		Name      Name           `json:"name"`
+		Age       int            `json:"age"`
+		Hobbies   []Hobby        `json:"hobbies"`
+		IsMarried bool           `json:"isMarried"`
+		Height    int64          `json:"height"`
+		Meta      map[string]any `json:"meta"`
+		Tags      []string       `json:"tags"`
 	}
 
 	u := User{
-		Name:      "john",
-		Age:       10,
-		Hobbies:   []Hobby{{Name: "dancing"}, {Name: "coding"}},
+		Name: "john",
+		Age:  10,
+		Hobbies: []Hobby{
+			{Name: "dancing"},
+			{Name: "coding"},
+		},
 		IsMarried: true,
 		Height:    168,
-		Meta: map[string]Name{
-			"foo": Name("bar"),
+		Meta: map[string]any{
+			"name":     Name("bar"),
+			"age":      10,
+			"isActive": true,
+			"ids":      []float64{1.0, 2.0, 3.0},
 		},
 		Tags: []string{"user", "name"},
 	}
 
 	m, err := maputil.ToMap(u)
 	if err != nil {
-		panic(err)
+		t.Fatal(err)
 	}
 
-	// Create an obfuscator.
-	var fields []string
-	mr := maputil.ReplaceFunc(m, func(k, v string) string {
-		fields = append(fields, k)
-		if k == "name" {
-			return "EDITED:" + v
-		}
-
-		if k == "hobbies[_].name" {
-			return "EDITED:" + v
-		}
-
-		return v
-	})
-
-	assert := assert.New(t)
-
-	mr = maputil.ReplaceFunc(mr, func(k string, v float64) float64 {
-		fields = append(fields, k)
-
-		if k == "age" {
-			assert.Equal(float64(u.Age), v)
-		}
-
-		if k == "height" {
-			assert.Equal(float64(u.Height), v)
-		}
-
-		return v + 10.0
-	})
-
-	mr = maputil.ReplaceFunc(mr, func(k string, v bool) bool {
-		fields = append(fields, k)
-
-		assert.Equal(u.IsMarried, v)
-		return !v
-	})
-
-	want := []string{
-		"name",
-		"hobbies[_].name",
-		"hobbies[_].name",
-		"meta.foo",
-		"tags[_]",
-		"tags[_]",
-		"isMarried",
-		"height",
-		"age",
-	}
-	sort.Strings(want)
-	sort.Strings(fields)
-	assert.Equal(want, fields)
-	testutil.DumpJSON(t, m, testutil.FileName("before"))
-	testutil.DumpJSON(t, mr, testutil.FileName("after"))
+	return m
 }
