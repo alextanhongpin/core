@@ -12,6 +12,10 @@ type JSONType interface {
 // matches the type.
 // Null values will be skipped.
 func ReplaceFunc[T JSONType](m map[string]any, fn func(k string, v T) T) map[string]any {
+	return replaceFunc(m, fn)
+}
+
+func replaceFunc[T any](m map[string]any, fn func(k string, v T) T) map[string]any {
 	var transformer func(string, any) any
 	transformer = func(k string, v any) any {
 		switch t := v.(type) {
