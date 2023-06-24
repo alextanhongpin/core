@@ -10,7 +10,8 @@ WHERE
   AND description = $3
   AND subscription IN ($4, $5)
   AND age > $6
-  AND is_active = ($7 LIKE ANY ($8));
+  AND is_active = $7
+  AND name LIKE ANY ($8);
 
 
 -- Args

@@ -190,7 +190,7 @@ func (o *ParameterizeOption) isSQL() {}
 // query and injects them into the args.
 func Parameterize() *ParameterizeOption { return new(ParameterizeOption) }
 
-func ignoreMapKeys(keys ...string) cmp.Option {
+func IgnoreMapKeys(keys ...string) cmp.Option {
 	return cmpopts.IgnoreMapEntries(func(key string, _ any) bool {
 		for _, k := range keys {
 			if k == key {

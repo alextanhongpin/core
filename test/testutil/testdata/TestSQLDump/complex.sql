@@ -10,7 +10,8 @@ WHERE
   AND description = e'foo bar walks in a bar, h\'a'
   AND subscription IN ('freemium', 'premium')
   AND age > 13
-  AND is_active = (true LIKE ANY ('{Foo,bar,%oo%}'));
+  AND is_active = true
+  AND name LIKE ANY ('{Foo,bar,%oo%}');
 
 
 -- Args

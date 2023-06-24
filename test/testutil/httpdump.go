@@ -35,9 +35,9 @@ func NewHTTPOption(opts ...HTTPOption) *httpOption {
 		case InspectHeaders:
 			h.headerFn = o
 		case IgnoreFieldsOption:
-			h.bodyOpts = append(h.bodyOpts, ignoreMapKeys(o...))
+			h.bodyOpts = append(h.bodyOpts, IgnoreMapKeys(o...))
 		case IgnoreHeadersOption:
-			h.headerOpts = append(h.headerOpts, ignoreMapKeys(o...))
+			h.headerOpts = append(h.headerOpts, IgnoreMapKeys(o...))
 		case BodyCmpOptions:
 			h.bodyOpts = append(h.bodyOpts, o...)
 		case HeaderCmpOptions:

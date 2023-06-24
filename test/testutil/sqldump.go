@@ -37,8 +37,8 @@ func NewSQLOption(opts ...SQLOption) *sqlOption {
 		case IgnoreFieldsOption:
 			// We share the same options, with the assumptions that there are no
 			// keys-collision - args are using keys numbered from $1 to $n.
-			s.argsOpts = append(s.argsOpts, ignoreMapKeys(o...))
-			s.rowsOpts = append(s.rowsOpts, ignoreMapKeys(o...))
+			s.argsOpts = append(s.argsOpts, IgnoreMapKeys(o...))
+			s.rowsOpts = append(s.rowsOpts, IgnoreMapKeys(o...))
 		case ArgsCmpOptions:
 			s.argsOpts = append(s.argsOpts, o...)
 		case RowsCmpOptions:
@@ -137,10 +137,8 @@ func (d *SQLDumper) Dump() ([]byte, error) {
 		return nil, err
 	}
 
-	for i, arg := range d.dump.Args {
-		// For Postgres, it starts from 1.
-		key := fmt.Sprintf("$%d", i+1)
-		args[key] = arg
+	for k, v := range toArgsMap(d.dump.Args) {
+		args[k] = v
 	}
 
 	argsBytes, err := json.MarshalIndent(args, "", " ")
@@ -218,7 +216,7 @@ func (c *SQLComparer) Compare(a, b []byte) error {
 		return err
 	}
 
-	if err := cmpDiff(l.Args, r.Args, c.opt.argsOpts...); err != nil {
+	if err := cmpDiff(toArgsMap(l.Args), toArgsMap(r.Args), c.opt.argsOpts...); err != nil {
 		return err
 	}
 
@@ -270,13 +268,7 @@ func parseSQLDump(b []byte) (*SQLDump, error) {
 				return nil, err
 			}
 
-			args := make([]any, len(m))
-			for i := 0; i < len(m); i++ {
-				key := fmt.Sprintf("$%d", i+1)
-				args[i] = m[key]
-			}
-
-			dump.Args = args
+			dump.Args = fromArgsMap(m)
 		case rowsStmtSection:
 			var tmp [][]byte
 
@@ -405,4 +397,25 @@ func parseSQLType(v string) any {
 	}
 
 	return v
+}
+
+func toArgsMap(args []any) map[string]any {
+	res := make(map[string]any)
+	for i, arg := range args {
+		// For Postgres, it starts from 1.
+		key := fmt.Sprintf("$%d", i+1)
+		res[key] = arg
+	}
+
+	return res
+}
+
+func fromArgsMap(m map[string]any) []any {
+	args := make([]any, len(m))
+	for i := 0; i < len(m); i++ {
+		key := fmt.Sprintf("$%d", i+1)
+		args[i] = m[key]
+	}
+
+	return args
 }

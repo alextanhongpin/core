@@ -2,9 +2,9 @@ package testutil_test
 
 import (
 	"testing"
-	"time"
 
 	"github.com/alextanhongpin/core/test/testutil"
+	"github.com/google/uuid"
 )
 
 func TestSQLDump(t *testing.T) {
@@ -33,11 +33,11 @@ func TestSQLDump(t *testing.T) {
      AND subscription in ('freemium', 'premium')
 		 AND age > 13
 		 AND is_active = true
- 		 LIKE ANY('{Foo,bar,%oo%}')`
+ 		 AND name LIKE ANY('{Foo,bar,%oo%}')`
 
 		dump := &testutil.SQLDump{
 			Stmt: stmt,
-			Args: []any{time.Now().Format("2006-01-02")},
+			Args: []any{"2023-06-23"},
 		}
 
 		testutil.DumpSQL(t, dump)
@@ -51,11 +51,11 @@ func TestSQLDumpParameterize(t *testing.T) {
 			Name string
 		}
 
-		dump := &testutil.SQLDump{
-			Stmt: `select * from users where name = 'John' and age = 13`,
-			Args: nil,
-			Rows: []User{{ID: 1, Name: "John"}},
-		}
+		dump := testutil.NewSQLDump(
+			`select * from users where name = 'John' and age = 13`,
+			nil,
+			[]User{{ID: 1, Name: "John"}},
+		)
 
 		testutil.DumpSQL(t, dump, testutil.Parameterize())
 	})
@@ -70,13 +70,25 @@ func TestSQLDumpParameterize(t *testing.T) {
      AND subscription in ('freemium', 'premium')
 		 AND age > 13
 		 AND is_active = true
- 		 LIKE ANY('{Foo,bar,%oo%}')`
+ 		 AND name LIKE ANY('{Foo,bar,%oo%}')`
 
 		dump := &testutil.SQLDump{
 			Stmt: stmt,
-			Args: []any{time.Now().Format("2006-01-02")},
+			Args: []any{"2023-06-23"},
 		}
 
 		testutil.DumpSQL(t, dump, testutil.Parameterize())
+	})
+
+	t.Run("skip comparison", func(t *testing.T) {
+		stmt := `select * from users where id = $1`
+		dump := testutil.NewSQLDump(
+			stmt,
+			[]any{uuid.New()},
+			nil,
+		)
+
+		// Args are mapped to $1, $2 ...
+		testutil.DumpSQL(t, dump, testutil.IgnoreFields("$1"))
 	})
 }

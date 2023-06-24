@@ -20,7 +20,7 @@ func NewJSONOption(opts ...JSONOption) *jsonOption {
 		case InspectBody:
 			j.bodyFn = o
 		case IgnoreFieldsOption:
-			j.bodyOpts = append(j.bodyOpts, ignoreMapKeys(o...))
+			j.bodyOpts = append(j.bodyOpts, IgnoreMapKeys(o...))
 		case CmpOptionsOptions:
 			j.bodyOpts = append(j.bodyOpts, o...)
 		case FilePath, FileName:
