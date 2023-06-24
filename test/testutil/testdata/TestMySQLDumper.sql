@@ -1,5 +1,13 @@
 -- Query
-select * from users where id = :id and age = :v1 and `status` in ::bv1 and subscription in ::bv2 and created_at > :created_at order by age desc limit :v2
+SELECT *
+  FROM users
+  WHERE id = :id
+    AND age = :v1
+    AND `status` IN ::bv1
+    AND subscription IN ::bv2
+    AND created_at > :created_at
+  ORDER BY age DESC
+  LIMIT :v2
 
 
 -- Args

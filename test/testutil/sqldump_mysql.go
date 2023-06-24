@@ -59,6 +59,13 @@ func (d *MySQLDumper) Dump() ([]byte, error) {
 
 	// Unfortunately the prettier doesn't work with ":".
 	query := sqlparser.String(stmt)
+	queryPretty := query
+	if isPythonInstalled {
+		queryPrettyBytes, err := sqlformat(query)
+		if err == nil {
+			queryPretty = string(queryPrettyBytes)
+		}
+	}
 
 	argsBytes, err := json.MarshalIndent(args, "", " ")
 	if err != nil {
@@ -73,7 +80,7 @@ func (d *MySQLDumper) Dump() ([]byte, error) {
 	lineBreak := string(LineBreak)
 	res := []string{
 		queryStmtSection,
-		query,
+		queryPretty,
 		lineBreak,
 
 		argsStmtSection,
