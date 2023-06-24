@@ -91,7 +91,7 @@ type SQLDump struct {
 
 func NewSQLDump(stmt string, args []any, rows any) *SQLDump {
 	return &SQLDump{
-		Stmt: stmt,
+		Stmt: strings.TrimSpace(stmt),
 		Args: args,
 		Rows: rows,
 	}
@@ -129,7 +129,7 @@ func (d *SQLDumper) Dump() ([]byte, error) {
 	}
 
 	prettyStmt, err := sqlfmt.FmtSQL(tree.PrettyCfg{
-		LineWidth: d.dynamicLineWidth(query),
+		LineWidth: dynamicLineWidth(query),
 		TabWidth:  2,
 		JSONFmt:   true,
 	}, []string{query})
@@ -168,7 +168,7 @@ func (d *SQLDumper) Dump() ([]byte, error) {
 	return []byte(strings.Join(res, string(LineBreak))), nil
 }
 
-func (d *SQLDumper) dynamicLineWidth(query string) int {
+func dynamicLineWidth(query string) int {
 	// Conditionally determine the line width so that the text is not a single
 	// line when it is too short.
 	n := len(query)
