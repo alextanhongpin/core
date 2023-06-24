@@ -9,14 +9,14 @@ import (
 	"github.com/google/uuid"
 )
 
-func TestMySQLDumper(t *testing.T) {
+func TestPostgresDumper(t *testing.T) {
 	type User struct {
 		ID   int64
 		Name string
 	}
 
 	simpleDump := testutil.NewSQLDump(
-		`select * from users where id = ? and deleted_at IS NULL`,
+		`select * from users where id = $1 and deleted_at IS NULL`,
 		[]any{uuid.New()},
 		User{ID: 1, Name: "Alice"},
 	)
@@ -26,7 +26,7 @@ func TestMySQLDumper(t *testing.T) {
      FROM users
      WHERE email = 'john.doe@mail.com'
      AND deleted_at IS NULL
-     AND last_logged_in_at > ?
+     AND last_logged_in_at > $1
      AND description = 'foo bar walks in a bar, h''a'
      AND subscription in ('freemium', 'premium')
 		 AND age > 13
@@ -40,29 +40,29 @@ func TestMySQLDumper(t *testing.T) {
 	}
 
 	t.Run("simple", func(t *testing.T) {
-		testutil.DumpMySQL(t, simpleDump,
-			testutil.IgnoreFields("v1"),
+		testutil.DumpPostgres(t, simpleDump,
+			testutil.IgnoreFields("$1"),
 		)
 	})
 
 	t.Run("simple normalized", func(t *testing.T) {
-		testutil.DumpMySQL(t, simpleDump,
+		testutil.DumpPostgres(t, simpleDump,
 			testutil.Normalize(),
-			testutil.IgnoreArgs("v1"),
+			testutil.IgnoreArgs("$1"),
 		)
 	})
 
 	t.Run("complex", func(t *testing.T) {
-		testutil.DumpMySQL(t, complexDump,
-			testutil.IgnoreFields("v1", "ID"),
+		testutil.DumpPostgres(t, complexDump,
+			testutil.IgnoreArgs("$1"),
+			testutil.IgnoreRows("ID"),
 		)
 	})
 
 	t.Run("complex normalized", func(t *testing.T) {
-		testutil.DumpMySQL(t, complexDump,
+		testutil.DumpPostgres(t, complexDump,
 			testutil.Normalize(),
-			testutil.IgnoreArgs("v1"),
-			testutil.IgnoreRows("ID"),
+			testutil.IgnoreFields("$1", "ID"),
 		)
 	})
 }

@@ -68,6 +68,7 @@ func (d *MySQLDumper) Dump() ([]byte, error) {
 		if err == nil {
 			queryNormPretty = string(normBytes)
 		}
+
 		bytes, err := sqlformat(query)
 		if err == nil {
 			queryPretty = string(bytes)

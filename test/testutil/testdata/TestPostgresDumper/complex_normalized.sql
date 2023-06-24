@@ -32,7 +32,7 @@ WHERE
 
 -- Args
 {
- "$1": "2023-06-23",
+ "$1": "2023-06-24",
  "$2": "john.doe@mail.com",
  "$3": "foo bar walks in a bar, h''a",
  "$4": "freemium",
@@ -44,4 +44,13 @@ WHERE
 
 
 -- Rows
-null
+[
+ {
+  "ID": 6351818813913898639,
+  "Name": "Alice"
+ },
+ {
+  "ID": 3903176830726961892,
+  "Name": "Bob"
+ }
+]

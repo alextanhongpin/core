@@ -2,6 +2,7 @@ package testutil
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 
 	"github.com/cockroachdb/cockroachdb-parser/pkg/sql/sem/tree"
@@ -107,4 +108,15 @@ func (d *PostgresSQLDumper) Dump() ([]byte, error) {
 	res = append(res, rowsSection...)
 
 	return []byte(strings.Join(res, string(LineBreak))), nil
+}
+
+func toArgsMap(args []any) map[string]any {
+	res := make(map[string]any)
+	for i, arg := range args {
+		// For Postgres, it starts from 1.
+		key := fmt.Sprintf("$%d", i+1)
+		res[key] = arg
+	}
+
+	return res
 }

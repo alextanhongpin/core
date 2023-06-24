@@ -145,6 +145,20 @@ func (o IgnoreFieldsOption) isHTTP() {}
 func (o IgnoreFieldsOption) isJSON() {}
 func (o IgnoreFieldsOption) isSQL()  {}
 
+type IgnoreArgsOption []string
+
+func (o IgnoreArgsOption) isSQL() {}
+func IgnoreArgs(keys ...string) IgnoreArgsOption {
+	return IgnoreArgsOption(keys)
+}
+
+type IgnoreRowsOption []string
+
+func (o IgnoreRowsOption) isSQL() {}
+func IgnoreRows(keys ...string) IgnoreRowsOption {
+	return IgnoreRowsOption(keys)
+}
+
 type InspectBody func(body []byte)
 
 func (o InspectBody) isHTTP() {}

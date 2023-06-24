@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"log"
 	"strconv"
 	"strings"
@@ -34,6 +33,10 @@ func NewSQLOption(opts ...SQLOption) *sqlOption {
 		switch o := opt.(type) {
 		case InspectQuery:
 			s.queryFn = o
+		case IgnoreArgsOption:
+			s.argsOpts = append(s.argsOpts, IgnoreMapKeys(o...))
+		case IgnoreRowsOption:
+			s.rowsOpts = append(s.rowsOpts, IgnoreMapKeys(o...))
 		case IgnoreFieldsOption:
 			// We share the same options, with the assumptions that there are no
 			// keys-collision - args are using keys numbered from $1 to $n.
@@ -69,6 +72,34 @@ func DumpSQL(t *testing.T, dump *SQLDump, dialect DialectOption, opts ...SQLOpti
 	}
 }
 
+func DumpMySQL(t *testing.T, dump *SQLDump, opts ...SQLOption) {
+	t.Helper()
+	opt := NewSQLPath(opts...)
+	if opt.FilePath == "" {
+		opt.FilePath = t.Name()
+	}
+
+	fileName := opt.String()
+
+	if err := DumpSQLFile(fileName, dump, MySQL(), opts...); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func DumpPostgres(t *testing.T, dump *SQLDump, opts ...SQLOption) {
+	t.Helper()
+	opt := NewSQLPath(opts...)
+	if opt.FilePath == "" {
+		opt.FilePath = t.Name()
+	}
+
+	fileName := opt.String()
+
+	if err := DumpSQLFile(fileName, dump, Postgres(), opts...); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func DumpSQLFile(fileName string, dump *SQLDump, dialect DialectOption, opts ...SQLOption) error {
 	type dumpAndCompare struct {
 		dumper
@@ -97,6 +128,10 @@ type SQLDump struct {
 	Stmt string
 	Args []any
 	Rows any
+
+	// The original mapping, used by Comparer for
+	// comparison.
+	args map[string]any
 }
 
 func NewSQLDump(stmt string, args []any, rows any) *SQLDump {
@@ -155,7 +190,7 @@ func (c *SQLComparer) Compare(a, b []byte) error {
 		return err
 	}
 
-	if err := cmpDiff(toArgsMap(l.Args), toArgsMap(r.Args), c.opt.argsOpts...); err != nil {
+	if err := cmpDiff(l.args, r.args, c.opt.argsOpts...); err != nil {
 		return err
 	}
 
@@ -224,7 +259,7 @@ func parseSQLDump(b []byte) (*SQLDump, error) {
 				return nil, err
 			}
 
-			dump.Args = fromArgsMap(m)
+			dump.args = m
 		case rowsStmtSection:
 			var tmp [][]byte
 
@@ -347,31 +382,15 @@ func parseSQLType(v string) any {
 		return n
 	}
 
+	f, err := strconv.ParseFloat(v, 64)
+	if err == nil {
+		return f
+	}
+
 	b, err := strconv.ParseBool(v)
 	if err == nil {
 		return b
 	}
 
 	return v
-}
-
-func toArgsMap(args []any) map[string]any {
-	res := make(map[string]any)
-	for i, arg := range args {
-		// For Postgres, it starts from 1.
-		key := fmt.Sprintf("$%d", i+1)
-		res[key] = arg
-	}
-
-	return res
-}
-
-func fromArgsMap(m map[string]any) []any {
-	args := make([]any, len(m))
-	for i := 0; i < len(m); i++ {
-		key := fmt.Sprintf("$%d", i+1)
-		args[i] = m[key]
-	}
-
-	return args
 }
