@@ -27,6 +27,9 @@ func (d *MySQLDumper) Dump() ([]byte, error) {
 		return nil, err
 	}
 
+	query := sqlparser.String(stmt)
+	queryPretty := query
+
 	args := make(map[string]any)
 	for i, v := range d.dump.Args {
 		key := fmt.Sprintf("v%d", i+1)
@@ -58,12 +61,16 @@ func (d *MySQLDumper) Dump() ([]byte, error) {
 	}
 
 	// Unfortunately the prettier doesn't work with ":".
-	query := sqlparser.String(stmt)
-	queryPretty := query
+	queryNorm := sqlparser.String(stmt)
+	queryNormPretty := queryNorm
 	if isPythonInstalled {
-		queryPrettyBytes, err := sqlformat(query)
+		normBytes, err := sqlformat(queryNorm)
 		if err == nil {
-			queryPretty = string(queryPrettyBytes)
+			queryNormPretty = string(normBytes)
+		}
+		bytes, err := sqlformat(query)
+		if err == nil {
+			queryPretty = string(bytes)
 		}
 	}
 
@@ -81,6 +88,10 @@ func (d *MySQLDumper) Dump() ([]byte, error) {
 	res := []string{
 		queryStmtSection,
 		queryPretty,
+		lineBreak,
+
+		queryNormalizedStmtSection,
+		queryNormPretty,
 		lineBreak,
 
 		argsStmtSection,

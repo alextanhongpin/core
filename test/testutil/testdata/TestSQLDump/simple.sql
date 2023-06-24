@@ -7,6 +7,15 @@ WHERE
   name = $1 AND age = $2;
 
 
+-- Query Normalized
+SELECT
+  *
+FROM
+  users
+WHERE
+  name = $1 AND age = $2;
+
+
 -- Args
 {
  "$1": "John",

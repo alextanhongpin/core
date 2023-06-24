@@ -7,9 +7,18 @@ WHERE
   id = $1;
 
 
+-- Query Normalized
+SELECT
+  *
+FROM
+  users
+WHERE
+  id = $1;
+
+
 -- Args
 {
- "$1": "cb250f20-1550-48e6-aacd-5e9fd89c8f30"
+ "$1": "ad021864-952c-4753-aebd-418ee9817a3f"
 }
 
 

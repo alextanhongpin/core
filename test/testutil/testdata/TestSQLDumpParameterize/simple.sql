@@ -4,6 +4,15 @@ SELECT
 FROM
   users
 WHERE
+  name = 'John' AND age = 13;
+
+
+-- Query Normalized
+SELECT
+  *
+FROM
+  users
+WHERE
   name = $1 AND age = $2;
 
 

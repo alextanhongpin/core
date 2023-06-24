@@ -32,15 +32,27 @@ func (d *PostgresSQLDumper) Dump() ([]byte, error) {
 		return nil, err
 	}
 
+	queryNorm := query
+
 	args := make(map[string]any)
+
 	if d.opts.parameterize {
-		query, args, err = parameterizeSQL(query)
+		queryNorm, args, err = parameterizeSQL(query)
 		if err != nil {
 			return nil, err
 		}
 	}
 
-	prettyStmt, err := sqlfmt.FmtSQL(tree.PrettyCfg{
+	queryNormPretty, err := sqlfmt.FmtSQL(tree.PrettyCfg{
+		LineWidth: dynamicLineWidth(queryNorm),
+		TabWidth:  2,
+		JSONFmt:   true,
+	}, []string{queryNorm})
+	if err != nil {
+		return nil, err
+	}
+
+	queryPretty, err := sqlfmt.FmtSQL(tree.PrettyCfg{
 		LineWidth: dynamicLineWidth(query),
 		TabWidth:  2,
 		JSONFmt:   true,
@@ -66,7 +78,11 @@ func (d *PostgresSQLDumper) Dump() ([]byte, error) {
 	lineBreak := string(LineBreak)
 	res := []string{
 		queryStmtSection,
-		prettyStmt,
+		queryPretty,
+		lineBreak,
+
+		queryNormalizedStmtSection,
+		queryNormPretty,
 		lineBreak,
 
 		argsStmtSection,

@@ -17,6 +17,7 @@ import (
 )
 
 const queryStmtSection = "-- Query"
+const queryNormalizedStmtSection = "-- Query Normalized"
 const argsStmtSection = "-- Args"
 const rowsStmtSection = "-- Rows"
 
@@ -187,6 +188,14 @@ func parseSQLDump(b []byte) (*SQLDump, error) {
 				tmp = append(tmp, line)
 			}
 			dump.Stmt = string(bytes.Join(tmp, LineBreak))
+		case queryNormalizedStmtSection:
+			// Discard normalized stmt since it is not used for comparison.
+			for s.Scan() {
+				line := s.Bytes()
+				if len(line) == 0 {
+					break
+				}
+			}
 		case argsStmtSection:
 			var tmp [][]byte
 
