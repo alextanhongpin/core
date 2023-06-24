@@ -19,9 +19,18 @@ func TestMySQLDumper(t *testing.T) {
 		limit ?
 	`
 
-	testutil.DumpSQL(t,
-		testutil.NewSQLDump(stmt, []any{13, 10}, nil),
-		testutil.MySQL(),
-		testutil.Parameterize(),
-	)
+	t.Run("simple", func(t *testing.T) {
+		testutil.DumpSQL(t,
+			testutil.NewSQLDump(stmt, []any{13, 10}, nil),
+			testutil.MySQL(),
+		)
+	})
+
+	t.Run("normalized", func(t *testing.T) {
+		testutil.DumpSQL(t,
+			testutil.NewSQLDump(stmt, []any{13, 10}, nil),
+			testutil.MySQL(),
+			testutil.Normalize(),
+		)
+	})
 }

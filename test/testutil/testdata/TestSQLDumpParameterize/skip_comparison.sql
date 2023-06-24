@@ -7,18 +7,9 @@ WHERE
   id = $1;
 
 
--- Query Normalized
-SELECT
-  *
-FROM
-  users
-WHERE
-  id = $1;
-
-
 -- Args
 {
- "$1": "ad021864-952c-4753-aebd-418ee9817a3f"
+ "$1": "902e4a97-aa71-4254-ba65-50c8f8de3819"
 }
 
 

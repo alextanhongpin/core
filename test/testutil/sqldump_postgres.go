@@ -36,8 +36,8 @@ func (d *PostgresSQLDumper) Dump() ([]byte, error) {
 
 	args := make(map[string]any)
 
-	if d.opts.parameterize {
-		queryNorm, args, err = parameterizeSQL(query)
+	if d.opts.normalize {
+		queryNorm, args, err = normalizePostgres(query)
 		if err != nil {
 			return nil, err
 		}
@@ -76,22 +76,35 @@ func (d *PostgresSQLDumper) Dump() ([]byte, error) {
 	}
 
 	lineBreak := string(LineBreak)
-	res := []string{
+	querySection := []string{
 		queryStmtSection,
 		queryPretty,
 		lineBreak,
+	}
 
+	queryNormalizedSection := []string{
 		queryNormalizedStmtSection,
 		queryNormPretty,
 		lineBreak,
+	}
 
+	argsSection := []string{
 		argsStmtSection,
 		string(argsBytes),
 		lineBreak,
+	}
 
+	rowsSection := []string{
 		rowsStmtSection,
 		string(rows),
 	}
+
+	res := append([]string{}, querySection...)
+	if d.opts.normalize {
+		res = append(res, queryNormalizedSection...)
+	}
+	res = append(res, argsSection...)
+	res = append(res, rowsSection...)
 
 	return []byte(strings.Join(res, string(LineBreak))), nil
 }

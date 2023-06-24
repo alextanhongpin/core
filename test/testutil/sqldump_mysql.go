@@ -36,7 +36,7 @@ func (d *MySQLDumper) Dump() ([]byte, error) {
 		args[key] = v
 	}
 
-	if d.opts.parameterize {
+	if d.opts.normalize {
 		bv := make(map[string]*querypb.BindVariable)
 		err = sqlparser.Normalize(stmt, sqlparser.NewReservedVars("bv", known), bv)
 		if err != nil {
@@ -85,22 +85,35 @@ func (d *MySQLDumper) Dump() ([]byte, error) {
 	}
 
 	lineBreak := string(LineBreak)
-	res := []string{
+	querySection := []string{
 		queryStmtSection,
 		queryPretty,
 		lineBreak,
+	}
 
+	queryNormalizedSection := []string{
 		queryNormalizedStmtSection,
 		queryNormPretty,
 		lineBreak,
+	}
 
+	argsSection := []string{
 		argsStmtSection,
 		string(argsBytes),
 		lineBreak,
+	}
 
+	rowsSection := []string{
 		rowsStmtSection,
 		string(rows),
 	}
+
+	res := append([]string{}, querySection...)
+	if d.opts.normalize {
+		res = append(res, queryNormalizedSection...)
+	}
+	res = append(res, argsSection...)
+	res = append(res, rowsSection...)
 
 	return []byte(strings.Join(res, string(LineBreak))), nil
 }

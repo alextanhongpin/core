@@ -22,10 +22,10 @@ const argsStmtSection = "-- Args"
 const rowsStmtSection = "-- Rows"
 
 type sqlOption struct {
-	queryFn      InspectQuery
-	argsOpts     []cmp.Option
-	rowsOpts     []cmp.Option
-	parameterize bool
+	queryFn   InspectQuery
+	argsOpts  []cmp.Option
+	rowsOpts  []cmp.Option
+	normalize bool
 }
 
 func NewSQLOption(opts ...SQLOption) *sqlOption {
@@ -45,8 +45,8 @@ func NewSQLOption(opts ...SQLOption) *sqlOption {
 			s.rowsOpts = append(s.rowsOpts, o...)
 		case FilePath, FileName:
 		// Do nothing.
-		case *ParameterizeOption:
-			s.parameterize = true
+		case *NormalizeOption:
+			s.normalize = true
 		default:
 			panic("option not implemented")
 		}
@@ -187,14 +187,23 @@ func parseSQLDump(b []byte) (*SQLDump, error) {
 
 				tmp = append(tmp, line)
 			}
+
 			dump.Stmt = string(bytes.Join(tmp, LineBreak))
 		case queryNormalizedStmtSection:
-			// Discard normalized stmt since it is not used for comparison.
+			var tmp [][]byte
+
 			for s.Scan() {
 				line := s.Bytes()
 				if len(line) == 0 {
 					break
 				}
+				tmp = append(tmp, line)
+			}
+
+			// If normalized section is present, we compare that instead of the
+			// non-normalized query.
+			if len(tmp) > 0 {
+				dump.Stmt = string(bytes.Join(tmp, LineBreak))
 			}
 		case argsStmtSection:
 			var tmp [][]byte
@@ -298,7 +307,7 @@ func extractSQLVariables(orig, norm string) (string, string) {
 	return orig, norm
 }
 
-func parameterizeSQL(query string) (norm string, args map[string]any, err error) {
+func normalizePostgres(query string) (norm string, args map[string]any, err error) {
 	norm, err = pg_query.Normalize(query)
 	if err != nil {
 		return

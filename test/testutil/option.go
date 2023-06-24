@@ -182,9 +182,9 @@ type RowsCmpOptions CmpOptionsOptions
 
 func (o RowsCmpOptions) isSQL() {}
 
-type ParameterizeOption struct{}
+type NormalizeOption struct{}
 
-func (o *ParameterizeOption) isSQL() {}
+func (o *NormalizeOption) isSQL() {}
 
 type DialectOption string
 
@@ -198,9 +198,9 @@ func MySQL() DialectOption {
 	return DialectOption("mysql")
 }
 
-// Parameterize extracts all constant values from the
+// Normalize extracts all constant values from the
 // query and injects them into the args.
-func Parameterize() *ParameterizeOption { return new(ParameterizeOption) }
+func Normalize() *NormalizeOption { return new(NormalizeOption) }
 
 func IgnoreMapKeys(keys ...string) cmp.Option {
 	return cmpopts.IgnoreMapEntries(func(key string, _ any) bool {
