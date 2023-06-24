@@ -2,6 +2,7 @@ package background_test
 
 import (
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 type numberTask struct {
 	numbers []int
 	delay   time.Duration
+	mu      sync.RWMutex
 }
 
 func (t *numberTask) sleep() {
@@ -21,7 +23,17 @@ func (t *numberTask) sleep() {
 func (t *numberTask) Exec(n int) {
 	t.sleep()
 	fmt.Println("exec", n)
+	t.mu.Lock()
 	t.numbers = append(t.numbers, n)
+	t.mu.Unlock()
+}
+
+func (t *numberTask) Numbers() []int {
+	t.mu.RLock()
+	numbers := make([]int, len(t.numbers))
+	copy(numbers, t.numbers)
+	t.mu.RUnlock()
+	return numbers
 }
 
 func TestBackground(t *testing.T) {
@@ -31,7 +43,7 @@ func TestBackground(t *testing.T) {
 		defer stop()
 		bg.Send(1)
 		time.Sleep(100 * time.Millisecond)
-		assert.Equal(t, []int{1}, task.numbers)
+		assert.Equal(t, []int{1}, task.Numbers())
 	})
 
 	t.Run("early stop", func(t *testing.T) {
@@ -41,7 +53,7 @@ func TestBackground(t *testing.T) {
 		stop()
 		bg.Send(2)
 		task.sleep()
-		assert.Equal(t, []int{1, 2}, task.numbers)
+		assert.Equal(t, []int{1, 2}, task.Numbers())
 	})
 
 	t.Run("buffer with early stop", func(t *testing.T) {
@@ -54,6 +66,6 @@ func TestBackground(t *testing.T) {
 		task.sleep()
 		task.sleep()
 
-		assert.Equal(t, []int{1, 2, 3}, task.numbers)
+		assert.Equal(t, []int{1, 2, 3}, task.Numbers())
 	})
 }
