@@ -2,6 +2,7 @@ package pgtest
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"log"
 	"sync"
@@ -122,6 +123,14 @@ func initDB(opts ...Option) (func(), error) {
 	})
 	if err != nil {
 		return nil, fmt.Errorf("could not start resources: %w", err)
+	}
+
+	code, err := resource.Exec([]string{"postgres", "-c", "fsync=off"}, dockertest.ExecOptions{})
+	if err != nil {
+		return nil, err
+	}
+	if code != 1 {
+		return nil, errors.New("exec code is not 1")
 	}
 
 	hostAndPort := resource.GetHostPort("5432/tcp")
