@@ -142,6 +142,11 @@ func NewSQLDump(stmt string, args []any, rows any) *SQLDump {
 	}
 }
 
+func (d *SQLDump) WithRows(rows any) *SQLDump {
+	d.Rows = rows
+	return d
+}
+
 func dynamicLineWidth(query string) int {
 	// Conditionally determine the line width so that the text is not a single
 	// line when it is too short.
