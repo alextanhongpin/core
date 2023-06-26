@@ -28,93 +28,75 @@ func (d *MySQLDumper) Dump() ([]byte, error) {
 	}
 
 	query := sqlparser.String(stmt)
-	queryPretty := query
+	queryPretty := sqlformatOrDefault(query)
 
+	// Populate the known '?' variables that has been given a prefix name.
 	args := make(map[string]any)
+	for k := range known {
+		args[k] = nil
+	}
+
+	// In case the args length does not match the known placeholders, the key
+	// should still be there.
 	for i, v := range d.dump.Args {
+		// sqlparser.Parse2 parses the '?' and replaces them with digits with
+		// prefix 'v'.
 		key := fmt.Sprintf("v%d", i+1)
 		args[key] = v
 	}
 
-	if d.opts.normalize {
-		bv := make(map[string]*querypb.BindVariable)
-		err = sqlparser.Normalize(stmt, sqlparser.NewReservedVars("bv", known), bv)
-		if err != nil {
-			return nil, err
+	// Normalize the query and extract the constants into bind variables.
+	bv := make(map[string]*querypb.BindVariable)
+	err = sqlparser.Normalize(stmt, sqlparser.NewReservedVars("bv", known), bv)
+	if err != nil {
+		return nil, err
+	}
+
+	for k, v := range bv {
+		if b := v.GetValue(); len(b) > 0 {
+			args[k] = string(b)
+			continue
 		}
 
-		for k, v := range bv {
-			if _, ok := args[k]; ok {
-				continue
-			}
-
-			if b := v.GetValue(); len(b) > 0 {
-				args[k] = string(b)
-			} else {
-				vals := make([]string, len(v.GetValues()))
-				for i, v := range v.GetValues() {
-					vals[i] = string(v.GetValue())
-				}
-				args[k] = vals
-			}
+		vals := make([]string, len(v.GetValues()))
+		for i, v := range v.GetValues() {
+			vals[i] = string(v.GetValue())
 		}
+
+		args[k] = vals
 	}
 
 	// Unfortunately the prettier doesn't work with ":".
 	queryNorm := sqlparser.String(stmt)
-	queryNormPretty := queryNorm
-	if isPythonInstalled {
-		normBytes, err := sqlformat(queryNorm)
-		if err == nil {
-			queryNormPretty = string(normBytes)
-		}
-
-		bytes, err := sqlformat(query)
-		if err == nil {
-			queryPretty = string(bytes)
-		}
-	}
+	queryNormPretty := sqlformatOrDefault(queryNorm)
 
 	argsBytes, err := json.MarshalIndent(args, "", " ")
 	if err != nil {
 		return nil, err
 	}
 
-	rows, err := json.MarshalIndent(d.dump.Rows, "", " ")
+	result, err := json.MarshalIndent(d.dump.Result, "", " ")
 	if err != nil {
 		return nil, err
 	}
 
 	lineBreak := string(LineBreak)
-	querySection := []string{
-		queryStmtSection,
+	res := []string{
+		querySection,
 		queryPretty,
 		lineBreak,
-	}
 
-	queryNormalizedSection := []string{
-		queryNormalizedStmtSection,
+		queryNormalizedSection,
 		queryNormPretty,
 		lineBreak,
-	}
 
-	argsSection := []string{
-		argsStmtSection,
+		argsSection,
 		string(argsBytes),
 		lineBreak,
+
+		resultSection,
+		string(result),
 	}
 
-	rowsSection := []string{
-		rowsStmtSection,
-		string(rows),
-	}
-
-	res := append([]string{}, querySection...)
-	if d.opts.normalize {
-		res = append(res, queryNormalizedSection...)
-	}
-	res = append(res, argsSection...)
-	res = append(res, rowsSection...)
-
-	return []byte(strings.Join(res, string(LineBreak))), nil
+	return []byte(strings.Join(res, lineBreak)), nil
 }

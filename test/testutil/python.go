@@ -44,6 +44,19 @@ func isPythonNotFoundError(err error) bool {
 	return isPython && isMissingModule
 }
 
+func sqlformatOrDefault(stmt string) string {
+	if !isPythonInstalled {
+		return stmt
+	}
+
+	b, err := sqlformat(stmt)
+	if err != nil {
+		return stmt
+	}
+
+	return string(b)
+}
+
 // equals to $ echo 'select 1' | python3 -m sqlparse -r -
 func sqlformat(stmt string) ([]byte, error) {
 	r, w := io.Pipe()

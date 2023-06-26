@@ -85,15 +85,6 @@ func (c *JSONComparer) Compare(a, b []byte) error {
 	a = bytes.TrimLeft(a, " \t\r\n")
 	b = bytes.TrimLeft(b, " \t\r\n")
 
-	unmarshal := func(b []byte) (any, error) {
-		var m any
-		if err := json.Unmarshal(b, &m); err != nil {
-			return nil, err
-		}
-
-		return m, nil
-	}
-
 	want, err := unmarshal(a)
 	if err != nil {
 		return err

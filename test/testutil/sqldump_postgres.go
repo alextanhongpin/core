@@ -23,46 +23,34 @@ func NewPostgresSQLDumper(dump *SQLDump, opts ...SQLOption) *PostgresSQLDumper {
 }
 
 func (d *PostgresSQLDumper) Dump() ([]byte, error) {
-	result, err := pg_query.Parse(d.dump.Stmt)
+	stmt, err := pg_query.Parse(d.dump.Stmt)
 	if err != nil {
 		return nil, err
 	}
 
-	query, err := pg_query.Deparse(result)
+	query, err := pg_query.Deparse(stmt)
 	if err != nil {
 		return nil, err
 	}
 
-	queryNorm := query
-
-	args := make(map[string]any)
-
-	if d.opts.normalize {
-		queryNorm, args, err = normalizePostgres(query)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	queryNormPretty, err := sqlfmt.FmtSQL(tree.PrettyCfg{
-		LineWidth: dynamicLineWidth(queryNorm),
-		TabWidth:  2,
-		JSONFmt:   true,
-	}, []string{queryNorm})
+	queryNorm, args, err := normalizePostgres(query)
 	if err != nil {
 		return nil, err
 	}
 
-	queryPretty, err := sqlfmt.FmtSQL(tree.PrettyCfg{
-		LineWidth: dynamicLineWidth(query),
-		TabWidth:  2,
-		JSONFmt:   true,
-	}, []string{query})
+	queryNormPretty, err := formatPostgresSQL(queryNorm)
 	if err != nil {
 		return nil, err
 	}
 
-	for k, v := range toArgsMap(d.dump.Args) {
+	queryPretty, err := formatPostgresSQL(query)
+	if err != nil {
+		return nil, err
+	}
+
+	for i, v := range d.dump.Args {
+		// Postgres uses $n as the placeholder, and n starts from 1.
+		k := fmt.Sprintf("$%d", i+1)
 		args[k] = v
 	}
 
@@ -71,52 +59,41 @@ func (d *PostgresSQLDumper) Dump() ([]byte, error) {
 		return nil, err
 	}
 
-	rows, err := json.MarshalIndent(d.dump.Rows, "", " ")
+	result, err := json.MarshalIndent(d.dump.Result, "", " ")
 	if err != nil {
 		return nil, err
 	}
 
 	lineBreak := string(LineBreak)
-	querySection := []string{
-		queryStmtSection,
+	res := []string{
+		querySection,
 		queryPretty,
 		lineBreak,
-	}
 
-	queryNormalizedSection := []string{
-		queryNormalizedStmtSection,
+		queryNormalizedSection,
 		queryNormPretty,
 		lineBreak,
-	}
 
-	argsSection := []string{
-		argsStmtSection,
+		argsSection,
 		string(argsBytes),
 		lineBreak,
+
+		resultSection,
+		string(result),
 	}
 
-	rowsSection := []string{
-		rowsStmtSection,
-		string(rows),
-	}
-
-	res := append([]string{}, querySection...)
-	if d.opts.normalize {
-		res = append(res, queryNormalizedSection...)
-	}
-	res = append(res, argsSection...)
-	res = append(res, rowsSection...)
-
-	return []byte(strings.Join(res, string(LineBreak))), nil
+	return []byte(strings.Join(res, lineBreak)), nil
 }
 
-func toArgsMap(args []any) map[string]any {
-	res := make(map[string]any)
-	for i, arg := range args {
-		// For Postgres, it starts from 1.
-		key := fmt.Sprintf("$%d", i+1)
-		res[key] = arg
+func formatPostgresSQL(stmt string) (string, error) {
+	pretty, err := sqlfmt.FmtSQL(tree.PrettyCfg{
+		LineWidth: dynamicLineWidth(stmt),
+		TabWidth:  2,
+		JSONFmt:   true,
+	}, []string{stmt})
+	if err != nil {
+		return "", err
 	}
 
-	return res
+	return pretty, nil
 }

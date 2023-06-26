@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"log"
-	"strconv"
 	"strings"
 	"testing"
 	"unicode"
@@ -15,16 +14,15 @@ import (
 	pg_query "github.com/pganalyze/pg_query_go/v4"
 )
 
-const queryStmtSection = "-- Query"
-const queryNormalizedStmtSection = "-- Query Normalized"
-const argsStmtSection = "-- Args"
-const rowsStmtSection = "-- Rows"
+const querySection = "-- Query"
+const queryNormalizedSection = "-- Query Normalized"
+const argsSection = "-- Args"
+const resultSection = "-- Result"
 
 type sqlOption struct {
-	queryFn   InspectQuery
-	argsOpts  []cmp.Option
-	rowsOpts  []cmp.Option
-	normalize bool
+	queryFn    InspectQuery
+	argsOpts   []cmp.Option
+	resultOpts []cmp.Option
 }
 
 func NewSQLOption(opts ...SQLOption) *sqlOption {
@@ -36,20 +34,18 @@ func NewSQLOption(opts ...SQLOption) *sqlOption {
 		case IgnoreArgsOption:
 			s.argsOpts = append(s.argsOpts, IgnoreMapKeys(o...))
 		case IgnoreRowsOption:
-			s.rowsOpts = append(s.rowsOpts, IgnoreMapKeys(o...))
+			s.resultOpts = append(s.resultOpts, IgnoreMapKeys(o...))
 		case IgnoreFieldsOption:
 			// We share the same options, with the assumptions that there are no
 			// keys-collision - args are using keys numbered from $1 to $n.
 			s.argsOpts = append(s.argsOpts, IgnoreMapKeys(o...))
-			s.rowsOpts = append(s.rowsOpts, IgnoreMapKeys(o...))
+			s.resultOpts = append(s.resultOpts, IgnoreMapKeys(o...))
 		case ArgsCmpOptions:
 			s.argsOpts = append(s.argsOpts, o...)
 		case RowsCmpOptions:
-			s.rowsOpts = append(s.rowsOpts, o...)
+			s.resultOpts = append(s.resultOpts, o...)
 		case FilePath, FileName:
 		// Do nothing.
-		case *NormalizeOption:
-			s.normalize = true
 		default:
 			panic("option not implemented")
 		}
@@ -125,25 +121,25 @@ func DumpSQLFile(fileName string, dump *SQLDump, dialect DialectOption, opts ...
 }
 
 type SQLDump struct {
-	Stmt string
-	Args []any
-	Rows any
+	Stmt   string
+	Args   []any
+	Result any
 
 	// The original mapping, used by Comparer for
 	// comparison.
-	args map[string]any
+	args any
 }
 
-func NewSQLDump(stmt string, args []any, rows any) *SQLDump {
+func NewSQLDump(stmt string, args []any, res any) *SQLDump {
 	return &SQLDump{
-		Stmt: strings.TrimSpace(stmt),
-		Args: args,
-		Rows: rows,
+		Stmt:   strings.TrimSpace(stmt),
+		Args:   args,
+		Result: res,
 	}
 }
 
-func (d *SQLDump) WithRows(rows any) *SQLDump {
-	d.Rows = rows
+func (d *SQLDump) WithResult(res any) *SQLDump {
+	d.Result = res
 	return d
 }
 
@@ -199,7 +195,7 @@ func (c *SQLComparer) Compare(a, b []byte) error {
 		return err
 	}
 
-	if err := ansiDiff(l.Rows, r.Rows, c.opt.rowsOpts...); err != nil {
+	if err := ansiDiff(l.Result, r.Result, c.opt.resultOpts...); err != nil {
 		return err
 	}
 
@@ -216,7 +212,15 @@ func parseSQLDump(b []byte) (*SQLDump, error) {
 		line := s.Text()
 
 		switch line {
-		case queryStmtSection:
+		case querySection:
+			// This is not used for comparison.
+			for s.Scan() {
+				line := s.Bytes()
+				if len(line) == 0 {
+					break
+				}
+			}
+		case queryNormalizedSection:
 			var tmp [][]byte
 
 			for s.Scan() {
@@ -229,23 +233,7 @@ func parseSQLDump(b []byte) (*SQLDump, error) {
 			}
 
 			dump.Stmt = string(bytes.Join(tmp, LineBreak))
-		case queryNormalizedStmtSection:
-			var tmp [][]byte
-
-			for s.Scan() {
-				line := s.Bytes()
-				if len(line) == 0 {
-					break
-				}
-				tmp = append(tmp, line)
-			}
-
-			// If normalized section is present, we compare that instead of the
-			// non-normalized query.
-			if len(tmp) > 0 {
-				dump.Stmt = string(bytes.Join(tmp, LineBreak))
-			}
-		case argsStmtSection:
+		case argsSection:
 			var tmp [][]byte
 
 			for s.Scan() {
@@ -257,15 +245,14 @@ func parseSQLDump(b []byte) (*SQLDump, error) {
 				tmp = append(tmp, line)
 			}
 
-			jsonBytes := bytes.Join(tmp, LineBreak)
-
-			var m map[string]any
-			if err := json.Unmarshal(jsonBytes, &m); err != nil {
+			b := bytes.Join(tmp, LineBreak)
+			a, err := unmarshal(b)
+			if err != nil {
 				return nil, err
 			}
 
-			dump.args = m
-		case rowsStmtSection:
+			dump.args = a
+		case resultSection:
 			var tmp [][]byte
 
 			for s.Scan() {
@@ -277,30 +264,15 @@ func parseSQLDump(b []byte) (*SQLDump, error) {
 				tmp = append(tmp, line)
 			}
 
-			jsonBytes := bytes.Join(tmp, LineBreak)
-			if json.Valid(jsonBytes) {
-				switch jsonBytes[0] {
-				case '{':
-					var m map[string]any
-					if err := json.Unmarshal(jsonBytes, &m); err != nil {
-						return nil, err
-					}
-					dump.Rows = m
-				case '[':
-					var m []map[string]any
-					if err := json.Unmarshal(jsonBytes, &m); err != nil {
-						return nil, err
-					}
-					dump.Rows = m
-				default:
-					var m any
-					if err := json.Unmarshal(jsonBytes, &m); err != nil {
-						return nil, err
-					}
-					dump.Rows = m
+			b := bytes.Join(tmp, LineBreak)
+			if json.Valid(b) {
+				a, err := unmarshal(b)
+				if err != nil {
+					return nil, err
 				}
+				dump.Result = a
 			} else {
-				dump.Rows = string(jsonBytes)
+				dump.Result = string(b)
 			}
 		}
 	}
@@ -320,82 +292,96 @@ func tokenizeSQL(s string) []string {
 	return a
 }
 
-func extractSQLVariables(orig, norm string) (string, string) {
-	normr := []rune(norm)
-	origr := []rune(orig)
+// cleanParameters cleans the placeholder and constants.
+// Due to the naive tokenization, we might end up with such results:
+//
+// Normalized query tokens: ["($1", "$2)"]
+// Original query tokens: ["('foo'", "'bar')"]
+//
+// The placeholder token might not start or end with the dollar sign.
+// To fix this, we need to shift trim the start and end for both the placholder
+// and constant values.
+func cleanParameters(p, c string) (string, string) {
+	rp := []rune(p)
+	rc := []rune(c)
 
-	for i := 0; i < len(normr); i++ {
-		if norm[i] == '$' {
-			normr = normr[i:]
-			origr = origr[i:]
+	// Move to the right until we find the first $.
+	for i := 0; i < len(rp); i++ {
+		if rp[i] == '$' {
+			rp = rp[i:]
+			rc = rc[i:]
 			break
 		}
 	}
 
-	for i := len(normr); i > -1; i-- {
-		if unicode.IsDigit(normr[i-1]) {
-			n := len(normr) - i
-			normr = normr[:len(normr)-n]
-			origr = origr[:len(origr)-n]
+	// Move to the left until we find the first digit.
+	for i := len(rp); i > -1; i-- {
+		if unicode.IsDigit(rp[i-1]) {
+			n := len(rp) - i
+			rp = rp[:len(rp)-n]
+			rc = rc[:len(rc)-n]
 			break
 		}
 	}
 
-	orig = string(origr)
-	norm = string(normr)
+	p = string(rp)
+	c = string(rc)
 
-	return orig, norm
+	return p, c
 }
 
+// normalizePostgres extracts the constant values from the statement and
+// replaces it with placeholders.
 func normalizePostgres(query string) (norm string, args map[string]any, err error) {
+	// After normalization, the constant variables will be replaced with
+	// placeholders, e.g. $1, $2 etc.
 	norm, err = pg_query.Normalize(query)
 	if err != nil {
 		return
 	}
 
+	// Tokenize the query to find out the position that has been substituted with
+	// the placeholder.
 	origTokens := tokenizeSQL(query)
 	normTokens := tokenizeSQL(norm)
 	if len(origTokens) != len(normTokens) {
 		return "", nil, errors.New("sql not normalized")
 	}
 
-	args = make(map[string]any)
+	safeUnmarshal := func(s string) any {
+		// Return "'foo'" as string "foo".
+		if len(s) >= 2 {
+			if s[0] == '\'' && s[len(s)-1] == '\'' {
+				return s[1 : len(s)-1]
+			}
+		}
 
+		a, err := unmarshal([]byte(s))
+		if err != nil {
+			return s
+		}
+
+		return a
+	}
+
+	args = make(map[string]any)
 	for i := 0; i < len(origTokens); i++ {
-		o, n := origTokens[i], normTokens[i]
-		if o != n {
-			orig, norm := extractSQLVariables(o, n)
-			args[norm] = parseSQLType(orig)
+		c, p := origTokens[i], normTokens[i]
+		// If the token does not match, then
+		if c != p {
+			placholder, constant := cleanParameters(p, c)
+			args[placholder] = safeUnmarshal(constant)
 		}
 	}
 
 	return
 }
 
-func parseSQLType(v string) any {
-	// Remove null characters.
-	v = strings.Trim(v, "\x00")
-
-	isQuote := v[0] == '\''
-	isString := isQuote && len(v) > 1 && v[0] == v[len(v)-1]
-	if isString {
-		return v[1 : len(v)-1]
+func unmarshal(b []byte) (any, error) {
+	var m any
+	if err := json.Unmarshal(b, &m); err != nil {
+		return nil, err
 	}
 
-	n, err := strconv.ParseInt(v, 10, 64)
-	if err == nil {
-		return n
-	}
-
-	f, err := strconv.ParseFloat(v, 64)
-	if err == nil {
-		return f
-	}
-
-	b, err := strconv.ParseBool(v)
-	if err == nil {
-		return b
-	}
-
-	return v
+	return m, nil
 }

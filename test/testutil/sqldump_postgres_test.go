@@ -27,13 +27,16 @@ func TestPostgresDumper(t *testing.T) {
      WHERE email = 'john.doe@mail.com'
      AND deleted_at IS NULL
      AND last_logged_in_at > $1
+		 AND created_at IN ($2) 
      AND description = 'foo bar walks in a bar, h''a'
      AND subscription in ('freemium', 'premium')
 		 AND age > 13
 		 AND is_active = true
- 		 AND name LIKE ANY('{Foo,bar,%oo%}')`,
+ 		 AND name LIKE ANY('{Foo,bar,%oo%}')
+		 AND id <> ALL(ARRAY[1, 2])
+		`,
 		Args: []any{time.Now().Format("2006-01-02")},
-		Rows: []User{
+		Result: []User{
 			{ID: rand.Int63(), Name: "Alice"},
 			{ID: rand.Int63(), Name: "Bob"},
 		},
@@ -41,13 +44,6 @@ func TestPostgresDumper(t *testing.T) {
 
 	t.Run("simple", func(t *testing.T) {
 		testutil.DumpPostgres(t, simpleDump,
-			testutil.IgnoreFields("$1"),
-		)
-	})
-
-	t.Run("simple normalized", func(t *testing.T) {
-		testutil.DumpPostgres(t, simpleDump,
-			testutil.Normalize(),
 			testutil.IgnoreArgs("$1"),
 		)
 	})
@@ -56,13 +52,6 @@ func TestPostgresDumper(t *testing.T) {
 		testutil.DumpPostgres(t, complexDump,
 			testutil.IgnoreArgs("$1"),
 			testutil.IgnoreRows("ID"),
-		)
-	})
-
-	t.Run("complex normalized", func(t *testing.T) {
-		testutil.DumpPostgres(t, complexDump,
-			testutil.Normalize(),
-			testutil.IgnoreFields("$1", "ID"),
 		)
 	})
 }
