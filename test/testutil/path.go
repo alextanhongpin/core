@@ -13,6 +13,18 @@ const (
 	ExtSQL  = ".sql"
 )
 
+type FilePath string
+
+func (FilePath) isJSON() {}
+func (FilePath) isHTTP() {}
+func (FilePath) isSQL()  {}
+
+type FileName string
+
+func (FileName) isJSON() {}
+func (FileName) isHTTP() {}
+func (FileName) isSQL()  {}
+
 type Path struct {
 	TestDir  string
 	FilePath string

@@ -103,7 +103,8 @@ func (c *JSONComparer) Compare(a, b []byte) error {
 }
 
 type JSONDumper struct {
-	v any
+	v    any
+	opts []JSONOption
 }
 
 func NewJSONDumper(v any) *JSONDumper {
