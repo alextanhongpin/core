@@ -47,7 +47,6 @@ func TestKeys(t *testing.T) {
 			"1.3.z",
 			"tags",
 			"nested",
-			"nested[_]",
 			"nested[_].a",
 			"nested[_].c",
 		}

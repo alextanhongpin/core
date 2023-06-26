@@ -2,6 +2,7 @@ package maputil
 
 import (
 	"fmt"
+	"strings"
 
 	"golang.org/x/exp/slices"
 )
@@ -21,7 +22,9 @@ func AllKeys(m map[string]any) []string {
 
 	var visitor func(k string, v any)
 	visitor = func(k string, v any) {
-		fields = append(fields, k)
+		if !strings.HasSuffix(k, "[_]") {
+			fields = append(fields, k)
+		}
 
 		switch t := v.(type) {
 		case map[string]any:
