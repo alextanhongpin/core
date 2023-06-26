@@ -8,7 +8,7 @@ import (
 
 var ErrNonStruct = errors.New("maputil: cannot convert non-struct to map")
 
-func ToMap(v any) (map[string]any, error) {
+func StructToMap(v any) (map[string]any, error) {
 	t := reflect.TypeOf(v)
 	if t.Kind() == reflect.Pointer {
 		t = t.Elem()

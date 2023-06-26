@@ -116,7 +116,7 @@ func testReplaceFixture(t *testing.T) map[string]any {
 		Tags: []string{"user", "name"},
 	}
 
-	m, err := maputil.ToMap(u)
+	m, err := maputil.StructToMap(u)
 	if err != nil {
 		t.Fatal(err)
 	}
