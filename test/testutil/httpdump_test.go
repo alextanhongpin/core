@@ -40,7 +40,7 @@ func TestHTTPDump(t *testing.T) {
 			handler: func(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(http.StatusOK)
 				w.Header().Set("Content-Type", "application/json")
-				fmt.Fprint(w, `{"data": {"name": "John Appleseed", "age": 10, "isMarried": false}}`)
+				fmt.Fprint(w, `{"data": {"name": "John Appleseed", "age": 10, "isMarried": true}}`)
 			},
 		},
 		{
