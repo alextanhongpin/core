@@ -52,3 +52,17 @@ func TestDumpJSONNonStruct(t *testing.T) {
 	nums := []int{1, 2, 3}
 	testutil.DumpJSON(t, nums)
 }
+
+func TestDumpJSONMaskField(t *testing.T) {
+	type Credentials struct {
+		Email    string `json:"email"`
+		Password string `json:"password"`
+	}
+
+	creds := Credentials{
+		Email:    "john.appleseed@mail.com",
+		Password: "s3cr3t",
+	}
+
+	testutil.DumpJSON(t, creds, testutil.MaskFields("password"))
+}

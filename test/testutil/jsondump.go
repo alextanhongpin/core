@@ -5,12 +5,14 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/alextanhongpin/core/types/maputil"
 	"github.com/google/go-cmp/cmp"
 )
 
 type jsonOption struct {
 	bodyOpts []cmp.Option
 	bodyFn   InspectBody
+	maskFn   MaskFn
 }
 
 func NewJSONOption(opts ...JSONOption) *jsonOption {
@@ -23,6 +25,8 @@ func NewJSONOption(opts ...JSONOption) *jsonOption {
 			j.bodyOpts = append(j.bodyOpts, IgnoreMapKeys(o...))
 		case CmpOptionsOptions:
 			j.bodyOpts = append(j.bodyOpts, o...)
+		case MaskFn:
+			j.maskFn = o
 		case FilePath, FileName:
 		// Do nothing.
 		default:
@@ -40,7 +44,7 @@ func DumpJSONFile(fileName string, v any, opts ...JSONOption) error {
 	}
 
 	dnc := dumpAndCompare{
-		dumper:   NewJSONDumper(v),
+		dumper:   NewJSONDumper(v, opts...),
 		comparer: NewJSONComparer(opts...),
 	}
 
@@ -103,16 +107,44 @@ func (c *JSONComparer) Compare(a, b []byte) error {
 }
 
 type JSONDumper struct {
-	v    any
-	opts []JSONOption
+	v      any
+	maskFn func(key string) bool
 }
 
-func NewJSONDumper(v any) *JSONDumper {
-	return &JSONDumper{v: v}
+func NewJSONDumper(v any, opts ...JSONOption) *JSONDumper {
+	return &JSONDumper{
+		v:      v,
+		maskFn: NewJSONOption(opts...).maskFn,
+	}
 }
 
 func (d *JSONDumper) Dump() ([]byte, error) {
+	if d.maskFn == nil {
+		return d.dump()
+	}
+
+	return d.maskBeforeDump()
+}
+
+func (d *JSONDumper) dump() ([]byte, error) {
 	return marshal(d.v)
+}
+
+func (d *JSONDumper) maskBeforeDump() ([]byte, error) {
+	b, err := marshal(d.v)
+	if err != nil {
+		return nil, err
+	}
+
+	// Mask can only be applied to map[string]any.
+	var m map[string]any
+	if err := json.Unmarshal(b, &m); err != nil {
+		return nil, err
+	}
+
+	// Apply mask.
+	masked := maputil.MaskFunc(m, d.maskFn)
+	return marshal(masked)
 }
 
 func marshal(v any) ([]byte, error) {

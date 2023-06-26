@@ -3,6 +3,7 @@ package testutil
 import (
 	"net/http"
 
+	"github.com/alextanhongpin/core/types/maputil"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 )
@@ -91,6 +92,14 @@ func (o RowsCmpOptions) isSQL() {}
 type DialectOption string
 
 func (o DialectOption) isSQL() {}
+
+type MaskFn func(key string) bool
+
+func (m MaskFn) isJSON() {}
+
+func MaskFields(fields ...string) MaskFn {
+	return maputil.MaskFields(fields...)
+}
 
 func Postgres() DialectOption {
 	return DialectOption("postgres")
