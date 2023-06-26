@@ -191,15 +191,15 @@ func (c *SQLComparer) Compare(a, b []byte) error {
 		c.opt.queryFn(r.Stmt)
 	}
 
-	if err := cmpDiff(l.Stmt, r.Stmt); err != nil {
+	if err := ansiDiff(l.Stmt, r.Stmt); err != nil {
 		return err
 	}
 
-	if err := cmpDiff(l.args, r.args, c.opt.argsOpts...); err != nil {
+	if err := ansiDiff(l.args, r.args, c.opt.argsOpts...); err != nil {
 		return err
 	}
 
-	if err := cmpDiff(l.Rows, r.Rows, c.opt.rowsOpts...); err != nil {
+	if err := ansiDiff(l.Rows, r.Rows, c.opt.rowsOpts...); err != nil {
 		return err
 	}
 

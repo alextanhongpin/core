@@ -211,7 +211,7 @@ func parseDotHTTP(ss []byte) (reqS, resS *httpdump.Dump, err error) {
 }
 
 func Diff(x, y *httpdump.Dump, headerOpts []cmp.Option, bodyOpts []cmp.Option) error {
-	if err := cmpDiff(x.Line, y.Line); err != nil {
+	if err := ansiDiff(x.Line, y.Line); err != nil {
 		return err
 	}
 
@@ -226,10 +226,10 @@ func Diff(x, y *httpdump.Dump, headerOpts []cmp.Option, bodyOpts []cmp.Option) e
 			return comparer.Compare(x.Body, y.Body)
 		}
 
-		return cmpDiff(x.Body, y.Body, bodyOpts...)
+		return ansiDiff(x.Body, y.Body, bodyOpts...)
 	}(json.Valid(x.Body) && json.Valid(y.Body)); err != nil {
 		return err
 	}
 
-	return cmpDiff(x.Headers, y.Headers, headerOpts...)
+	return ansiDiff(x.Headers, y.Headers, headerOpts...)
 }

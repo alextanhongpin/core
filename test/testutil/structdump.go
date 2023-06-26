@@ -29,7 +29,7 @@ func DumpStruct(t *testing.T, v any, opts ...cmp.Option) {
 		t.Fatal(err)
 	}
 
-	if err := cmpDiff(want, got, opts...); err != nil {
+	if err := ansiDiff(want, got, opts...); err != nil {
 		t.Fatal(err)
 	}
 

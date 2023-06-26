@@ -108,7 +108,7 @@ func (c *JSONComparer) Compare(a, b []byte) error {
 		c.opt.bodyFn(b)
 	}
 
-	return cmpDiff(want, got, c.opt.bodyOpts...)
+	return ansiDiff(want, got, c.opt.bodyOpts...)
 }
 
 type JSONDumper struct {
