@@ -1,0 +1,15 @@
+{
+ "data": {
+  "token": "*!REDACTED*"
+ },
+ "email": "john.doe@mail.com",
+ "password": "*!REDACTED*",
+ "tokens": [
+  {
+   "token": "*!REDACTED*"
+  },
+  {
+   "token": "*!REDACTED*"
+  }
+ ]
+}

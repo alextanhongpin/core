@@ -2,6 +2,7 @@ package maputil
 
 import (
 	"fmt"
+	"strings"
 )
 
 type JSONType interface {
@@ -13,6 +14,28 @@ type JSONType interface {
 // Null values will be skipped.
 func ReplaceFunc[T JSONType](m map[string]any, fn func(k string, v T) T) map[string]any {
 	return replaceFunc(m, fn)
+}
+
+func Mask(m map[string]any, fn func(k string) bool) map[string]any {
+	return replaceFunc(m, func(k, v string) string {
+		if fn(k) {
+			return "*!REDACTED*"
+		}
+
+		return v
+	})
+}
+
+func MaskFields(fields ...string) func(k string) bool {
+	return func(k string) bool {
+		for _, f := range fields {
+			if f == k {
+				return true
+			}
+		}
+
+		return false
+	}
 }
 
 func replaceFunc[T any](m map[string]any, fn func(k string, v T) T) map[string]any {
@@ -36,7 +59,11 @@ func replaceFunc[T any](m map[string]any, fn func(k string, v T) T) map[string]a
 			}
 			return res
 		case T:
-			return fn(k, t)
+			if !strings.HasSuffix(k, "[_]") {
+				return fn(k, t)
+			}
+
+			return v
 		default:
 			return v
 		}

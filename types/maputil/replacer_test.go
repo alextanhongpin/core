@@ -42,8 +42,6 @@ func TestReplace(t *testing.T) {
 			"hobbies[_].name",
 			"hobbies[_].name",
 			"meta.name",
-			"tags[_]",
-			"tags[_]",
 		}
 		sort.Strings(want)
 		sort.Strings(keys)
@@ -66,9 +64,6 @@ func TestReplace(t *testing.T) {
 			"age",
 			"height",
 			"meta.age",
-			"meta.ids[_]",
-			"meta.ids[_]",
-			"meta.ids[_]",
 		}
 
 		sort.Strings(want)
@@ -77,6 +72,35 @@ func TestReplace(t *testing.T) {
 		testutil.DumpJSON(t, m, testutil.FileName("before"))
 		testutil.DumpJSON(t, got, testutil.FileName("after"))
 	})
+}
+
+func TestMask(t *testing.T) {
+	type Data struct {
+		Token string `json:"token"`
+	}
+	type credentials struct {
+		Password string `json:"password"`
+		Email    string `json:"email"`
+		Data     Data   `json:"data"`
+		Tokens   []Data `json:"tokens"`
+	}
+
+	creds := credentials{
+		Password: "123456",
+		Email:    "john.doe@mail.com",
+		Data:     Data{Token: "jwt-123456"},
+		Tokens:   []Data{{Token: "abc-123"}, {Token: "xyz-987"}},
+	}
+
+	credsMap, err := maputil.StructToMap(creds)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	credsMask := maputil.Mask(credsMap,
+		maputil.MaskFields("password", "data.token", "tokens[_].token"),
+	)
+	testutil.DumpJSON(t, credsMask)
 }
 
 func testReplaceFixture(t *testing.T) map[string]any {
