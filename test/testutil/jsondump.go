@@ -85,15 +85,12 @@ func (c *JSONComparer) Compare(a, b []byte) error {
 	a = bytes.TrimLeft(a, " \t\r\n")
 	b = bytes.TrimLeft(b, " \t\r\n")
 
-	unmarshal := func(j []byte) (any, error) {
-		isObject := len(j) > 0 && j[0] == '{'
+	unmarshal := func(b []byte) (any, error) {
 		var m any
-		if isObject {
-			m = make(map[string]any)
-		}
-		if err := json.Unmarshal(j, &m); err != nil {
+		if err := json.Unmarshal(b, &m); err != nil {
 			return nil, err
 		}
+
 		return m, nil
 	}
 
@@ -134,6 +131,7 @@ func marshal(v any) ([]byte, error) {
 			return b, nil
 		}
 
+		// Prettify.
 		var bb bytes.Buffer
 		if err := json.Indent(&bb, b, "", " "); err != nil {
 			return nil, err
