@@ -16,28 +16,6 @@ func ReplaceFunc[T JSONType](m map[string]any, fn func(k string, v T) T) map[str
 	return replaceFunc(m, fn)
 }
 
-func Mask(m map[string]any, fn func(k string) bool) map[string]any {
-	return replaceFunc(m, func(k, v string) string {
-		if fn(k) {
-			return "*!REDACTED*"
-		}
-
-		return v
-	})
-}
-
-func MaskFields(fields ...string) func(k string) bool {
-	return func(k string) bool {
-		for _, f := range fields {
-			if f == k {
-				return true
-			}
-		}
-
-		return false
-	}
-}
-
 func replaceFunc[T any](m map[string]any, fn func(k string, v T) T) map[string]any {
 	var transformer func(string, any) any
 	transformer = func(k string, v any) any {
