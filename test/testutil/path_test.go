@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestPathOption(t *testing.T) {
+func TestPath(t *testing.T) {
 
 	tests := []struct {
 		name string

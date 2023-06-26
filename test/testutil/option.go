@@ -2,17 +2,10 @@ package testutil
 
 import (
 	"net/http"
-	"path/filepath"
-	"strings"
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 )
-
-const TestData = "testdata"
-const ExtJSON = ".json"
-const ExtHTTP = ".http"
-const ExtSQL = ".sql"
 
 type HTTPOption interface {
 	isHTTP()
@@ -37,95 +30,6 @@ type FileName string
 func (FileName) isJSON() {}
 func (FileName) isHTTP() {}
 func (FileName) isSQL()  {}
-
-type PathOption struct {
-	TestDir  string
-	FilePath string
-	FileName string
-	FileExt  string
-}
-
-func (o *PathOption) String() string {
-	if len(o.FileName) == 0 {
-		return filepath.Join(
-			o.TestDir,
-			o.FilePath+o.FileExt,
-		)
-	}
-
-	// Get the file extension.
-	fileName := string(o.FileName)
-	fileExt := filepath.Ext(fileName)
-	if fileExt != o.FileExt {
-		fileName = fileName + o.FileExt
-	}
-
-	return filepath.Join(
-		o.TestDir,
-		o.FilePath,
-		fileName,
-	)
-}
-
-func NewJSONPath(opts ...JSONOption) *PathOption {
-	opt := &PathOption{
-		TestDir:  TestData,
-		FilePath: "",
-		FileName: "",
-		FileExt:  ExtJSON,
-	}
-
-	for _, o := range opts {
-		switch v := o.(type) {
-		case FilePath:
-			opt.FilePath = strings.TrimSuffix(string(v), "/")
-		case FileName:
-			opt.FileName = string(v)
-		}
-	}
-
-	return opt
-}
-
-func NewHTTPPath(opts ...HTTPOption) *PathOption {
-	opt := &PathOption{
-		TestDir:  TestData,
-		FilePath: "",
-		FileName: "",
-		FileExt:  ExtHTTP,
-	}
-
-	for _, o := range opts {
-		switch v := o.(type) {
-		case FilePath:
-			opt.FilePath = strings.TrimSuffix(string(v), "/")
-		case FileName:
-			opt.FileName = string(v)
-		}
-	}
-
-	return opt
-}
-
-func NewSQLPath(opts ...SQLOption) *PathOption {
-	opt := &PathOption{
-		TestDir:  TestData,
-		FilePath: "",
-		FileName: "",
-		FileExt:  ExtSQL,
-	}
-
-	for _, o := range opts {
-		switch v := o.(type) {
-		case FilePath:
-			opt.FilePath = strings.TrimSuffix(string(v), "/")
-		case FileName:
-			opt.FileName = string(v)
-		}
-	}
-
-	return opt
-}
 
 type IgnoreHeadersOption []string
 
