@@ -19,6 +19,57 @@ import (
 )
 
 func TestHTTPDump(t *testing.T) {
+	htmlHandler := func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Header().Add("Content-Type", "text/html")
+		fmt.Fprint(w, `<!DOCTYPE html><html><head><title>Hello</title></head><body><h1>Hello world</h1></body></html>`)
+	}
+
+	jsonHandler := func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"data": {"name": "John Appleseed", "age": 10, "isMarried": true}}`)
+	}
+	loginHandler := func(w http.ResponseWriter, r *http.Request) {
+		type loginRequest struct {
+			Email    string `json:"email"`
+			Password string `json:"password"`
+		}
+
+		var req loginRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		w.WriteHeader(http.StatusCreated)
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"data": {"accessToken": "@cc3$$T0k3n"}}`)
+	}
+
+	registerHandler := func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		email := r.Form.Get("email")
+		password := r.Form.Get("password")
+		if email != "john.doe@mail.com" && password != "123456" {
+			http.Error(w, "invalid credentials", http.StatusUnauthorized)
+			return
+		}
+
+		w.WriteHeader(http.StatusCreated)
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"data": {"accessToken": "@cc3$$T0k3n"}}`)
+	}
+
+	noContentHandler := func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+		fmt.Fprint(w, nil)
+	}
+
 	testCases := []struct {
 		name    string
 		r       *http.Request
@@ -26,22 +77,14 @@ func TestHTTPDump(t *testing.T) {
 		opts    []testutil.HTTPOption
 	}{
 		{
-			name: "get html",
-			r:    httptest.NewRequest("GET", "/blog.html", nil),
-			handler: func(w http.ResponseWriter, r *http.Request) {
-				w.WriteHeader(http.StatusOK)
-				w.Header().Add("Content-Type", "text/html")
-				fmt.Fprint(w, `<!DOCTYPE html><html><head><title>Hello</title></head><body><h1>Hello world</h1></body></html>`)
-			},
+			name:    "get html",
+			r:       httptest.NewRequest("GET", "/blog.html", nil),
+			handler: htmlHandler,
 		},
 		{
-			name: "get json",
-			r:    httptest.NewRequest("GET", "/user.json", nil),
-			handler: func(w http.ResponseWriter, r *http.Request) {
-				w.WriteHeader(http.StatusOK)
-				w.Header().Set("Content-Type", "application/json")
-				fmt.Fprint(w, `{"data": {"name": "John Appleseed", "age": 10, "isMarried": true}}`)
-			},
+			name:    "get json",
+			r:       httptest.NewRequest("GET", "/user.json", nil),
+			handler: jsonHandler,
 		},
 		{
 			name: "get query string",
@@ -54,11 +97,7 @@ func TestHTTPDump(t *testing.T) {
 				r.URL.RawQuery = q.Encode()
 				return r
 			}(),
-			handler: func(w http.ResponseWriter, r *http.Request) {
-				w.WriteHeader(http.StatusOK)
-				w.Header().Set("Content-Type", "application/json")
-				fmt.Fprint(w, `{"data": {"name": "John Appleseed", "age": 10, "isMarried": true}}`)
-			},
+			handler: jsonHandler,
 		},
 		{
 			name: "post json",
@@ -67,22 +106,7 @@ func TestHTTPDump(t *testing.T) {
 				r.Header.Set("Content-Type", "application/json;charset=utf-8")
 				return r
 			}(),
-			handler: func(w http.ResponseWriter, r *http.Request) {
-				type loginRequest struct {
-					Email    string `json:"email"`
-					Password string `json:"password"`
-				}
-
-				var req loginRequest
-				if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-					http.Error(w, err.Error(), http.StatusBadRequest)
-					return
-				}
-
-				w.WriteHeader(http.StatusCreated)
-				w.Header().Set("Content-Type", "application/json")
-				fmt.Fprint(w, `{"data": {"accessToken": "@cc3$$T0k3n"}}`)
-			},
+			handler: loginHandler,
 		},
 		{
 			name: "post form",
@@ -94,18 +118,12 @@ func TestHTTPDump(t *testing.T) {
 				r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 				return r
 			}(),
-			handler: func(w http.ResponseWriter, r *http.Request) {
-				w.WriteHeader(http.StatusCreated)
-				fmt.Fprint(w, `{"data": {"accessToken": "@cc3$$T0k3n"}}`)
-			},
+			handler: registerHandler,
 		},
 		{
-			name: "delete no content",
-			r:    httptest.NewRequest("DELETE", "/users/1", nil),
-			handler: func(w http.ResponseWriter, r *http.Request) {
-				w.WriteHeader(http.StatusNoContent)
-				fmt.Fprint(w, nil)
-			},
+			name:    "delete no content",
+			r:       httptest.NewRequest("DELETE", "/users/1", nil),
+			handler: noContentHandler,
 		},
 		{
 			name: "skip fields",
@@ -138,7 +156,7 @@ func TestHTTPDump(t *testing.T) {
 			},
 			opts: []testutil.HTTPOption{
 				testutil.IgnoreFields("createdAt"),
-				testutil.InspectBody(func(body []byte) {
+				testutil.InspectResponseBody(func(body []byte) error {
 					type response struct {
 						Data struct {
 							CreatedAt time.Time `json:"createdAt"`
@@ -147,12 +165,14 @@ func TestHTTPDump(t *testing.T) {
 
 					var res response
 					if err := json.Unmarshal(body, &res); err != nil {
-						t.Fatal(err)
+						return err
 					}
 
 					if res.Data.CreatedAt.IsZero() {
-						t.Fatalf("want createdAt to be non-zero, got %s", res.Data.CreatedAt)
+						return fmt.Errorf("want createdAt to be non-zero, got %s", res.Data.CreatedAt)
 					}
+
+					return nil
 				}),
 			},
 		},
@@ -220,6 +240,19 @@ func TestHTTPDump(t *testing.T) {
 					}
 				}),
 			},
+		},
+		{
+			name: "masked request",
+			r: func() *http.Request {
+				r := httptest.NewRequest("POST", "/register", strings.NewReader(`{"email": "john.doe@mail.com", "password": "p@$$w0rd"}`))
+				r.Header.Set("Content-Type", "application/json;charset=utf-8")
+				return r
+			}(),
+			opts: []testutil.HTTPOption{
+				testutil.MaskRequestBody("password"),
+				testutil.MaskResponseBody("data.accessToken"),
+			},
+			handler: loginHandler,
 		},
 	}
 

@@ -20,18 +20,17 @@ var (
 )
 
 type httpOption struct {
-	headerFn   InspectHeaders
-	headerOpts []cmp.Option
-	bodyFn     InspectBody
-	bodyOpts   []cmp.Option
+	headerFn             InspectHeaders
+	headerOpts           []cmp.Option
+	bodyOpts             []cmp.Option
+	requestInterceptors  []RequestInterceptor
+	responseInterceptors []ResponseInterceptor
 }
 
 func NewHTTPOption(opts ...HTTPOption) *httpOption {
 	h := &httpOption{}
 	for _, opt := range opts {
 		switch o := opt.(type) {
-		case InspectBody:
-			h.bodyFn = o
 		case InspectHeaders:
 			h.headerFn = o
 		case IgnoreFieldsOption:
@@ -42,6 +41,10 @@ func NewHTTPOption(opts ...HTTPOption) *httpOption {
 			h.bodyOpts = append(h.bodyOpts, o...)
 		case HeaderCmpOptions:
 			h.headerOpts = append(h.headerOpts, o...)
+		case RequestInterceptor:
+			h.requestInterceptors = append(h.requestInterceptors, o)
+		case ResponseInterceptor:
+			h.responseInterceptors = append(h.responseInterceptors, o)
 		case FilePath, FileName:
 		default:
 			panic("option not implemented")
@@ -76,6 +79,21 @@ func DumpHTTPFile(fileName string, r *http.Request, handler http.HandlerFunc, op
 	type dumpAndCompare struct {
 		dumper
 		comparer
+	}
+
+	opt := NewHTTPOption(opts...)
+	for _, in := range opt.requestInterceptors {
+		r, err = in(r)
+		if err != nil {
+			return err
+		}
+	}
+
+	for _, in := range opt.responseInterceptors {
+		w, err = in(w)
+		if err != nil {
+			return err
+		}
 	}
 
 	dnc := &dumpAndCompare{
@@ -122,7 +140,10 @@ type HTTPDumper struct {
 }
 
 func NewHTTPDumper(w *http.Response, r *http.Request) *HTTPDumper {
-	return &HTTPDumper{w, r}
+	return &HTTPDumper{
+		w: w,
+		r: r,
+	}
 }
 
 func (d *HTTPDumper) Dump() ([]byte, error) {
@@ -160,20 +181,14 @@ func (c *HTTPComparer) Compare(want, got []byte) error {
 		return fmt.Errorf("failed to parse new snapshot: %w", err)
 	}
 
-	// Diff request.
-	if err := Diff(wantReq, gotReq, c.opt.headerOpts, c.opt.bodyOpts); err != nil {
+	// httpDiff request.
+	if err := httpDiff(wantReq, gotReq, c.opt.headerOpts, c.opt.bodyOpts); err != nil {
 		return fmt.Errorf("Request does not match snapshot. %w", err)
 	}
 
-	// Diff response.
-	if err := Diff(wantRes, gotRes, c.opt.headerOpts, c.opt.bodyOpts); err != nil {
+	// httpDiff response.
+	if err := httpDiff(wantRes, gotRes, c.opt.headerOpts, c.opt.bodyOpts); err != nil {
 		return fmt.Errorf("Response does not match snapshot. %w", err)
-	}
-
-	// Validate response body.
-	// The request body is not validated, since that is passed in explicitly.
-	if c.opt.bodyFn != nil {
-		c.opt.bodyFn(wantRes.Body)
 	}
 
 	if c.opt.headerFn != nil {
@@ -210,7 +225,7 @@ func parseDotHTTP(ss []byte) (reqS, resS *httpdump.Dump, err error) {
 	return
 }
 
-func Diff(x, y *httpdump.Dump, headerOpts []cmp.Option, bodyOpts []cmp.Option) error {
+func httpDiff(x, y *httpdump.Dump, headerOpts []cmp.Option, bodyOpts []cmp.Option) error {
 	if err := ansiDiff(x.Line, y.Line); err != nil {
 		return err
 	}

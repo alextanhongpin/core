@@ -1,6 +1,9 @@
 package testutil
 
 import (
+	"bytes"
+	"encoding/json"
+	"io/ioutil"
 	"net/http"
 
 	"github.com/alextanhongpin/core/types/maputil"
@@ -54,7 +57,6 @@ func IgnoreRows(keys ...string) IgnoreRowsOption {
 
 type InspectBody func(body []byte)
 
-func (o InspectBody) isHTTP() {}
 func (o InspectBody) isJSON() {}
 
 type InspectHeaders func(headers http.Header, isRequest bool)
@@ -99,6 +101,93 @@ func (m MaskFn) isJSON() {}
 
 func MaskFields(fields ...string) MaskFn {
 	return maputil.MaskFields(fields...)
+}
+
+type RequestInterceptor func(r *http.Request) (*http.Request, error)
+
+func (r RequestInterceptor) isHTTP() {}
+
+type ResponseInterceptor func(w *http.Response) (*http.Response, error)
+
+func (r ResponseInterceptor) isHTTP() {}
+
+func MaskRequestBody(fields ...string) RequestInterceptor {
+	return func(r *http.Request) (*http.Request, error) {
+		body, err := ioutil.ReadAll(r.Body)
+		if err != nil {
+			return nil, err
+		}
+
+		if json.Valid(body) {
+			var m map[string]any
+			if err := json.Unmarshal(body, &m); err != nil {
+				return nil, err
+			}
+			masked := maputil.MaskFunc(m, maputil.MaskFields(fields...))
+			body, err = json.Marshal(masked)
+			if err != nil {
+				return nil, err
+			}
+		}
+
+		r.Body = ioutil.NopCloser(bytes.NewReader(body))
+		return r, nil
+	}
+}
+
+func MaskResponseBody(fields ...string) ResponseInterceptor {
+	return func(w *http.Response) (*http.Response, error) {
+		body, err := ioutil.ReadAll(w.Body)
+		if err != nil {
+			return nil, err
+		}
+
+		if json.Valid(body) {
+			var m map[string]any
+			if err := json.Unmarshal(body, &m); err != nil {
+				return nil, err
+			}
+			masked := maputil.MaskFunc(m, maputil.MaskFields(fields...))
+			body, err = json.Marshal(masked)
+			if err != nil {
+				return nil, err
+			}
+		}
+
+		w.Body = ioutil.NopCloser(bytes.NewReader(body))
+		return w, nil
+	}
+}
+
+func InspectRequestBody(fn func([]byte) error) RequestInterceptor {
+	return func(r *http.Request) (*http.Request, error) {
+		body, err := ioutil.ReadAll(r.Body)
+		if err != nil {
+			return nil, err
+		}
+
+		if err := fn(body); err != nil {
+			return nil, err
+		}
+
+		r.Body = ioutil.NopCloser(bytes.NewReader(body))
+		return r, nil
+	}
+}
+
+func InspectResponseBody(fn func([]byte) error) ResponseInterceptor {
+	return func(w *http.Response) (*http.Response, error) {
+		body, err := ioutil.ReadAll(w.Body)
+		if err != nil {
+			return nil, err
+		}
+		if err := fn(body); err != nil {
+			return nil, err
+		}
+
+		w.Body = ioutil.NopCloser(bytes.NewReader(body))
+		return w, nil
+	}
 }
 
 func Postgres() DialectOption {
