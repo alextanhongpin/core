@@ -20,14 +20,15 @@ import (
 
 func TestHTTPDump(t *testing.T) {
 	htmlHandler := func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
 		w.Header().Add("Content-Type", "text/html")
+		// NOTE: WriteHeader must be called after Header.
+		w.WriteHeader(http.StatusOK)
 		fmt.Fprint(w, `<!DOCTYPE html><html><head><title>Hello</title></head><body><h1>Hello world</h1></body></html>`)
 	}
 
 	jsonHandler := func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
 		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
 		fmt.Fprint(w, `{"data": {"name": "John Appleseed", "age": 10, "isMarried": true}}`)
 	}
 	loginHandler := func(w http.ResponseWriter, r *http.Request) {
@@ -42,8 +43,9 @@ func TestHTTPDump(t *testing.T) {
 			return
 		}
 
-		w.WriteHeader(http.StatusCreated)
 		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("WWW-Authenticate", "Basic realm=<realm>, charset=UTF-8")
+		w.WriteHeader(http.StatusCreated)
 		fmt.Fprint(w, `{"data": {"accessToken": "@cc3$$T0k3n"}}`)
 	}
 
@@ -60,8 +62,8 @@ func TestHTTPDump(t *testing.T) {
 			return
 		}
 
-		w.WriteHeader(http.StatusCreated)
 		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
 		fmt.Fprint(w, `{"data": {"accessToken": "@cc3$$T0k3n"}}`)
 	}
 
@@ -100,6 +102,20 @@ func TestHTTPDump(t *testing.T) {
 			handler: jsonHandler,
 		},
 		{
+			name: "post bearer",
+			r: func() *http.Request {
+				r := httptest.NewRequest("POST", "/register", strings.NewReader(`{"email": "john.doe@mail.com", "password": "p@$$w0rd"}`))
+				r.Header.Set("Content-Type", "application/json;charset=utf-8")
+				r.Header.Set("Authorization", "Bearer xyz")
+				return r
+			}(),
+			opts: []testutil.HTTPOption{
+				testutil.MaskRequestHeaders("Authorization"),
+				testutil.MaskResponseHeaders("WWW-Authenticate"),
+			},
+			handler: loginHandler,
+		},
+		{
 			name: "post json",
 			r: func() *http.Request {
 				r := httptest.NewRequest("POST", "/register", strings.NewReader(`{"email": "john.doe@mail.com", "password": "p@$$w0rd"}`))
@@ -133,8 +149,8 @@ func TestHTTPDump(t *testing.T) {
 				return r
 			}(),
 			handler: func(w http.ResponseWriter, r *http.Request) {
-				w.WriteHeader(http.StatusCreated)
 				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusCreated)
 				id := rand.Int63()
 				fmt.Fprintf(w, `{"data": {"id": %d}}`, id)
 			},
@@ -150,8 +166,8 @@ func TestHTTPDump(t *testing.T) {
 				return r
 			}(),
 			handler: func(w http.ResponseWriter, r *http.Request) {
-				w.WriteHeader(http.StatusCreated)
 				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusCreated)
 				fmt.Fprintf(w, `{"data": {"createdAt": %q}}`, time.Now().Format(time.RFC3339))
 			},
 			opts: []testutil.HTTPOption{
@@ -184,8 +200,8 @@ func TestHTTPDump(t *testing.T) {
 				return r
 			}(),
 			handler: func(w http.ResponseWriter, r *http.Request) {
-				w.WriteHeader(http.StatusNoContent)
 				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusNoContent)
 				fmt.Fprint(w, nil)
 			},
 			opts: []testutil.HTTPOption{
@@ -217,8 +233,8 @@ func TestHTTPDump(t *testing.T) {
 				return r
 			}(),
 			handler: func(w http.ResponseWriter, r *http.Request) {
-				w.WriteHeader(http.StatusNoContent)
 				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusNoContent)
 				fmt.Fprint(w, nil)
 			},
 			opts: []testutil.HTTPOption{

@@ -148,6 +148,30 @@ func MaskResponseBody(fields ...string) HTTPInterceptor {
 	}
 }
 
+func MaskRequestHeaders(keys ...string) HTTPInterceptor {
+	return func(w *http.Response, r *http.Request) error {
+		for _, k := range keys {
+			if v := r.Header.Get(k); len(v) > 0 {
+				r.Header.Set(k, maputil.MaskValue)
+			}
+		}
+
+		return nil
+	}
+}
+
+func MaskResponseHeaders(keys ...string) HTTPInterceptor {
+	return func(w *http.Response, r *http.Request) error {
+		for _, k := range keys {
+			if v := w.Header.Get(k); len(v) > 0 {
+				w.Header.Set(k, maputil.MaskValue)
+			}
+		}
+
+		return nil
+	}
+}
+
 func InspectRequestBody(fn func([]byte) error) HTTPInterceptor {
 	return func(w *http.Response, r *http.Request) error {
 		b, err := httputil.ReadRequest(r)

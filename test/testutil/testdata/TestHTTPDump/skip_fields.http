@@ -13,9 +13,10 @@ Accept-Encoding: gzip
 
 HTTP/1.1 201 Created
 Connection: close
+Content-Type: application/json
 
 {
  "data": {
-  "id": 1841475632360419309
+  "id": 44365892523229594
  }
 }
