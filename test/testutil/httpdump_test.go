@@ -205,11 +205,7 @@ func TestHTTPDump(t *testing.T) {
 				fmt.Fprint(w, nil)
 			},
 			opts: []testutil.HTTPOption{
-				testutil.InspectHeaders(func(headers http.Header, isRequest bool) {
-					if !isRequest {
-						return
-					}
-
+				testutil.InspectRequestHeaders(func(headers http.Header) {
 					contentType, params, err := mime.ParseMediaType(headers.Get("Content-Type"))
 					if err != nil {
 						t.Fatal(err)
@@ -238,11 +234,7 @@ func TestHTTPDump(t *testing.T) {
 				fmt.Fprint(w, nil)
 			},
 			opts: []testutil.HTTPOption{
-				testutil.InspectHeaders(func(headers http.Header, isRequest bool) {
-					if !isRequest {
-						return
-					}
-
+				testutil.InspectRequestHeaders(func(headers http.Header) {
 					cacheControl := headers["Cache-Control"]
 
 					maxAge := "max-age=604800"

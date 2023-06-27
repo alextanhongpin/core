@@ -20,7 +20,6 @@ var (
 )
 
 type httpOption struct {
-	headerFn     InspectHeaders
 	headerOpts   []cmp.Option
 	bodyOpts     []cmp.Option
 	interceptors []HTTPInterceptor
@@ -30,8 +29,6 @@ func NewHTTPOption(opts ...HTTPOption) *httpOption {
 	h := &httpOption{}
 	for _, opt := range opts {
 		switch o := opt.(type) {
-		case InspectHeaders:
-			h.headerFn = o
 		case IgnoreFieldsOption:
 			h.bodyOpts = append(h.bodyOpts, IgnoreMapKeys(o...))
 		case IgnoreHeadersOption:
@@ -175,11 +172,6 @@ func (c *HTTPComparer) Compare(want, got []byte) error {
 	// httpDiff response.
 	if err := httpDiff(wantRes, gotRes, c.opt.headerOpts, c.opt.bodyOpts); err != nil {
 		return fmt.Errorf("Response does not match snapshot. %w", err)
-	}
-
-	if c.opt.headerFn != nil {
-		c.opt.headerFn(wantReq.Headers, true)
-		c.opt.headerFn(wantRes.Headers, false)
 	}
 
 	return nil

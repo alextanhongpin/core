@@ -56,10 +56,6 @@ func IgnoreRows(keys ...string) IgnoreRowsOption {
 	return IgnoreRowsOption(keys)
 }
 
-type InspectHeaders func(headers http.Header, isRequest bool)
-
-func (o InspectHeaders) isHTTP() {}
-
 type InspectQuery func(query string)
 
 func (o InspectQuery) isSQL() {}
@@ -197,6 +193,20 @@ func InspectResponseBody(fn func([]byte) error) HTTPInterceptor {
 		}
 
 		return fn(b)
+	}
+}
+
+func InspectRequestHeaders(fn func(http.Header)) HTTPInterceptor {
+	return func(w *http.Response, r *http.Request) error {
+		fn(r.Header.Clone())
+		return nil
+	}
+}
+
+func InspectResponseHeaders(fn func(http.Header)) HTTPInterceptor {
+	return func(w *http.Response, r *http.Request) error {
+		fn(w.Header.Clone())
+		return nil
 	}
 }
 
