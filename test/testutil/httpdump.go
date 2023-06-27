@@ -20,11 +20,10 @@ var (
 )
 
 type httpOption struct {
-	headerFn             InspectHeaders
-	headerOpts           []cmp.Option
-	bodyOpts             []cmp.Option
-	requestInterceptors  []RequestInterceptor
-	responseInterceptors []ResponseInterceptor
+	headerFn     InspectHeaders
+	headerOpts   []cmp.Option
+	bodyOpts     []cmp.Option
+	interceptors []HTTPInterceptor
 }
 
 func NewHTTPOption(opts ...HTTPOption) *httpOption {
@@ -41,10 +40,8 @@ func NewHTTPOption(opts ...HTTPOption) *httpOption {
 			h.bodyOpts = append(h.bodyOpts, o...)
 		case HeaderCmpOptions:
 			h.headerOpts = append(h.headerOpts, o...)
-		case RequestInterceptor:
-			h.requestInterceptors = append(h.requestInterceptors, o)
-		case ResponseInterceptor:
-			h.responseInterceptors = append(h.responseInterceptors, o)
+		case HTTPInterceptor:
+			h.interceptors = append(h.interceptors, o)
 		case FilePath, FileName:
 		default:
 			panic("option not implemented")
@@ -62,9 +59,6 @@ func DumpHTTPFile(fileName string, r *http.Request, handler http.HandlerFunc, op
 	}
 
 	br := bytes.NewReader(b)
-	defer br.Seek(0, 0)
-
-	r.Body.Close()
 	r.Body = io.NopCloser(br)
 
 	wr := httptest.NewRecorder()
@@ -73,7 +67,7 @@ func DumpHTTPFile(fileName string, r *http.Request, handler http.HandlerFunc, op
 	handler(wr, r)
 	w := wr.Result()
 
-	// Restore to original body.
+	// Reset request for the handler.
 	br.Seek(0, 0)
 
 	type dumpAndCompare struct {
@@ -82,16 +76,8 @@ func DumpHTTPFile(fileName string, r *http.Request, handler http.HandlerFunc, op
 	}
 
 	opt := NewHTTPOption(opts...)
-	for _, in := range opt.requestInterceptors {
-		r, err = in(r)
-		if err != nil {
-			return err
-		}
-	}
-
-	for _, in := range opt.responseInterceptors {
-		w, err = in(w)
-		if err != nil {
+	for _, in := range opt.interceptors {
+		if err := in(w, r); err != nil {
 			return err
 		}
 	}

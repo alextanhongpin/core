@@ -19,26 +19,17 @@ func DumpRequest(r *http.Request) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	var br interface {
-		io.Reader
-		Len() int
+
+	b, err = prettyBytes(b)
+	if err != nil {
+		return nil, err
 	}
 
-	if json.Valid(b) {
-		// Pretty-print the json body.
-		bb := new(bytes.Buffer)
-		if err := json.Indent(bb, b, "", " "); err != nil {
-			return nil, err
-		}
-		br = bb
-	} else {
-		br = bytes.NewReader(b)
-	}
 	// Assign back to the body.
-	r.Body = io.NopCloser(br)
+	r.Body = io.NopCloser(bytes.NewReader(b))
 
 	// Update the content-length after updating body.
-	r.ContentLength = int64(br.Len())
+	r.ContentLength = int64(len(b))
 
 	// `httputil.DumpRequestOut` requires these to be set.
 	if r.URL.Scheme == "" {
@@ -65,18 +56,13 @@ func DumpResponse(w *http.Response) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	if json.Valid(b) {
-		// Pretty-print the json body.
-		bb := new(bytes.Buffer)
-		if err := json.Indent(bb, b, "", " "); err != nil {
-			return nil, err
-		}
-		// Assign back to the body.
-		w.Body = io.NopCloser(bb)
-	} else {
-		// Assign back to the body.
-		w.Body = io.NopCloser(bytes.NewReader(b))
+
+	b, err = prettyBytes(b)
+	if err != nil {
+		return nil, err
 	}
+
+	w.Body = io.NopCloser(bytes.NewReader(b))
 
 	res, err := httputil.DumpResponse(w, true)
 	if err != nil {
@@ -141,4 +127,17 @@ func parseHeaders(headers []byte) (http.Header, error) {
 	}
 
 	return h, nil
+}
+
+func prettyBytes(b []byte) ([]byte, error) {
+	if !json.Valid(b) {
+		return b, nil
+	}
+
+	bb := new(bytes.Buffer)
+	if err := json.Indent(bb, b, "", " "); err != nil {
+		return nil, err
+	}
+
+	return bb.Bytes(), nil
 }

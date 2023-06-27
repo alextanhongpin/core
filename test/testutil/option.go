@@ -3,9 +3,10 @@ package testutil
 import (
 	"bytes"
 	"encoding/json"
-	"io/ioutil"
+	"io"
 	"net/http"
 
+	"github.com/alextanhongpin/core/http/httputil"
 	"github.com/alextanhongpin/core/types/maputil"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
@@ -103,90 +104,69 @@ func MaskFields(fields ...string) MaskFn {
 	return maputil.MaskFields(fields...)
 }
 
-type RequestInterceptor func(r *http.Request) (*http.Request, error)
+type HTTPInterceptor func(w *http.Response, r *http.Request) error
 
-func (r RequestInterceptor) isHTTP() {}
+func (i HTTPInterceptor) isHTTP() {}
 
-type ResponseInterceptor func(w *http.Response) (*http.Response, error)
-
-func (r ResponseInterceptor) isHTTP() {}
-
-func MaskRequestBody(fields ...string) RequestInterceptor {
-	return func(r *http.Request) (*http.Request, error) {
-		body, err := ioutil.ReadAll(r.Body)
+func MaskRequestBody(fields ...string) HTTPInterceptor {
+	return func(w *http.Response, r *http.Request) error {
+		b, err := httputil.ReadRequest(r)
 		if err != nil {
-			return nil, err
+			return err
 		}
 
-		if json.Valid(body) {
-			var m map[string]any
-			if err := json.Unmarshal(body, &m); err != nil {
-				return nil, err
-			}
-			masked := maputil.MaskFunc(m, maputil.MaskFields(fields...))
-			body, err = json.Marshal(masked)
+		if json.Valid(b) {
+			b, err = maputil.MaskBytes(b, fields...)
 			if err != nil {
-				return nil, err
+				return err
 			}
+
+			r.Body = io.NopCloser(bytes.NewReader(b))
 		}
 
-		r.Body = ioutil.NopCloser(bytes.NewReader(body))
-		return r, nil
+		return nil
 	}
 }
 
-func MaskResponseBody(fields ...string) ResponseInterceptor {
-	return func(w *http.Response) (*http.Response, error) {
-		body, err := ioutil.ReadAll(w.Body)
+func MaskResponseBody(fields ...string) HTTPInterceptor {
+	return func(w *http.Response, r *http.Request) error {
+		b, err := httputil.ReadResponse(w)
 		if err != nil {
-			return nil, err
+			return err
 		}
 
-		if json.Valid(body) {
-			var m map[string]any
-			if err := json.Unmarshal(body, &m); err != nil {
-				return nil, err
-			}
-			masked := maputil.MaskFunc(m, maputil.MaskFields(fields...))
-			body, err = json.Marshal(masked)
+		if json.Valid(b) {
+			b, err = maputil.MaskBytes(b, fields...)
 			if err != nil {
-				return nil, err
+				return err
 			}
+
+			w.Body = io.NopCloser(bytes.NewReader(b))
 		}
 
-		w.Body = ioutil.NopCloser(bytes.NewReader(body))
-		return w, nil
+		return nil
 	}
 }
 
-func InspectRequestBody(fn func([]byte) error) RequestInterceptor {
-	return func(r *http.Request) (*http.Request, error) {
-		body, err := ioutil.ReadAll(r.Body)
+func InspectRequestBody(fn func([]byte) error) HTTPInterceptor {
+	return func(w *http.Response, r *http.Request) error {
+		b, err := httputil.ReadRequest(r)
 		if err != nil {
-			return nil, err
+			return err
 		}
 
-		if err := fn(body); err != nil {
-			return nil, err
-		}
-
-		r.Body = ioutil.NopCloser(bytes.NewReader(body))
-		return r, nil
+		return fn(b)
 	}
 }
 
-func InspectResponseBody(fn func([]byte) error) ResponseInterceptor {
-	return func(w *http.Response) (*http.Response, error) {
-		body, err := ioutil.ReadAll(w.Body)
+func InspectResponseBody(fn func([]byte) error) HTTPInterceptor {
+	return func(w *http.Response, r *http.Request) error {
+		b, err := httputil.ReadResponse(w)
 		if err != nil {
-			return nil, err
-		}
-		if err := fn(body); err != nil {
-			return nil, err
+			return err
 		}
 
-		w.Body = ioutil.NopCloser(bytes.NewReader(body))
-		return w, nil
+		return fn(b)
 	}
 }
 
