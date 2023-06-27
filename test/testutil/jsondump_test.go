@@ -64,5 +64,11 @@ func TestDumpJSONMaskField(t *testing.T) {
 		Password: "s3cr3t",
 	}
 
-	testutil.DumpJSON(t, creds, testutil.MaskFields("password"))
+	testutil.DumpJSON(t, creds,
+		testutil.MaskJSON("password"),
+		testutil.InspectJSON(func(b []byte) error {
+			t.Log(string(b))
+			return nil
+		}),
+	)
 }

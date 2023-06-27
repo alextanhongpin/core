@@ -5,28 +5,27 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/alextanhongpin/core/types/maputil"
 	"github.com/google/go-cmp/cmp"
 )
 
 type jsonOption struct {
-	bodyOpts []cmp.Option
-	bodyFn   InspectBody
-	maskFn   MaskFn
+	bodyOpts     []cmp.Option
+	inspector    JSONInspector
+	interceptors []JSONInterceptor
 }
 
 func NewJSONOption(opts ...JSONOption) *jsonOption {
 	j := &jsonOption{}
 	for _, opt := range opts {
 		switch o := opt.(type) {
-		case InspectBody:
-			j.bodyFn = o
 		case IgnoreFieldsOption:
 			j.bodyOpts = append(j.bodyOpts, IgnoreMapKeys(o...))
 		case CmpOptionsOptions:
 			j.bodyOpts = append(j.bodyOpts, o...)
-		case MaskFn:
-			j.maskFn = o
+		case JSONInspector:
+			j.inspector = o
+		case JSONInterceptor:
+			j.interceptors = append(j.interceptors, o)
 		case FilePath, FileName:
 		// Do nothing.
 		default:
@@ -89,6 +88,12 @@ func (c *JSONComparer) Compare(a, b []byte) error {
 	a = bytes.TrimLeft(a, " \t\r\n")
 	b = bytes.TrimLeft(b, " \t\r\n")
 
+	if c.opt.inspector != nil {
+		if err := c.opt.inspector(b); err != nil {
+			return err
+		}
+	}
+
 	want, err := unmarshal(a)
 	if err != nil {
 		return err
@@ -99,52 +104,39 @@ func (c *JSONComparer) Compare(a, b []byte) error {
 		return err
 	}
 
-	if c.opt.bodyFn != nil {
-		c.opt.bodyFn(b)
-	}
-
 	return ansiDiff(want, got, c.opt.bodyOpts...)
 }
 
 type JSONDumper struct {
-	v      any
-	maskFn func(key string) bool
+	v            any
+	interceptors []JSONInterceptor
 }
 
 func NewJSONDumper(v any, opts ...JSONOption) *JSONDumper {
 	return &JSONDumper{
-		v:      v,
-		maskFn: NewJSONOption(opts...).maskFn,
+		v:            v,
+		interceptors: NewJSONOption(opts...).interceptors,
 	}
 }
 
 func (d *JSONDumper) Dump() ([]byte, error) {
-	if d.maskFn == nil {
-		return d.dump()
-	}
-
-	return d.maskBeforeDump()
-}
-
-func (d *JSONDumper) dump() ([]byte, error) {
-	return marshal(d.v)
-}
-
-func (d *JSONDumper) maskBeforeDump() ([]byte, error) {
 	b, err := marshal(d.v)
 	if err != nil {
 		return nil, err
 	}
 
-	// Mask can only be applied to map[string]any.
-	var m map[string]any
-	if err := json.Unmarshal(b, &m); err != nil {
-		return nil, err
+	if len(d.interceptors) == 0 {
+		return b, nil
 	}
 
-	// Apply mask.
-	masked := maputil.MaskFunc(m, d.maskFn)
-	return marshal(masked)
+	for _, it := range d.interceptors {
+		b, err = it(b)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return marshal(b)
 }
 
 func marshal(v any) ([]byte, error) {

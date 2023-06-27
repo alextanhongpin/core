@@ -56,10 +56,6 @@ func IgnoreRows(keys ...string) IgnoreRowsOption {
 	return IgnoreRowsOption(keys)
 }
 
-type InspectBody func(body []byte)
-
-func (o InspectBody) isJSON() {}
-
 type InspectHeaders func(headers http.Header, isRequest bool)
 
 func (o InspectHeaders) isHTTP() {}
@@ -96,12 +92,22 @@ type DialectOption string
 
 func (o DialectOption) isSQL() {}
 
-type MaskFn func(key string) bool
+type JSONInspector func([]byte) error
 
-func (m MaskFn) isJSON() {}
+func (i JSONInspector) isJSON() {}
 
-func MaskFields(fields ...string) MaskFn {
-	return maputil.MaskFields(fields...)
+func InspectJSON(fn func([]byte) error) JSONInspector {
+	return fn
+}
+
+type JSONInterceptor func([]byte) ([]byte, error)
+
+func (i JSONInterceptor) isJSON() {}
+
+func MaskJSON(fields ...string) JSONInterceptor {
+	return func(b []byte) ([]byte, error) {
+		return maputil.MaskBytes(b, fields...)
+	}
 }
 
 type HTTPInterceptor func(w *http.Response, r *http.Request) error
