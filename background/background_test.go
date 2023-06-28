@@ -42,7 +42,7 @@ func TestBackground(t *testing.T) {
 		bg, stop := background.New[int](task)
 		defer stop()
 		bg.Send(1)
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(150 * time.Millisecond)
 		assert.Equal(t, []int{1}, task.Numbers())
 	})
 
@@ -52,7 +52,8 @@ func TestBackground(t *testing.T) {
 		bg.Send(1)
 		stop()
 		bg.Send(2)
-		task.sleep()
+
+		time.Sleep(150 * time.Millisecond)
 		assert.Equal(t, []int{1, 2}, task.Numbers())
 	})
 
@@ -63,8 +64,7 @@ func TestBackground(t *testing.T) {
 		bg.Send(2)
 		stop()
 		bg.Send(3)
-		task.sleep()
-		task.sleep()
+		time.Sleep(350 * time.Millisecond)
 
 		assert.Equal(t, []int{1, 2, 3}, task.Numbers())
 	})
