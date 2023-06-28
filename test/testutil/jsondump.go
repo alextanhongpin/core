@@ -18,9 +18,7 @@ func NewJSONOption(opts ...JSONOption) *jsonOption {
 	j := &jsonOption{}
 	for _, opt := range opts {
 		switch o := opt.(type) {
-		case IgnoreFieldsOption:
-			j.bodyOpts = append(j.bodyOpts, IgnoreMapKeys(o...))
-		case CmpOptionsOptions:
+		case JSONCmpOptions:
 			j.bodyOpts = append(j.bodyOpts, o...)
 		case JSONInspector:
 			j.inspector = o
@@ -120,13 +118,13 @@ func NewJSONDumper(v any, opts ...JSONOption) *JSONDumper {
 }
 
 func (d *JSONDumper) Dump() ([]byte, error) {
-	b, err := marshal(d.v)
-	if err != nil {
-		return nil, err
+	if len(d.interceptors) == 0 {
+		return marshal(d.v)
 	}
 
-	if len(d.interceptors) == 0 {
-		return b, nil
+	b, err := json.Marshal(d.v)
+	if err != nil {
+		return nil, err
 	}
 
 	for _, it := range d.interceptors {

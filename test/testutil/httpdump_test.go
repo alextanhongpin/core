@@ -155,7 +155,7 @@ func TestHTTPDump(t *testing.T) {
 				fmt.Fprintf(w, `{"data": {"id": %d}}`, id)
 			},
 			opts: []testutil.HTTPOption{
-				testutil.IgnoreFields("id"),
+				testutil.IgnoreBodyFields("id"),
 			},
 		},
 		{
@@ -171,7 +171,7 @@ func TestHTTPDump(t *testing.T) {
 				fmt.Fprintf(w, `{"data": {"createdAt": %q}}`, time.Now().Format(time.RFC3339))
 			},
 			opts: []testutil.HTTPOption{
-				testutil.IgnoreFields("createdAt"),
+				testutil.IgnoreBodyFields("createdAt"),
 				testutil.InspectResponseBody(func(body []byte) error {
 					type response struct {
 						Data struct {

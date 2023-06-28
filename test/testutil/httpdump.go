@@ -3,20 +3,34 @@ package testutil
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"testing"
+	"text/template"
 
 	"github.com/alextanhongpin/core/http/httpdump"
 	"github.com/google/go-cmp/cmp"
 )
 
+var ErrInvalidHTTPDumpFormat = errors.New("invalid HTTP dump format")
+
 var (
 	LineBreak = []byte("\n")
-	Separator = []byte("###")
-	SemiColon = []byte(":")
+
+	dumpTemplate = template.Must(template.New(`request`).Parse(`{{.Request}}
+
+
+###
+
+
+{{.Response}}
+`))
+
+	re = regexp.MustCompile(`(?m)^#{3}$`)
 )
 
 type httpOption struct {
@@ -29,10 +43,6 @@ func NewHTTPOption(opts ...HTTPOption) *httpOption {
 	h := &httpOption{}
 	for _, opt := range opts {
 		switch o := opt.(type) {
-		case IgnoreFieldsOption:
-			h.bodyOpts = append(h.bodyOpts, IgnoreMapKeys(o...))
-		case IgnoreHeadersOption:
-			h.headerOpts = append(h.headerOpts, IgnoreMapKeys(o...))
 		case BodyCmpOptions:
 			h.bodyOpts = append(h.bodyOpts, o...)
 		case HeaderCmpOptions:
@@ -130,17 +140,28 @@ func NewHTTPDumper(w *http.Response, r *http.Request) *HTTPDumper {
 }
 
 func (d *HTTPDumper) Dump() ([]byte, error) {
-	req, err := httpdump.DumpRequest(d.r)
+	r := httpdump.NewRequest(d.r)
+	w := httpdump.NewResponse(d.w)
+
+	req, err := r.MarshalBinary()
 	if err != nil {
 		return nil, err
 	}
 
-	res, err := httpdump.DumpResponse(d.w)
+	res, err := w.MarshalBinary()
 	if err != nil {
 		return nil, err
 	}
 
-	return bytes.Join([][]byte{req, Separator, res}, bytes.Repeat(LineBreak, 2)), nil
+	var b bytes.Buffer
+	if err := dumpTemplate.Execute(&b, map[string]any{
+		"Request":  string(req),
+		"Response": string(res),
+	}); err != nil {
+		return nil, err
+	}
+
+	return b.Bytes(), nil
 }
 
 type HTTPComparer struct {
@@ -153,60 +174,81 @@ func NewHTTPComparer(opts ...HTTPOption) *HTTPComparer {
 	}
 }
 
-func (c *HTTPComparer) Compare(want, got []byte) error {
-	wantReq, wantRes, err := parseDotHTTP(want)
+func (c *HTTPComparer) Compare(snapshot, received []byte) error {
+	snapshotReq, snapshotRes, err := parseHTTPDump(snapshot)
 	if err != nil {
 		return fmt.Errorf("failed to parse old snapshot: %w", err)
 	}
 
-	gotReq, gotRes, err := parseDotHTTP(got)
+	receivedReq, receivedRes, err := parseHTTPDump(received)
 	if err != nil {
 		return fmt.Errorf("failed to parse new snapshot: %w", err)
 	}
 
-	// httpDiff request.
-	if err := httpDiff(wantReq, gotReq, c.opt.headerOpts, c.opt.bodyOpts); err != nil {
+	// httpdumpDiff request.
+	if err := httpdumpDiff(snapshotReq.Dump, receivedReq.Dump, c.opt.headerOpts, c.opt.bodyOpts); err != nil {
 		return fmt.Errorf("Request does not match snapshot. %w", err)
 	}
 
-	// httpDiff response.
-	if err := httpDiff(wantRes, gotRes, c.opt.headerOpts, c.opt.bodyOpts); err != nil {
+	// httpdumpDiff response.
+	if err := httpdumpDiff(snapshotRes.Dump, receivedRes.Dump, c.opt.headerOpts, c.opt.bodyOpts); err != nil {
 		return fmt.Errorf("Response does not match snapshot. %w", err)
 	}
 
 	return nil
 }
 
-func parseDotHTTP(ss []byte) (reqS, resS *httpdump.Dump, err error) {
-	var sep []byte
-	sep = append(sep, LineBreak...)
-	sep = append(sep, Separator...)
-	sep = append(sep, LineBreak...)
-
-	req, res, ok := bytes.Cut(ss, sep)
-	if !ok {
-		return nil, nil, fmt.Errorf("invalid snapshot: %s", ss)
+func parseHTTPDump(b []byte) (r *httpdump.Request, w *httpdump.Response, err error) {
+	req, res, err := split(b)
+	if err != nil {
+		return nil, nil, err
 	}
 
-	reqS, err = httpdump.Parse(req)
+	r = new(httpdump.Request)
+	err = r.UnmarshalBinary(req)
 	if err != nil {
-		err = fmt.Errorf("failed to parse request: %w", err)
 		return
 	}
 
-	resS, err = httpdump.Parse(res)
+	w = new(httpdump.Response)
+	err = w.UnmarshalBinary(res)
 	if err != nil {
-		err = fmt.Errorf("failed to parse response: %w", err)
 		return
 	}
 
 	return
 }
 
-func httpDiff(x, y *httpdump.Dump, headerOpts []cmp.Option, bodyOpts []cmp.Option) error {
+type dump struct {
+	Line   string
+	Header http.Header
+	Body   *bytes.Buffer
+}
+
+func httpdumpDiff(
+	snapshot httpdump.Dump,
+	received httpdump.Dump,
+	headerOpts []cmp.Option,
+	bodyOpts []cmp.Option,
+) error {
+	x := snapshot
+	y := received
+
 	if err := ansiDiff(x.Line, y.Line); err != nil {
 		return err
 	}
+
+	xBody, err := io.ReadAll(x.Body)
+	if err != nil {
+		return err
+	}
+	x.Body.Seek(0, 0)
+
+	yBody, err := io.ReadAll(y.Body)
+	if err != nil {
+		return err
+	}
+	y.Body.Seek(0, 0)
 
 	// Compare body before header.
 	// Headers may contain `Content-Length`, which depends on the body.
@@ -216,13 +258,25 @@ func httpDiff(x, y *httpdump.Dump, headerOpts []cmp.Option, bodyOpts []cmp.Optio
 			// Convert the json to map[string]any for better diff.
 			// This does not work on JSON array.
 			// Ensure that only structs are passed in.
-			return comparer.Compare(x.Body, y.Body)
+			return comparer.Compare(xBody, yBody)
 		}
 
-		return ansiDiff(x.Body, y.Body, bodyOpts...)
-	}(json.Valid(x.Body) && json.Valid(y.Body)); err != nil {
+		return ansiDiff(xBody, yBody, bodyOpts...)
+	}(json.Valid(xBody) && json.Valid(yBody)); err != nil {
 		return err
 	}
 
-	return ansiDiff(x.Headers, y.Headers, headerOpts...)
+	return ansiDiff(x.Header, y.Header, headerOpts...)
+}
+
+func split(s []byte) (req, res []byte, err error) {
+	parts := re.Split(string(s), 2)
+	if len(parts) != 2 {
+		return nil, nil, ErrInvalidHTTPDumpFormat
+	}
+
+	req = []byte(parts[0])
+	res = []byte(parts[1])
+
+	return
 }

@@ -24,63 +24,58 @@ type SQLOption interface {
 	isSQL()
 }
 
-type IgnoreHeadersOption []string
-
-func IgnoreHeaders(keys ...string) IgnoreHeadersOption {
-	return IgnoreHeadersOption(keys)
-}
-
-func (o IgnoreHeadersOption) isHTTP() {}
-
-type IgnoreFieldsOption []string
-
-func IgnoreFields(keys ...string) IgnoreFieldsOption {
-	return IgnoreFieldsOption(keys)
-}
-
-func (o IgnoreFieldsOption) isHTTP() {}
-func (o IgnoreFieldsOption) isJSON() {}
-func (o IgnoreFieldsOption) isSQL()  {}
-
 type IgnoreArgsOption []string
 
 func (o IgnoreArgsOption) isSQL() {}
-func IgnoreArgs(keys ...string) IgnoreArgsOption {
-	return IgnoreArgsOption(keys)
+func IgnoreArgs(fields ...string) ArgsCmpOptions {
+	return ArgsCmpOptions([]cmp.Option{IgnoreMapKeys(fields...)})
 }
 
 type IgnoreRowsOption []string
 
 func (o IgnoreRowsOption) isSQL() {}
-func IgnoreRows(keys ...string) IgnoreRowsOption {
-	return IgnoreRowsOption(keys)
+
+func IgnoreRows(fields ...string) RowsCmpOptions {
+	return RowsCmpOptions([]cmp.Option{IgnoreMapKeys(fields...)})
 }
 
 type InspectQuery func(query string)
 
 func (o InspectQuery) isSQL() {}
 
-type CmpOptionsOptions []cmp.Option
+type JSONCmpOptions []cmp.Option
 
-func CmpOptions(opts ...cmp.Option) CmpOptionsOptions {
-	return CmpOptionsOptions(opts)
+func JSONCmpOption(opts ...cmp.Option) JSONCmpOptions {
+	return JSONCmpOptions(opts)
 }
 
-func (o CmpOptionsOptions) isJSON() {}
+func IgnoreFields(fields ...string) JSONCmpOptions {
+	return JSONCmpOptions([]cmp.Option{IgnoreMapKeys(fields...)})
+}
 
-type HeaderCmpOptions CmpOptionsOptions
+func (o JSONCmpOptions) isJSON() {}
+
+type HeaderCmpOptions []cmp.Option
 
 func (o HeaderCmpOptions) isHTTP() {}
 
-type BodyCmpOptions CmpOptionsOptions
+func IgnoreHeaders(keys ...string) HeaderCmpOptions {
+	return HeaderCmpOptions([]cmp.Option{IgnoreMapKeys(keys...)})
+}
+
+type BodyCmpOptions []cmp.Option
 
 func (o BodyCmpOptions) isHTTP() {}
 
-type ArgsCmpOptions CmpOptionsOptions
+func IgnoreBodyFields(fields ...string) BodyCmpOptions {
+	return BodyCmpOptions([]cmp.Option{IgnoreMapKeys(fields...)})
+}
+
+type ArgsCmpOptions []cmp.Option
 
 func (o ArgsCmpOptions) isSQL() {}
 
-type RowsCmpOptions CmpOptionsOptions
+type RowsCmpOptions []cmp.Option
 
 func (o RowsCmpOptions) isSQL() {}
 

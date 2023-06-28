@@ -41,7 +41,7 @@ func TestDumpJSON(t *testing.T) {
 	testutil.DumpJSON(t, p, testutil.IgnoreFields("bornAt"),
 		testutil.FilePath("DumpPerson"),
 	)
-	testutil.DumpJSON(t, p, testutil.CmpOptions(
+	testutil.DumpJSON(t, p, testutil.JSONCmpOption(
 		cmpopts.IgnoreMapEntries(func(key string, _ any) bool {
 			return key == "bornAt"
 		}),

@@ -31,15 +31,6 @@ func NewSQLOption(opts ...SQLOption) *sqlOption {
 		switch o := opt.(type) {
 		case InspectQuery:
 			s.queryFn = o
-		case IgnoreArgsOption:
-			s.argsOpts = append(s.argsOpts, IgnoreMapKeys(o...))
-		case IgnoreRowsOption:
-			s.resultOpts = append(s.resultOpts, IgnoreMapKeys(o...))
-		case IgnoreFieldsOption:
-			// We share the same options, with the assumptions that there are no
-			// keys-collision - args are using keys numbered from $1 to $n.
-			s.argsOpts = append(s.argsOpts, IgnoreMapKeys(o...))
-			s.resultOpts = append(s.resultOpts, IgnoreMapKeys(o...))
 		case ArgsCmpOptions:
 			s.argsOpts = append(s.argsOpts, o...)
 		case RowsCmpOptions:
@@ -62,7 +53,6 @@ func DumpSQL(t *testing.T, dump *SQLDump, dialect DialectOption, opts ...SQLOpti
 	}
 
 	fileName := opt.String()
-
 	if err := DumpSQLFile(fileName, dump, dialect, opts...); err != nil {
 		t.Fatal(err)
 	}
@@ -76,7 +66,6 @@ func DumpMySQL(t *testing.T, dump *SQLDump, opts ...SQLOption) {
 	}
 
 	fileName := opt.String()
-
 	if err := DumpSQLFile(fileName, dump, MySQL(), opts...); err != nil {
 		t.Fatal(err)
 	}
@@ -90,7 +79,6 @@ func DumpPostgres(t *testing.T, dump *SQLDump, opts ...SQLOption) {
 	}
 
 	fileName := opt.String()
-
 	if err := DumpSQLFile(fileName, dump, Postgres(), opts...); err != nil {
 		t.Fatal(err)
 	}
