@@ -14,15 +14,9 @@ import (
 
 var ErrParseHeader = errors.New("httpdump: parse header failed")
 
-type Dump struct {
-	Line   string
-	Header http.Header
-	Body   *bytes.Reader
-}
-
 type Request struct {
 	*http.Request
-	Dump
+	Dump Dump
 }
 
 func NewRequest(r *http.Request) *Request {

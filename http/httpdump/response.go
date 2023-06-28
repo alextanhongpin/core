@@ -13,7 +13,7 @@ import (
 
 type Response struct {
 	*http.Response
-	Dump
+	Dump Dump
 }
 
 func NewResponse(r *http.Response) *Response {
