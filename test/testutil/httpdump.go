@@ -143,12 +143,12 @@ func (d *HTTPDumper) Dump() ([]byte, error) {
 	r := httpdump.NewRequest(d.r)
 	w := httpdump.NewResponse(d.w)
 
-	req, err := r.MarshalBinary()
+	req, err := r.MarshalText()
 	if err != nil {
 		return nil, err
 	}
 
-	res, err := w.MarshalBinary()
+	res, err := w.MarshalText()
 	if err != nil {
 		return nil, err
 	}
@@ -205,13 +205,13 @@ func parseHTTPDump(b []byte) (r *httpdump.Request, w *httpdump.Response, err err
 	}
 
 	r = new(httpdump.Request)
-	err = r.UnmarshalBinary(req)
+	err = r.UnmarshalText(req)
 	if err != nil {
 		return
 	}
 
 	w = new(httpdump.Response)
-	err = w.UnmarshalBinary(res)
+	err = w.UnmarshalText(res)
 	if err != nil {
 		return
 	}

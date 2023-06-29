@@ -7,7 +7,7 @@ import (
 	"github.com/alextanhongpin/core/http/httpdump"
 )
 
-func TestRequestUnmarshalBinary(t *testing.T) {
+func TestRequestUnmarshalText(t *testing.T) {
 	b := []byte(`POST /bar HTTP/1.1
 Host: 127.0.0.1:61663
 User-Agent: Go-http-client/1.1
@@ -20,11 +20,11 @@ Content-Type: application/json
 }`)
 
 	r := new(httpdump.Request)
-	if err := r.UnmarshalBinary(b); err != nil {
+	if err := r.UnmarshalText(b); err != nil {
 		t.Fatal(err)
 	}
 
-	got, err := r.MarshalBinary()
+	got, err := r.MarshalText()
 	if err != nil {
 		t.Fatal(err)
 	}

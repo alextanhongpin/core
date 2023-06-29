@@ -22,7 +22,7 @@ func NewResponse(r *http.Response) *Response {
 	}
 }
 
-func (r *Response) UnmarshalBinary(b []byte) error {
+func (r *Response) UnmarshalText(b []byte) error {
 	b = bytes.TrimSpace(b)
 
 	w := new(http.Response)
@@ -78,7 +78,7 @@ func (r *Response) UnmarshalBinary(b []byte) error {
 	return nil
 }
 
-func (r *Response) MarshalBinary() ([]byte, error) {
+func (r *Response) MarshalText() ([]byte, error) {
 	w := r.Response
 
 	b, err := io.ReadAll(w.Body)

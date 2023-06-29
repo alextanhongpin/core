@@ -7,7 +7,7 @@ import (
 	"github.com/alextanhongpin/core/http/httpdump"
 )
 
-func TestResponseUnmarshalBinary(t *testing.T) {
+func TestResponseUnmarshalText(t *testing.T) {
 	b := []byte(`HTTP/1.1 200 OK
 Connection: close
 Content-Type: text/plain; charset=utf-8
@@ -15,11 +15,11 @@ Content-Type: text/plain; charset=utf-8
 bar`)
 
 	w := new(httpdump.Response)
-	if err := w.UnmarshalBinary(b); err != nil {
+	if err := w.UnmarshalText(b); err != nil {
 		t.Fatal(err)
 	}
 
-	got, err := w.MarshalBinary()
+	got, err := w.MarshalText()
 	if err != nil {
 		t.Fatal(err)
 	}

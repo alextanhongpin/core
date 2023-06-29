@@ -25,7 +25,7 @@ func NewRequest(r *http.Request) *Request {
 	}
 }
 
-func (r *Request) UnmarshalBinary(b []byte) error {
+func (r *Request) UnmarshalText(b []byte) error {
 	b = bytes.TrimSpace(b)
 
 	req := new(http.Request)
@@ -95,7 +95,7 @@ func (r *Request) UnmarshalBinary(b []byte) error {
 	return nil
 }
 
-func (r *Request) MarshalBinary() ([]byte, error) {
+func (r *Request) MarshalText() ([]byte, error) {
 	req := r.Request
 	b, err := io.ReadAll(req.Body)
 	if err != nil {
