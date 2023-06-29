@@ -7,7 +7,7 @@ import (
 
 var ErrInvalidJSON = errors.New("maputil: invalid json")
 
-const MaskValue = "*!REDACTED*"
+const MaskValue = "**!REDACTED**"
 
 func MaskFunc(m map[string]any, fn func(k string) bool) map[string]any {
 	return replaceFunc(m, func(k, v string) string {
