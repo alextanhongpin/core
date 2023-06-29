@@ -70,12 +70,12 @@ Content-Type: application/json
 			t.Fatal(err)
 		}
 
-		dr := httpdump.NewRequest(r.Request)
-		if err := dr.Parse(); err != nil {
+		req, err := httpdump.NewRequest(r.Request)
+		if err != nil {
 			t.Fatal(err)
 		}
 
-		j, err := json.Marshal(dr)
+		j, err := json.Marshal(req)
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -3,6 +3,7 @@ package httpdump
 import (
 	"bufio"
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -19,19 +20,33 @@ type Request struct {
 	Dump          Dump
 }
 
-func NewRequest(r *http.Request) *Request {
-	return &Request{
+func NewRequest(r *http.Request) (*Request, error) {
+	req := &Request{
 		Request: r,
 	}
+
+	if err := req.Parse(); err != nil {
+		return nil, err
+	}
+
+	return req, nil
 }
 
 func (r *Request) Parse() error {
-	b, err := r.MarshalText()
+	req, err := normalizeRequest(r.Request)
 	if err != nil {
 		return err
 	}
 
-	return r.UnmarshalText(b)
+	dump, err := requestToDump(req)
+	if err != nil {
+		return err
+	}
+
+	r.Request = req
+	r.Dump = *dump
+
+	return nil
 }
 
 func (r *Request) UnmarshalText(b []byte) error {
@@ -42,7 +57,6 @@ func (r *Request) UnmarshalText(b []byte) error {
 	scanner := bufio.NewScanner(bytes.NewReader(b))
 
 	var bb bytes.Buffer
-	var line string
 
 	sections := 3
 	for i := 0; i < sections; i++ {
@@ -56,11 +70,10 @@ func (r *Request) UnmarshalText(b []byte) error {
 			switch i {
 			case 0:
 				var err error
-				req, err = parseLineRequest([]byte(text))
+				req, err = parseRequestLine([]byte(text))
 				if err != nil {
 					return err
 				}
-				line = text
 
 				break scan
 			case 1:
@@ -79,59 +92,27 @@ func (r *Request) UnmarshalText(b []byte) error {
 		}
 	}
 
-	b = bytes.TrimSpace(bb.Bytes())
+	req.Body = io.NopCloser(bytes.NewReader(bytes.TrimSpace(bb.Bytes())))
+
 	var err error
-	b, err = prettyBytes(b)
+	req, err = normalizeRequest(req)
 	if err != nil {
 		return err
 	}
 
-	body := bytes.NewReader(b)
-	req.Body = io.NopCloser(body)
-
-	req.ContentLength = int64(len(b))
-
-	r.Dump = Dump{
-		Line:   line,
-		Header: req.Header.Clone(),
-		Body:   body,
+	dump, err := requestToDump(req)
+	if err != nil {
+		return err
 	}
 
-	r.Request = new(http.Request)
-	r.Request.Header = make(http.Header)
-
-	*r.Request = *req
+	r.Request = req
+	r.Dump = *dump
 
 	return nil
 }
 
 func (r *Request) MarshalText() ([]byte, error) {
 	req := r.Request
-
-	// Prettify the request body.
-	b, err := io.ReadAll(req.Body)
-	if err != nil {
-		return nil, err
-	}
-
-	b, err = prettyBytes(b)
-	if err != nil {
-		return nil, err
-	}
-
-	// Update the content length.
-	req.ContentLength = int64(len(b))
-
-	req.Body = io.NopCloser(bytes.NewReader(b))
-
-	// `httputil.DumpRequestOut` requires these to be set.
-	if req.URL.Scheme == "" {
-		req.URL.Scheme = "http"
-	}
-
-	if req.URL.Host == "" {
-		req.URL.Host = "example.com"
-	}
 
 	// Use `DumpRequestOut` instead of `DumpRequest` to preserve the
 	// querystring.
@@ -150,29 +131,106 @@ func (r *Request) MarshalJSON() ([]byte, error) {
 }
 
 func (r *Request) UnmarshalJSON(b []byte) error {
-	dump := new(Dump)
-	dump.Header = make(http.Header)
-	if err := dump.UnmarshalJSON(b); err != nil {
+	var dump Dump
+	//dump := new(Dump)
+	//dump.Header = make(http.Header)
+	if err := json.Unmarshal(b, &dump); err != nil {
 		return err
 	}
-	r.Dump = *dump
 
-	req, err := parseLineRequest([]byte(dump.Line))
+	req, err := dumpToRequest(&dump)
 	if err != nil {
 		return err
+	}
+
+	r.Dump = dump
+	r.Request = req
+	//r.Dump = *dump
+
+	//req, err := parseRequestLine([]byte(dump.Line))
+	//if err != nil {
+	//return err
+	//}
+
+	//req.Header = dump.Header.Clone()
+	//req.Host = dump.Header.Get("Host")
+	//req.Body = io.NopCloser(dump.Body)
+
+	//r.Request = new(http.Request)
+	//*r.Request = *req
+
+	return nil
+}
+
+func normalizeRequest(r *http.Request) (*http.Request, error) {
+	req := r.Clone(r.Context())
+
+	// Prettify the request body.
+	b, err := io.ReadAll(req.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	b, err = prettyBytes(b)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Body = io.NopCloser(bytes.NewReader(b))
+
+	// Update the content length.
+	req.ContentLength = int64(len(b))
+
+	// `httputil.DumpRequestOut` requires these to be set.
+	if req.URL.Scheme == "" {
+		req.URL.Scheme = "http"
+	}
+
+	if req.URL.Host == "" {
+		req.URL.Host = "example.com"
+	}
+
+	return req, nil
+}
+
+func dumpToRequest(dump *Dump) (*http.Request, error) {
+	req, err := parseRequestLine([]byte(dump.Line))
+	if err != nil {
+		return nil, err
 	}
 
 	req.Header = dump.Header.Clone()
 	req.Host = dump.Header.Get("Host")
 	req.Body = io.NopCloser(dump.Body)
 
-	r.Request = new(http.Request)
-	*r.Request = *req
-
-	return err
+	return normalizeRequest(req)
 }
 
-func parseLineRequest(b []byte) (*http.Request, error) {
+func requestToDump(req *http.Request) (*Dump, error) {
+	reqURI := req.RequestURI
+	if reqURI == "" {
+		reqURI = req.URL.RequestURI()
+	}
+
+	reqLine := fmt.Sprintf("%s %s HTTP/%d.%d", valueOrDefault(req.Method, "GET"),
+		reqURI, req.ProtoMajor, req.ProtoMinor)
+
+	b, err := io.ReadAll(req.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	body := bytes.NewReader(b)
+	req.Body = io.NopCloser(body)
+
+	return &Dump{
+		Line:   reqLine,
+		Header: req.Header.Clone(),
+		Body:   body,
+	}, nil
+}
+
+func parseRequestLine(b []byte) (*http.Request, error) {
 	r := new(http.Request)
 
 	var reqURI string
@@ -195,4 +253,12 @@ func parseLineRequest(b []byte) (*http.Request, error) {
 	r.Header = make(http.Header)
 
 	return r, nil
+}
+
+func valueOrDefault(v, d string) string {
+	if v != "" {
+		return v
+	}
+
+	return d
 }

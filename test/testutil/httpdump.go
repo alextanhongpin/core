@@ -140,7 +140,11 @@ func NewHTTPDumper(w *http.Response, r *http.Request) *HTTPDumper {
 }
 
 func (d *HTTPDumper) Dump() ([]byte, error) {
-	r := httpdump.NewRequest(d.r)
+	r, err := httpdump.NewRequest(d.r)
+	if err != nil {
+		return nil, err
+	}
+
 	w := httpdump.NewResponse(d.w)
 
 	req, err := r.MarshalText()
