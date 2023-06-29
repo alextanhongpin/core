@@ -27,6 +27,7 @@ func TestDump(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Log(string(b))
 
 	var d httpdump.Dump
 	if err := json.Unmarshal(b, &d); err != nil {

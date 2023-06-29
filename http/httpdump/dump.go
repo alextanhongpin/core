@@ -15,25 +15,29 @@ type Dump struct {
 
 func (d *Dump) MarshalJSON() ([]byte, error) {
 	type dump struct {
-		Line   string      `json:"line"`
-		Header http.Header `json:"headers"`
-		Body   any         `json:"body"`
+		Line   string          `json:"line"`
+		Header http.Header     `json:"headers"`
+		Body   json.RawMessage `json:"body"`
 	}
 
+	d.Body.Seek(0, 0)
 	b, err := io.ReadAll(d.Body)
 	if err != nil {
 		return nil, err
 	}
 	d.Body.Seek(0, 0)
-	var a any
-	if err := json.Unmarshal(b, &a); err != nil {
-		return nil, err
+
+	// This will error if body is empty.
+	// Set to nil to avoid error.
+	body := json.RawMessage(b)
+	if len(b) == 0 {
+		body = nil
 	}
 
 	return json.Marshal(dump{
 		Line:   d.Line,
 		Header: d.Header,
-		Body:   a,
+		Body:   body,
 	})
 }
 
