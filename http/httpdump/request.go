@@ -70,7 +70,7 @@ func (r *Request) UnmarshalText(b []byte) error {
 			switch i {
 			case 0:
 				var err error
-				req, err = parseRequestLine([]byte(text))
+				req, err = parseRequestLine(strings.NewReader(text))
 				if err != nil {
 					return err
 				}
@@ -112,11 +112,9 @@ func (r *Request) UnmarshalText(b []byte) error {
 }
 
 func (r *Request) MarshalText() ([]byte, error) {
-	req := r.Request
-
 	// Use `DumpRequestOut` instead of `DumpRequest` to preserve the
 	// querystring.
-	res, err := httputil.DumpRequestOut(req, true)
+	res, err := httputil.DumpRequestOut(r.Request, true)
 	if err != nil {
 		return nil, err
 	}
@@ -179,7 +177,7 @@ func normalizeRequest(r *http.Request) (*http.Request, error) {
 }
 
 func dumpToRequest(dump *Dump) (*http.Request, error) {
-	req, err := parseRequestLine([]byte(dump.Line))
+	req, err := parseRequestLine(strings.NewReader(dump.Line))
 	if err != nil {
 		return nil, err
 	}
@@ -192,13 +190,7 @@ func dumpToRequest(dump *Dump) (*http.Request, error) {
 }
 
 func requestToDump(req *http.Request) (*Dump, error) {
-	reqURI := req.RequestURI
-	if reqURI == "" {
-		reqURI = req.URL.RequestURI()
-	}
-
-	reqLine := fmt.Sprintf("%s %s HTTP/%d.%d", valueOrDefault(req.Method, "GET"),
-		reqURI, req.ProtoMajor, req.ProtoMinor)
+	reqLine := formatRequestLine(req)
 
 	b, err := io.ReadAll(req.Body)
 	if err != nil {
@@ -215,17 +207,25 @@ func requestToDump(req *http.Request) (*Dump, error) {
 	}, nil
 }
 
-func parseRequestLine(b []byte) (*http.Request, error) {
-	r := new(http.Request)
+func formatRequestLine(req *http.Request) string {
+	reqURI := req.RequestURI
+	if reqURI == "" {
+		reqURI = req.URL.RequestURI()
+	}
+
+	return fmt.Sprintf("%s %s HTTP/%d.%d", valueOrDefault(req.Method, "GET"),
+		reqURI, req.ProtoMajor, req.ProtoMinor)
+}
+
+func parseRequestLine(r io.Reader) (*http.Request, error) {
+	req := new(http.Request)
 
 	var reqURI string
-	if _, err := fmt.Fscanf(
-		bytes.NewReader(b),
-		"%s %s HTTP/%d.%d",
-		&r.Method,
+	if _, err := fmt.Fscanf(r, "%s %s HTTP/%d.%d",
+		&req.Method,
 		&reqURI,
-		&r.ProtoMajor,
-		&r.ProtoMinor,
+		&req.ProtoMajor,
+		&req.ProtoMinor,
 	); err != nil {
 		return nil, err
 	}
@@ -234,10 +234,10 @@ func parseRequestLine(b []byte) (*http.Request, error) {
 	if err != nil {
 		return nil, err
 	}
-	r.URL = uri
-	r.Header = make(http.Header)
+	req.URL = uri
+	req.Header = make(http.Header)
 
-	return r, nil
+	return req, nil
 }
 
 func valueOrDefault(v, d string) string {

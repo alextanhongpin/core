@@ -145,7 +145,10 @@ func (d *HTTPDumper) Dump() ([]byte, error) {
 		return nil, err
 	}
 
-	w := httpdump.NewResponse(d.w)
+	w, err := httpdump.NewResponse(d.w)
+	if err != nil {
+		return nil, err
+	}
 
 	req, err := r.MarshalText()
 	if err != nil {
