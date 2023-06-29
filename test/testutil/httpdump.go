@@ -82,27 +82,6 @@ func DumpHTTPFile(fileName string, r *http.Request, handler http.HandlerFunc, op
 	return Dump(fileName, dnc)
 }
 
-type HTTPDumper struct {
-	w *http.Response
-	r *http.Request
-}
-
-func NewHTTPDumper(w *http.Response, r *http.Request) *HTTPDumper {
-	return &HTTPDumper{
-		w: w,
-		r: r,
-	}
-}
-
-func (d *HTTPDumper) Dump() ([]byte, error) {
-	h, err := httpdump.NewHTTP(d.w, d.r)
-	if err != nil {
-		return nil, err
-	}
-
-	return h.MarshalText()
-}
-
 func DumpHTTP(t *testing.T, r *http.Request, handler http.HandlerFunc, opts ...HTTPOption) string {
 	t.Helper()
 	p := NewHTTPPath(opts...)
@@ -131,6 +110,27 @@ func DumpHTTPHandler(t *testing.T, opts ...HTTPOption) func(http.Handler) http.H
 
 		return http.HandlerFunc(fn)
 	}
+}
+
+type HTTPDumper struct {
+	w *http.Response
+	r *http.Request
+}
+
+func NewHTTPDumper(w *http.Response, r *http.Request) *HTTPDumper {
+	return &HTTPDumper{
+		w: w,
+		r: r,
+	}
+}
+
+func (d *HTTPDumper) Dump() ([]byte, error) {
+	h, err := httpdump.NewHTTP(d.w, d.r)
+	if err != nil {
+		return nil, err
+	}
+
+	return h.MarshalText()
 }
 
 type HTTPComparer struct {
