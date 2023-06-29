@@ -16,18 +16,22 @@ func (disallowUnknownFields) isLoadJSONOption() {}
 
 func DisallowUnknownFields() *disallowUnknownFields { return nil }
 
-func LoadJSON[T any](fileName string, opts ...LoadJSONOption) (*T, error) {
+func LoadJSONFile[T any](fileName string, opts ...LoadJSONOption) (*T, error) {
+	b, err := os.ReadFile(fileName)
+	if err != nil {
+		return nil, err
+	}
+
+	return LoadJSON[T](b, opts...)
+}
+
+func LoadJSON[T any](b []byte, opts ...LoadJSONOption) (*T, error) {
 	var strict bool
 	for _, opt := range opts {
 		switch (opt).(type) {
 		case *disallowUnknownFields:
 			strict = true
 		}
-	}
-
-	b, err := os.ReadFile(fileName)
-	if err != nil {
-		return nil, err
 	}
 
 	if strict {

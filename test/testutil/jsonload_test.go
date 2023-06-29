@@ -16,7 +16,7 @@ func TestLoadJSON(t *testing.T) {
 
 	t.Run("load json", func(t *testing.T) {
 		assert := assert.New(t)
-		p, err := testutil.LoadJSON[Person]("./testdata/TestDumpJSON/person.json")
+		p, err := testutil.LoadJSONFile[Person]("./testdata/TestDumpJSON/person.json")
 		assert.Nil(err)
 		assert.Equal("John Appleseed", p.Name)
 		assert.Equal(int64(13), p.Age)
@@ -25,7 +25,7 @@ func TestLoadJSON(t *testing.T) {
 
 	t.Run("disallow unknown fields option", func(t *testing.T) {
 		assert := assert.New(t)
-		p, err := testutil.LoadJSON[Person]("./testdata/TestDumpJSON/person.json", testutil.DisallowUnknownFields())
+		p, err := testutil.LoadJSONFile[Person]("./testdata/TestDumpJSON/person.json", testutil.DisallowUnknownFields())
 		assert.NotNil(err)
 		assert.Equal(`json: unknown field "bornAt"`, err.Error())
 		assert.Nil(p)

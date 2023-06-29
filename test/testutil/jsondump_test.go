@@ -25,7 +25,7 @@ func TestDumpJSON(t *testing.T) {
 	}
 
 	fileName := testutil.DumpJSON(t, p, testutil.IgnoreFields("bornAt"))
-	l, err := testutil.LoadJSON[Person](fileName)
+	l, err := testutil.LoadJSONFile[Person](fileName)
 	assert.Nil(t, err)
 	assert.Equal(t, p.Name, l.Name)
 
