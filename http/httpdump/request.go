@@ -132,8 +132,6 @@ func (r *Request) MarshalJSON() ([]byte, error) {
 
 func (r *Request) UnmarshalJSON(b []byte) error {
 	var dump Dump
-	//dump := new(Dump)
-	//dump.Header = make(http.Header)
 	if err := json.Unmarshal(b, &dump); err != nil {
 		return err
 	}
@@ -145,19 +143,6 @@ func (r *Request) UnmarshalJSON(b []byte) error {
 
 	r.Dump = dump
 	r.Request = req
-	//r.Dump = *dump
-
-	//req, err := parseRequestLine([]byte(dump.Line))
-	//if err != nil {
-	//return err
-	//}
-
-	//req.Header = dump.Header.Clone()
-	//req.Host = dump.Header.Get("Host")
-	//req.Body = io.NopCloser(dump.Body)
-
-	//r.Request = new(http.Request)
-	//*r.Request = *req
 
 	return nil
 }
