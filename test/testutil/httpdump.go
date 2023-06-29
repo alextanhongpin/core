@@ -8,9 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"regexp"
 	"testing"
-	"text/template"
 
 	"github.com/alextanhongpin/core/http/httpdump"
 	"github.com/google/go-cmp/cmp"
@@ -18,20 +16,7 @@ import (
 
 var ErrInvalidHTTPDumpFormat = errors.New("invalid HTTP dump format")
 
-var (
-	LineBreak = []byte("\n")
-
-	dumpTemplate = template.Must(template.New(`request`).Parse(`{{.Request}}
-
-
-###
-
-
-{{.Response}}
-`))
-
-	re = regexp.MustCompile(`(?m)^#{3}$`)
-)
+var LineBreak = []byte("\n")
 
 type httpOption struct {
 	headerOpts   []cmp.Option
@@ -97,6 +82,27 @@ func DumpHTTPFile(fileName string, r *http.Request, handler http.HandlerFunc, op
 	return Dump(fileName, dnc)
 }
 
+type HTTPDumper struct {
+	w *http.Response
+	r *http.Request
+}
+
+func NewHTTPDumper(w *http.Response, r *http.Request) *HTTPDumper {
+	return &HTTPDumper{
+		w: w,
+		r: r,
+	}
+}
+
+func (d *HTTPDumper) Dump() ([]byte, error) {
+	h, err := httpdump.NewHTTP(d.w, d.r)
+	if err != nil {
+		return nil, err
+	}
+
+	return h.MarshalText()
+}
+
 func DumpHTTP(t *testing.T, r *http.Request, handler http.HandlerFunc, opts ...HTTPOption) string {
 	t.Helper()
 	p := NewHTTPPath(opts...)
@@ -127,50 +133,6 @@ func DumpHTTPHandler(t *testing.T, opts ...HTTPOption) func(http.Handler) http.H
 	}
 }
 
-type HTTPDumper struct {
-	w *http.Response
-	r *http.Request
-}
-
-func NewHTTPDumper(w *http.Response, r *http.Request) *HTTPDumper {
-	return &HTTPDumper{
-		w: w,
-		r: r,
-	}
-}
-
-func (d *HTTPDumper) Dump() ([]byte, error) {
-	r, err := httpdump.NewRequest(d.r)
-	if err != nil {
-		return nil, err
-	}
-
-	w, err := httpdump.NewResponse(d.w)
-	if err != nil {
-		return nil, err
-	}
-
-	req, err := r.MarshalText()
-	if err != nil {
-		return nil, err
-	}
-
-	res, err := w.MarshalText()
-	if err != nil {
-		return nil, err
-	}
-
-	var b bytes.Buffer
-	if err := dumpTemplate.Execute(&b, map[string]any{
-		"Request":  string(req),
-		"Response": string(res),
-	}); err != nil {
-		return nil, err
-	}
-
-	return b.Bytes(), nil
-}
-
 type HTTPComparer struct {
 	opt *httpOption
 }
@@ -182,54 +144,35 @@ func NewHTTPComparer(opts ...HTTPOption) *HTTPComparer {
 }
 
 func (c *HTTPComparer) Compare(snapshot, received []byte) error {
-	snapshotReq, snapshotRes, err := parseHTTPDump(snapshot)
-	if err != nil {
-		return fmt.Errorf("failed to parse old snapshot: %w", err)
+	snap := new(httpdump.HTTP)
+	if err := snap.UnmarshalText(snapshot); err != nil {
+		return err
 	}
 
-	receivedReq, receivedRes, err := parseHTTPDump(received)
-	if err != nil {
-		return fmt.Errorf("failed to parse new snapshot: %w", err)
+	recv := new(httpdump.HTTP)
+	if err := recv.UnmarshalText(snapshot); err != nil {
+		return err
 	}
 
-	// httpdumpDiff request.
-	if err := httpdumpDiff(snapshotReq.Dump, receivedReq.Dump, c.opt.headerOpts, c.opt.bodyOpts); err != nil {
+	if err := httpdumpDiff(
+		snap.Request().Dump,
+		recv.Request().Dump,
+		c.opt.headerOpts,
+		c.opt.bodyOpts,
+	); err != nil {
 		return fmt.Errorf("Request does not match snapshot. %w", err)
 	}
 
-	// httpdumpDiff response.
-	if err := httpdumpDiff(snapshotRes.Dump, receivedRes.Dump, c.opt.headerOpts, c.opt.bodyOpts); err != nil {
+	if err := httpdumpDiff(
+		snap.Response().Dump,
+		recv.Response().Dump,
+		c.opt.headerOpts,
+		c.opt.bodyOpts,
+	); err != nil {
 		return fmt.Errorf("Response does not match snapshot. %w", err)
 	}
 
 	return nil
-}
-
-func parseHTTPDump(b []byte) (r *httpdump.Request, w *httpdump.Response, err error) {
-	req, res, err := split(b)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	r = new(httpdump.Request)
-	err = r.UnmarshalText(req)
-	if err != nil {
-		return
-	}
-
-	w = new(httpdump.Response)
-	err = w.UnmarshalText(res)
-	if err != nil {
-		return
-	}
-
-	return
-}
-
-type dump struct {
-	Line   string
-	Header http.Header
-	Body   *bytes.Buffer
 }
 
 func httpdumpDiff(
@@ -274,16 +217,4 @@ func httpdumpDiff(
 	}
 
 	return ansiDiff(x.Header, y.Header, headerOpts...)
-}
-
-func split(s []byte) (req, res []byte, err error) {
-	parts := re.Split(string(s), 2)
-	if len(parts) != 2 {
-		return nil, nil, ErrInvalidHTTPDumpFormat
-	}
-
-	req = []byte(parts[0])
-	res = []byte(parts[1])
-
-	return
 }
