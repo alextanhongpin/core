@@ -24,6 +24,10 @@ type SQLOption interface {
 	isSQL()
 }
 
+type TextOption interface {
+	isText()
+}
+
 type IgnoreArgsOption []string
 
 func (o IgnoreArgsOption) isSQL() {}

@@ -11,6 +11,7 @@ const (
 	ExtJSON = ".json"
 	ExtHTTP = ".http"
 	ExtSQL  = ".sql"
+	ExtText = ".txt"
 )
 
 type FilePath string
@@ -18,12 +19,14 @@ type FilePath string
 func (FilePath) isJSON() {}
 func (FilePath) isHTTP() {}
 func (FilePath) isSQL()  {}
+func (FilePath) isText() {}
 
 type FileName string
 
 func (FileName) isJSON() {}
 func (FileName) isHTTP() {}
 func (FileName) isSQL()  {}
+func (FileName) isText() {}
 
 type Path struct {
 	TestDir  string
@@ -100,6 +103,26 @@ func NewSQLPath(opts ...SQLOption) *Path {
 		FilePath: "",
 		FileName: "",
 		FileExt:  ExtSQL,
+	}
+
+	for _, o := range opts {
+		switch v := o.(type) {
+		case FilePath:
+			opt.FilePath = strings.TrimSuffix(string(v), "/")
+		case FileName:
+			opt.FileName = string(v)
+		}
+	}
+
+	return opt
+}
+
+func NewTextPath(opts ...TextOption) *Path {
+	opt := &Path{
+		TestDir:  TestData,
+		FilePath: "",
+		FileName: "",
+		FileExt:  ExtText,
 	}
 
 	for _, o := range opts {
