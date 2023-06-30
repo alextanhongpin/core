@@ -5,6 +5,16 @@ import (
 	"github.com/google/go-cmp/cmp/cmpopts"
 )
 
+const (
+	FormatYAML Format = "yaml"
+	FormatJSON Format = "json"
+)
+
+// Format represents the embedded format.
+type Format string
+
+func (Format) isSQL() {}
+
 type HTTPOption interface {
 	isHTTP()
 }

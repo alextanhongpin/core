@@ -1,7 +1,6 @@
 package testutil
 
 import (
-	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -70,12 +69,13 @@ func (d *MySQLDumper) Dump() ([]byte, error) {
 	queryNorm := sqlparser.String(stmt)
 	queryNormPretty := sqlformatOrDefault(queryNorm)
 
-	argsBytes, err := json.MarshalIndent(args, "", " ")
+	marshalFunc := marshalSelector(d.opts.format)
+	argsBytes, err := marshalFunc(args)
 	if err != nil {
 		return nil, err
 	}
 
-	result, err := json.MarshalIndent(d.dump.Result, "", " ")
+	result, err := marshalFunc(d.dump.Result)
 	if err != nil {
 		return nil, err
 	}

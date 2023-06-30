@@ -13,13 +13,10 @@ SELECT *
 
 
 -- Args
-{
- "v1": "e4741d26-9b95-49f6-8423-9cb015ad94db"
-}
+v1: 28dc2951-5907-4791-81a9-bf1dbb93394a
+
 
 
 -- Result
-{
- "ID": 1,
- "Name": "Alice"
-}
+ID: 1
+Name: Alice

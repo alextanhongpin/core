@@ -28,28 +28,20 @@ SELECT *
 
 
 -- Args
-{
- "age": "13",
- "bv1": [
-  "freemium",
-  "premium"
- ],
- "bv2": "{Foo,bar,%oo%}",
- "description": "foo bar walks in a bar, h'a",
- "email": "john.doe@mail.com",
- "v1": "2023-06-27",
- "v2": null
-}
+age: "13"
+bv1:
+    - freemium
+    - premium
+bv2: '{Foo,bar,%oo%}'
+description: foo bar walks in a bar, h'a
+email: john.doe@mail.com
+v1: "2023-07-01"
+v2: null
+
 
 
 -- Result
-[
- {
-  "ID": 9197004928671496586,
-  "Name": "Alice"
- },
- {
-  "ID": 2820128565906968551,
-  "Name": "Bob"
- }
-]
+- ID: 6.178993579811616e+18
+  Name: Alice
+- ID: 8.5415522290487e+17
+  Name: Bob

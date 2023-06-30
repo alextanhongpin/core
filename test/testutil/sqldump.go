@@ -3,7 +3,6 @@ package testutil
 import (
 	"bufio"
 	"bytes"
-	"encoding/json"
 	"errors"
 	"log"
 	"strings"
@@ -23,10 +22,11 @@ type sqlOption struct {
 	queryFn    InspectQuery
 	argsOpts   []cmp.Option
 	resultOpts []cmp.Option
+	format     Format
 }
 
 func NewSQLOption(opts ...SQLOption) *sqlOption {
-	s := &sqlOption{}
+	s := &sqlOption{format: FormatYAML}
 	for _, opt := range opts {
 		switch o := opt.(type) {
 		case InspectQuery:
@@ -35,6 +35,8 @@ func NewSQLOption(opts ...SQLOption) *sqlOption {
 			s.argsOpts = append(s.argsOpts, o...)
 		case RowsCmpOptions:
 			s.resultOpts = append(s.resultOpts, o...)
+		case Format:
+			s.format = o
 		case FilePath, FileName:
 		// Do nothing.
 		default:
@@ -161,12 +163,13 @@ func (c *SQLComparer) Compare(a, b []byte) error {
 	a = bytes.TrimLeft(a, " \t\r\n")
 	b = bytes.TrimLeft(b, " \t\r\n")
 
-	l, err := parseSQLDump(a)
+	unmarshalFunc := unmarshalSelector(c.opt.format)
+	l, err := parseSQLDump(a, unmarshalFunc)
 	if err != nil {
 		return err
 	}
 
-	r, err := parseSQLDump(b)
+	r, err := parseSQLDump(b, unmarshalFunc)
 	if err != nil {
 		return err
 	}
@@ -190,7 +193,7 @@ func (c *SQLComparer) Compare(a, b []byte) error {
 	return nil
 }
 
-func parseSQLDump(b []byte) (*SQLDump, error) {
+func parseSQLDump(b []byte, unmarshalFunc func([]byte) (any, error)) (*SQLDump, error) {
 	br := bytes.NewReader(b)
 	s := bufio.NewScanner(br)
 
@@ -234,7 +237,7 @@ func parseSQLDump(b []byte) (*SQLDump, error) {
 			}
 
 			b := bytes.Join(tmp, LineBreak)
-			a, err := unmarshalJSON(b)
+			a, err := unmarshalFunc(b)
 			if err != nil {
 				return nil, err
 			}
@@ -253,15 +256,11 @@ func parseSQLDump(b []byte) (*SQLDump, error) {
 			}
 
 			b := bytes.Join(tmp, LineBreak)
-			if json.Valid(b) {
-				a, err := unmarshalJSON(b)
-				if err != nil {
-					return nil, err
-				}
-				dump.Result = a
-			} else {
-				dump.Result = string(b)
+			a, err := unmarshalFunc(b)
+			if err != nil {
+				return nil, err
 			}
+			dump.Result = a
 		}
 	}
 
@@ -363,4 +362,22 @@ func normalizePostgres(query string) (norm string, args map[string]any, err erro
 	}
 
 	return
+}
+
+func unmarshalSelector(format Format) func([]byte) (any, error) {
+	switch format {
+	case FormatYAML:
+		return unmarshalYAML
+	default:
+		return unmarshalJSON
+	}
+}
+
+func marshalSelector(format Format) func(v any) ([]byte, error) {
+	switch format {
+	case FormatYAML:
+		return marshalYAMLNoTag
+	default:
+		return marshalJSON
+	}
 }

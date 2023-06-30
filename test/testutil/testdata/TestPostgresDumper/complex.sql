@@ -31,28 +31,21 @@ SELECT *
 
 
 -- Args
-{
- "$1": "2023-07-01",
- "$10": 1,
- "$11": 2,
- "$3": "john.doe@mail.com",
- "$4": "foo bar walks in a bar, h''a",
- "$5": "freemium",
- "$6": "premium",
- "$7": 13,
- "$8": true,
- "$9": "{Foo,bar,%oo%}"
-}
+$1: "2023-07-01"
+$3: john.doe@mail.com
+$4: foo bar walks in a bar, h''a
+$5: freemium
+$6: premium
+$7: 13
+$8: true
+$9: '{Foo,bar,%oo%}'
+$10: 1
+$11: 2
+
 
 
 -- Result
-[
- {
-  "ID": 2856466933791275646,
-  "Name": "Alice"
- },
- {
-  "ID": 4753754882371201711,
-  "Name": "Bob"
- }
-]
+- ID: 2.9364905326249994e+18
+  Name: Alice
+- ID: 9.585388146945019e+17
+  Name: Bob
