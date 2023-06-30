@@ -86,6 +86,19 @@ func (d *PostgresSQLDumper) Dump() ([]byte, error) {
 }
 
 func formatPostgresSQL(stmt string) (string, error) {
+	if isPythonInstalled {
+		// Use sqlformat by default, since it is prettier.
+		b, err := sqlformat(stmt)
+		if err == nil {
+			return string(b), nil
+		}
+	}
+
+	return sqlfmtPostgres(stmt)
+}
+
+// sqlfmtPostgres only works for formatting postgres.
+func sqlfmtPostgres(stmt string) (string, error) {
 	pretty, err := sqlfmt.FmtSQL(tree.PrettyCfg{
 		LineWidth: dynamicLineWidth(stmt),
 		TabWidth:  2,

@@ -1,42 +1,38 @@
 -- Query
-SELECT
-  *
-FROM
-  users
-WHERE
-  email = 'john.doe@mail.com'
-  AND deleted_at IS NULL
-  AND last_logged_in_at > $1
-  AND created_at IN ($2,)
-  AND description = e'foo bar walks in a bar, h\'a'
-  AND subscription IN ('freemium', 'premium')
-  AND age > 13
-  AND is_active = true
-  AND name LIKE ANY ('{Foo,bar,%oo%}')
-  AND id != ALL (ARRAY[1, 2]);
+SELECT *
+  FROM users
+  WHERE email = 'john.doe@mail.com'
+    AND deleted_at IS NULL
+    AND last_logged_in_at > $1
+    AND created_at IN ($2)
+    AND description = 'foo bar walks in a bar, h''a'
+    AND subscription IN ('freemium',
+                         'premium')
+    AND age > 13
+    AND is_active = TRUE
+    AND name LIKE ANY('{Foo,bar,%oo%}')
+    AND id <> ALL(ARRAY[1, 2])
 
 
 -- Query Normalized
-SELECT
-  *
-FROM
-  users
-WHERE
-  email = $3
-  AND deleted_at IS NULL
-  AND last_logged_in_at > $1
-  AND created_at IN ($2,)
-  AND description = $4
-  AND subscription IN ($5, $6)
-  AND age > $7
-  AND is_active = $8
-  AND name LIKE ANY ($9)
-  AND id != ALL (ARRAY[$10, $11]);
+SELECT *
+  FROM users
+  WHERE email = $3
+    AND deleted_at IS NULL
+    AND last_logged_in_at > $1
+    AND created_at IN ($2)
+    AND description = $4
+    AND subscription IN ($5,
+                         $6)
+    AND age > $7
+    AND is_active = $8
+    AND name LIKE ANY($9)
+    AND id <> ALL(ARRAY[$10, $11])
 
 
 -- Args
 {
- "$1": "2023-06-27",
+ "$1": "2023-07-01",
  "$10": 1,
  "$11": 2,
  "$3": "john.doe@mail.com",
@@ -52,11 +48,11 @@ WHERE
 -- Result
 [
  {
-  "ID": 1957305231053673596,
+  "ID": 2856466933791275646,
   "Name": "Alice"
  },
  {
-  "ID": 4516380072496366232,
+  "ID": 4753754882371201711,
   "Name": "Bob"
  }
 ]
