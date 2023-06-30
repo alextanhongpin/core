@@ -92,12 +92,12 @@ func (c *JSONComparer) Compare(a, b []byte) error {
 		}
 	}
 
-	want, err := unmarshal(a)
+	want, err := unmarshalJSON(a)
 	if err != nil {
 		return err
 	}
 
-	got, err := unmarshal(b)
+	got, err := unmarshalJSON(b)
 	if err != nil {
 		return err
 	}
@@ -119,7 +119,7 @@ func NewJSONDumper(v any, opts ...JSONOption) *JSONDumper {
 
 func (d *JSONDumper) Dump() ([]byte, error) {
 	if len(d.interceptors) == 0 {
-		return marshal(d.v)
+		return marshalJSON(d.v)
 	}
 
 	b, err := json.Marshal(d.v)
@@ -134,10 +134,10 @@ func (d *JSONDumper) Dump() ([]byte, error) {
 		}
 	}
 
-	return marshal(b)
+	return marshalJSON(b)
 }
 
-func marshal(v any) ([]byte, error) {
+func marshalJSON(v any) ([]byte, error) {
 	// If it is byte, pretty print.
 	b, ok := v.([]byte)
 	if ok {
@@ -155,4 +155,13 @@ func marshal(v any) ([]byte, error) {
 	}
 
 	return json.MarshalIndent(v, "", " ")
+}
+
+func unmarshalJSON(b []byte) (any, error) {
+	var m any
+	if err := json.Unmarshal(b, &m); err != nil {
+		return nil, err
+	}
+
+	return m, nil
 }

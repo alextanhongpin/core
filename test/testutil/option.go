@@ -20,6 +20,10 @@ type TextOption interface {
 	isText()
 }
 
+type YAMLOption interface {
+	isYAML()
+}
+
 func IgnoreMapKeys(keys ...string) cmp.Option {
 	return cmpopts.IgnoreMapEntries(func(key string, _ any) bool {
 		for _, k := range keys {

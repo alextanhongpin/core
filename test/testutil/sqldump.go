@@ -234,7 +234,7 @@ func parseSQLDump(b []byte) (*SQLDump, error) {
 			}
 
 			b := bytes.Join(tmp, LineBreak)
-			a, err := unmarshal(b)
+			a, err := unmarshalJSON(b)
 			if err != nil {
 				return nil, err
 			}
@@ -254,7 +254,7 @@ func parseSQLDump(b []byte) (*SQLDump, error) {
 
 			b := bytes.Join(tmp, LineBreak)
 			if json.Valid(b) {
-				a, err := unmarshal(b)
+				a, err := unmarshalJSON(b)
 				if err != nil {
 					return nil, err
 				}
@@ -344,7 +344,7 @@ func normalizePostgres(query string) (norm string, args map[string]any, err erro
 			}
 		}
 
-		a, err := unmarshal([]byte(s))
+		a, err := unmarshalJSON([]byte(s))
 		if err != nil {
 			return s
 		}
@@ -363,13 +363,4 @@ func normalizePostgres(query string) (norm string, args map[string]any, err erro
 	}
 
 	return
-}
-
-func unmarshal(b []byte) (any, error) {
-	var m any
-	if err := json.Unmarshal(b, &m); err != nil {
-		return nil, err
-	}
-
-	return m, nil
 }

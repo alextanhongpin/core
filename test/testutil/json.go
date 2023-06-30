@@ -28,7 +28,7 @@ type JSONInterceptor func([]byte) ([]byte, error)
 
 func (i JSONInterceptor) isJSON() {}
 
-func MaskJSON(fields ...string) JSONInterceptor {
+func MaskFields(fields ...string) JSONInterceptor {
 	return func(b []byte) ([]byte, error) {
 		return maputil.MaskBytes(b, fields...)
 	}

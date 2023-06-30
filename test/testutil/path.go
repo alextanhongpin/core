@@ -12,6 +12,7 @@ const (
 	ExtHTTP = ".http"
 	ExtSQL  = ".sql"
 	ExtText = ".txt"
+	ExtYAML = ".yaml"
 )
 
 type FilePath string
@@ -20,6 +21,7 @@ func (FilePath) isJSON() {}
 func (FilePath) isHTTP() {}
 func (FilePath) isSQL()  {}
 func (FilePath) isText() {}
+func (FilePath) isYAML() {}
 
 type FileName string
 
@@ -27,6 +29,7 @@ func (FileName) isJSON() {}
 func (FileName) isHTTP() {}
 func (FileName) isSQL()  {}
 func (FileName) isText() {}
+func (FileName) isYAML() {}
 
 type Path struct {
 	TestDir  string
@@ -123,6 +126,26 @@ func NewTextPath(opts ...TextOption) *Path {
 		FilePath: "",
 		FileName: "",
 		FileExt:  ExtText,
+	}
+
+	for _, o := range opts {
+		switch v := o.(type) {
+		case FilePath:
+			opt.FilePath = strings.TrimSuffix(string(v), "/")
+		case FileName:
+			opt.FileName = string(v)
+		}
+	}
+
+	return opt
+}
+
+func NewYAMLPath(opts ...YAMLOption) *Path {
+	opt := &Path{
+		TestDir:  TestData,
+		FilePath: "",
+		FileName: "",
+		FileExt:  ExtYAML,
 	}
 
 	for _, o := range opts {
