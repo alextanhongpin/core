@@ -2,8 +2,10 @@ package testutil
 
 import "github.com/google/go-cmp/cmp"
 
-const Postgres DialectOption = "postgres"
-const MySQL DialectOption = "mysql"
+const (
+	Postgres DialectOption = "postgres"
+	MySQL    DialectOption = "mysql"
+)
 
 type IgnoreArgsOption []string
 
