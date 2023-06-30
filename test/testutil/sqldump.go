@@ -66,7 +66,7 @@ func DumpMySQL(t *testing.T, dump *SQLDump, opts ...SQLOption) {
 	}
 
 	fileName := opt.String()
-	if err := DumpSQLFile(fileName, dump, MySQL(), opts...); err != nil {
+	if err := DumpSQLFile(fileName, dump, MySQL, opts...); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -79,7 +79,7 @@ func DumpPostgres(t *testing.T, dump *SQLDump, opts ...SQLOption) {
 	}
 
 	fileName := opt.String()
-	if err := DumpSQLFile(fileName, dump, Postgres(), opts...); err != nil {
+	if err := DumpSQLFile(fileName, dump, Postgres, opts...); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -92,9 +92,9 @@ func DumpSQLFile(fileName string, dump *SQLDump, dialect DialectOption, opts ...
 
 	var d dumper
 	switch dialect {
-	case Postgres():
+	case Postgres:
 		d = NewPostgresSQLDumper(dump, opts...)
-	case MySQL():
+	case MySQL:
 		d = NewMySQLDumper(dump, opts...)
 	default:
 		log.Fatalf(`sqldump: dialect must be one of "postgres" or "mysql", got %q`, d)
