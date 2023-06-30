@@ -9,10 +9,11 @@ import (
 
 func TestDumpYAML(t *testing.T) {
 	type Person struct {
-		Name      string    `yaml:"name"`
-		Age       int64     `yaml:"age"`
-		IsMarried bool      `yaml:"isMarried"`
-		BornAt    time.Time `yaml:"bornAt"`
+		Name      string
+		Age       int64
+		IsMarried bool
+		BornAt    time.Time
+		Biography string
 	}
 
 	p := Person{
@@ -20,9 +21,13 @@ func TestDumpYAML(t *testing.T) {
 		Age:       13,
 		IsMarried: true,
 		BornAt:    time.Now(),
+		Biography: `You see, tonight, it could go either way
+Hearts balanced on a razor blade
+We are designed to love and break
+And to rinse and repeat it all again`,
 	}
 
-	testutil.DumpYAML(t, p, testutil.IgnoreKeys("bornAt"))
+	testutil.DumpYAML(t, p, testutil.IgnoreKeys("BornAt"))
 }
 
 func TestDumpYAMLNonStruct(t *testing.T) {

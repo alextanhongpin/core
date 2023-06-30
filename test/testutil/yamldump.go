@@ -121,7 +121,7 @@ func NewYAMLDumper(v any, opts ...YAMLOption) *YAMLDumper {
 
 func (d *YAMLDumper) Dump() ([]byte, error) {
 	if len(d.interceptors) == 0 {
-		return marshalYAML(d.v)
+		return marshalYAMLNoTag(d.v)
 	}
 
 	b, ok := d.v.([]byte)
@@ -148,6 +148,29 @@ func (d *YAMLDumper) Dump() ([]byte, error) {
 	}
 
 	return marshalYAML(a)
+}
+
+// marshalYAMLNoTag ignores the `yaml:"key"` tags to use the original struct
+// casing.
+// Otherwise, yaml.Marshal will lowercase the struct field names if no yaml tag
+// is specified.
+func marshalYAMLNoTag(v any) ([]byte, error) {
+	b, ok := v.([]byte)
+	if ok {
+		return b, nil
+	}
+
+	b, err := json.Marshal(v)
+	if err != nil {
+		return nil, err
+	}
+
+	var a any
+	if err := json.Unmarshal(b, &a); err != nil {
+		return nil, err
+	}
+
+	return yaml.Marshal(a)
 }
 
 func marshalYAML(v any) ([]byte, error) {
