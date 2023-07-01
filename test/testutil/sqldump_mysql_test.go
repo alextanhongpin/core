@@ -49,7 +49,7 @@ func TestMySQLDumper(t *testing.T) {
 	t.Run("complex", func(t *testing.T) {
 		testutil.DumpMySQL(t, complexDump,
 			testutil.IgnoreArgs("v1"),
-			testutil.IgnoreRows("ID"),
+			testutil.IgnoreRows("id"),
 		)
 	})
 }

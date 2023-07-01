@@ -3,11 +3,13 @@ package testutil
 import (
 	"bytes"
 	"encoding/json"
+	"reflect"
 	"testing"
 
 	"gopkg.in/yaml.v3"
 
 	"github.com/google/go-cmp/cmp"
+	orderedmap "github.com/wk8/go-ordered-map/v2"
 )
 
 type yamlOption struct {
@@ -121,7 +123,7 @@ func NewYAMLDumper(v any, opts ...YAMLOption) *YAMLDumper {
 
 func (d *YAMLDumper) Dump() ([]byte, error) {
 	if len(d.interceptors) == 0 {
-		return marshalYAMLNoTag(d.v)
+		return marshalYAMLPreserveKeysOrder(d.v)
 	}
 
 	b, ok := d.v.([]byte)
@@ -150,29 +152,6 @@ func (d *YAMLDumper) Dump() ([]byte, error) {
 	return marshalYAML(a)
 }
 
-// marshalYAMLNoTag ignores the `yaml:"key"` tags to use the original struct
-// casing.
-// Otherwise, yaml.Marshal will lowercase the struct field names if no yaml tag
-// is specified.
-func marshalYAMLNoTag(v any) ([]byte, error) {
-	b, ok := v.([]byte)
-	if ok {
-		return b, nil
-	}
-
-	b, err := json.Marshal(v)
-	if err != nil {
-		return nil, err
-	}
-
-	var a any
-	if err := json.Unmarshal(b, &a); err != nil {
-		return nil, err
-	}
-
-	return yaml.Marshal(a)
-}
-
 func marshalYAML(v any) ([]byte, error) {
 	b, ok := v.([]byte)
 	if ok {
@@ -186,4 +165,38 @@ func unmarshalYAML(b []byte) (any, error) {
 	var a any
 	err := yaml.Unmarshal(b, &a)
 	return a, err
+}
+
+func marshalYAMLPreserveKeysOrder(v any) ([]byte, error) {
+	switch t := v.(type) {
+	case map[string]any:
+		return yaml.Marshal(t)
+	case []byte:
+		return t, nil
+	default:
+		if !isStruct(v) {
+			return yaml.Marshal(t)
+		}
+
+		b, err := json.Marshal(v)
+		if err != nil {
+			return nil, err
+		}
+
+		om := orderedmap.New[string, any]()
+		if err := json.Unmarshal(b, &om); err != nil {
+			return nil, err
+		}
+
+		return yaml.Marshal(om)
+	}
+}
+
+func isStruct(v any) bool {
+	t := reflect.TypeOf(v)
+	if t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+
+	return t.Kind() == reflect.Struct
 }

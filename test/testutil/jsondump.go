@@ -62,7 +62,6 @@ func DumpJSON(t *testing.T, v any, opts ...JSONOption) string {
 	}
 
 	fileName := p.String()
-
 	if err := DumpJSONFile(fileName, v, opts...); err != nil {
 		t.Fatal(err)
 	}

@@ -376,7 +376,7 @@ func unmarshalSelector(format Format) func([]byte) (any, error) {
 func marshalSelector(format Format) func(v any) ([]byte, error) {
 	switch format {
 	case FormatYAML:
-		return marshalYAMLNoTag
+		return marshalYAMLPreserveKeysOrder
 	default:
 		return marshalJSON
 	}

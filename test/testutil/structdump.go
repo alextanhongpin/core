@@ -1,115 +1,80 @@
 package testutil
 
 import (
+	"errors"
 	"fmt"
-	"go/format"
-	"os"
-	"strings"
 	"testing"
-	"unicode"
 
-	"github.com/google/go-cmp/cmp"
+	"github.com/davecgh/go-spew/spew"
 )
 
-func countLeadingSpace(s string) int {
-	return len(s) - len(strings.TrimSpace(s))
+var ErrNonStruct = errors.New("cannot dump non-struct")
+
+var scs = spew.ConfigState{
+	Indent:                  "  ",
+	DisableCapacities:       true,
+	DisablePointerAddresses: true,
 }
 
-func DumpStruct(t *testing.T, v any, opts ...cmp.Option) {
+func DumpStructFile(fileName string, v any) error {
+	if !isStruct(v) {
+		return fmt.Errorf("%w: %v", ErrNonStruct, v)
+	}
+	type dumpAndCompare struct {
+		dumper
+		comparer
+	}
+
+	dnc := dumpAndCompare{
+		dumper:   NewStructDumper(v),
+		comparer: NewStructComparer(),
+	}
+
+	return Dump(fileName, dnc)
+}
+
+// DumpStruct dumps a type as json.
+func DumpStruct(t *testing.T, v any, opts ...TextOption) string {
 	t.Helper()
 
-	got := []byte(prettyStruct(v))
-
-	fileName := fmt.Sprintf("./testdata/%s.struct", t.Name())
-	if err := writeToNewFile(fileName, got); err != nil {
-		t.Fatal(err)
-	}
-	want, err := os.ReadFile(fileName)
-	if err != nil {
-		t.Fatal(err)
+	p := NewTextPath(opts...)
+	if p.FilePath == "" {
+		p.FilePath = t.Name()
 	}
 
-	if err := ansiDiff(want, got, opts...); err != nil {
+	if p.FileName == "" {
+		p.FileName = typeName(v)
+	}
+
+	fileName := p.String()
+	if err := DumpStructFile(fileName, v); err != nil {
 		t.Fatal(err)
 	}
 
-	return
+	return fileName
 }
 
-func prettyStruct(v any) string {
-	s := fmt.Sprintf("%#v", v)
-	b, err := format.Source([]byte(s))
-	if err != nil {
-		panic(err)
+type StructDumper struct {
+	v any
+}
+
+func NewStructDumper(v any) *StructDumper {
+	return &StructDumper{
+		v: v,
 	}
+}
 
-	s = string(b)
-	var res []string
-	push := func(s string) {
-		res = append(res, strings.TrimSuffix(s, " "))
-	}
+func (d *StructDumper) Dump() ([]byte, error) {
+	res := scs.Sdump(d.v)
+	return []byte(res), nil
+}
 
-	sb := new(strings.Builder)
+type StructComparer struct{}
 
-	for i, r := range s {
-		h := i - 1
-		j := i + 1
-		k := i + 2
-		if i == len(s)-1 {
-			j = i
-			k = i
-		} else if i == 0 {
-			h = i
-		}
-		nextIsDigit := unicode.IsDigit(rune(s[j]))
-		nextIsLetter := unicode.IsLetter(rune(s[j]))
-		nextIsQuote := s[j] == '"'
-		nextIsArray := s[j] == '[' && s[k] == ']'
+func NewStructComparer() *StructComparer {
+	return &StructComparer{}
+}
 
-		if r == '{' && s[j] != '}' { // Skip if map[string]interface{}
-			sb.WriteRune(r)
-			push(sb.String())
-			sb.Reset()
-
-			var n int
-			if len(res) > 0 {
-				last := res[len(res)-1]
-				n = countLeadingSpace(last)
-			}
-			n += 2
-			sb.WriteString(strings.Repeat(" ", n))
-		} else if r == '}' && s[h] != '{' {
-			push(sb.String())
-			sb.Reset()
-
-			var n int
-			if len(res) > 0 {
-				last := res[len(res)-1]
-				n = countLeadingSpace(last)
-			}
-			n -= 2
-			sb.WriteString(strings.Repeat(" ", n))
-			sb.WriteRune(r)
-		} else if r == ',' && s[j] == ' ' {
-			// New line.
-			sb.WriteRune(r)
-			push(sb.String())
-			sb.Reset()
-
-			var n int
-			if len(res) > 0 {
-				last := res[len(res)-1]
-				n = countLeadingSpace(last)
-			}
-			n--
-			sb.WriteString(strings.Repeat(" ", n))
-		} else if r == ':' && (nextIsDigit || nextIsLetter || nextIsArray || nextIsQuote) { // To avoid matching http://
-			sb.WriteRune(r)
-			sb.WriteRune(' ') // Add a space after colon.
-		} else {
-			sb.WriteRune(r)
-		}
-	}
-	push(sb.String())
-	return strings.Join(res, "\n")
+func (c *StructComparer) Compare(a, b []byte) error {
+	return ansiDiff(a, b)
 }

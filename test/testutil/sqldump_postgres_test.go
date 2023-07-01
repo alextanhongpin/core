@@ -51,7 +51,7 @@ func TestPostgresDumper(t *testing.T) {
 	t.Run("complex", func(t *testing.T) {
 		testutil.DumpPostgres(t, complexDump,
 			testutil.IgnoreArgs("$1"),
-			testutil.IgnoreRows("ID"),
+			testutil.IgnoreRows("id"),
 		)
 	})
 }
