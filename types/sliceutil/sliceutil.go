@@ -75,3 +75,17 @@ func Max[T constraints.Integer](n []T) T {
 
 	return max
 }
+
+func Dedup[T comparable](t []T) []T {
+	cache := make(map[T]bool)
+	for i := range t {
+		cache[t[i]] = true
+	}
+
+	unique := make([]T, 0, len(cache))
+	for key := range cache {
+		unique = append(unique, key)
+	}
+
+	return unique
+}
