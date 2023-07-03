@@ -2,10 +2,10 @@
 package result
 
 type Result[T any] struct {
-	data T
-	err  error
+	Data T
+	Err  error
 }
 
 func (r *Result[T]) Unwrap() (T, error) {
-	return r.data, r.err
+	return r.Data, r.Err
 }
