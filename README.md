@@ -1,6 +1,8 @@
 #  core
 
 
+[![](https://godoc.org/github.com/alextanhongpin/core?status.svg)](http://godoc.org/github.com/alextanhongpin/core)
+
 Useful collection of dependencies required to build microservices.
 
 
