@@ -67,3 +67,13 @@ func Invert[K, V comparable](m map[K]V) map[V]K {
 
 	return res
 }
+
+func GroupBy[K comparable, V any](v []V, fn func(i int) K) map[K][]V {
+	m := make(map[K][]V)
+	for i := range v {
+		k := fn(i)
+		m[k] = append(m[k], v[i])
+	}
+
+	return m
+}

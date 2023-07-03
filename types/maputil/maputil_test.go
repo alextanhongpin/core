@@ -56,3 +56,30 @@ func TestKeys(t *testing.T) {
 		assert.Equal(t, want, keys)
 	})
 }
+
+func TestGroupBy(t *testing.T) {
+	type product struct {
+		name     string
+		category int
+	}
+	pdts := []product{
+		{name: "p1", category: 1},
+		{name: "p2", category: 2},
+		{name: "p3", category: 2},
+	}
+
+	m := maputil.GroupBy(pdts, func(i int) int {
+		return pdts[i].category
+	})
+
+	if want, got := "p1", m[1][0].name; want != got {
+		t.Fatalf("want %s, got %s", want, got)
+	}
+
+	if want, got := "p2", m[2][0].name; want != got {
+		t.Fatalf("want %s, got %s", want, got)
+	}
+	if want, got := "p3", m[2][1].name; want != got {
+		t.Fatalf("want %s, got %s", want, got)
+	}
+}
