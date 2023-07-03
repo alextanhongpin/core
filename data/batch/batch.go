@@ -1,15 +1,27 @@
+// package batch simplifies data loading for one-to-one and one-to-many relationships.
 package batch
 
 import (
 	"errors"
 	"fmt"
 
+	"github.com/alextanhongpin/core/types/sliceutil"
 	"github.com/mitchellh/copystructure"
 )
 
+type kind int
+
+const (
+	zero kind = iota
+	one
+	many
+)
+
 var (
-	ErrKeyNotFound = errors.New("batch: key not found")
-	ErrClosed      = errors.New("batch: already closed")
+	ErrKeyNotFound         = errors.New("batch: key not found")
+	ErrMultipleValuesFound = errors.New("batch: multiple values found")
+	ErrClosed              = errors.New("batch: already closed")
+	ErrNilReference        = errors.New("batch: nil reference is passed in")
 )
 
 type BatchFn[K comparable, V any] func(...K) ([]V, error)
@@ -17,11 +29,13 @@ type BatchFn[K comparable, V any] func(...K) ([]V, error)
 type KeyFn[K comparable, V any] func(V) (K, error)
 
 type Loader[K comparable, V any] struct {
-	keys    []K
-	vals    []*V
-	batchFn BatchFn[K, V]
-	keyFn   KeyFn[K, V]
-	done    chan bool
+	kindByID map[int]kind
+	keys     []K
+	one      map[int]*V
+	many     map[int]*[]V
+	batchFn  BatchFn[K, V]
+	keyFn    KeyFn[K, V]
+	done     chan bool
 }
 
 func NewLoader[K comparable, V any](
@@ -29,18 +43,48 @@ func NewLoader[K comparable, V any](
 	keyFn KeyFn[K, V],
 ) *Loader[K, V] {
 	return &Loader[K, V]{
-		batchFn: batchFn,
-		keyFn:   keyFn,
-		done:    make(chan bool),
+		batchFn:  batchFn,
+		kindByID: make(map[int]kind),
+		one:      make(map[int]*V),
+		many:     make(map[int]*[]V),
+		keyFn:    keyFn,
+		done:     make(chan bool),
 	}
 }
 
-func (l *Loader[K, V]) Load(k K) *V {
+// Load ensures that exactly one result will be loaded.
+// Suitable for loading data with one-to-one
+// relationships.
+// Returns error if the batchFn does not return exactly 1 result.
+// If the same key is loaded multiple times, the result will be deep-copied
+// before returned.
+func (l *Loader[K, V]) Load(k K, v *V) {
+	if v == nil {
+		panic(ErrNilReference)
+	}
+
 	if err := l.closed(); err != nil {
 		panic(err)
 	}
 
-	return l.load(k)
+	l.load(k, v)
+}
+
+// LoadMany returns zero, one or many results.
+// Suitable for loading data with one-to-many
+// relationships.
+// If the same key is loaded multiple times, the result will be deep-copied
+// before returned.
+func (l *Loader[K, V]) LoadMany(k K, v *[]V) {
+	if v == nil {
+		panic(ErrNilReference)
+	}
+
+	if err := l.closed(); err != nil {
+		panic(err)
+	}
+
+	l.loadMany(k, v)
 }
 
 func (l *Loader[K, V]) Wait() error {
@@ -61,11 +105,20 @@ func (l *Loader[K, V]) closed() error {
 	}
 }
 
-func (l *Loader[K, V]) load(k K) *V {
+func (l *Loader[K, V]) load(k K, v *V) {
+	id := len(l.keys)
 	l.keys = append(l.keys, k)
-	v := new(V)
-	l.vals = append(l.vals, v)
-	return v
+	l.kindByID[id] = one
+
+	l.one[id] = v
+}
+
+func (l *Loader[K, V]) loadMany(k K, v *[]V) {
+	id := len(l.keys)
+	l.keys = append(l.keys, k)
+	l.kindByID[id] = many
+
+	l.many[id] = v
 }
 
 func (l *Loader[K, V]) wait() error {
@@ -74,12 +127,13 @@ func (l *Loader[K, V]) wait() error {
 		return nil
 	}
 
-	vals, err := l.batchFn(l.keys...)
+	keys := sliceutil.Dedup(l.keys)
+	vals, err := l.batchFn(keys...)
 	if err != nil {
 		return err
 	}
 
-	valByKey := make(map[K]V)
+	valsByKey := make(map[K][]V)
 	for _, v := range vals {
 		v := v
 
@@ -88,14 +142,22 @@ func (l *Loader[K, V]) wait() error {
 			return err
 		}
 
-		valByKey[k] = v
+		valsByKey[k] = append(valsByKey[k], v)
 	}
 
 	cached := make(map[K]bool)
 	for i, k := range l.keys {
-		v, ok := valByKey[k]
-		if !ok {
-			return fmt.Errorf("%w: %v", ErrKeyNotFound, k)
+		kind := l.kindByID[i]
+		v, ok := valsByKey[k]
+
+		switch kind {
+		case one:
+			if !ok {
+				return fmt.Errorf("%w: key '%v'", ErrKeyNotFound, k)
+			}
+			if len(v) != 1 {
+				return fmt.Errorf("%w: key '%v'", ErrMultipleValuesFound, k)
+			}
 		}
 
 		if cached[k] {
@@ -107,9 +169,19 @@ func (l *Loader[K, V]) wait() error {
 				return err
 			}
 
-			*l.vals[i] = c.(V)
+			switch kind {
+			case one:
+				*l.one[i] = c.([]V)[0]
+			case many:
+				*l.many[i] = c.([]V)
+			}
 		} else {
-			*l.vals[i] = v
+			switch kind {
+			case one:
+				*l.one[i] = v[0]
+			case many:
+				*l.many[i] = v
+			}
 			cached[k] = true
 		}
 	}
