@@ -19,6 +19,7 @@ func TestDump(t *testing.T) {
 			"Content-Length":  []string{"17"},
 			"Accept-Encoding": []string{"gzip"},
 			"Content-Type":    []string{"application/json"},
+			"Trailer":         []string{"My-Trailer"},
 		},
 		Body: bytes.NewReader([]byte(`{"name": "Alice"}`)),
 	}

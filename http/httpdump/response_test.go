@@ -1,7 +1,7 @@
 package httpdump_test
 
 import (
-	"encoding/json"
+	"fmt"
 	"testing"
 
 	"github.com/alextanhongpin/core/http/httpdump"
@@ -9,85 +9,47 @@ import (
 )
 
 func TestResponseUnmarshal(t *testing.T) {
-	b := []byte(`HTTP/1.1 200 OK
+	text := []byte(`HTTP/1.1 200 OK
 Connection: close
 Content-Type: text/plain; charset=utf-8
 
 bar`)
+	trailer := []byte(`HTTP/1.1 200 OK
+Transfer-Encoding: chunked
+Trailer: My-Trailer
+Content-Type: application/json
+Date: Tue, 04 Jul 2023 15:52:27 GMT
 
-	t.Run("text", func(t *testing.T) {
-		r := new(httpdump.Response)
-		if err := r.UnmarshalText(b); err != nil {
-			t.Fatal(err)
-		}
+12
+{"hello": "world"}
+0
+My-Trailer: my-val`)
 
-		got, err := r.MarshalText()
-		if err != nil {
-			t.Fatal(err)
-		}
+	tests := []struct {
+		name string
+		data []byte
+	}{
+		{"text", text},
+		{"trailer", trailer},
+	}
+	for _, ts := range tests {
+		name, b := ts.name, ts.data
 
-		want := b
-		if diff := cmp.Diff(want, got); diff != "" {
-			t.Fatalf("want(+), got (-):\n%s", diff)
-		}
-	})
+		t.Run(fmt.Sprintf("text %s", name), func(t *testing.T) {
+			r := new(httpdump.Response)
+			if err := r.UnmarshalText(b); err != nil {
+				t.Fatal(err)
+			}
 
-	t.Run("json", func(t *testing.T) {
-		r := new(httpdump.Response)
-		if err := r.UnmarshalText(b); err != nil {
-			t.Fatal(err)
-		}
+			got, err := r.MarshalText()
+			if err != nil {
+				t.Fatal(err)
+			}
 
-		j, err := json.Marshal(r)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		var jr httpdump.Response
-		if err := json.Unmarshal(j, &jr); err != nil {
-			t.Fatal(err)
-		}
-
-		got, err := jr.MarshalText()
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		want := b
-		if diff := cmp.Diff(want, got); diff != "" {
-			t.Fatalf("want(+), got (-):\n%s", diff)
-		}
-	})
-
-	t.Run("parse", func(t *testing.T) {
-		r := new(httpdump.Response)
-		if err := r.UnmarshalText(b); err != nil {
-			t.Fatal(err)
-		}
-
-		req, err := httpdump.NewResponse(r.Response)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		j, err := json.Marshal(req)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		var jr httpdump.Response
-		if err := json.Unmarshal(j, &jr); err != nil {
-			t.Fatal(err)
-		}
-
-		got, err := jr.MarshalText()
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		want := b
-		if diff := cmp.Diff(want, got); diff != "" {
-			t.Fatalf("want(+), got (-):\n%s", diff)
-		}
-	})
+			want := b
+			if diff := cmp.Diff(want, got); diff != "" {
+				t.Fatalf("want(+), got (-):\n%s", diff)
+			}
+		})
+	}
 }

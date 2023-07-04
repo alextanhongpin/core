@@ -97,6 +97,39 @@ func DumpHTTP(t *testing.T, r *http.Request, handler http.HandlerFunc, opts ...H
 	return fileName
 }
 
+func DumpRequestResponse(t *testing.T, w *http.Response, r *http.Request, opts ...HTTPOption) string {
+	t.Helper()
+
+	type dumpAndCompare struct {
+		dumper
+		comparer
+	}
+
+	opt := NewHTTPOption(opts...)
+	for _, in := range opt.interceptors {
+		if err := in(w, r); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	dnc := &dumpAndCompare{
+		dumper:   NewHTTPDumper(w, r),
+		comparer: NewHTTPComparer(opts...),
+	}
+
+	p := NewHTTPPath(opts...)
+	if p.FileName == "" {
+		p.FileName = t.Name()
+	}
+
+	fileName := p.String()
+	if err := Dump(fileName, dnc); err != nil {
+		t.Fatal(err)
+	}
+
+	return fileName
+}
+
 func DumpHTTPHandler(t *testing.T, opts ...HTTPOption) func(http.Handler) http.Handler {
 	t.Helper()
 	return func(next http.Handler) http.Handler {

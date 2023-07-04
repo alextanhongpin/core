@@ -1,0 +1,21 @@
+GET / HTTP/1.1
+Host: 127.0.0.1:49235
+User-Agent: Go-http-client/1.1
+Accept-Encoding: gzip
+
+
+###
+
+
+HTTP/1.1 200 OK
+Transfer-Encoding: chunked
+Trailer: My-Trailer
+Content-Type: application/json
+Date: Tue, 04 Jul 2023 18:09:02 GMT
+
+15
+{
+ "hello": "world"
+}
+0
+My-Trailer: my-val

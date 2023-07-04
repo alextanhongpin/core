@@ -26,6 +26,7 @@ func NewRequest(r *http.Request) (*Request, error) {
 	}
 
 	if err := req.Parse(); err != nil {
+		logError(err)
 		return nil, err
 	}
 
@@ -35,11 +36,13 @@ func NewRequest(r *http.Request) (*Request, error) {
 func (r *Request) Parse() error {
 	req, err := normalizeRequest(r.Request)
 	if err != nil {
+		logError(err)
 		return err
 	}
 
 	dump, err := requestToDump(req)
 	if err != nil {
+		logError(err)
 		return err
 	}
 
@@ -50,58 +53,24 @@ func (r *Request) Parse() error {
 }
 
 func (r *Request) UnmarshalText(b []byte) error {
-	b = bytes.TrimSpace(b)
+	b = normalizeNewlines(b)
+	b = denormalizeNewlines(b)
 
-	var req *http.Request
-
-	scanner := bufio.NewScanner(bytes.NewReader(b))
-
-	var bb bytes.Buffer
-
-	sections := 3
-	for i := 0; i < sections; i++ {
-	scan:
-		for scanner.Scan() {
-			text := scanner.Text()
-			if len(text) == 0 {
-				break scan
-			}
-
-			switch i {
-			case 0:
-				var err error
-				req, err = parseRequestLine(strings.NewReader(text))
-				if err != nil {
-					return err
-				}
-
-				break scan
-			case 1:
-				k, v, ok := strings.Cut(text, ": ")
-				if !ok {
-					return fmt.Errorf("%w: %q", ErrParseHeader, text)
-				}
-				req.Header.Add(k, v)
-				if http.CanonicalHeaderKey(k) == "Host" {
-					req.Host = v
-				}
-			case 2:
-				bb.WriteString(text)
-				bb.WriteString("\n")
-			}
-		}
+	req, err := http.ReadRequest(bufio.NewReader(bytes.NewReader(b)))
+	if err != nil {
+		logError(err)
+		return err
 	}
 
-	req.Body = io.NopCloser(bytes.NewReader(bytes.TrimSpace(bb.Bytes())))
-
-	var err error
 	req, err = normalizeRequest(req)
 	if err != nil {
+		logError(err)
 		return err
 	}
 
 	dump, err := requestToDump(req)
 	if err != nil {
+		logError(err)
 		return err
 	}
 
@@ -112,14 +81,14 @@ func (r *Request) UnmarshalText(b []byte) error {
 }
 
 func (r *Request) MarshalText() ([]byte, error) {
-	// Use `DumpRequestOut` instead of `DumpRequest` to preserve the
-	// querystring.
+	// Use `DumpRequestOut` instead of `DumpRequest` to preserve the querystring.
 	res, err := httputil.DumpRequestOut(r.Request, true)
 	if err != nil {
+		logError(err)
 		return nil, err
 	}
-	res = NormalizeNewlines(res)
-	res = bytes.TrimSpace(res)
+
+	res = normalizeNewlines(res)
 
 	return res, nil
 }
@@ -131,11 +100,13 @@ func (r *Request) MarshalJSON() ([]byte, error) {
 func (r *Request) UnmarshalJSON(b []byte) error {
 	var dump Dump
 	if err := json.Unmarshal(b, &dump); err != nil {
+		logError(err)
 		return err
 	}
 
 	req, err := dumpToRequest(&dump)
 	if err != nil {
+		logError(err)
 		return err
 	}
 
@@ -151,34 +122,49 @@ func normalizeRequest(r *http.Request) (*http.Request, error) {
 	// Prettify the request body.
 	b, err := io.ReadAll(req.Body)
 	if err != nil {
+		logError(err)
 		return nil, err
 	}
 
 	b, err = prettyBytes(b)
 	if err != nil {
+		logError(err)
 		return nil, err
 	}
 
+	// NOTE: The new lines changes the content-length drastically.
+	b = denormalizeNewlines(b)
+	b = bytes.TrimSpace(b)
 	req.Body = io.NopCloser(bytes.NewReader(b))
 
 	// Update the content length.
 	req.ContentLength = int64(len(b))
 
 	// `httputil.DumpRequestOut` requires these to be set.
+	normalizeHost(req)
+	normalizeScheme(req)
+
+	return req, nil
+}
+
+func normalizeHost(req *http.Request) {
+	host := valueOrDefault(req.Header.Get("Host"), req.Host)
+	host = valueOrDefault(host, "example.com")
+	req.Header.Set("Host", host)
+	req.Host = host
+	req.URL.Host = host
+}
+
+func normalizeScheme(req *http.Request) {
 	if req.URL.Scheme == "" {
 		req.URL.Scheme = "http"
 	}
-
-	if req.URL.Host == "" {
-		req.URL.Host = "example.com"
-	}
-
-	return req, nil
 }
 
 func dumpToRequest(dump *Dump) (*http.Request, error) {
 	req, err := parseRequestLine(strings.NewReader(dump.Line))
 	if err != nil {
+		logError(err)
 		return nil, err
 	}
 
@@ -194,6 +180,7 @@ func requestToDump(req *http.Request) (*Dump, error) {
 
 	b, err := io.ReadAll(req.Body)
 	if err != nil {
+		logError(err)
 		return nil, err
 	}
 
@@ -227,11 +214,13 @@ func parseRequestLine(r io.Reader) (*http.Request, error) {
 		&req.ProtoMajor,
 		&req.ProtoMinor,
 	); err != nil {
+		logError(err)
 		return nil, err
 	}
 
 	uri, err := url.Parse(reqURI)
 	if err != nil {
+		logError(err)
 		return nil, err
 	}
 	req.URL = uri
