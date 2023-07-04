@@ -272,7 +272,7 @@ func TestHTTPDump(t *testing.T) {
 	}
 }
 
-func TestHTTP(t *testing.T) {
+func TestHTTPServer(t *testing.T) {
 	fooHandler := func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, "foo")
 	}
@@ -312,6 +312,66 @@ func TestHTTP(t *testing.T) {
 	if bar != "bar" {
 		t.Fatalf("want %s, got %s", "bar", bar)
 	}
+}
+
+func TestHTTPTrailer(t *testing.T) {
+	h := func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Add("Trailer", "my-trailer")
+		w.Header().Set("Content-Type", "application/json")
+		body := `{"hello": "world"}`
+		//w.Header().Set("Content-Length", strconv.Itoa(len(body)))
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, body)
+		w.Header().Set("my-trailer", "my-val")
+	}
+
+	mux := http.NewServeMux()
+	//mid := testutil.DumpHTTPHandler(t, testutil.IgnoreHeaders("Host"))
+	mux.Handle("/", http.HandlerFunc(h))
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	r, err := http.NewRequest("GET", ts.URL, strings.NewReader(""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := http.DefaultClient.Do(r)
+	//resp, err := http.Get(ts.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	/*
+		defer resp.Body.Close()
+		b, err := io.ReadAll(resp.Body)
+
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		t.Log("BODY:", string(b))
+		resp.Body = io.NopCloser(bytes.NewReader(b))
+		b, err = httputil.DumpResponse(resp, true)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		t.Log(string(b))
+		// You can only get trailer after reading the body.
+		t.Log("TRAILER:", resp.Trailer)
+		{
+			r, err := httpdump.NewResponse(resp)
+			if err != nil {
+				t.Fatal(err)
+			}
+			b, err := r.MarshalText()
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Log("GOT", string(b))
+		}
+	*/
+	testutil.DumpRequestResponse(t, resp, r)
 }
 
 type YourClient struct {

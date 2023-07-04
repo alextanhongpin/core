@@ -1,7 +1,9 @@
 package httpdump_test
 
 import (
-	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/alextanhongpin/core/http/httpdump"
@@ -9,28 +11,27 @@ import (
 )
 
 func TestHTTP(t *testing.T) {
-	b := []byte(`POST /bar HTTP/1.1
-Host: 127.0.0.1:64011
-User-Agent: Go-http-client/1.1
-Content-Length: 17
-Accept-Encoding: gzip
-Content-Type: application/json
+	h := func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"data": {"name": "John Appleseed", "age": 10, "isMarried": true}}`)
+	}
 
-{
- "bar": "baz"
-}
+	r := httptest.NewRequest("POST", "/userinfo", nil)
+	w := httptest.NewRecorder()
+	h(w, r)
+	resp := w.Result()
 
+	t.Run("marshal", func(t *testing.T) {
+		d, err := httpdump.NewHTTP(resp, r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, err := d.MarshalText()
+		if err != nil {
+			t.Fatal(err)
+		}
 
-###
-
-
-HTTP/1.1 200 OK
-Connection: close
-Content-Type: text/plain; charset=utf-8
-
-bar`)
-
-	t.Run("text", func(t *testing.T) {
 		h := new(httpdump.HTTP)
 		if err := h.UnmarshalText(b); err != nil {
 			t.Fatal(err)
@@ -45,31 +46,6 @@ bar`)
 		if diff := cmp.Diff(want, got); diff != "" {
 			t.Fatalf("want(+), got(-):\n%s", diff)
 		}
-	})
 
-	t.Run("json", func(t *testing.T) {
-		h1 := new(httpdump.HTTP)
-		if err := h1.UnmarshalText(b); err != nil {
-			t.Fatal(err)
-		}
-
-		b1, err := json.Marshal(h1)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		var h2 httpdump.HTTP
-		if err := json.Unmarshal(b1, &h2); err != nil {
-			t.Fatal(err)
-		}
-
-		b2, err := h2.MarshalJSON()
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		if diff := cmp.Diff(b1, b2); diff != "" {
-			t.Fatalf("want(+), got(-):\n%s", diff)
-		}
 	})
 }
