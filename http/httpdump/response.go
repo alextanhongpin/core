@@ -143,16 +143,14 @@ func normalizeResponse(res *http.Response) (*http.Response, error) {
 		return nil, fmt.Errorf("failed to read body: %w", err)
 	}
 
-	if len(res.Trailer) == 0 {
-		b, err = prettyBytes(b)
-		if err != nil {
-			logError(err)
-			return nil, fmt.Errorf("failed to prettify body: %w", err)
-		}
+	b, err = prettyBytes(b)
+	if err != nil {
+		logError(err)
+		return nil, fmt.Errorf("failed to prettify body: %w", err)
 	}
 
-	//b = denormalizeNewlines(b)
-	//b = bytes.TrimSpace(b)
+	b = denormalizeNewlines(b)
+	b = bytes.TrimSpace(b)
 	res.Body = io.NopCloser(bytes.NewReader(b))
 
 	return res, nil
