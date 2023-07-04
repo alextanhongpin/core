@@ -8,15 +8,17 @@ import (
 	"io"
 	"net/http"
 	"net/http/httputil"
+	"os"
 	"runtime"
 	"strconv"
 	"strings"
 )
 
 func logError(err error) (b bool) {
-	//if _, ok := os.LookupEnv("DEBUG"); !ok {
-	//return
-	//}
+	if _, ok := os.LookupEnv("DEBUG"); !ok {
+		return
+	}
+
 	if err != nil {
 		pkg := "github.com/alextanhongpin"
 		pretty := func(s string) string {
@@ -24,9 +26,9 @@ func logError(err error) (b bool) {
 			part := parts[len(parts)-1]
 			return strings.TrimPrefix(part, "/")
 		}
-		// notice that we're using 1, so it will actually log the where
-		// the error happened, 0 = this function, we don't want that.
 
+		// Notice that we're using 1, so it will actually log the where
+		// the error happened, 0 = this function, we don't want that.
 		pc, filename, line, _ := runtime.Caller(1)
 		fn := runtime.FuncForPC(pc).Name()
 
