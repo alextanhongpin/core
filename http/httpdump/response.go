@@ -49,19 +49,20 @@ func NewResponse(r *http.Response) (*Response, error) {
 		Response: r,
 	}
 
-	if err := res.Parse(); err != nil {
+	if err := res.parse(); err != nil {
 		return nil, err
 	}
 
 	return res, nil
 }
 
-func (r *Response) Parse() error {
+func (r *Response) parse() error {
 	res, err := normalizeResponse(r.Response)
 	if err != nil {
 		logError(err)
 		return err
 	}
+
 	dump, err := responseToDump(res)
 	if err != nil {
 		logError(err)
@@ -114,29 +115,6 @@ func (r *Response) MarshalText() ([]byte, error) {
 	return res, nil
 }
 
-func (r *Response) MarshalJSON() ([]byte, error) {
-	return r.Dump.MarshalJSON()
-}
-
-func (r *Response) UnmarshalJSON(b []byte) error {
-	var dump Dump
-	if err := json.Unmarshal(b, &dump); err != nil {
-		logError(err)
-		return err
-	}
-
-	res, err := dumpToResponse(&dump)
-	if err != nil {
-		logError(err)
-		return fmt.Errorf("UnmarshalJSON: %w", err)
-	}
-
-	r.Dump = dump
-	r.Response = res
-
-	return nil
-}
-
 func normalizeResponse(res *http.Response) (*http.Response, error) {
 	// Prettify the request body.
 	b, err := io.ReadAll(res.Body)
@@ -158,20 +136,6 @@ func normalizeResponse(res *http.Response) (*http.Response, error) {
 	return res, nil
 }
 
-func dumpToResponse(dump *Dump) (*http.Response, error) {
-	res, err := parseResponseLine(strings.NewReader(dump.Line))
-	if err != nil {
-		logError(err)
-		return nil, err
-	}
-
-	res.Header = dump.Header.Clone()
-	res.Body = io.NopCloser(dump.Body)
-	res.Trailer = dump.Trailer.Clone()
-
-	return normalizeResponse(res)
-}
-
 func responseToDump(res *http.Response) (*Dump, error) {
 	resLine := formatResponseLine(res)
 
@@ -181,13 +145,21 @@ func responseToDump(res *http.Response) (*Dump, error) {
 		return nil, fmt.Errorf("responseToDump: %w", err)
 	}
 
-	body := bytes.NewReader(b)
-	res.Body = io.NopCloser(body)
+	var a any
+	if json.Valid(b) {
+		if err := json.Unmarshal(b, &a); err != nil {
+			return nil, err
+		}
+	} else {
+		a = string(b)
+	}
+
+	res.Body = io.NopCloser(bytes.NewReader(b))
 
 	return &Dump{
 		Line:    resLine,
 		Header:  res.Header.Clone(),
-		Body:    body,
+		Body:    a,
 		Trailer: res.Trailer.Clone(),
 	}, nil
 }
@@ -207,19 +179,4 @@ func formatResponseLine(r *http.Response) string {
 	}
 
 	return fmt.Sprintf("HTTP/%d.%d %03d %s", r.ProtoMajor, r.ProtoMinor, r.StatusCode, text)
-}
-
-func parseResponseLine(r io.Reader) (*http.Response, error) {
-	var w http.Response
-	if _, err := fmt.Fscanf(r, "HTTP/%d.%d %03d",
-		&w.ProtoMajor,
-		&w.ProtoMinor,
-		&w.StatusCode,
-	); err != nil {
-		logError(err)
-		return nil, err
-	}
-	w.Header = make(http.Header)
-
-	return &w, nil
 }

@@ -35,7 +35,7 @@ func TestDump(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	bb, err := (&d).MarshalJSON()
+	bb, err := json.Marshal(d)
 	if err != nil {
 		t.Fatal(err)
 	}

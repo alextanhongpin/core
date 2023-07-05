@@ -2,7 +2,6 @@ package testutil
 
 import (
 	"bytes"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -221,31 +220,7 @@ func httpdumpDiff(
 		return err
 	}
 
-	xBody, err := io.ReadAll(x.Body)
-	if err != nil {
-		return err
-	}
-	x.Body.Seek(0, 0)
-
-	yBody, err := io.ReadAll(y.Body)
-	if err != nil {
-		return err
-	}
-	y.Body.Seek(0, 0)
-
-	// Compare body before header.
-	// Headers may contain `Content-Length`, which depends on the body.
-	if err := func(isJSON bool) error {
-		if isJSON {
-			comparer := &JSONComparer{opt: &jsonOption{bodyOpts: bodyOpts}}
-			// Convert the json to map[string]any for better diff.
-			// This does not work on JSON array.
-			// Ensure that only structs are passed in.
-			return comparer.Compare(xBody, yBody)
-		}
-
-		return ansiDiff(xBody, yBody, bodyOpts...)
-	}(json.Valid(xBody) && json.Valid(yBody)); err != nil {
+	if err := ansiDiff(x.Body, y.Body, bodyOpts...); err != nil {
 		return err
 	}
 

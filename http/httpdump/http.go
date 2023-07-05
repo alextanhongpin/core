@@ -2,7 +2,6 @@ package httpdump
 
 import (
 	"bytes"
-	"encoding/json"
 	"errors"
 	"net/http"
 )
@@ -74,35 +73,6 @@ func (d *HTTP) UnmarshalText(b []byte) error {
 
 	d.w = w
 	d.r = r
-
-	return nil
-}
-
-func (d *HTTP) MarshalJSON() ([]byte, error) {
-	type data struct {
-		Request  *Request  `json:"request"`
-		Response *Response `json:"response"`
-	}
-
-	return json.Marshal(data{
-		Request:  d.r,
-		Response: d.w,
-	})
-}
-
-func (d *HTTP) UnmarshalJSON(b []byte) error {
-	type data struct {
-		Request  *Request  `json:"request"`
-		Response *Response `json:"response"`
-	}
-
-	var r data
-	if err := json.Unmarshal(b, &r); err != nil {
-		return err
-	}
-
-	d.w = r.Response
-	d.r = r.Request
 
 	return nil
 }

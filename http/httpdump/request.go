@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
-	"strings"
 )
 
 var ErrParseHeader = errors.New("httpdump: parse header failed")
@@ -25,7 +24,7 @@ func NewRequest(r *http.Request) (*Request, error) {
 		Request: r,
 	}
 
-	if err := req.Parse(); err != nil {
+	if err := req.parse(); err != nil {
 		logError(err)
 		return nil, err
 	}
@@ -33,7 +32,7 @@ func NewRequest(r *http.Request) (*Request, error) {
 	return req, nil
 }
 
-func (r *Request) Parse() error {
+func (r *Request) parse() error {
 	req, err := normalizeRequest(r.Request)
 	if err != nil {
 		logError(err)
@@ -93,29 +92,6 @@ func (r *Request) MarshalText() ([]byte, error) {
 	return res, nil
 }
 
-func (r *Request) MarshalJSON() ([]byte, error) {
-	return r.Dump.MarshalJSON()
-}
-
-func (r *Request) UnmarshalJSON(b []byte) error {
-	var dump Dump
-	if err := json.Unmarshal(b, &dump); err != nil {
-		logError(err)
-		return err
-	}
-
-	req, err := dumpToRequest(&dump)
-	if err != nil {
-		logError(err)
-		return err
-	}
-
-	r.Dump = dump
-	r.Request = req
-
-	return nil
-}
-
 func normalizeRequest(r *http.Request) (*http.Request, error) {
 	req := r.Clone(r.Context())
 
@@ -161,20 +137,6 @@ func normalizeScheme(req *http.Request) {
 	}
 }
 
-func dumpToRequest(dump *Dump) (*http.Request, error) {
-	req, err := parseRequestLine(strings.NewReader(dump.Line))
-	if err != nil {
-		logError(err)
-		return nil, err
-	}
-
-	req.Header = dump.Header.Clone()
-	req.Host = dump.Header.Get("Host")
-	req.Body = io.NopCloser(dump.Body)
-
-	return normalizeRequest(req)
-}
-
 func requestToDump(req *http.Request) (*Dump, error) {
 	reqLine := formatRequestLine(req)
 
@@ -184,13 +146,21 @@ func requestToDump(req *http.Request) (*Dump, error) {
 		return nil, err
 	}
 
-	body := bytes.NewReader(b)
-	req.Body = io.NopCloser(body)
+	var a any
+	if json.Valid(b) {
+		if err := json.Unmarshal(b, &a); err != nil {
+			return nil, err
+		}
+	} else {
+		a = string(b)
+	}
+
+	req.Body = io.NopCloser(bytes.NewReader(b))
 
 	return &Dump{
 		Line:   reqLine,
 		Header: req.Header.Clone(),
-		Body:   body,
+		Body:   a,
 	}, nil
 }
 
