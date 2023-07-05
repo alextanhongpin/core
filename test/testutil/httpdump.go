@@ -81,7 +81,7 @@ func DumpHTTPFile(fileName string, r *http.Request, handler http.HandlerFunc, op
 	return Dump(fileName, dnc)
 }
 
-func DumpHTTP(t *testing.T, r *http.Request, handler http.HandlerFunc, opts ...HTTPOption) string {
+func DumpHTTPHandler(t *testing.T, r *http.Request, handler http.HandlerFunc, opts ...HTTPOption) string {
 	t.Helper()
 	p := NewHTTPPath(opts...)
 	if p.FileName == "" {
@@ -96,7 +96,7 @@ func DumpHTTP(t *testing.T, r *http.Request, handler http.HandlerFunc, opts ...H
 	return fileName
 }
 
-func DumpRequestResponse(t *testing.T, w *http.Response, r *http.Request, opts ...HTTPOption) string {
+func DumpHTTP(t *testing.T, w *http.Response, r *http.Request, opts ...HTTPOption) string {
 	t.Helper()
 
 	type dumpAndCompare struct {
@@ -127,21 +127,6 @@ func DumpRequestResponse(t *testing.T, w *http.Response, r *http.Request, opts .
 	}
 
 	return fileName
-}
-
-func DumpHTTPHandler(t *testing.T, opts ...HTTPOption) func(http.Handler) http.Handler {
-	t.Helper()
-	return func(next http.Handler) http.Handler {
-		fn := func(w http.ResponseWriter, r *http.Request) {
-			// Serve to the response recorder.
-			_ = DumpHTTP(t, r, next.ServeHTTP, opts...)
-
-			// Serve to the actual server.
-			next.ServeHTTP(w, r)
-		}
-
-		return http.HandlerFunc(fn)
-	}
 }
 
 type HTTPDumper struct {

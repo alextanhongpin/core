@@ -1,11 +1,8 @@
 package testutil_test
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
-	"io"
-	"io/ioutil"
 	"math/rand"
 	"mime"
 	"net/http"
@@ -267,50 +264,8 @@ func TestHTTPDump(t *testing.T) {
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			testutil.DumpHTTP(t, tc.r, tc.handler, tc.opts...)
+			testutil.DumpHTTPHandler(t, tc.r, tc.handler, tc.opts...)
 		})
-	}
-}
-
-func TestHTTPServer(t *testing.T) {
-	fooHandler := func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, "foo")
-	}
-	barHandler := func(w http.ResponseWriter, r *http.Request) {
-		_, err := io.ReadAll(r.Body)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		defer r.Body.Close()
-
-		fmt.Fprint(w, "bar")
-	}
-
-	mux := http.NewServeMux()
-	mux.HandleFunc("/foo", fooHandler)
-	mw := testutil.DumpHTTPHandler(t, testutil.IgnoreHeaders("Host"))
-	mux.Handle("/bar", mw(http.HandlerFunc(barHandler)))
-	ts := httptest.NewServer(mux)
-	defer ts.Close()
-
-	ctx := context.Background()
-	client := &YourClient{url: ts.URL}
-
-	foo, err := client.GetFoo(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if foo != "foo" {
-		t.Fatalf("want %s, got %s", "foo", foo)
-	}
-
-	bar, err := client.PostBar(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if bar != "bar" {
-		t.Fatalf("want %s, got %s", "bar", bar)
 	}
 }
 
@@ -319,14 +274,12 @@ func TestHTTPTrailer(t *testing.T) {
 		w.Header().Add("Trailer", "my-trailer")
 		w.Header().Set("Content-Type", "application/json")
 		body := `{"hello": "world"}`
-		//w.Header().Set("Content-Length", strconv.Itoa(len(body)))
 		w.WriteHeader(http.StatusOK)
 		fmt.Fprint(w, body)
 		w.Header().Set("my-trailer", "my-val")
 	}
 
 	mux := http.NewServeMux()
-	//mid := testutil.DumpHTTPHandler(t, testutil.IgnoreHeaders("Host"))
 	mux.Handle("/", http.HandlerFunc(h))
 	ts := httptest.NewServer(mux)
 	defer ts.Close()
@@ -335,83 +288,11 @@ func TestHTTPTrailer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	resp, err := http.DefaultClient.Do(r)
-	//resp, err := http.Get(ts.URL)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	/*
-		defer resp.Body.Close()
-		b, err := io.ReadAll(resp.Body)
-
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		t.Log("BODY:", string(b))
-		resp.Body = io.NopCloser(bytes.NewReader(b))
-		b, err = httputil.DumpResponse(resp, true)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		t.Log(string(b))
-		// You can only get trailer after reading the body.
-		t.Log("TRAILER:", resp.Trailer)
-		{
-			r, err := httpdump.NewResponse(resp)
-			if err != nil {
-				t.Fatal(err)
-			}
-			b, err := r.MarshalText()
-			if err != nil {
-				t.Fatal(err)
-			}
-			t.Log("GOT", string(b))
-		}
-	*/
-	testutil.DumpRequestResponse(t, resp, r)
-}
-
-type YourClient struct {
-	url string
-}
-
-func (c *YourClient) GetFoo(ctx context.Context) (string, error) {
-	endpoint, err := url.JoinPath(c.url, "/foo")
-	if err != nil {
-		return "", err
-	}
-
-	fmt.Println("calling", endpoint)
-	resp, err := http.Get(endpoint)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-	b, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		return "", err
-	}
-	return string(b), nil
-}
-
-func (c *YourClient) PostBar(ctx context.Context) (string, error) {
-	endpoint, err := url.JoinPath(c.url, "/bar")
-	if err != nil {
-		return "", err
-	}
-
-	fmt.Println("calling", endpoint)
-	resp, err := http.Post(endpoint, "application/json", strings.NewReader(`{"bar": "baz"}`))
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-	b, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		return "", err
-	}
-	return string(b), nil
+	testutil.DumpHTTP(t, resp, r)
 }
