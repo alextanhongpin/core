@@ -34,6 +34,7 @@ func ListenAndServe(port string, handler http.Handler) {
 
 	// Also limit the payload size to 1 MB.
 	handler = http.MaxBytesHandler(handler, MaxBytesSize)
+
 	srv := &http.Server{
 		Addr:              port,
 		ReadHeaderTimeout: readTimeout,
@@ -46,12 +47,15 @@ func ListenAndServe(port string, handler http.Handler) {
 		},
 	}
 
+	done := make(chan bool)
+
 	// Initializing the srv in a goroutine so that
 	// it won't block the graceful shutdown handling below
 	go func() {
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			panic(err)
 		}
+		close(done)
 	}()
 
 	// Listen for the interrupt signal.
@@ -68,4 +72,7 @@ func ListenAndServe(port string, handler http.Handler) {
 	if err := srv.Shutdown(ctx); err != nil {
 		panic(err)
 	}
+
+	// Wait for the server to shutdown.
+	<-done
 }
