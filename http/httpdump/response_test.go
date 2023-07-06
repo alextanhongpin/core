@@ -38,12 +38,12 @@ My-Trailer: my-val`)
 		name, b := ts.name, ts.data
 
 		t.Run(fmt.Sprintf("text %s", name), func(t *testing.T) {
-			r := new(httpdump.Response)
-			if err := r.UnmarshalText(b); err != nil {
+			w, err := httpdump.ReadResponse(b)
+			if err != nil {
 				t.Fatal(err)
 			}
 
-			got, err := r.MarshalText()
+			got, err := httpdump.DumpResponse(w)
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -7,45 +7,16 @@ import (
 )
 
 var ErrInvalidDumpFormat = errors.New("invalid http dump format")
+
 var sep = []byte("\n###\n")
 
-type HTTP struct {
-	w *Response
-	r *Request
-}
-
-func NewHTTP(w *http.Response, r *http.Request) (*HTTP, error) {
-	req, err := NewRequest(r)
+func DumpHTTP(w *http.Response, r *http.Request) ([]byte, error) {
+	req, err := DumpRequest(r)
 	if err != nil {
 		return nil, err
 	}
 
-	res, err := NewResponse(w)
-	if err != nil {
-		return nil, err
-	}
-
-	return &HTTP{
-		w: res,
-		r: req,
-	}, nil
-}
-
-func (h *HTTP) Request() *Request {
-	return h.r
-}
-
-func (h *HTTP) Response() *Response {
-	return h.w
-}
-
-func (d *HTTP) MarshalText() ([]byte, error) {
-	req, err := d.r.MarshalText()
-	if err != nil {
-		return nil, err
-	}
-
-	res, err := d.w.MarshalText()
+	res, err := DumpResponse(w)
 	if err != nil {
 		return nil, err
 	}
@@ -55,24 +26,21 @@ func (d *HTTP) MarshalText() ([]byte, error) {
 	return bytes.Join(out, []byte("\n\n")), nil
 }
 
-func (d *HTTP) UnmarshalText(b []byte) error {
+func ReadHTTP(b []byte) (w *http.Response, r *http.Request, err error) {
 	req, res, ok := bytes.Cut(b, sep)
 	if !ok {
-		return ErrInvalidDumpFormat
+		return nil, nil, ErrInvalidDumpFormat
 	}
 
-	r := new(Request)
-	if err := r.UnmarshalText(req); err != nil {
-		return err
+	r, err = ReadRequest(req)
+	if err != nil {
+		return
 	}
 
-	w := new(Response)
-	if err := w.UnmarshalText(res); err != nil {
-		return err
+	w, err = ReadResponse(res)
+	if err != nil {
+		return
 	}
 
-	d.w = w
-	d.r = r
-
-	return nil
+	return
 }

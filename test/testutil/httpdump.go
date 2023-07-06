@@ -142,12 +142,7 @@ func NewHTTPDumper(w *http.Response, r *http.Request) *HTTPDumper {
 }
 
 func (d *HTTPDumper) Dump() ([]byte, error) {
-	h, err := httpdump.NewHTTP(d.w, d.r)
-	if err != nil {
-		return nil, err
-	}
-
-	return h.MarshalText()
+	return httpdump.DumpHTTP(d.w, d.r)
 }
 
 type HTTPComparer struct {
@@ -161,31 +156,39 @@ func NewHTTPComparer(opts ...HTTPOption) *HTTPComparer {
 }
 
 func (c *HTTPComparer) Compare(snapshot, received []byte) error {
-	snap := new(httpdump.HTTP)
-	if err := snap.UnmarshalText(snapshot); err != nil {
+	w, r, err := httpdump.ReadHTTP(snapshot)
+	if err != nil {
+		return err
+	}
+	xr, err := httpdump.FromRequest(r)
+	if err != nil {
+		return nil
+	}
+	xw, err := httpdump.FromResponse(w)
+	if err != nil {
+		return nil
+	}
+
+	ww, rr, err := httpdump.ReadHTTP(received)
+	if err != nil {
 		return err
 	}
 
-	recv := new(httpdump.HTTP)
-	if err := recv.UnmarshalText(snapshot); err != nil {
-		return err
+	yr, err := httpdump.FromRequest(rr)
+	if err != nil {
+		return nil
 	}
 
-	if err := httpdumpDiff(
-		snap.Request().Dump,
-		recv.Request().Dump,
-		c.opt.headerOpts,
-		c.opt.bodyOpts,
-	); err != nil {
+	yw, err := httpdump.FromResponse(ww)
+	if err != nil {
+		return nil
+	}
+
+	if err := httpdumpDiff(*xr, *yr, c.opt.headerOpts, c.opt.bodyOpts); err != nil {
 		return fmt.Errorf("Request does not match snapshot. %w", err)
 	}
 
-	if err := httpdumpDiff(
-		snap.Response().Dump,
-		recv.Response().Dump,
-		c.opt.headerOpts,
-		c.opt.bodyOpts,
-	); err != nil {
+	if err := httpdumpDiff(*xw, *yw, c.opt.headerOpts, c.opt.bodyOpts); err != nil {
 		return fmt.Errorf("Response does not match snapshot. %w", err)
 	}
 
@@ -202,12 +205,20 @@ func httpdumpDiff(
 	y := received
 
 	if err := ansiDiff(x.Line, y.Line); err != nil {
-		return err
+		return fmt.Errorf("Line: %w", err)
 	}
 
 	if err := ansiDiff(x.Body, y.Body, bodyOpts...); err != nil {
-		return err
+		return fmt.Errorf("Body: %w", err)
 	}
 
-	return ansiDiff(x.Header, y.Header, headerOpts...)
+	if err := ansiDiff(x.Header, y.Header, headerOpts...); err != nil {
+		return fmt.Errorf("Header: %w", err)
+	}
+
+	if err := ansiDiff(x.Trailer, y.Trailer, headerOpts...); err != nil {
+		return fmt.Errorf("Trailer: %w", err)
+	}
+
+	return nil
 }

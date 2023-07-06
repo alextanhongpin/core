@@ -8,141 +8,70 @@ import (
 	"io"
 	"net/http"
 	"net/http/httputil"
-	"os"
-	"runtime"
 	"strconv"
 	"strings"
 )
 
-func logError(err error) (b bool) {
-	if _, ok := os.LookupEnv("DEBUG"); !ok {
-		return
-	}
-
-	if err != nil {
-		pkg := "github.com/alextanhongpin"
-		pretty := func(s string) string {
-			parts := strings.Split(s, pkg)
-			part := parts[len(parts)-1]
-			return strings.TrimPrefix(part, "/")
-		}
-
-		// Notice that we're using 1, so it will actually log the where
-		// the error happened, 0 = this function, we don't want that.
-		pc, filename, line, _ := runtime.Caller(1)
-		fn := runtime.FuncForPC(pc).Name()
-
-		fmt.Printf("%s[%s:%d]: %v\n", pretty(fn), pretty(filename), line, err)
-		b = true
-	}
-
-	return
-}
-
-type Response struct {
-	*http.Response
-	Dump Dump
-}
-
-func NewResponse(r *http.Response) (*Response, error) {
-	res := &Response{
-		Response: r,
-	}
-
-	if err := res.parse(); err != nil {
-		return nil, err
-	}
-
-	return res, nil
-}
-
-func (r *Response) parse() error {
-	res, err := normalizeResponse(r.Response)
-	if err != nil {
-		logError(err)
-		return err
-	}
-
-	dump, err := responseToDump(res)
-	if err != nil {
-		logError(err)
-		return err
-	}
-
-	r.Response = res
-	r.Dump = *dump
-
-	return nil
-}
-
-func (r *Response) UnmarshalText(b []byte) error {
-	b = normalizeNewlines(b)
+func ReadResponse(b []byte) (*http.Response, error) {
+	b = bytes.TrimSpace(b)
 	b = denormalizeNewlines(b)
 
-	res, err := http.ReadResponse(bufio.NewReader(bytes.NewReader(b)), nil)
+	r, err := http.ReadResponse(bufio.NewReader(bytes.NewReader(b)), nil)
 	if err != nil {
-		logError(err)
-		return err
-	}
-
-	res, err = normalizeResponse(res)
-	if err != nil {
-		logError(err)
-		return err
-	}
-
-	dump, err := responseToDump(res)
-	if err != nil {
-		logError(err)
-		return err
-	}
-
-	r.Response = res
-	r.Dump = *dump
-
-	return nil
-}
-
-func (r *Response) MarshalText() ([]byte, error) {
-	res, err := httputil.DumpResponse(r.Response, true)
-	if err != nil {
-		logError(err)
 		return nil, err
 	}
 
-	res = normalizeNewlines(res)
+	return normalizeResponse(r)
+}
 
-	return res, nil
+func DumpResponse(r *http.Response) ([]byte, error) {
+	r, err := normalizeResponse(r)
+	if err != nil {
+		return nil, err
+	}
+
+	b, err := httputil.DumpResponse(r, true)
+	if err != nil {
+		return nil, err
+	}
+
+	b = normalizeNewlines(b)
+	return b, nil
+}
+
+func FromResponse(r *http.Response) (*Dump, error) {
+	return responseToDump(r)
 }
 
 func normalizeResponse(res *http.Response) (*http.Response, error) {
 	// Prettify the request body.
 	b, err := io.ReadAll(res.Body)
 	if err != nil {
-		logError(err)
-		return nil, fmt.Errorf("failed to read body: %w", err)
+		return nil, err
 	}
 
-	b, err = prettyBytes(b)
+	b, err = bytesPretty(b)
 	if err != nil {
-		logError(err)
-		return nil, fmt.Errorf("failed to prettify body: %w", err)
+		return nil, err
 	}
 
-	b = denormalizeNewlines(b)
-	b = bytes.TrimSpace(b)
 	res.Body = io.NopCloser(bytes.NewReader(b))
+
+	// If the content-length is set, we need to update it.
+	n := int64(len(b))
+	if res.ContentLength > 0 && res.ContentLength != n {
+		res.ContentLength = n
+	}
 
 	return res, nil
 }
 
-func responseToDump(res *http.Response) (*Dump, error) {
-	resLine := formatResponseLine(res)
+func responseToDump(r *http.Response) (*Dump, error) {
+	resLine := formatResponseLine(r)
 
-	b, err := io.ReadAll(res.Body)
+	b, err := io.ReadAll(r.Body)
 	if err != nil {
-		logError(err)
-		return nil, fmt.Errorf("responseToDump: %w", err)
+		return nil, err
 	}
 
 	var a any
@@ -154,13 +83,13 @@ func responseToDump(res *http.Response) (*Dump, error) {
 		a = string(b)
 	}
 
-	res.Body = io.NopCloser(bytes.NewReader(b))
+	r.Body = io.NopCloser(bytes.NewReader(b))
 
 	return &Dump{
 		Line:    resLine,
-		Header:  res.Header.Clone(),
+		Header:  r.Header.Clone(),
 		Body:    a,
-		Trailer: res.Trailer.Clone(),
+		Trailer: r.Trailer.Clone(),
 	}, nil
 }
 

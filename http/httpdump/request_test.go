@@ -14,22 +14,17 @@ func TestRequestUnmarshal(t *testing.T) {
 	r := httptest.NewRequest("POST", "/", p)
 
 	t.Run("text", func(t *testing.T) {
-		req, err := httpdump.NewRequest(r)
+		b, err := httpdump.DumpRequest(r)
 		if err != nil {
 			t.Fatal(err)
 		}
 
-		b, err := req.MarshalText()
+		rr, err := httpdump.ReadRequest(b)
 		if err != nil {
 			t.Fatal(err)
 		}
 
-		r := new(httpdump.Request)
-		if err := r.UnmarshalText(b); err != nil {
-			t.Fatal(err)
-		}
-
-		got, err := r.MarshalText()
+		got, err := httpdump.DumpRequest(rr)
 		if err != nil {
 			t.Fatal(err)
 		}

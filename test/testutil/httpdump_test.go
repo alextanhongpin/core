@@ -294,5 +294,7 @@ func TestHTTPTrailer(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	testutil.DumpHTTP(t, resp, r)
+	testutil.DumpHTTP(t, resp, r,
+		testutil.IgnoreHeaders("Host", "Date"),
+	)
 }

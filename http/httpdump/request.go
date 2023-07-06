@@ -4,92 +4,43 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httputil"
-	"net/url"
 )
 
-var ErrParseHeader = errors.New("httpdump: parse header failed")
-
-type Request struct {
-	*http.Request `json:"-"`
-	Dump          Dump
-}
-
-func NewRequest(r *http.Request) (*Request, error) {
-	req := &Request{
-		Request: r,
-	}
-
-	if err := req.parse(); err != nil {
-		logError(err)
-		return nil, err
-	}
-
-	return req, nil
-}
-
-func (r *Request) parse() error {
-	req, err := normalizeRequest(r.Request)
-	if err != nil {
-		logError(err)
-		return err
-	}
-
-	dump, err := requestToDump(req)
-	if err != nil {
-		logError(err)
-		return err
-	}
-
-	r.Request = req
-	r.Dump = *dump
-
-	return nil
-}
-
-func (r *Request) UnmarshalText(b []byte) error {
-	b = normalizeNewlines(b)
+func ReadRequest(b []byte) (*http.Request, error) {
+	b = bytes.TrimSpace(b)
 	b = denormalizeNewlines(b)
 
-	req, err := http.ReadRequest(bufio.NewReader(bytes.NewReader(b)))
+	r, err := http.ReadRequest(bufio.NewReader(bytes.NewReader(b)))
 	if err != nil {
-		logError(err)
-		return err
-	}
-
-	req, err = normalizeRequest(req)
-	if err != nil {
-		logError(err)
-		return err
-	}
-
-	dump, err := requestToDump(req)
-	if err != nil {
-		logError(err)
-		return err
-	}
-
-	r.Request = req
-	r.Dump = *dump
-
-	return nil
-}
-
-func (r *Request) MarshalText() ([]byte, error) {
-	// Use `DumpRequestOut` instead of `DumpRequest` to preserve the querystring.
-	res, err := httputil.DumpRequestOut(r.Request, true)
-	if err != nil {
-		logError(err)
 		return nil, err
 	}
 
-	res = normalizeNewlines(res)
+	return normalizeRequest(r)
+}
 
-	return res, nil
+func DumpRequest(r *http.Request) ([]byte, error) {
+	r, err := normalizeRequest(r)
+	if err != nil {
+		return nil, err
+	}
+
+	// Use `DumpRequestOut` instead of `DumpRequest` to preserve the querystring.
+	b, err := httputil.DumpRequestOut(r, true)
+	if err != nil {
+		return nil, err
+	}
+
+	b = normalizeNewlines(b)
+
+	return b, nil
+}
+
+func FromRequest(r *http.Request) (*Dump, error) {
+	return requestToDump(r)
 }
 
 func normalizeRequest(r *http.Request) (*http.Request, error) {
@@ -98,19 +49,14 @@ func normalizeRequest(r *http.Request) (*http.Request, error) {
 	// Prettify the request body.
 	b, err := io.ReadAll(req.Body)
 	if err != nil {
-		logError(err)
 		return nil, err
 	}
 
-	b, err = prettyBytes(b)
+	b, err = bytesPretty(b)
 	if err != nil {
-		logError(err)
 		return nil, err
 	}
 
-	// NOTE: The new lines changes the content-length drastically.
-	b = denormalizeNewlines(b)
-	b = bytes.TrimSpace(b)
 	req.Body = io.NopCloser(bytes.NewReader(b))
 
 	// Update the content length.
@@ -137,12 +83,11 @@ func normalizeScheme(req *http.Request) {
 	}
 }
 
-func requestToDump(req *http.Request) (*Dump, error) {
-	reqLine := formatRequestLine(req)
+func requestToDump(r *http.Request) (*Dump, error) {
+	reqLine := formatRequestLine(r)
 
-	b, err := io.ReadAll(req.Body)
+	b, err := io.ReadAll(r.Body)
 	if err != nil {
-		logError(err)
 		return nil, err
 	}
 
@@ -155,11 +100,11 @@ func requestToDump(req *http.Request) (*Dump, error) {
 		a = string(b)
 	}
 
-	req.Body = io.NopCloser(bytes.NewReader(b))
+	r.Body = io.NopCloser(bytes.NewReader(b))
 
 	return &Dump{
 		Line:   reqLine,
-		Header: req.Header.Clone(),
+		Header: r.Header.Clone(),
 		Body:   a,
 	}, nil
 }
@@ -172,31 +117,6 @@ func formatRequestLine(req *http.Request) string {
 
 	return fmt.Sprintf("%s %s HTTP/%d.%d", valueOrDefault(req.Method, "GET"),
 		reqURI, req.ProtoMajor, req.ProtoMinor)
-}
-
-func parseRequestLine(r io.Reader) (*http.Request, error) {
-	req := new(http.Request)
-
-	var reqURI string
-	if _, err := fmt.Fscanf(r, "%s %s HTTP/%d.%d",
-		&req.Method,
-		&reqURI,
-		&req.ProtoMajor,
-		&req.ProtoMinor,
-	); err != nil {
-		logError(err)
-		return nil, err
-	}
-
-	uri, err := url.Parse(reqURI)
-	if err != nil {
-		logError(err)
-		return nil, err
-	}
-	req.URL = uri
-	req.Header = make(http.Header)
-
-	return req, nil
 }
 
 func valueOrDefault(v, d string) string {
