@@ -17,19 +17,21 @@ const (
 
 type FilePath string
 
-func (FilePath) isJSON() {}
-func (FilePath) isHTTP() {}
-func (FilePath) isSQL()  {}
-func (FilePath) isText() {}
-func (FilePath) isYAML() {}
+func (FilePath) isJSON()     {}
+func (FilePath) isJSONType() {}
+func (FilePath) isHTTP()     {}
+func (FilePath) isSQL()      {}
+func (FilePath) isText()     {}
+func (FilePath) isYAML()     {}
 
 type FileName string
 
-func (FileName) isJSON() {}
-func (FileName) isHTTP() {}
-func (FileName) isSQL()  {}
-func (FileName) isText() {}
-func (FileName) isYAML() {}
+func (FileName) isJSON()     {}
+func (FileName) isJSONType() {}
+func (FileName) isHTTP()     {}
+func (FileName) isSQL()      {}
+func (FileName) isText()     {}
+func (FileName) isYAML()     {}
 
 type Path struct {
 	TestDir  string
@@ -61,6 +63,26 @@ func (o *Path) String() string {
 }
 
 func NewJSONPath(opts ...JSONOption) *Path {
+	opt := &Path{
+		TestDir:  TestData,
+		FilePath: "",
+		FileName: "",
+		FileExt:  ExtJSON,
+	}
+
+	for _, o := range opts {
+		switch v := o.(type) {
+		case FilePath:
+			opt.FilePath = strings.TrimSuffix(string(v), "/")
+		case FileName:
+			opt.FileName = string(v)
+		}
+	}
+
+	return opt
+}
+
+func NewJSONTypePath(opts ...JSONTypeOption) *Path {
 	opt := &Path{
 		TestDir:  TestData,
 		FilePath: "",

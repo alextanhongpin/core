@@ -22,6 +22,11 @@ type HTTPOption interface {
 type JSONOption interface {
 	isJSON()
 }
+
+type JSONTypeOption interface {
+	isJSONType()
+}
+
 type SQLOption interface {
 	isSQL()
 }
@@ -45,3 +50,8 @@ func IgnoreMapKeys(keys ...string) cmp.Option {
 		return false
 	})
 }
+
+// CmpOptions is a generic cmp options.
+type CmpOptions []cmp.Option
+
+func (CmpOptions) isJSONType() {}
