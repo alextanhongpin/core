@@ -22,13 +22,36 @@ func UnmarshalYAML[T any](b []byte) (T, error) {
 	return t, err
 }
 
-func MarshalYAMLPreserveKeysOrder[T any](v T) ([]byte, error) {
-	switch t := any(v).(type) {
+func UnmarshalYAMLPreserveKeysOrder[T any](b []byte) (T, error) {
+	var t T
+
+	// Due to how we marshal, the names will no longer map
+	// to the original struct name.
+	// E.g. the field `BirthDate` should be `birthdate`
+	// after yaml.Marshal, but MarshalYAMLPreserveKeysOrder
+	// uses the original struct or JSON tag.
+	var a any
+	if err := yaml.Unmarshal(b, &a); err != nil {
+		return t, err
+	}
+
+	b, err := json.Marshal(a)
+	if err != nil {
+		return t, err
+	}
+
+	err = json.Unmarshal(b, &t)
+	return t, err
+}
+
+func MarshalYAMLPreserveKeysOrder(v any) ([]byte, error) {
+	switch t := v.(type) {
 	case map[string]any:
 		return yaml.Marshal(t)
 	case []byte:
 		return t, nil
 	default:
+		// Doesn't work on slices either...
 		if !IsStruct(v) {
 			return yaml.Marshal(t)
 		}
