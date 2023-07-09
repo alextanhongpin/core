@@ -38,6 +38,21 @@ func dump(w *http.Response, r *http.Request) (string, error) {
 }
 ```
 
+## Patterns
+
+- dump input/output, e.g.
+	- before and after unmarshalling
+	- before and after mapping
+	- before and after transforming
+	- before and after calling a function
+- dump specific format, e.g.
+	- httpdump
+	- mysqldump
+	- grpcdump
+	- graphqldump
+	- calcdump
+	- markdowndump
+
 ## Reference
 
 https://solidstudio.io/blog/snapshot-testing
