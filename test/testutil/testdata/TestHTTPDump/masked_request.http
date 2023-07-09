@@ -7,7 +7,7 @@ Accept-Encoding: gzip
 
 {
  "email": "john.doe@mail.com",
- "password": "**!REDACTED**"
+ "password": "/* !REDACTED */"
 }
 
 
@@ -21,6 +21,6 @@ Www-Authenticate: Basic realm=<realm>, charset=UTF-8
 
 {
  "data": {
-  "accessToken": "**!REDACTED**"
+  "accessToken": "/* !REDACTED */"
  }
 }
