@@ -9,7 +9,7 @@ import (
 	"github.com/google/uuid"
 )
 
-func TestMySQLDumper(t *testing.T) {
+func TestDumpMySQL(t *testing.T) {
 	type User struct {
 		ID   int64
 		Name string

@@ -9,7 +9,7 @@ import (
 	"github.com/google/uuid"
 )
 
-func TestPostgresDumper(t *testing.T) {
+func TestDumpPostgres(t *testing.T) {
 	type User struct {
 		ID   int64
 		Name string

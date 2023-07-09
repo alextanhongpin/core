@@ -91,12 +91,12 @@ func (c *JSONComparer) Compare(a, b []byte) error {
 		}
 	}
 
-	want, err := unmarshalJSON(a)
+	want, err := unmarshalJSON[any](a)
 	if err != nil {
 		return err
 	}
 
-	got, err := unmarshalJSON(b)
+	got, err := unmarshalJSON[any](b)
 	if err != nil {
 		return err
 	}
@@ -156,11 +156,11 @@ func marshalJSON(v any) ([]byte, error) {
 	return json.MarshalIndent(v, "", " ")
 }
 
-func unmarshalJSON(b []byte) (any, error) {
-	var m any
-	if err := json.Unmarshal(b, &m); err != nil {
-		return nil, err
+func unmarshalJSON[T any](b []byte) (T, error) {
+	var t T
+	if err := json.Unmarshal(b, &t); err != nil {
+		return t, err
 	}
 
-	return m, nil
+	return t, nil
 }

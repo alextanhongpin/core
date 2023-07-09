@@ -31,7 +31,7 @@ SELECT *
 
 
 -- Args
-$1: "2023-07-01"
+$1: "2023-07-09"
 $3: john.doe@mail.com
 $4: foo bar walks in a bar, h''a
 $5: freemium
@@ -45,7 +45,7 @@ $11: 2
 
 
 -- Result
-- id: 2018950676235147775
+- id: 8742928967736104934
   name: Alice
-- id: 551432964093393572
+- id: 5887499256977334832
   name: Bob

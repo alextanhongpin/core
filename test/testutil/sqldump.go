@@ -343,7 +343,7 @@ func normalizePostgres(query string) (norm string, args map[string]any, err erro
 			}
 		}
 
-		a, err := unmarshalJSON([]byte(s))
+		a, err := unmarshalJSON[any]([]byte(s))
 		if err != nil {
 			return s
 		}
@@ -369,7 +369,9 @@ func unmarshalSelector(format Format) func([]byte) (any, error) {
 	case FormatYAML:
 		return unmarshalYAML
 	default:
-		return unmarshalJSON
+		return func(b []byte) (any, error) {
+			return unmarshalJSON[any](b)
+		}
 	}
 }
 
