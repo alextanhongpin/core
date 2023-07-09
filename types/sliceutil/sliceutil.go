@@ -89,3 +89,19 @@ func Dedup[T comparable](t []T) []T {
 
 	return unique
 }
+
+func DedupFunc[T any, K comparable](t []T, fn func(i int) K) []T {
+	var res []T
+
+	seen := make(map[K]bool)
+	for i := 0; i < len(t); i++ {
+		k := fn(i)
+		if seen[k] {
+			continue
+		}
+		seen[k] = true
+		res = append(res, t[i])
+	}
+
+	return res
+}
