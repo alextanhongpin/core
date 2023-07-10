@@ -11,9 +11,16 @@ import (
 
 type SQL = sqldump.SQL
 
-func MySQL(fileName string, sql *SQL, opt *MySQLOption) error {
+type SQLOption struct {
+	Hooks  []Hook[*SQL]
+	Args   []cmp.Option
+	Vars   []cmp.Option
+	Result []cmp.Option
+}
+
+func MySQL(fileName string, sql *SQL, opt *SQLOption) error {
 	if opt == nil {
-		opt = new(MySQLOption)
+		opt = new(SQLOption)
 	}
 
 	type T = *SQL
@@ -29,13 +36,6 @@ func MySQL(fileName string, sql *SQL, opt *MySQLOption) error {
 	}
 
 	return Snapshot(fileName, sql, &s, opt.Hooks...)
-}
-
-type MySQLOption struct {
-	Hooks  []Hook[*SQL]
-	Args   []cmp.Option
-	Vars   []cmp.Option
-	Result []cmp.Option
 }
 
 func MarshalMySQL(s *SQL) ([]byte, error) {

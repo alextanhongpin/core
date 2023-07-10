@@ -15,14 +15,14 @@ func TestDumpMySQL(t *testing.T) {
 		Name string
 	}
 
-	simpleDump := testutil.NewSQLDump(
-		`select * from users where id = ? and deleted_at IS NULL`,
-		[]any{uuid.New()},
-		User{ID: 1, Name: "Alice"},
-	)
+	simpleDump := &testutil.SQL{
+		Query:  `select * from users where id = ? and deleted_at IS NULL`,
+		Args:   []any{uuid.New()},
+		Result: User{ID: 1, Name: "Alice"},
+	}
 
-	complexDump := &testutil.SQLDump{
-		Stmt: `SELECT *
+	complexDump := &testutil.SQL{
+		Query: `SELECT *
      FROM users
      WHERE email = 'john.doe@mail.com'
      AND deleted_at IS NULL
@@ -42,14 +42,14 @@ func TestDumpMySQL(t *testing.T) {
 
 	t.Run("simple", func(t *testing.T) {
 		testutil.DumpMySQL(t, simpleDump,
-			testutil.IgnoreArgs("v1"),
+			testutil.IgnoreArgs(":v1"),
 		)
 	})
 
 	t.Run("complex", func(t *testing.T) {
 		testutil.DumpMySQL(t, complexDump,
-			testutil.IgnoreArgs("v1"),
-			testutil.IgnoreRows("id"),
+			testutil.IgnoreArgs(":v1"),
+			testutil.IgnoreResultFields("id"),
 		)
 	})
 }

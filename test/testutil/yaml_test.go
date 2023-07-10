@@ -27,7 +27,8 @@ We are designed to love and break
 And to rinse and repeat it all again`,
 	}
 
-	testutil.DumpYAML(t, p, testutil.IgnoreKeys("BornAt"))
+	type T = Person
+	testutil.DumpYAML(t, p, testutil.IgnoreKeys[T]("BornAt"))
 }
 
 func TestDumpYAMLNonStruct(t *testing.T) {
@@ -46,11 +47,8 @@ func TestDumpYAMLMaskField(t *testing.T) {
 		Password: "s3cr3t",
 	}
 
+	type T = Credentials
 	testutil.DumpYAML(t, creds,
-		testutil.MaskKeys("password"),
-		testutil.InspectYAML(func(b []byte) error {
-			t.Log(string(b))
-			return nil
-		}),
+		testutil.MaskKeys[T]("password"),
 	)
 }

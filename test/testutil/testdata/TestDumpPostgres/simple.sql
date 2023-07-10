@@ -4,17 +4,18 @@ SELECT *
   WHERE id = $1
     AND deleted_at IS NULL
 
+-- Args
+$1: 04bd405a-47f3-4fb5-bb67-3c267879fb87
 
--- Query Normalized
+
+-- Normalized
 SELECT *
   FROM users
   WHERE id = $1
     AND deleted_at IS NULL
 
-
--- Args
-$1: 4e2d0885-2354-4728-abd5-61bbb6711390
-
+-- Vars
+$1: $1
 
 
 -- Result

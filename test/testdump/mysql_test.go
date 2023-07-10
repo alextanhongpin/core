@@ -40,7 +40,7 @@ func TestMySQL(t *testing.T) {
 		},
 	}
 
-	opt := testdump.MySQLOption{
+	opt := testdump.SQLOption{
 		Args: []cmp.Option{
 			internal.IgnoreMapEntries(":v1", ":v2"),
 		},

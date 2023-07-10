@@ -15,14 +15,14 @@ func TestDumpPostgres(t *testing.T) {
 		Name string
 	}
 
-	simpleDump := testutil.NewSQLDump(
-		`select * from users where id = $1 and deleted_at IS NULL`,
-		[]any{uuid.New()},
-		User{ID: 1, Name: "Alice"},
-	)
+	simpleDump := &testutil.SQL{
+		Query:  `select * from users where id = $1 and deleted_at IS NULL`,
+		Args:   []any{uuid.New()},
+		Result: User{ID: 1, Name: "Alice"},
+	}
 
-	complexDump := &testutil.SQLDump{
-		Stmt: `SELECT *
+	complexDump := &testutil.SQL{
+		Query: `SELECT *
      FROM users
      WHERE email = 'john.doe@mail.com'
      AND deleted_at IS NULL
@@ -51,7 +51,7 @@ func TestDumpPostgres(t *testing.T) {
 	t.Run("complex", func(t *testing.T) {
 		testutil.DumpPostgres(t, complexDump,
 			testutil.IgnoreArgs("$1"),
-			testutil.IgnoreRows("id"),
+			testutil.IgnoreResultFields("id"),
 		)
 	})
 }

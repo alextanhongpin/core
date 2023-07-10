@@ -8,22 +8,33 @@ import (
 
 type DumpTextOption = testdump.TextOption
 
-type TextOption struct {
+type TextOption func(*TxtOption)
+
+type TxtOption struct {
 	Dump     *DumpTextOption
 	FileName string
 }
 
-func DumpText(t *testing.T, s string, opt *TextOption) {
+func DumpText(t *testing.T, s string, opts ...TextOption) {
 	t.Helper()
+
+	o := new(TxtOption)
+	o.Dump = new(DumpTextOption)
 
 	p := Path{
 		Dir:      "testdata",
 		FilePath: t.Name(),
-		FileName: opt.FileName,
+		FileName: o.FileName,
 		FileExt:  ".txt",
 	}
 
-	if err := testdump.Text(p.String(), s, opt.Dump); err != nil {
+	if err := testdump.Text(p.String(), s, o.Dump); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TextFileName(name string) TextOption {
+	return func(o *TxtOption) {
+		o.FileName = name
 	}
 }

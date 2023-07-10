@@ -9,9 +9,9 @@ import (
 	"github.com/sergi/go-diff/diffmatchpatch"
 )
 
-func Postgres(fileName string, sql *SQL, opt *PostgresOption) error {
+func Postgres(fileName string, sql *SQL, opt *SQLOption) error {
 	if opt == nil {
-		opt = new(PostgresOption)
+		opt = new(SQLOption)
 	}
 
 	type T = *SQL
@@ -27,13 +27,6 @@ func Postgres(fileName string, sql *SQL, opt *PostgresOption) error {
 	}
 
 	return Snapshot(fileName, sql, &s, opt.Hooks...)
-}
-
-type PostgresOption struct {
-	Hooks  []Hook[*SQL]
-	Args   []cmp.Option
-	Vars   []cmp.Option
-	Result []cmp.Option
 }
 
 func MarshalPostgres(s *SQL) ([]byte, error) {

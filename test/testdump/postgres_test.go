@@ -41,7 +41,7 @@ func TestPostgres(t *testing.T) {
 		},
 	}
 
-	opt := testdump.PostgresOption{
+	opt := testdump.SQLOption{
 		Args: []cmp.Option{
 			internal.IgnoreMapEntries("$1", "$2"),
 		},

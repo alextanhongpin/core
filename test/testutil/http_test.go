@@ -13,10 +13,7 @@ import (
 	"time"
 
 	"github.com/alextanhongpin/core/http/httputil"
-	"github.com/alextanhongpin/core/internal"
-	"github.com/alextanhongpin/core/test/testdump"
 	"github.com/alextanhongpin/core/test/testutil"
-	"github.com/google/go-cmp/cmp"
 )
 
 func TestHTTPDump(t *testing.T) {
@@ -77,7 +74,7 @@ func TestHTTPDump(t *testing.T) {
 		name    string
 		r       *http.Request
 		handler http.HandlerFunc
-		opt     *testutil.HTTPOption
+		opts    []testutil.HTTPOption
 	}{
 		{
 			name:    "get html",
@@ -110,13 +107,9 @@ func TestHTTPDump(t *testing.T) {
 				r.Header.Set("Authorization", "Bearer xyz")
 				return r
 			}(),
-			opt: &testutil.HTTPOption{
-				Dump: &testutil.HTTPDumpOption{
-					Hooks: []testutil.HTTPHook{
-						testdump.MaskRequestHeaders("Authorization"),
-						testdump.MaskResponseHeaders("WWW-Authenticate"),
-					},
-				},
+			opts: []testutil.HTTPOption{
+				testutil.MaskRequestHeaders("Authorization"),
+				testutil.MaskResponseHeaders("WWW-Authenticate"),
 			},
 			handler: loginHandler,
 		},
@@ -159,10 +152,8 @@ func TestHTTPDump(t *testing.T) {
 				id := rand.Int63()
 				fmt.Fprintf(w, `{"data": {"id": %d}}`, id)
 			},
-			opt: &testutil.HTTPOption{
-				Dump: &testutil.HTTPDumpOption{
-					Body: []cmp.Option{internal.IgnoreMapEntries("id")},
-				},
+			opts: []testutil.HTTPOption{
+				testutil.IgnoreBodyFields("id"),
 			},
 		},
 		{
@@ -177,37 +168,33 @@ func TestHTTPDump(t *testing.T) {
 				w.WriteHeader(http.StatusCreated)
 				fmt.Fprintf(w, `{"data": {"createdAt": %q}}`, time.Now().Format(time.RFC3339))
 			},
-			opt: &testutil.HTTPOption{
-				Dump: &testutil.HTTPDumpOption{
-					Body: []cmp.Option{internal.IgnoreMapEntries("createdAt")},
-					Hooks: []testutil.HTTPHook{
-						testdump.HTTPCompareHook(
-							func(snapshot, received *testutil.HTTPDump) error {
-								body, err := httputil.ReadResponse(received.W)
-								if err != nil {
-									return err
-								}
+			opts: []testutil.HTTPOption{
+				testutil.IgnoreBodyFields("createdAt"),
+				testutil.CompareHTTP(
+					func(snapshot, received *testutil.HTTPDump) error {
+						body, err := httputil.ReadResponse(received.W)
+						if err != nil {
+							return err
+						}
 
-								type response struct {
-									Data struct {
-										CreatedAt time.Time `json:"createdAt"`
-									} `json:"data"`
-								}
+						type response struct {
+							Data struct {
+								CreatedAt time.Time `json:"createdAt"`
+							} `json:"data"`
+						}
 
-								var res response
-								if err := json.Unmarshal(body, &res); err != nil {
-									return err
-								}
+						var res response
+						if err := json.Unmarshal(body, &res); err != nil {
+							return err
+						}
 
-								if res.Data.CreatedAt.IsZero() {
-									return fmt.Errorf("want createdAt to be non-zero, got %s", res.Data.CreatedAt)
-								}
+						if res.Data.CreatedAt.IsZero() {
+							return fmt.Errorf("want createdAt to be non-zero, got %s", res.Data.CreatedAt)
+						}
 
-								return nil
-							},
-						),
+						return nil
 					},
-				},
+				),
 			},
 		},
 		{
@@ -222,26 +209,22 @@ func TestHTTPDump(t *testing.T) {
 				w.WriteHeader(http.StatusNoContent)
 				fmt.Fprint(w, nil)
 			},
-			opt: &testutil.HTTPOption{
-				Dump: &testutil.HTTPDumpOption{
-					Hooks: []testutil.HTTPHook{
-						testdump.HTTPMarshalHook(func(d *testutil.HTTPDump) (*testutil.HTTPDump, error) {
-							headers := d.R.Header
-							contentType, params, err := mime.ParseMediaType(headers.Get("Content-Type"))
-							if err != nil {
-								t.Fatal(err)
-							}
-							if want, got := "utf-8", params["charset"]; want != got {
-								t.Fatalf("want %s, got %s", want, got)
-							}
-							if want, got := "application/json", contentType; want != got {
-								t.Fatalf("want %s, got %s", want, got)
-							}
+			opts: []testutil.HTTPOption{
+				testutil.MarshalHTTP(func(d *testutil.HTTPDump) (*testutil.HTTPDump, error) {
+					headers := d.R.Header
+					contentType, params, err := mime.ParseMediaType(headers.Get("Content-Type"))
+					if err != nil {
+						t.Fatal(err)
+					}
+					if want, got := "utf-8", params["charset"]; want != got {
+						t.Fatalf("want %s, got %s", want, got)
+					}
+					if want, got := "application/json", contentType; want != got {
+						t.Fatalf("want %s, got %s", want, got)
+					}
 
-							return d, nil
-						}),
-					},
-				},
+					return d, nil
+				}),
 			},
 		},
 		{
@@ -258,27 +241,24 @@ func TestHTTPDump(t *testing.T) {
 				w.WriteHeader(http.StatusNoContent)
 				fmt.Fprint(w, nil)
 			},
-			opt: &testutil.HTTPOption{
-				Dump: &testutil.HTTPDumpOption{
-					Hooks: []testutil.HTTPHook{
-						testdump.HTTPMarshalHook(func(d *testutil.HTTPDump) (*testutil.HTTPDump, error) {
-							headers := d.R.Header
-							cacheControl := headers["Cache-Control"]
+			opts: []testutil.HTTPOption{
 
-							maxAge := "max-age=604800"
-							staleWhileRevalidate := "stale-while-revalidate=86400"
-							if want, got := maxAge, cacheControl[0]; want != got {
-								t.Fatalf("want %s, got %s", want, got)
-							}
+				testutil.MarshalHTTP(func(d *testutil.HTTPDump) (*testutil.HTTPDump, error) {
+					headers := d.R.Header
+					cacheControl := headers["Cache-Control"]
 
-							if want, got := staleWhileRevalidate, cacheControl[1]; want != got {
-								t.Fatalf("want %s, got %s", want, got)
-							}
+					maxAge := "max-age=604800"
+					staleWhileRevalidate := "stale-while-revalidate=86400"
+					if want, got := maxAge, cacheControl[0]; want != got {
+						t.Fatalf("want %s, got %s", want, got)
+					}
 
-							return d, nil
-						}),
-					},
-				},
+					if want, got := staleWhileRevalidate, cacheControl[1]; want != got {
+						t.Fatalf("want %s, got %s", want, got)
+					}
+
+					return d, nil
+				}),
 			},
 		},
 		{
@@ -288,13 +268,9 @@ func TestHTTPDump(t *testing.T) {
 				r.Header.Set("Content-Type", "application/json;charset=utf-8")
 				return r
 			}(),
-			opt: &testutil.HTTPOption{
-				Dump: &testutil.HTTPDumpOption{
-					Hooks: []testutil.HTTPHook{
-						testdump.MaskRequestBody("password"),
-						testdump.MaskResponseBody("data.accessToken"),
-					},
-				},
+			opts: []testutil.HTTPOption{
+				testutil.MaskRequestBody("password"),
+				testutil.MaskResponseBody("data.accessToken"),
 			},
 			handler: loginHandler,
 		},
@@ -303,7 +279,7 @@ func TestHTTPDump(t *testing.T) {
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			testutil.DumpHTTPHandler(t, tc.r, tc.handler, tc.opt)
+			testutil.DumpHTTPHandler(t, tc.r, tc.handler, tc.opts...)
 		})
 	}
 }
@@ -333,10 +309,7 @@ func TestHTTPTrailer(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	opt := &testutil.HTTPOption{
-		Dump: &testutil.HTTPDumpOption{
-			Header: []cmp.Option{internal.IgnoreMapEntries("Host", "Date")},
-		},
-	}
-	testutil.DumpHTTP(t, resp, r, opt)
+	testutil.DumpHTTP(t, resp, r,
+		testutil.IgnoreHeaders("Host", "Date"),
+	)
 }

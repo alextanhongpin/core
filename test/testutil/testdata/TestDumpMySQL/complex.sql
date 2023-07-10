@@ -12,36 +12,33 @@ SELECT *
     AND is_active = TRUE
     AND `name` like ANY('{Foo,bar,%oo%}')
 
-
--- Query Normalized
-SELECT *
-  FROM users
-  WHERE email = :email
-    AND deleted_at IS NULL
-    AND last_logged_in_at > :v1
-    AND created_at IN (:v2)
-    AND description = :description
-    AND subscription IN ::bv1
-    AND age > :age
-    AND is_active = TRUE
-    AND `name` like ANY(:bv2)
-
-
 -- Args
-age: "13"
-bv1:
-    - freemium
-    - premium
-bv2: '{Foo,bar,%oo%}'
-description: foo bar walks in a bar, h'a
-email: john.doe@mail.com
-v1: "2023-07-09"
-v2: null
+:v1: "2023-07-11"
 
+
+-- Normalized
+SELECT *
+  FROM `users`
+  WHERE `name` LIKE ANY(:1)
+    AND `age` > :age
+    AND `created_at` IN (:v2)
+    AND `deleted_at` IS NULL
+    AND `description` = :description
+    AND `email` = :email
+    AND `is_active` = TRUE
+    AND `last_logged_in_at` > :v1
+    AND `subscription` IN ::2
+
+-- Vars
+:1: '{Foo,bar,%oo%}'
+:2: '"freemium","premium"'
+:age: "13"
+:description: foo bar walks in a bar, h'a
+:email: john.doe@mail.com
 
 
 -- Result
-- id: 1744399929503938655
+- id: 2947257634655258034
   name: Alice
-- id: 8065415284646902907
+- id: 7445160117598956230
   name: Bob
