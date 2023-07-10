@@ -11,42 +11,46 @@ import (
 // that are removed won't be compared.
 // Ideally, using map[string]any or just any should work better for snapshot
 // testing.
-func JSON(fileName string, t any, opt *JSONOption) error {
+func JSON[T any](fileName string, t T, opt *JSONOption[T]) error {
 	if opt == nil {
-		opt = new(JSONOption)
+		opt = new(JSONOption[T])
 	}
-
-	type T = any
 
 	s := snapshot[T]{
-		Marshaller:   MarshalFunc[T](MarshalJSON[T]),
+		Marshaller: MarshalFunc[T](MarshalJSON[T]),
+		// This is only used for custom comparison. It does not benefit as much as
+		// using map[string]any for comparison due to loss of information.
 		Unmarshaller: UnmarshalFunc[T](UnmarshalJSON[T]),
-		Comparer:     &JSONComparer[T]{opts: opt.Body},
+		Comparer:     CompareFunc[T](nopComparer[T]),
+		// The core logic, unmarshalling into map type and comparing it.
+		unmarshalAny: UnmarshalFunc[any](UnmarshalJSON[any]),
+		compareAny:   CompareFunc[any](CompareJSON[any](opt.Body...)),
 	}
 
-	return Snapshot[T](fileName, t, &s, opt.Hooks...)
-}
-
-type JSONOption struct {
-	Hooks []Hook[any]
-	Body  []cmp.Option
+	return Snapshot(fileName, t, &s, opt.Hooks...)
 }
 
 func MarshalJSON[T any](t T) ([]byte, error) {
 	return internal.PrettyJSON(t)
 }
 
+// The problem is here - the unmarshalling actually causes a loss of data.
 func UnmarshalJSON[T any](b []byte) (T, error) {
 	var t T
-	err := json.Unmarshal(b, &t)
+	if err := json.Unmarshal(b, &t); err != nil {
+		return t, err
+	}
 
-	return t, err
+	return t, nil
 }
 
-type JSONComparer[T any] struct {
-	opts []cmp.Option
+func CompareJSON[T any](opts ...cmp.Option) func(a, b T) error {
+	return func(snapshot, received T) error {
+		return internal.ANSIDiff(snapshot, received, opts...)
+	}
 }
 
-func (cmp JSONComparer[T]) Compare(snapshot, received T) error {
-	return internal.ANSIDiff(snapshot, received, cmp.opts...)
+type JSONOption[T any] struct {
+	Hooks []Hook[T]
+	Body  []cmp.Option
 }

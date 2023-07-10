@@ -5,23 +5,25 @@ import (
 	"github.com/google/go-cmp/cmp"
 )
 
-func YAML(fileName string, v any, opt *YAMLOption) error {
+func YAML[T any](fileName string, t T, opt *YAMLOption[T]) error {
 	if opt == nil {
-		opt = new(YAMLOption)
+		opt = new(YAMLOption[T])
 	}
-	type T = any
 
-	var s S[T] = &snapshot[T]{
+	s := snapshot[T]{
 		Marshaller:   MarshalFunc[T](MarshalYAML[T]),
 		Unmarshaller: UnmarshalFunc[T](UnmarshalYAML[T]),
-		Comparer:     &YAMLComparer[T]{opts: opt.Body},
+		Comparer:     CompareFunc[T](nopComparer[T]),
+		// Custom.
+		unmarshalAny: UnmarshalFunc[any](UnmarshalYAML[any]),
+		compareAny:   CompareFunc[any](CompareYAML[any](opt.Body...)),
 	}
 
-	return Snapshot(fileName, v, s, opt.Hooks...)
+	return Snapshot(fileName, t, &s, opt.Hooks...)
 }
 
-type YAMLOption struct {
-	Hooks []Hook[any]
+type YAMLOption[T any] struct {
+	Hooks []Hook[T]
 	Body  []cmp.Option
 }
 
@@ -33,10 +35,8 @@ func UnmarshalYAML[T any](b []byte) (T, error) {
 	return internal.UnmarshalYAMLPreserveKeysOrder[T](b)
 }
 
-type YAMLComparer[T any] struct {
-	opts []cmp.Option
-}
-
-func (cmp YAMLComparer[T]) Compare(snapshot, received T) error {
-	return internal.ANSIDiff(snapshot, received, cmp.opts...)
+func CompareYAML[T any](opts ...cmp.Option) func(a, b T) error {
+	return func(snapshot, received T) error {
+		return internal.ANSIDiff(snapshot, received, opts...)
+	}
 }

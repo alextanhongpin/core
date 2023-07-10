@@ -16,7 +16,7 @@ func Postgres(fileName string, sql *SQL, opt *PostgresOption) error {
 
 	type T = *SQL
 
-	var s S[T] = &snapshot[T]{
+	s := snapshot[T]{
 		Marshaller:   MarshalFunc[T](MarshalPostgres),
 		Unmarshaller: UnmarshalFunc[T](UnmarshalPostgres),
 		Comparer: &PostgresComparer{
@@ -25,7 +25,7 @@ func Postgres(fileName string, sql *SQL, opt *PostgresOption) error {
 		},
 	}
 
-	return Snapshot(fileName, sql, s, opt.Hooks...)
+	return Snapshot(fileName, sql, &s, opt.Hooks...)
 }
 
 type PostgresOption struct {

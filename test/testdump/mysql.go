@@ -18,7 +18,7 @@ func MySQL(fileName string, sql *SQL, opt *MySQLOption) error {
 
 	type T = *SQL
 
-	var s S[T] = &snapshot[T]{
+	s := snapshot[T]{
 		Marshaller:   MarshalFunc[T](MarshalMySQL),
 		Unmarshaller: UnmarshalFunc[T](UnmarshalMySQL),
 		Comparer: &MySQLComparer{
@@ -27,7 +27,7 @@ func MySQL(fileName string, sql *SQL, opt *MySQLOption) error {
 		},
 	}
 
-	return Snapshot(fileName, sql, s, opt.Hooks...)
+	return Snapshot(fileName, sql, &s, opt.Hooks...)
 }
 
 type MySQLOption struct {

@@ -1,6 +1,7 @@
 package testdump_test
 
 import (
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -9,6 +10,7 @@ import (
 	"github.com/alextanhongpin/core/test/testdump"
 	"github.com/alextanhongpin/core/types/maputil"
 	"github.com/google/go-cmp/cmp"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestYAML(t *testing.T) {
@@ -43,31 +45,26 @@ func TestYAMLHook(t *testing.T) {
 	}
 
 	// Alias to shorten the types.
+	type T = Credentials
 
-	opt := testdump.YAMLOption{
+	opt := testdump.YAMLOption[T]{
 		Body: []cmp.Option{
 			// Ignore CreatedAt field for comparison.
 			internal.IgnoreMapEntries("CreatedAt"),
 		},
-		Hooks: []testdump.Hook[any]{
+		Hooks: []testdump.Hook[T]{
 			// Mask the password value.
-			testdump.MarshalHook(func(a any) (any, error) {
-				c := a.(Credentials)
-				c.Password = maputil.MaskValue
-				return c, nil
+			testdump.MarshalHook(func(t T) (T, error) {
+				t.Password = maputil.MaskValue
+				return t, nil
 			}),
 
 			// Validate that the time is not zero.
-			testdump.CompareHook(func(snap, recv any) error {
-				x := snap.(map[string]any)
-				y := snap.(map[string]any)
-				if err := internal.IsNonZeroTime(x, "CreatedAt"); err != nil {
-					return err
+			testdump.CompareHook(func(snap, recv T) error {
+				// You can access the concrete type.
+				if snap.CreatedAt.IsZero() || recv.CreatedAt.IsZero() {
+					return errors.New("zero time")
 				}
-				if err := internal.IsNonZeroTime(y, "CreatedAt"); err != nil {
-					return err
-				}
-
 				return nil
 			}),
 		},
@@ -86,23 +83,25 @@ func TestYAMLMap(t *testing.T) {
 		"createdAt": time.Now(),    // Dynamic.
 	}
 
-	opt := testdump.YAMLOption{
+	type T = map[string]any
+
+	opt := testdump.YAMLOption[T]{
 		Body: []cmp.Option{
 			// Ignore CreatedAt field for comparison.
 			internal.IgnoreMapEntries("createdAt"),
 		},
-		Hooks: []testdump.Hook[any]{
+		Hooks: []testdump.Hook[T]{
 			// Mask the password value.
-			testdump.MarshalHook(func(a any) (any, error) {
-				m := a.(map[string]any)
-				m["password"] = maputil.MaskValue
-				return m, nil
+			testdump.MarshalHook(func(t T) (T, error) {
+				// WARN: This will set the field even if it doesn't exists.
+				t["password"] = maputil.MaskValue
+				return t, nil
 			}),
 
 			// Validate that the time is not zero.
-			testdump.CompareHook(func(snap, recv any) error {
-				x := snap.(map[string]any)
-				y := snap.(map[string]any)
+			testdump.CompareHook(func(snap, recv T) error {
+				x := snap
+				y := recv
 				if err := internal.IsNonZeroTime(x, "createdAt"); err != nil {
 					return err
 				}
@@ -118,4 +117,136 @@ func TestYAMLMap(t *testing.T) {
 	if err := testdump.YAML(fileName, data, &opt); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func TestYAMLDiff(t *testing.T) {
+	type User struct {
+		ID        int64     `json:"id"`
+		Email     string    `json:"email"`
+		Password  string    `json:"password"`
+		CreatedAt time.Time `json:"createdAt"`
+	}
+
+	fileName := fmt.Sprintf("testdata/%s.json", t.Name())
+	u := User{
+		ID:        42,
+		Email:     "John Appleseed",
+		Password:  "$up3rS3cr3t", // To be masked.
+		CreatedAt: time.Now(),    // Dynamic.
+	}
+
+	// Alias to shorten the types.
+	type T = User
+
+	opt := new(testdump.YAMLOption[T])
+	opt.Body = append(opt.Body, internal.IgnoreMapEntries("createdAt"))
+	opt.Hooks = append(opt.Hooks,
+		testdump.MarshalHook(func(t T) (T, error) {
+			t.Password = maputil.MaskValue
+
+			return t, nil
+		}),
+	)
+	if err := testdump.YAML(fileName, u, opt); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("add new field", func(t *testing.T) {
+		type NewUser struct {
+			User
+			Hobbies []string `json:"hobbies"`
+		}
+
+		type T = NewUser
+
+		u := NewUser{
+			User:    u,
+			Hobbies: []string{"coding"},
+		}
+
+		opt := new(testdump.YAMLOption[T])
+		opt.Body = append(opt.Body, internal.IgnoreMapEntries("createdAt"))
+		opt.Hooks = append(opt.Hooks,
+			testdump.MarshalHook(func(t T) (T, error) {
+				t.Password = maputil.MaskValue
+
+				return t, nil
+			}),
+		)
+
+		assert := assert.New(t)
+		err := testdump.YAML(fileName, u, opt)
+		assert.NotNil(err)
+
+		var diffErr *internal.DiffError
+		assert.True(errors.As(err, &diffErr))
+
+		diffText := diffErr.Text()
+		plus, minus := parseDiff(diffText)
+		assert.Len(plus, 1)
+		assert.Len(minus, 0)
+		assert.Equal(`"hobbies":  []any{string("coding")},`, plus[0])
+	})
+
+	t.Run("remove existing field", func(t *testing.T) {
+		type PartialUser struct {
+			Email     string    `json:"email"`
+			Password  string    `json:"password"`
+			CreatedAt time.Time `json:"createdAt"`
+		}
+
+		type T = PartialUser
+
+		u := T{
+			Email:     u.Email,
+			Password:  u.Password,
+			CreatedAt: u.CreatedAt,
+		}
+
+		opt := new(testdump.YAMLOption[T])
+		opt.Body = append(opt.Body, internal.IgnoreMapEntries("createdAt"))
+		opt.Hooks = append(opt.Hooks,
+			testdump.MarshalHook(func(t T) (T, error) {
+				t.Password = maputil.MaskValue
+
+				return t, nil
+			}),
+		)
+
+		assert := assert.New(t)
+		err := testdump.YAML(fileName, u, opt)
+		assert.NotNil(err)
+
+		var diffErr *internal.DiffError
+		assert.True(errors.As(err, &diffErr))
+
+		diffText := diffErr.Text()
+		plus, minus := parseDiff(diffText)
+		assert.Len(plus, 0)
+		assert.Len(minus, 1)
+		assert.Equal(`"id":       float64(42),`, minus[0])
+	})
+
+	t.Run("update existing field", func(t *testing.T) {
+		u := User{
+			ID:        42,
+			Email:     "John Doe",
+			Password:  "$up3rS3cr3t", // To be masked.
+			CreatedAt: time.Now(),    // Dynamic.
+		}
+
+		assert := assert.New(t)
+		err := testdump.YAML(fileName, u, opt)
+		assert.NotNil(err)
+
+		var diffErr *internal.DiffError
+		assert.True(errors.As(err, &diffErr))
+
+		diffText := diffErr.Text()
+		plus, minus := parseDiff(diffText)
+		assert.Len(plus, 1)
+		assert.Len(minus, 1)
+		assert.Equal(`"email":    string("John Doe"),`, plus[0])
+		assert.Equal(`"email":    string("John Appleseed"),`, minus[0])
+	})
 }

@@ -1,6 +1,7 @@
 package testdump
 
 import (
+	"bytes"
 	"errors"
 	"os"
 
@@ -19,12 +20,6 @@ type Comparer[T any] interface {
 	Compare(snapshot, received T) error
 }
 
-type snapshot[T any] struct {
-	Marshaller[T]
-	Unmarshaller[T]
-	Comparer[T]
-}
-
 type S[T any] interface {
 	Marshaller[T]
 	Unmarshaller[T]
@@ -33,16 +28,8 @@ type S[T any] interface {
 
 type Hook[T any] func(S[T]) S[T]
 
-func Snapshot[T any](fileName string, t T, s S[T], hooks ...Hook[T]) error {
-	/*
-		// Create a new copy.
-		v, err := copystructure.Copy(t)
-		if err != nil {
-			return err
-		}
-		t = v.(T)
-	*/
-
+func Snapshot[T any](fileName string, t T, ss *snapshot[T], hooks ...Hook[T]) error {
+	var s S[T] = ss
 	// Run middleware in reverse order, so that the first
 	// will execute first.
 	for i := 0; i < len(hooks); i++ {
@@ -59,6 +46,7 @@ func Snapshot[T any](fileName string, t T, s S[T], hooks ...Hook[T]) error {
 		return err
 	}
 
+	receivedBytes := bytes.Clone(b)
 	// NOTE: We unmarshal back the bytes, since there might
 	// be additional information not present during the
 	// marshalling process.
@@ -72,9 +60,29 @@ func Snapshot[T any](fileName string, t T, s S[T], hooks ...Hook[T]) error {
 		return err
 	}
 
+	snapshotBytes := bytes.Clone(b)
 	snapshot, err := s.Unmarshal(b)
 	if err != nil {
 		return err
+	}
+
+	// This is required when comparing JSON/YAML type, because
+	// unmarshalling the type to map[any]interface{} will cause
+	// information to be lost (e.g. additional fields).
+	if ss.unmarshalAny != nil && ss.compareAny != nil {
+		x, err := ss.unmarshalAny.Unmarshal(snapshotBytes)
+		if err != nil {
+			return err
+		}
+
+		y, err := ss.unmarshalAny.Unmarshal(receivedBytes)
+		if err != nil {
+			return err
+		}
+
+		if err := ss.compareAny.Compare(x, y); err != nil {
+			return err
+		}
 	}
 
 	return s.Compare(snapshot, received)
@@ -118,22 +126,6 @@ func MarshalHook[T any](hook func(T) (T, error)) Hook[T] {
 	}
 }
 
-func MarshalHookAny[T, V any](hook func(V) (V, error)) Hook[T] {
-	return func(s S[T]) S[T] {
-		return &marshalHook[T]{
-			S: s,
-			hook: func(t T) (T, error) {
-				v, err := hook(any(t).(V))
-				if err != nil {
-					return t, err
-				}
-
-				return any(v).(T), nil
-			},
-		}
-	}
-}
-
 func CompareHook[T any](hook func(snapshot T, received T) error) Hook[T] {
 	return func(s S[T]) S[T] {
 		return &compareHook[T]{
@@ -141,6 +133,15 @@ func CompareHook[T any](hook func(snapshot T, received T) error) Hook[T] {
 			hook: hook,
 		}
 	}
+}
+
+type snapshot[T any] struct {
+	Marshaller[T]
+	Unmarshaller[T]
+	Comparer[T]
+
+	unmarshalAny Unmarshaller[any]
+	compareAny   Comparer[any]
 }
 
 type marshalHook[T any] struct {
@@ -172,4 +173,19 @@ func (m *compareHook[T]) Compare(snapshot, received T) error {
 	}
 
 	return m.S.Compare(snapshot, received)
+}
+
+func nopComparer[T any](a, b T) error {
+	return nil
+}
+
+func Copier[T any]() Hook[T] {
+	return func(s S[T]) S[T] {
+		return &marshalHook[T]{
+			S: s,
+			hook: func(t T) (T, error) {
+				return internal.Copy(t)
+			},
+		}
+	}
 }
