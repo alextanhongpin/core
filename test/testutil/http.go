@@ -2,131 +2,71 @@ package testutil
 
 import (
 	"bytes"
-	"encoding/json"
 	"io"
 	"net/http"
+	"net/http/httptest"
+	"testing"
 
-	"github.com/alextanhongpin/core/http/httputil"
-	"github.com/alextanhongpin/core/types/maputil"
-	"github.com/google/go-cmp/cmp"
+	"github.com/alextanhongpin/core/internal"
+	"github.com/alextanhongpin/core/test/testdump"
 )
 
-type HeaderCmpOptions []cmp.Option
+// IgnoreHeaders
+// MaskRequestBody
+// MaskResponseBody
+// MaskResponseHeaders
+// MaskRequestHeaders
+type HTTPDumpOption = testdump.HTTPOption
+type HTTPDump = testdump.HTTPDump
+type HTTPHook = testdump.HTTPHook
 
-func (o HeaderCmpOptions) isHTTP() {}
+type Path = internal.Path
 
-func IgnoreHeaders(keys ...string) HeaderCmpOptions {
-	return HeaderCmpOptions([]cmp.Option{IgnoreMapKeys(keys...)})
+type HTTPOption struct {
+	Dump     *HTTPDumpOption
+	FileName string
 }
 
-type BodyCmpOptions []cmp.Option
+func DumpHTTPHandler(t *testing.T, r *http.Request, handler http.HandlerFunc, opt *HTTPOption) {
+	t.Helper()
 
-func (o BodyCmpOptions) isHTTP() {}
-
-func IgnoreBodyFields(fields ...string) BodyCmpOptions {
-	return BodyCmpOptions([]cmp.Option{IgnoreMapKeys(fields...)})
-}
-
-type HTTPInterceptor func(w *http.Response, r *http.Request) error
-
-func (i HTTPInterceptor) isHTTP() {}
-
-func MaskRequestBody(fields ...string) HTTPInterceptor {
-	return func(w *http.Response, r *http.Request) error {
-		b, err := httputil.ReadRequest(r)
-		if err != nil {
-			return err
-		}
-
-		if json.Valid(b) {
-			b, err = maputil.MaskBytes(b, fields...)
-			if err != nil {
-				return err
-			}
-
-			r.Body = io.NopCloser(bytes.NewReader(b))
-		}
-
-		return nil
+	// Make a copy of the body.
+	b, err := io.ReadAll(r.Body)
+	if err != nil {
+		t.Fatal(err)
 	}
+
+	br := bytes.NewReader(b)
+	r.Body = io.NopCloser(br)
+
+	wr := httptest.NewRecorder()
+
+	// Execute.
+	handler(wr, r)
+	w := wr.Result()
+
+	// Reset request for the handler.
+	br.Seek(0, 0)
+
+	DumpHTTP(t, w, r, opt)
 }
 
-func MaskResponseBody(fields ...string) HTTPInterceptor {
-	return func(w *http.Response, r *http.Request) error {
-		b, err := httputil.ReadResponse(w)
-		if err != nil {
-			return err
-		}
+func DumpHTTP(t *testing.T, w *http.Response, r *http.Request, opt *HTTPOption) {
+	t.Helper()
 
-		if json.Valid(b) {
-			b, err = maputil.MaskBytes(b, fields...)
-			if err != nil {
-				return err
-			}
-
-			w.Body = io.NopCloser(bytes.NewReader(b))
-		}
-
-		return nil
+	p := Path{
+		Dir:      "testdata",
+		FilePath: t.Name(),
+		FileName: opt.FileName,
+		FileExt:  ".http",
 	}
-}
 
-func MaskRequestHeaders(keys ...string) HTTPInterceptor {
-	return func(w *http.Response, r *http.Request) error {
-		for _, k := range keys {
-			if v := r.Header.Get(k); len(v) > 0 {
-				r.Header.Set(k, maputil.MaskValue)
-			}
-		}
+	fileName := p.String()
 
-		return nil
-	}
-}
-
-func MaskResponseHeaders(keys ...string) HTTPInterceptor {
-	return func(w *http.Response, r *http.Request) error {
-		for _, k := range keys {
-			if v := w.Header.Get(k); len(v) > 0 {
-				w.Header.Set(k, maputil.MaskValue)
-			}
-		}
-
-		return nil
-	}
-}
-
-func InspectRequestBody(fn func([]byte) error) HTTPInterceptor {
-	return func(w *http.Response, r *http.Request) error {
-		b, err := httputil.ReadRequest(r)
-		if err != nil {
-			return err
-		}
-
-		return fn(b)
-	}
-}
-
-func InspectResponseBody(fn func([]byte) error) HTTPInterceptor {
-	return func(w *http.Response, r *http.Request) error {
-		b, err := httputil.ReadResponse(w)
-		if err != nil {
-			return err
-		}
-
-		return fn(b)
-	}
-}
-
-func InspectRequestHeaders(fn func(http.Header)) HTTPInterceptor {
-	return func(w *http.Response, r *http.Request) error {
-		fn(r.Header.Clone())
-		return nil
-	}
-}
-
-func InspectResponseHeaders(fn func(http.Header)) HTTPInterceptor {
-	return func(w *http.Response, r *http.Request) error {
-		fn(w.Header.Clone())
-		return nil
+	if err := testdump.HTTP(fileName, &testdump.HTTPDump{
+		W: w,
+		R: r,
+	}, opt.Dump); err != nil {
+		t.Fatal(err)
 	}
 }

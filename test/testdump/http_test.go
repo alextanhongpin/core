@@ -49,6 +49,9 @@ func TestHTTP(t *testing.T) {
 				return k == "Host" || k == "Date"
 			}),
 		},
+		Hooks: []testdump.Hook[*testdump.HTTPDump]{
+			testdump.MaskRequestHeaders(),
+		},
 	}); err != nil {
 		t.Fatal(err)
 	}

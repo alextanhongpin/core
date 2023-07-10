@@ -44,11 +44,13 @@ func UnmarshalHTTP(b []byte) (*HTTPDump, error) {
 	}, nil
 }
 
+type HTTPHook = Hook[*HTTPDump]
+
 type HTTPOption struct {
 	Header  []cmp.Option
 	Body    []cmp.Option
 	Trailer []cmp.Option
-	Hooks   []Hook[*HTTPDump]
+	Hooks   []HTTPHook
 }
 
 type HTTPComparer struct {
