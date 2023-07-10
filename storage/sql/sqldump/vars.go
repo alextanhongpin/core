@@ -1,8 +1,13 @@
 package sqldump
 
 import (
+	"fmt"
 	"regexp"
 	"strings"
+
+	pg_query "github.com/pganalyze/pg_query_go/v4"
+	querypb "vitess.io/vitess/go/vt/proto/query"
+	"vitess.io/vitess/go/vt/sqlparser"
 )
 
 var placePat = regexp.MustCompile(`\$\d+`)
@@ -12,9 +17,16 @@ type Var struct {
 	Value string
 }
 
-func PostgresVars(normalized, original string) []Var {
-	a := normalized
-	b := original
+func PostgresVars(q string) ([]Var, error) {
+	b, err := standardizePostgres(q)
+	if err != nil {
+		return nil, err
+	}
+
+	a, err := pg_query.Normalize(b)
+	if err != nil {
+		return nil, err
+	}
 
 	var res []Var
 
@@ -42,5 +54,47 @@ func PostgresVars(normalized, original string) []Var {
 		b = b[in+j:]
 	}
 
-	return res
+	return res, nil
+}
+
+func MySQLVars(q string) ([]Var, error) {
+	bv := make(map[string]*querypb.BindVariable)
+	q, err := sqlparser.NormalizeAlphabetically(q)
+	if err != nil {
+		return nil, err
+	}
+
+	stmt, reservedVars, err := sqlparser.Parse2(q)
+	if err != nil {
+		return nil, err
+	}
+
+	err = sqlparser.Normalize(stmt, sqlparser.NewReservedVars("", reservedVars), bv)
+	if err != nil {
+		return nil, err
+	}
+
+	var res []Var
+	for k, v := range bv {
+		if b := v.GetValue(); len(b) > 0 {
+			res = append(res, Var{
+				Name:  k,
+				Value: string(b),
+			})
+
+			continue
+		}
+
+		vals := make([]string, len(v.GetValues()))
+		for i, v := range v.GetValues() {
+			vals[i] = fmt.Sprintf("%q", string(v.GetValue()))
+		}
+
+		res = append(res, Var{
+			Name:  k,
+			Value: strings.Join(vals, ","),
+		})
+	}
+
+	return res, nil
 }
