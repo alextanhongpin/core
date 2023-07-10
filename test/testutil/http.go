@@ -11,11 +11,6 @@ import (
 	"github.com/alextanhongpin/core/test/testdump"
 )
 
-// IgnoreHeaders
-// MaskRequestBody
-// MaskResponseBody
-// MaskResponseHeaders
-// MaskRequestHeaders
 type HTTPDumpOption = testdump.HTTPOption
 type HTTPDump = testdump.HTTPDump
 type HTTPHook = testdump.HTTPHook
