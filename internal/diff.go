@@ -1,17 +1,54 @@
 package internal
 
 import (
-	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/google/go-cmp/cmp"
 )
 
+type DiffError struct {
+	ansi  string
+	text  string
+	color bool
+}
+
+func (d *DiffError) Error() string {
+	if d.color {
+		return d.ansi
+	}
+
+	return d.text
+}
+
+func (d *DiffError) Ansi() string {
+	return d.ansi
+}
+
+func (d *DiffError) Text() string {
+	return d.text
+}
+
+func (d *DiffError) SetColor(color bool) {
+	d.color = color
+}
+
 func ANSIDiff(x, y any, opts ...cmp.Option) error {
 	diff := cmp.Diff(x, y, opts...)
 	if diff == "" {
 		return nil
+	}
+
+	return &DiffError{
+		ansi:  ansiDiff(diff),
+		text:  textDiff(diff),
+		color: true,
+	}
+}
+
+func ansiDiff(diff string) string {
+	if diff == "" {
+		return ""
 	}
 
 	// TODO: Option to disable.
@@ -33,7 +70,24 @@ func ANSIDiff(x, y any, opts ...cmp.Option) error {
 	}
 	lines = append(header, lines...)
 
-	return errors.New(strings.Join(lines, "\n"))
+	return strings.Join(lines, "\n")
+}
+
+func textDiff(diff string) string {
+	if diff == "" {
+		return ""
+	}
+
+	header := []string{
+		"\n",
+		"  Snapshot(-)",
+		"  Received(+)",
+		"\n",
+	}
+	lines := strings.Split(diff, "\n")
+	lines = append(header, lines...)
+
+	return strings.Join(lines, "\n")
 }
 
 func escapeCode(code int) string {

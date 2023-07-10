@@ -1,9 +1,12 @@
 package internal
 
-import "path/filepath"
+import (
+	"path/filepath"
+	"strings"
+)
 
 type Path struct {
-	TestDir  string
+	Dir      string
 	FilePath string
 	FileName string
 	FileExt  string
@@ -11,9 +14,10 @@ type Path struct {
 
 func (o *Path) String() string {
 	if len(o.FileName) == 0 {
+		filePath := strings.TrimSuffix(o.FilePath, "/")
 		return filepath.Join(
-			o.TestDir,
-			o.FilePath+o.FileExt,
+			o.Dir,
+			filePath+o.FileExt,
 		)
 	}
 
@@ -25,7 +29,7 @@ func (o *Path) String() string {
 	}
 
 	return filepath.Join(
-		o.TestDir,
+		o.Dir,
 		o.FilePath,
 		fileName,
 	)
