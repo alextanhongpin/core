@@ -28,6 +28,26 @@ func DumpMySQL(sql *SQL, marshalFunc func(v any) ([]byte, error)) ([]byte, error
 		args[k] = v
 	}
 
+	n, vars, err := mySQLVars(sql.Query)
+	if err != nil {
+		return nil, err
+	}
+
+	n, err = sqlformat.Format(n)
+	if err != nil {
+		return nil, err
+	}
+
+	kv := make(map[string]any)
+	for _, v := range vars {
+		kv[fmt.Sprintf(":%v", v.Name)] = v.Value
+	}
+
+	v, err := marshalFunc(kv)
+	if err != nil {
+		return nil, err
+	}
+
 	a, err := marshalFunc(args)
 	if err != nil {
 		return nil, err
@@ -38,7 +58,7 @@ func DumpMySQL(sql *SQL, marshalFunc func(v any) ([]byte, error)) ([]byte, error
 		return nil, err
 	}
 
-	return []byte(dump(q, a, b)), nil
+	return []byte(dump(q, a, n, v, b)), nil
 }
 
 // MatchMySQLQuery checks if two queries are equal,

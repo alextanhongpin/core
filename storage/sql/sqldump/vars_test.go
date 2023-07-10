@@ -29,15 +29,15 @@ SELECT *
 		t.Fatal(err)
 	}
 	want := []sqldump.Var{
-		{"$3", "'john.doe@mail.com'"},
+		{"$3", "john.doe@mail.com"},
 		{"$1", "$1"},
 		{"$2", "$2"},
-		{"$4", "'foo bar walks in a bar, h''a'"},
-		{"$5", "'freemium'"},
-		{"$6", "'premium'"},
+		{"$4", "foo bar walks in a bar, h''a"},
+		{"$5", "freemium"},
+		{"$6", "premium"},
 		{"$7", "13"},
 		{"$8", "true"},
-		{"$9", "'{Foo,bar,%oo%}'"},
+		{"$9", "{Foo,bar,%oo%}"},
 		{"$10", "1"},
 		{"$11", "2"},
 	}

@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/alextanhongpin/core/internal"
 	pg_query "github.com/pganalyze/pg_query_go/v4"
 	querypb "vitess.io/vitess/go/vt/proto/query"
 	"vitess.io/vitess/go/vt/sqlparser"
@@ -28,6 +29,12 @@ func PostgresVars(q string) ([]Var, error) {
 		return nil, err
 	}
 
+	return postgresVars(a, b), nil
+}
+
+func postgresVars(normalized, original string) []Var {
+	a := normalized
+	b := original
 	var res []Var
 
 	placeholders := placePat.FindAllString(a, -1)
@@ -48,30 +55,35 @@ func PostgresVars(q string) ([]Var, error) {
 
 		res = append(res, Var{
 			Name:  p,
-			Value: b[in : in+j],
+			Value: internal.TrimQuotes(b[in : in+j]),
 		})
 		a = a[in+len(p):]
 		b = b[in+j:]
 	}
 
-	return res, nil
+	return res
 }
 
 func MySQLVars(q string) ([]Var, error) {
+	_, vars, err := mySQLVars(q)
+	return vars, err
+}
+
+func mySQLVars(q string) (string, []Var, error) {
 	bv := make(map[string]*querypb.BindVariable)
 	q, err := sqlparser.NormalizeAlphabetically(q)
 	if err != nil {
-		return nil, err
+		return "", nil, err
 	}
 
 	stmt, reservedVars, err := sqlparser.Parse2(q)
 	if err != nil {
-		return nil, err
+		return "", nil, err
 	}
 
 	err = sqlparser.Normalize(stmt, sqlparser.NewReservedVars("", reservedVars), bv)
 	if err != nil {
-		return nil, err
+		return "", nil, err
 	}
 
 	var res []Var
@@ -79,7 +91,7 @@ func MySQLVars(q string) ([]Var, error) {
 		if b := v.GetValue(); len(b) > 0 {
 			res = append(res, Var{
 				Name:  k,
-				Value: string(b),
+				Value: internal.TrimQuotes(string(b)),
 			})
 
 			continue
@@ -87,7 +99,7 @@ func MySQLVars(q string) ([]Var, error) {
 
 		vals := make([]string, len(v.GetValues()))
 		for i, v := range v.GetValues() {
-			vals[i] = fmt.Sprintf("%q", string(v.GetValue()))
+			vals[i] = fmt.Sprintf("%q", internal.TrimQuotes(string(v.GetValue())))
 		}
 
 		res = append(res, Var{
@@ -96,5 +108,5 @@ func MySQLVars(q string) ([]Var, error) {
 		})
 	}
 
-	return res, nil
+	return sqlparser.String(stmt), res, nil
 }

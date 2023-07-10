@@ -11,15 +11,19 @@ var patEols = regexp.MustCompile(`[\r\n]{2,}`)
 
 const querySection = "-- Query"
 const argsSection = "-- Args"
+const normalizedSection = "-- Normalized"
+const varsSection = "-- Vars"
 const resultSection = "-- Result"
 
 type SQL struct {
-	Query string
-	Args  []any
-	// Key-value representation of the ArgsMap.
+	Query      string
+	Normalized string
+	Args       []any
+	// Key-value representation of the ArgMap.
 	// Since it can be yaml or json, we leave it to unmarshal to decide.
-	ArgsMap any
-	Result  any
+	ArgMap any
+	VarMap any
+	Result any
 }
 
 func Read(b []byte, unmarshalFunc func([]byte) (any, error)) (*SQL, error) {
@@ -38,13 +42,20 @@ func Read(b []byte, unmarshalFunc func([]byte) (any, error)) (*SQL, error) {
 		switch head {
 		case querySection:
 			d.Query = body
+		case normalizedSection:
+			d.Normalized = body
 		case argsSection:
-			// Due to type issue, this is hardcoded.
 			a, err := unmarshalFunc([]byte(body))
 			if err != nil {
 				return nil, err
 			}
-			d.ArgsMap = a
+			d.ArgMap = a
+		case varsSection:
+			a, err := unmarshalFunc([]byte(body))
+			if err != nil {
+				return nil, err
+			}
+			d.VarMap = a
 		case resultSection:
 			a, err := unmarshalFunc([]byte(body))
 			if err != nil {
@@ -57,7 +68,7 @@ func Read(b []byte, unmarshalFunc func([]byte) (any, error)) (*SQL, error) {
 	return d, nil
 }
 
-func dump(q string, args, result []byte) string {
+func dump(q string, args []byte, n string, varMap, result []byte) string {
 	var sb strings.Builder
 	// Query.
 	sb.WriteString(querySection)
@@ -72,6 +83,22 @@ func dump(q string, args, result []byte) string {
 	sb.WriteRune('\n')
 
 	sb.Write(args)
+	sb.WriteRune('\n')
+	sb.WriteRune('\n')
+
+	// Normalized.
+	sb.WriteString(normalizedSection)
+	sb.WriteRune('\n')
+
+	sb.WriteString(n)
+	sb.WriteRune('\n')
+	sb.WriteRune('\n')
+
+	// Vars.
+	sb.WriteString(varsSection)
+	sb.WriteRune('\n')
+
+	sb.Write(varMap)
 	sb.WriteRune('\n')
 	sb.WriteRune('\n')
 

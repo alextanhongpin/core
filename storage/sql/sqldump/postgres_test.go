@@ -1,7 +1,6 @@
 package sqldump_test
 
 import (
-	"encoding/json"
 	"fmt"
 	"math/rand"
 	"testing"
@@ -40,7 +39,7 @@ func TestDumpPostgres(t *testing.T) {
 		},
 	}
 
-	b, err := sqldump.DumpPostgres(&dump, json.Marshal)
+	b, err := sqldump.DumpPostgres(&dump, internal.MarshalYAMLPreserveKeysOrder)
 	if err != nil {
 		t.Fatal(err)
 	}

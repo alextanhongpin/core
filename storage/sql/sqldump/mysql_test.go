@@ -1,7 +1,6 @@
 package sqldump_test
 
 import (
-	"encoding/json"
 	"fmt"
 	"math/rand"
 	"testing"
@@ -41,7 +40,7 @@ func TestDumpMySQL(t *testing.T) {
 		},
 	}
 
-	b, err := sqldump.DumpMySQL(&dump, json.Marshal)
+	b, err := sqldump.DumpMySQL(&dump, internal.MarshalYAMLPreserveKeysOrder)
 	if err != nil {
 		t.Fatal(err)
 	}

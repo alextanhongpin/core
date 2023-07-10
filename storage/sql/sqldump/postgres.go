@@ -13,7 +13,19 @@ func DumpPostgres(sql *SQL, marshalFunc func(v any) ([]byte, error)) ([]byte, er
 		return nil, err
 	}
 
+	n, err := pg_query.Normalize(q)
+	if err != nil {
+		return nil, err
+	}
+
+	vars := postgresVars(n, q)
+
 	q, err = sqlformat.Format(q)
+	if err != nil {
+		return nil, err
+	}
+
+	n, err = sqlformat.Format(n)
 	if err != nil {
 		return nil, err
 	}
@@ -23,7 +35,18 @@ func DumpPostgres(sql *SQL, marshalFunc func(v any) ([]byte, error)) ([]byte, er
 		k := fmt.Sprintf("$%d", i+1)
 		args[k] = v
 	}
+
 	a, err := marshalFunc(args)
+	if err != nil {
+		return nil, err
+	}
+
+	kv := make(map[string]any)
+	for _, v := range vars {
+		kv[v.Name] = v.Value
+	}
+
+	v, err := marshalFunc(kv)
 	if err != nil {
 		return nil, err
 	}
@@ -33,7 +56,7 @@ func DumpPostgres(sql *SQL, marshalFunc func(v any) ([]byte, error)) ([]byte, er
 		return nil, err
 	}
 
-	return []byte(dump(q, a, b)), nil
+	return []byte(dump(q, a, n, v, b)), nil
 }
 
 // MatchPostgresQuery checks if two queries are equal,
