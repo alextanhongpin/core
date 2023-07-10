@@ -23,6 +23,7 @@ func MySQL(fileName string, sql *SQL, opt *MySQLOption) error {
 		Unmarshaller: UnmarshalFunc[T](UnmarshalMySQL),
 		Comparer: &MySQLComparer{
 			args:   opt.Args,
+			vars:   opt.Vars,
 			result: opt.Result,
 		},
 	}
@@ -33,6 +34,7 @@ func MySQL(fileName string, sql *SQL, opt *MySQLOption) error {
 type MySQLOption struct {
 	Hooks  []Hook[*SQL]
 	Args   []cmp.Option
+	Vars   []cmp.Option
 	Result []cmp.Option
 }
 
@@ -46,6 +48,7 @@ func UnmarshalMySQL(b []byte) (*SQL, error) {
 
 type MySQLComparer struct {
 	args   []cmp.Option
+	vars   []cmp.Option
 	result []cmp.Option
 }
 
@@ -68,8 +71,12 @@ func (cmp *MySQLComparer) Compare(snapshot, received *SQL) error {
 		return fmt.Errorf("\nThe SQL query has been modified:\n\n%s", diff)
 	}
 
-	if err := internal.ANSIDiff(x.ArgsMap, y.ArgsMap, cmp.args...); err != nil {
+	if err := internal.ANSIDiff(x.ArgMap, y.ArgMap, cmp.args...); err != nil {
 		return fmt.Errorf("Args: %w", err)
+	}
+
+	if err := internal.ANSIDiff(x.VarMap, y.VarMap, cmp.vars...); err != nil {
+		return fmt.Errorf("Vars: %w", err)
 	}
 
 	if err := internal.ANSIDiff(x.Result, y.Result, cmp.result...); err != nil {

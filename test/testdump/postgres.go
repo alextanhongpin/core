@@ -22,6 +22,7 @@ func Postgres(fileName string, sql *SQL, opt *PostgresOption) error {
 		Comparer: &PostgresComparer{
 			args:   opt.Args,
 			result: opt.Result,
+			vars:   opt.Vars,
 		},
 	}
 
@@ -31,6 +32,7 @@ func Postgres(fileName string, sql *SQL, opt *PostgresOption) error {
 type PostgresOption struct {
 	Hooks  []Hook[*SQL]
 	Args   []cmp.Option
+	Vars   []cmp.Option
 	Result []cmp.Option
 }
 
@@ -44,6 +46,7 @@ func UnmarshalPostgres(b []byte) (*SQL, error) {
 
 type PostgresComparer struct {
 	args   []cmp.Option
+	vars   []cmp.Option
 	result []cmp.Option
 }
 
@@ -66,8 +69,12 @@ func (cmp *PostgresComparer) Compare(snapshot, received *SQL) error {
 		return fmt.Errorf("\nThe SQL query has been modified:\n\n%s", diff)
 	}
 
-	if err := internal.ANSIDiff(x.ArgsMap, y.ArgsMap, cmp.args...); err != nil {
+	if err := internal.ANSIDiff(x.ArgMap, y.ArgMap, cmp.args...); err != nil {
 		return fmt.Errorf("Args: %w", err)
+	}
+
+	if err := internal.ANSIDiff(x.VarMap, y.VarMap, cmp.vars...); err != nil {
+		return fmt.Errorf("Vars: %w", err)
 	}
 
 	if err := internal.ANSIDiff(x.Result, y.Result, cmp.result...); err != nil {
