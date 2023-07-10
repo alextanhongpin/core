@@ -108,5 +108,5 @@ func mySQLVars(q string) (string, []Var, error) {
 		})
 	}
 
-	return sqlparser.String(stmt), res, nil
+	return sqlparser.CanonicalString(stmt), res, nil
 }
