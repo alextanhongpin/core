@@ -52,3 +52,20 @@ func TestDumpYAMLMaskField(t *testing.T) {
 		testutil.MaskKeys[T]("password"),
 	)
 }
+
+func TestDumpYAMLIntercept(t *testing.T) {
+	nums := []int{1, 2, 3}
+
+	type T = []int
+
+	testutil.DumpYAML(t, nums,
+		testutil.InterceptYAML(func(t T) (T, error) {
+			// Double the value
+			for i, v := range t {
+				t[i] = v * 2
+			}
+
+			return t, nil
+		}),
+	)
+}

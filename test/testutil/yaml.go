@@ -30,7 +30,7 @@ func DumpYAML[T any](t *testing.T, v T, opts ...YAMLOption[T]) {
 	p := Path{
 		Dir:      "testdata",
 		FilePath: t.Name(),
-		FileName: o.FileName,
+		FileName: internal.Or(o.FileName, internal.TypeName(v)),
 		FileExt:  ".yaml",
 	}
 
@@ -80,9 +80,16 @@ func MaskKeys[T any](fields ...string) YAMLOption[T] {
 	}
 }
 
-func CompareYAML[T any](hook func(snapshot, received T) error) YAMLOption[T] {
+func InspectYAML[T any](hook func(snapshot, received T) error) YAMLOption[T] {
 	return func(o *YamlOption[T]) {
 		o.Dump.Hooks = append(o.Dump.Hooks,
 			testdump.CompareHook(hook))
+	}
+}
+
+func InterceptYAML[T any](hook func(T) (T, error)) YAMLOption[T] {
+	return func(o *YamlOption[T]) {
+		o.Dump.Hooks = append(o.Dump.Hooks,
+			testdump.MarshalHook(hook))
 	}
 }
