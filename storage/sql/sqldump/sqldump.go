@@ -6,6 +6,8 @@ import (
 	"strings"
 )
 
+var ErrInvalidDumpFormat = errors.New("sqldump: invalid dump format")
+
 // Split when there is 2 or more new lines.
 var patEols = regexp.MustCompile(`[\r\n]{2,}`)
 
@@ -29,8 +31,8 @@ type SQL struct {
 func Read(b []byte, unmarshalFunc func([]byte) (any, error)) (*SQL, error) {
 	s := string(b)
 	sections := patEols.Split(s, -1)
-	if len(sections) != 3 {
-		return nil, errors.New("invalid dump format")
+	if len(sections) != 5 {
+		return nil, ErrInvalidDumpFormat
 	}
 
 	d := new(SQL)

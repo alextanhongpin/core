@@ -24,7 +24,7 @@ func DumpMySQL(sql *SQL, marshalFunc func(v any) ([]byte, error)) ([]byte, error
 	for i, v := range sql.Args {
 		// sqlparser replaces all '?' with ':v1', ':v2', ':vn'
 		// ...
-		k := fmt.Sprintf(":v%d", i+1)
+		k := fmt.Sprintf("v%d", i+1)
 		args[k] = v
 	}
 
@@ -40,7 +40,7 @@ func DumpMySQL(sql *SQL, marshalFunc func(v any) ([]byte, error)) ([]byte, error
 
 	kv := make(map[string]any)
 	for _, v := range vars {
-		kv[fmt.Sprintf(":%v", v.Name)] = v.Value
+		kv[fmt.Sprintf("%v", v.Name)] = v.Value
 	}
 
 	v, err := marshalFunc(kv)

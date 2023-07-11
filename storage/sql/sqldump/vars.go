@@ -98,13 +98,25 @@ func mySQLVars(q string) (string, []Var, error) {
 		}
 
 		vals := make([]string, len(v.GetValues()))
+		// If the value is a list, join them.
+		// If the item in the list has a comma, add a quote before joining them.
+		//
+		// e.g.
+		// Input: ["hello, world", "hi"]
+		// Wrong output: 'hello, world, hi'
+		// Right output: '"hello, world", hi'
+		//
 		for i, v := range v.GetValues() {
-			vals[i] = fmt.Sprintf("%q", internal.TrimQuotes(string(v.GetValue())))
+			val := internal.TrimQuotes(string(v.GetValue()))
+			if strings.Contains(val, ",") {
+				val = fmt.Sprintf("%q", val)
+			}
+			vals[i] = val
 		}
 
 		res = append(res, Var{
 			Name:  k,
-			Value: strings.Join(vals, ","),
+			Value: strings.Join(vals, ", "),
 		})
 	}
 

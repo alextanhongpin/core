@@ -13,8 +13,8 @@ SELECT *
     AND `name` like ANY('{Foo,bar,%oo%}')
 
 -- Args
-:v1: 2023-07-10T22:13:11.941815+08:00
-:v2: 2023-07-10T22:13:11.941816+08:00
+v1: 2023-07-10T22:13:11.941815+08:00
+v2: 2023-07-10T22:13:11.941816+08:00
 
 
 -- Normalized
@@ -31,11 +31,11 @@ SELECT *
     AND `subscription` IN ::2
 
 -- Vars
-:1: '{Foo,bar,%oo%}'
-:2: '"freemium","premium"'
-:age: "13"
-:description: foo bar walks in a bar, h'a
-:email: john.doe@mail.com
+"1": '{Foo,bar,%oo%}'
+"2": freemium, premium
+age: "13"
+description: foo bar walks in a bar, h'a
+email: john.doe@mail.com
 
 
 -- Result
