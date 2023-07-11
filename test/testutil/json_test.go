@@ -70,5 +70,28 @@ func TestDumpJSONMaskField(t *testing.T) {
 
 	testutil.DumpJSON(t, creds,
 		testutil.MaskFields[T]("password"),
+		testutil.InspectJSON(func(snapshot, received T) error {
+			t.Log("snapshot:", snapshot)
+			t.Log("received:", received)
+
+			return nil
+		}),
+	)
+}
+
+func TestDumpJSONIntercept(t *testing.T) {
+	nums := []int{1, 2, 3}
+
+	type T = []int
+
+	testutil.DumpJSON(t, nums,
+		testutil.InterceptJSON(func(t T) (T, error) {
+			// Double the value
+			for i, v := range t {
+				t[i] = v * 2
+			}
+
+			return t, nil
+		}),
 	)
 }

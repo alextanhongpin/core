@@ -80,9 +80,16 @@ func MaskFields[T any](fields ...string) JSONOption[T] {
 	}
 }
 
-func CompareJSON[T any](hook func(snapshot, received T) error) JSONOption[T] {
+func InspectJSON[T any](hook func(snapshot, received T) error) JSONOption[T] {
 	return func(o *JsonOption[T]) {
 		o.Dump.Hooks = append(o.Dump.Hooks,
 			testdump.CompareHook(hook))
+	}
+}
+
+func InterceptJSON[T any](hook func(t T) (T, error)) JSONOption[T] {
+	return func(o *JsonOption[T]) {
+		o.Dump.Hooks = append(o.Dump.Hooks,
+			testdump.MarshalHook(hook))
 	}
 }
