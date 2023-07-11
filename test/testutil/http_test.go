@@ -170,30 +170,29 @@ func TestHTTPDump(t *testing.T) {
 			},
 			opts: []testutil.HTTPOption{
 				testutil.IgnoreBodyFields("createdAt"),
-				testutil.CompareHTTP(
-					func(snapshot, received *testutil.HTTPDump) error {
-						body, err := httputil.ReadResponse(received.W)
-						if err != nil {
-							return err
-						}
+				testutil.InspectHTTP(func(snapshot, received *testutil.HTTPDump) error {
+					body, err := httputil.ReadResponse(received.W)
+					if err != nil {
+						return err
+					}
 
-						type response struct {
-							Data struct {
-								CreatedAt time.Time `json:"createdAt"`
-							} `json:"data"`
-						}
+					type response struct {
+						Data struct {
+							CreatedAt time.Time `json:"createdAt"`
+						} `json:"data"`
+					}
 
-						var res response
-						if err := json.Unmarshal(body, &res); err != nil {
-							return err
-						}
+					var res response
+					if err := json.Unmarshal(body, &res); err != nil {
+						return err
+					}
 
-						if res.Data.CreatedAt.IsZero() {
-							return fmt.Errorf("want createdAt to be non-zero, got %s", res.Data.CreatedAt)
-						}
+					if res.Data.CreatedAt.IsZero() {
+						return fmt.Errorf("want createdAt to be non-zero, got %s", res.Data.CreatedAt)
+					}
 
-						return nil
-					},
+					return nil
+				},
 				),
 			},
 		},
@@ -210,8 +209,8 @@ func TestHTTPDump(t *testing.T) {
 				fmt.Fprint(w, nil)
 			},
 			opts: []testutil.HTTPOption{
-				testutil.MarshalHTTP(func(d *testutil.HTTPDump) (*testutil.HTTPDump, error) {
-					headers := d.R.Header
+				testutil.InspectHTTP(func(snapshot, received *testutil.HTTPDump) error {
+					headers := received.R.Header
 					contentType, params, err := mime.ParseMediaType(headers.Get("Content-Type"))
 					if err != nil {
 						t.Fatal(err)
@@ -223,7 +222,7 @@ func TestHTTPDump(t *testing.T) {
 						t.Fatalf("want %s, got %s", want, got)
 					}
 
-					return d, nil
+					return nil
 				}),
 			},
 		},
@@ -243,8 +242,8 @@ func TestHTTPDump(t *testing.T) {
 			},
 			opts: []testutil.HTTPOption{
 
-				testutil.MarshalHTTP(func(d *testutil.HTTPDump) (*testutil.HTTPDump, error) {
-					headers := d.R.Header
+				testutil.InspectHTTP(func(snapshot, received *testutil.HTTPDump) error {
+					headers := snapshot.R.Header
 					cacheControl := headers["Cache-Control"]
 
 					maxAge := "max-age=604800"
@@ -257,7 +256,7 @@ func TestHTTPDump(t *testing.T) {
 						t.Fatalf("want %s, got %s", want, got)
 					}
 
-					return d, nil
+					return nil
 				}),
 			},
 		},
