@@ -13,28 +13,6 @@ import (
 
 var ErrHeaderNotFound = errors.New("testdump: HTTP header not found")
 
-func HTTPCompareHook(hook func(snap, recv *HTTPDump) error) Hook[*HTTPDump] {
-	type T = *HTTPDump
-
-	return func(s S[T]) S[T] {
-		return &compareHook[T]{
-			S:    s,
-			hook: hook,
-		}
-	}
-}
-
-func HTTPMarshalHook(hook func(snap *HTTPDump) (*HTTPDump, error)) Hook[*HTTPDump] {
-	type T = *HTTPDump
-
-	return func(s S[T]) S[T] {
-		return &marshalHook[T]{
-			S:    s,
-			hook: hook,
-		}
-	}
-}
-
 func MaskRequestHeaders(headers ...string) Hook[*HTTPDump] {
 	type T = *HTTPDump
 

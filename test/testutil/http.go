@@ -131,14 +131,14 @@ func MaskResponseBody(fields ...string) HTTPOption {
 func InspectHTTP(hook func(snapshot, received *HTTPDump) error) HTTPOption {
 	return func(o *HttpOption) {
 		o.Dump.Hooks = append(o.Dump.Hooks,
-			testdump.HTTPCompareHook(hook))
+			testdump.CompareHook(hook))
 	}
 }
 
 func InterceptHTTP(hook func(dump *HTTPDump) (*HTTPDump, error)) HTTPOption {
 	return func(o *HttpOption) {
 		o.Dump.Hooks = append(o.Dump.Hooks,
-			testdump.HTTPMarshalHook(hook))
+			testdump.MarshalHook(hook))
 	}
 }
 
