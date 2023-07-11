@@ -42,13 +42,13 @@ func TestDumpMySQL(t *testing.T) {
 
 	t.Run("simple", func(t *testing.T) {
 		testutil.DumpMySQL(t, simpleDump,
-			testutil.IgnoreArgs(":v1"),
+			testutil.IgnoreArgs("v1"),
 		)
 	})
 
 	t.Run("complex", func(t *testing.T) {
 		testutil.DumpMySQL(t, complexDump,
-			testutil.IgnoreArgs(":v1"),
+			testutil.IgnoreArgs("v1"),
 			testutil.IgnoreResultFields("id"),
 		)
 	})

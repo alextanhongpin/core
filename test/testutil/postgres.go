@@ -63,3 +63,17 @@ func SQLFileName(name string) SQLOption {
 		o.FileName = name
 	}
 }
+
+func InspectSQL(hook func(snapshot, received *SQL) error) SQLOption {
+	return func(o *SqlOption) {
+		o.Dump.Hooks = append(o.Dump.Hooks,
+			testdump.CompareHook(hook))
+	}
+}
+
+func InterceptSQL(hook func(t *SQL) (*SQL, error)) SQLOption {
+	return func(o *SqlOption) {
+		o.Dump.Hooks = append(o.Dump.Hooks,
+			testdump.MarshalHook(hook))
+	}
+}
