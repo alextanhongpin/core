@@ -71,11 +71,6 @@ func MySQLVars(q string) ([]Var, error) {
 
 func mySQLVars(q string) (string, []Var, error) {
 	bv := make(map[string]*querypb.BindVariable)
-	q, err := sqlparser.NormalizeAlphabetically(q)
-	if err != nil {
-		return "", nil, err
-	}
-
 	stmt, reservedVars, err := sqlparser.Parse2(q)
 	if err != nil {
 		return "", nil, err

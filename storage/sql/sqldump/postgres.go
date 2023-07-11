@@ -62,17 +62,16 @@ func DumpPostgres(sql *SQL, marshalFunc func(v any) ([]byte, error)) ([]byte, er
 // MatchPostgresQuery checks if two queries are equal,
 // ignoring variables.
 func MatchPostgresQuery(a, b string) (bool, error) {
-	x, err := normalizePostgres(a)
+	fa, err := pg_query.Fingerprint(a)
+	if err != nil {
+		return false, err
+	}
+	fb, err := pg_query.Fingerprint(b)
 	if err != nil {
 		return false, err
 	}
 
-	y, err := normalizePostgres(b)
-	if err != nil {
-		return false, err
-	}
-
-	return x == y, nil
+	return fa == fb, nil
 }
 
 // standardizePostgres standardize the capitalization and strip of new lines etc.

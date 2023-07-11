@@ -64,17 +64,7 @@ func DumpMySQL(sql *SQL, marshalFunc func(v any) ([]byte, error)) ([]byte, error
 // MatchMySQLQuery checks if two queries are equal,
 // ignoring variables.
 func MatchMySQLQuery(a, b string) (bool, error) {
-	x, err := normalizeMySQL(a)
-	if err != nil {
-		return false, err
-	}
-
-	y, err := normalizeMySQL(b)
-	if err != nil {
-		return false, err
-	}
-
-	return x == y, nil
+	return sqlparser.QueryMatchesTemplates(a, []string{b})
 }
 
 func standardizeMySQL(q string) (string, error) {
@@ -93,11 +83,6 @@ func standardizeMySQL(q string) (string, error) {
 // Referred from sqlparser.QueryMatchesTemplates(q, []string{q})
 func normalizeMySQL(q string) (string, error) {
 	bv := make(map[string]*querypb.BindVariable)
-	q, err := sqlparser.NormalizeAlphabetically(q)
-	if err != nil {
-		return "", err
-	}
-
 	stmt, reservedVars, err := sqlparser.Parse2(q)
 	if err != nil {
 		return "", err

@@ -20,26 +20,26 @@ v2: "2023-07-11"
 -- Normalized
 SELECT *
   FROM `users`
-  WHERE `name` LIKE ANY(:1)
-    AND `age` > :age
-    AND `created_at` IN (:v2)
+  WHERE `email` = :email
     AND `deleted_at` IS NULL
-    AND `description` = :description
-    AND `email` = :email
-    AND `is_active` = TRUE
     AND `last_logged_in_at` > :v1
-    AND `subscription` IN ::2
+    AND `created_at` IN (:v2)
+    AND `description` = :description
+    AND `subscription` IN ::1
+    AND `age` > :age
+    AND `is_active` = TRUE
+    AND `name` LIKE ANY(:2)
 
 -- Vars
-"1": '{Foo,bar,%oo%}'
-"2": freemium, premium
+"1": freemium, premium
+"2": '{Foo,bar,%oo%}'
 age: "13"
 description: foo bar walks in a bar, h'a
 email: john.doe@mail.com
 
 
 -- Result
-- id: 4382821114756197659
+- id: 3308685347180913487
   name: Alice
-- id: 3397901520974381966
+- id: 3090463935716139422
   name: Bob
