@@ -3,9 +3,11 @@ package maputil
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 )
 
 var ErrInvalidJSON = errors.New("maputil: invalid json")
+var ErrMaskKeyNotFound = errors.New("maputil: mask key not found")
 
 const MaskValue = "/* !REDACTED */"
 
@@ -19,6 +21,7 @@ func MaskFunc(m map[string]any, fn func(k string) bool) map[string]any {
 	})
 }
 
+// TODO: Check if field exists.
 func MaskFields(fields ...string) func(k string) bool {
 	return func(k string) bool {
 		for _, f := range fields {
@@ -32,7 +35,29 @@ func MaskFields(fields ...string) func(k string) bool {
 }
 
 func MaskBytes(b []byte, fields ...string) ([]byte, error) {
-	return MaskBytesFunc(b, MaskFields(fields...))
+	cache := make(map[string]bool)
+	for _, f := range fields {
+		cache[f] = false
+	}
+
+	b, err := MaskBytesFunc(b, func(k string) bool {
+		_, ok := cache[k]
+		if ok {
+			cache[k] = true
+		}
+		return ok
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	for f := range cache {
+		if !cache[f] {
+			return nil, fmt.Errorf("%w: %q", ErrMaskKeyNotFound, f)
+		}
+	}
+
+	return b, nil
 }
 
 func MaskBytesFunc(b []byte, fn func(key string) bool) ([]byte, error) {

@@ -1,6 +1,7 @@
 package maputil_test
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/alextanhongpin/core/test/testutil"
@@ -34,4 +35,12 @@ func TestMask(t *testing.T) {
 		maputil.MaskFields("password", "data.token", "tokens[_].token"),
 	)
 	testutil.DumpJSON(t, credsMask)
+}
+
+func TestMaskFieldNotFound(t *testing.T) {
+
+	_, err := maputil.MaskBytes([]byte(`{"name": "john"}`), "age")
+	if !errors.Is(err, maputil.ErrMaskKeyNotFound) {
+		t.Fatalf("want error mask key not found, got %v", err)
+	}
 }
