@@ -38,3 +38,17 @@ func TextFileName(name string) TextOption {
 		o.FileName = name
 	}
 }
+
+func InspectText(hook func(snapshot, received string) error) TextOption {
+	return func(o *TxtOption) {
+		o.Dump.Hooks = append(o.Dump.Hooks,
+			testdump.CompareHook(hook))
+	}
+}
+
+func InterceptText(hook func(dump string) (string, error)) TextOption {
+	return func(o *TxtOption) {
+		o.Dump.Hooks = append(o.Dump.Hooks,
+			testdump.MarshalHook(hook))
+	}
+}
