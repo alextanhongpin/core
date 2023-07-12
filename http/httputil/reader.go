@@ -25,3 +25,15 @@ func ReadResponse(w *http.Response) ([]byte, error) {
 	w.Body = io.NopCloser(bytes.NewReader(b))
 	return b, nil
 }
+
+func CloneRequest(r *http.Request) (*http.Request, error) {
+	b, err := ReadRequest(r)
+	if err != nil {
+		return nil, err
+	}
+
+	rc := r.Clone(r.Context())
+	rc.Body = io.NopCloser(bytes.NewBuffer(b))
+
+	return rc, nil
+}

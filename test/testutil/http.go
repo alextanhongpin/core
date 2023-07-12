@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/alextanhongpin/core/http/httputil"
 	"github.com/alextanhongpin/core/internal"
 	"github.com/alextanhongpin/core/test/testdump"
 )
@@ -72,6 +73,31 @@ func DumpHTTP(t *testing.T, w *http.Response, r *http.Request, opts ...HTTPOptio
 	}, o.Dump); err != nil {
 		t.Fatal(err)
 	}
+}
+
+type RoundTripper struct {
+	t    *testing.T
+	opts []HTTPOption
+}
+
+func DumpRoundTrip(t *testing.T, opts ...HTTPOption) *RoundTripper {
+	return &RoundTripper{
+		t:    t,
+		opts: opts,
+	}
+}
+
+func (t *RoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	r, err := httputil.CloneRequest(req)
+	if err != nil {
+		return nil, err
+	}
+
+	w, err := http.DefaultTransport.RoundTrip(req)
+
+	DumpHTTP(t.t, w, r, t.opts...)
+
+	return w, err
 }
 
 func IgnoreHeaders(headers ...string) HTTPOption {

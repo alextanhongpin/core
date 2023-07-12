@@ -1,7 +1,12 @@
-GET / HTTP/1.1
-Host: 127.0.0.1:51299
+POST / HTTP/1.1
+Host: 127.0.0.1:57880
 User-Agent: Go-http-client/1.1
+Content-Length: 31
 Accept-Encoding: gzip
+
+{
+ "message": "hello world"
+}
 
 
 ###
@@ -11,7 +16,7 @@ HTTP/1.1 200 OK
 Transfer-Encoding: chunked
 Trailer: My-Trailer
 Content-Type: application/json
-Date: Mon, 10 Jul 2023 17:06:33 GMT
+Date: Wed, 12 Jul 2023 17:19:53 GMT
 
 17
 {

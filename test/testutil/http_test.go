@@ -3,6 +3,7 @@ package testutil_test
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"math/rand"
 	"mime"
 	"net/http"
@@ -285,11 +286,26 @@ func TestHTTPDump(t *testing.T) {
 
 func TestHTTPTrailer(t *testing.T) {
 	h := func(w http.ResponseWriter, r *http.Request) {
+		type Request struct {
+			Message string `json:"message"`
+		}
+
+		var req Request
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		k, v, ok := strings.Cut(req.Message, " ")
+		if !ok {
+			http.Error(w, "unknown message format", http.StatusBadRequest)
+			return
+		}
+
 		w.Header().Add("Trailer", "my-trailer")
 		w.Header().Set("Content-Type", "application/json")
-		body := `{"hello": "world"}`
 		w.WriteHeader(http.StatusOK)
-		fmt.Fprint(w, body)
+		fmt.Fprintf(w, `{%q: %q}`, k, v)
 		w.Header().Set("my-trailer", "my-val")
 	}
 
@@ -298,17 +314,32 @@ func TestHTTPTrailer(t *testing.T) {
 	ts := httptest.NewServer(mux)
 	defer ts.Close()
 
-	r, err := http.NewRequest("GET", ts.URL, strings.NewReader(""))
+	body := strings.NewReader(`{"message": "hello world"}`)
+	r, err := http.NewRequest("POST", ts.URL, body)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	resp, err := http.DefaultClient.Do(r)
+	// Dump using round tripper (doesn't consume request body).
+	rt := testutil.DumpRoundTrip(t,
+		testutil.HTTPFileName("round_tripper"),
+		testutil.IgnoreHeaders("Host", "Date"),
+	)
+	client := &http.Client{
+		Transport: rt,
+	}
+	resp, err := client.Do(r)
 	if err != nil {
 		t.Fatal(err)
 	}
 
+	// If the method consumes request body, then you need to
+	// manually set request body.
+	// Seek resets the read.
+	body.Seek(0, 0)
+	r.Body = io.NopCloser(body)
 	testutil.DumpHTTP(t, resp, r,
+		testutil.HTTPFileName("dump_http"),
 		testutil.IgnoreHeaders("Host", "Date"),
 	)
 }
