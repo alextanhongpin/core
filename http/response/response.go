@@ -55,19 +55,20 @@ func JSON[T any](w http.ResponseWriter, res T, statusCode int) {
 // JSONError encodes the error as json response. Status code is inferred from
 // the error kind.
 func JSONError(w http.ResponseWriter, err error) {
-	var errCode *errcodes.Error
-	if !errors.As(err, &errCode) {
-		errCode = ErrInternal
+	var c *errcodes.Error
+	if !errors.As(err, &c) {
+		JSONError(w, ErrInternal)
+		return
 	}
 
 	res := &Payload[any]{
 		Error: &Error{
-			Code:    string(errCode.Code),
-			Message: errCode.Message,
+			Code:    string(c.Code()),
+			Message: c.Message(),
 		},
 	}
 
-	JSON(w, res, errcodes.HTTPStatusCode(errCode.Kind))
+	JSON(w, res, errcodes.HTTPStatusCode(c.Kind()))
 }
 
 func OK[T any](t *T) *Payload[T] {

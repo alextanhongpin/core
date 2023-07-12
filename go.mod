@@ -6,7 +6,7 @@ require golang.org/x/exp v0.0.0-20230626212559-97b1e661b5df
 
 require (
 	github.com/DATA-DOG/go-txdb v0.1.6
-	github.com/alextanhongpin/errcodes v0.0.0-20230602163126-0444dce7a961
+	github.com/alextanhongpin/errcodes v0.0.0-20230712124132-da60799908c6
 	github.com/cockroachdb/cockroachdb-parser v0.0.0-20230515042840-c9c144eab71a
 	github.com/go-playground/validator/v10 v10.14.1
 	github.com/golang-jwt/jwt/v5 v5.0.0
@@ -138,7 +138,7 @@ require (
 	google.golang.org/genproto v0.0.0-20230628200519-e449d1ea0e82 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20230628200519-e449d1ea0e82 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20230628200519-e449d1ea0e82 // indirect
-	google.golang.org/grpc v1.56.1 // indirect
+	google.golang.org/grpc v1.56.2 // indirect
 	google.golang.org/protobuf v1.31.0 // indirect
 	gopkg.in/DataDog/dd-trace-go.v1 v1.52.0 // indirect
 	gopkg.in/ini.v1 v1.67.0 // indirect

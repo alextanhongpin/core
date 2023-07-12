@@ -31,7 +31,7 @@ func TestJSONError(t *testing.T) {
 			h := func(w http.ResponseWriter, r *http.Request) {
 				response.JSONError(w, ts.err)
 			}
-			testutil.DumpHTTP(t, r, h)
+			testutil.DumpHTTPHandler(t, r, h)
 		})
 	}
 }
@@ -55,5 +55,5 @@ func TestJSON(t *testing.T) {
 
 		response.JSON(w, payload, http.StatusOK)
 	}
-	testutil.DumpHTTP(t, r, h)
+	testutil.DumpHTTPHandler(t, r, h)
 }
