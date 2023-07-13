@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httputil"
+	"strconv"
 )
 
 func ReadRequest(b []byte) (*http.Request, error) {
@@ -29,7 +30,8 @@ func DumpRequest(r *http.Request) ([]byte, error) {
 	}
 
 	// Use `DumpRequestOut` instead of `DumpRequest` to preserve the querystring.
-	b, err := httputil.DumpRequestOut(r, true)
+	// Just don't forgot to strip of the user-agent=Go-http-client/1.1 and accept-encoding=gzip
+	b, err := httputil.DumpRequest(r, true)
 	if err != nil {
 		return nil, err
 	}
@@ -44,10 +46,18 @@ func FromRequest(r *http.Request) (*Dump, error) {
 }
 
 func normalizeRequest(r *http.Request) (*http.Request, error) {
-	req := r.Clone(r.Context())
+	// httputil.DumpRequest seem to strip the querystring
+	// when constructed with httptest.NewRequest.
+	if len(r.URL.RequestURI()) > len(r.RequestURI) {
+		r.RequestURI = r.URL.RequestURI()
+	}
+
+	if r.Body == nil {
+		return r, nil
+	}
 
 	// Prettify the request body.
-	b, err := io.ReadAll(req.Body)
+	b, err := io.ReadAll(r.Body)
 	if err != nil {
 		return nil, err
 	}
@@ -57,30 +67,15 @@ func normalizeRequest(r *http.Request) (*http.Request, error) {
 		return nil, err
 	}
 
-	req.Body = io.NopCloser(bytes.NewReader(b))
+	r.Body = io.NopCloser(bytes.NewReader(b))
 
-	// Update the content length.
-	req.ContentLength = int64(len(b))
-
-	// `httputil.DumpRequestOut` requires these to be set.
-	normalizeHost(req)
-	normalizeScheme(req)
-
-	return req, nil
-}
-
-func normalizeHost(req *http.Request) {
-	host := valueOrDefault(req.Header.Get("Host"), req.Host)
-	host = valueOrDefault(host, "example.com")
-	req.Header.Set("Host", host)
-	req.Host = host
-	req.URL.Host = host
-}
-
-func normalizeScheme(req *http.Request) {
-	if req.URL.Scheme == "" {
-		req.URL.Scheme = "http"
+	n := strconv.Itoa(len(b))
+	if o := r.Header.Get("Content-Length"); o != n && len(b) > 0 {
+		// Update the content length.
+		r.Header.Set("Content-Length", n)
 	}
+
+	return r, nil
 }
 
 func requestToDump(r *http.Request) (*Dump, error) {

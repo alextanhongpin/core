@@ -1,9 +1,7 @@
 POST /register-form HTTP/1.1
 Host: example.com
-User-Agent: Go-http-client/1.1
 Content-Length: 44
 Content-Type: application/x-www-form-urlencoded
-Accept-Encoding: gzip
 
 password=123456&username=john.doe%40mail.com
 

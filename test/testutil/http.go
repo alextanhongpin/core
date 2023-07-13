@@ -29,13 +29,20 @@ func DumpHTTPHandler(t *testing.T, r *http.Request, handler http.HandlerFunc, op
 	t.Helper()
 
 	// Make a copy of the body.
-	b, err := io.ReadAll(r.Body)
-	if err != nil {
-		t.Fatal(err)
-	}
+	var reset func()
+	//var br *bytes.Reader
+	if r.Body != nil {
+		b, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
 
-	br := bytes.NewReader(b)
-	r.Body = io.NopCloser(br)
+		br := bytes.NewReader(b)
+		r.Body = io.NopCloser(br)
+		reset = func() {
+			br.Seek(0, 0)
+		}
+	}
 
 	wr := httptest.NewRecorder()
 
@@ -44,7 +51,9 @@ func DumpHTTPHandler(t *testing.T, r *http.Request, handler http.HandlerFunc, op
 	w := wr.Result()
 
 	// Reset request for the handler.
-	br.Seek(0, 0)
+	if reset != nil {
+		reset()
+	}
 
 	DumpHTTP(t, w, r, opts...)
 }

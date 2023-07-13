@@ -1,7 +1,5 @@
 GET / HTTP/1.1
-Host: 127.0.0.1:61481
-User-Agent: Go-http-client/1.1
-Accept-Encoding: gzip
+Host: 127.0.0.1:60923
 
 
 ###
@@ -11,7 +9,7 @@ HTTP/1.1 200 OK
 Transfer-Encoding: chunked
 Trailer: My-Trailer
 Content-Type: application/json
-Date: Sun, 09 Jul 2023 12:07:17 GMT
+Date: Thu, 13 Jul 2023 13:02:19 GMT
 
 17
 {
