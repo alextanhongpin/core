@@ -29,15 +29,13 @@ func (r *RateLimit) Unwrap() (bool, error) {
 
 func CheckRateLimit() okay.OK[RateLimitKey] {
 	fn := func(ctx context.Context, key RateLimitKey) okay.Response {
-		if key == "0.0.0.0:banned-user" {
-			return &RateLimit{
-				Limit: 1000,
-				Reset: time.Hour,
-			}
+		var remaining int
+		if key != "0.0.0.0:banned-user" {
+			remaining = 42
 		}
 
 		return &RateLimit{
-			Remaining: 42,
+			Remaining: remaining,
 			Limit:     1000,
 			Reset:     time.Hour,
 		}
