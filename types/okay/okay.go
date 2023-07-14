@@ -6,32 +6,24 @@ import (
 	"fmt"
 )
 
-var NotAllowed = errors.New("not allowed")
+var (
+	Invalid = errors.New("okay: no successful checks")
+	Denied  = errors.New("okay: denied")
+)
 
-// Return generic, so that we can add custom types.
 type Response interface {
-	Err() error
-	OK() bool
+	Unwrap() (bool, error)
 }
 
-// Allows, Denies, None, All, Any, Authorize, Verify.
+// OK can be used for authorization, authentication, verification of context,
+// as well as validation.
 type OK[T any] interface {
-	Allows(ctx context.Context, t T) Response
-}
-
-func Check[T any](ctx context.Context, t T, oks ...OK[T]) Response {
-	for _, ok := range oks {
-		if res := ok.Allows(ctx, t); !res.OK() {
-			return res
-		}
-	}
-
-	return Allow(len(oks) > 0)
+	Check(ctx context.Context, t T) Response
 }
 
 type Func[T any] func(ctx context.Context, t T) Response
 
-func (fn Func[T]) Allows(ctx context.Context, t T) Response {
+func (fn Func[T]) Check(ctx context.Context, t T) Response {
 	return fn(ctx, t)
 }
 
@@ -58,41 +50,102 @@ func (o *Okay[T]) AddFunc(oks ...OK[T]) {
 	o.checks = append(o.checks, oks...)
 }
 
-func (o *Okay[T]) Allows(ctx context.Context, t T) Response {
+// All requires all checks to be successful.
+func (o *Okay[T]) All(ctx context.Context, t T) Response {
 	if len(o.checks) == 0 {
-		return Error(NotAllowed)
+		return Error(Invalid)
 	}
 
-	return Check(ctx, t, o.checks...)
+	for _, ok := range o.checks {
+		res := ok.Check(ctx, t)
+		if ok, _ := res.Unwrap(); !ok {
+			return res
+		}
+	}
+
+	return Allow(true)
 }
 
-type response struct {
+// Any requires just one check to be successful.
+func (o *Okay[T]) Any(ctx context.Context, t T) Response {
+	if len(o.checks) == 0 {
+		return Error(Invalid)
+	}
+
+	for _, ok := range o.checks {
+		res := ok.Check(ctx, t)
+		if ok, _ := res.Unwrap(); ok {
+			return res
+		}
+	}
+
+	return Error(Invalid)
+}
+
+// Some is just an alias to Any.
+func (o *Okay[T]) Some(ctx context.Context, t T) Response {
+	return o.Any(ctx, t)
+}
+
+// None requires all checks to be false.
+func (o *Okay[T]) None(ctx context.Context, t T) Response {
+	if len(o.checks) == 0 {
+		return Error(Invalid)
+	}
+
+	for _, ok := range o.checks {
+		res := ok.Check(ctx, t)
+		if ok, _ := res.Unwrap(); ok {
+			return Error(Denied)
+		}
+	}
+
+	return Allow(true)
+}
+
+type Result struct {
 	ok  bool
 	err error
 }
 
-func Error(err error) *response {
-	return &response{
+func (r *Result) Unwrap() (bool, error) {
+	return r.ok, r.err
+}
+
+func Error(err error) *Result {
+	return &Result{
 		err: err,
 	}
 }
 
-func Errorf(msg string, args ...any) *response {
-	return &response{
+func Errorf(msg string, args ...any) *Result {
+	return &Result{
 		err: fmt.Errorf(msg, args...),
 	}
 }
 
-func (r *response) OK() bool {
-	return r.ok
-}
-
-func (r *response) Err() error {
-	return r.err
-}
-
-func Allow(ok bool) *response {
-	return &response{
+func Allow(ok bool) *Result {
+	return &Result{
 		ok: ok,
 	}
+}
+
+type deny[T any] struct{}
+
+func (d *deny[T]) Check(ctx context.Context, t T) Response {
+	return Error(Denied)
+}
+
+func Deny[T any]() *deny[T] {
+	return &deny[T]{}
+}
+
+type verify[T any] struct{}
+
+func (v *verify[T]) Check(ctx context.Context, t T) Response {
+	return Allow(true)
+}
+
+func NoVerify[T any]() *verify[T] {
+	return &verify[T]{}
 }

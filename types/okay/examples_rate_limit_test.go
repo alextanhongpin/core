@@ -19,16 +19,12 @@ type RateLimit struct {
 	Reset     time.Duration
 }
 
-func (r *RateLimit) OK() bool {
-	return r.Remaining > 0
-}
-
-func (r *RateLimit) Err() error {
-	if r.OK() {
-		return nil
+func (r *RateLimit) Unwrap() (bool, error) {
+	ok := r.Remaining > 0
+	if !ok {
+		return false, RateLimitExceeded
 	}
-
-	return RateLimitExceeded
+	return true, nil
 }
 
 func CheckRateLimit() okay.OK[RateLimitKey] {
@@ -56,18 +52,19 @@ func ExampleResponse() {
 	)
 
 	ctx := context.Background()
-	res := okay.Check[RateLimitKey](ctx, RateLimitKey("0.0.0.0:banned-user"), ok)
+	res := ok.All(ctx, RateLimitKey("0.0.0.0:banned-user"))
+	valid, err := res.Unwrap()
 
-	fmt.Println("OK:", res.OK())
-	fmt.Println("ERR:", res.Err())
+	fmt.Println("OK:", valid)
+	fmt.Println("ERR:", err)
 
-	fmt.Println("IsRateLimitExceeded:", errors.Is(res.Err(), RateLimitExceeded))
+	fmt.Println("IsRateLimitExceeded:", errors.Is(err, RateLimitExceeded))
 	rateLimit, _ := res.(*RateLimit)
 	fmt.Printf("RateLimit: %+v\n", rateLimit)
 
-	res = ok.Allows(context.Background(), "0.0.0.0:good-user")
-	fmt.Println("OK:", res.OK())
-	fmt.Println("ERR:", res.Err())
+	valid, err = ok.All(context.Background(), "0.0.0.0:good-user").Unwrap()
+	fmt.Println("OK:", valid)
+	fmt.Println("ERR:", err)
 
 	// Output:
 	// OK: false

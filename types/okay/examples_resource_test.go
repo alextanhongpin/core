@@ -51,24 +51,24 @@ func ExampleNew() {
 
 	ctx := context.Background()
 	ctx = context.WithValue(ctx, contextKey("user_id"), "user-xyz")
-	res := okay.Check[Document](ctx, publicDoc, ok)
+	valid, err := ok.All(ctx, publicDoc).Unwrap()
 
-	fmt.Println(res.OK())
-	fmt.Println(res.Err())
+	fmt.Println(valid)
+	fmt.Println(err)
 
-	res = ok.Allows(context.Background(), publicDoc)
-	fmt.Println(res.OK())
-	fmt.Println(res.Err())
+	valid, err = ok.All(context.Background(), publicDoc).Unwrap()
+	fmt.Println(valid)
+	fmt.Println(err)
 
 	privateDoc := Document{
 		UserID: "user-xyz",
 		Public: false,
 	}
 
-	res = ok.Allows(ctx, privateDoc)
+	valid, err = ok.All(ctx, privateDoc).Unwrap()
 
-	fmt.Println(res.OK())
-	fmt.Println(res.Err())
+	fmt.Println(valid)
+	fmt.Println(err)
 	// Output:
 	// true
 	// <nil>
