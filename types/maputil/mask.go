@@ -21,7 +21,6 @@ func MaskFunc(m map[string]any, fn func(k string) bool) map[string]any {
 	})
 }
 
-// TODO: Check if field exists.
 func MaskFields(fields ...string) func(k string) bool {
 	return func(k string) bool {
 		for _, f := range fields {
@@ -45,6 +44,7 @@ func MaskBytes(b []byte, fields ...string) ([]byte, error) {
 		if ok {
 			cache[k] = true
 		}
+
 		return ok
 	})
 	if err != nil {
