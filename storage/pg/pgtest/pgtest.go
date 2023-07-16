@@ -125,7 +125,17 @@ func initDB(opts ...Option) (func(), error) {
 		return nil, fmt.Errorf("could not start resources: %w", err)
 	}
 
-	code, err := resource.Exec([]string{"postgres", "-c", "fsync=off"}, dockertest.ExecOptions{})
+	// https://www.postgresql.org/docs/current/non-durability.html
+	code, err := resource.Exec([]string{"postgres",
+		// No need to flush data to disk.
+		"-c", "fsync=off",
+
+		// No need to force WAL writes to disk on every commit.
+		"-c", "synchronous_commit=off",
+
+		// No need to guard against partial page writes.
+		"-c", "full_page_writes=off",
+	}, dockertest.ExecOptions{})
 	if err != nil {
 		return nil, err
 	}
