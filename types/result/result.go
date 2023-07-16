@@ -8,6 +8,12 @@
 // data, an entire struct can be returned that fulfils the Result interface.
 package result
 
+// Resultable yields result.
+
+type Resultable[T any] interface {
+	Unwrap() (T, error)
+}
+
 type Result[T any] struct {
 	Data T
 	Err  error
