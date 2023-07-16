@@ -16,9 +16,12 @@ func ExampleValidator() {
 	ctx := context.Background()
 
 	err := always.Validate(new(User),
+		// Curry context.
 		UserIsAuthorized(ctx),
 		UserIsInitialized,
-		(*User).Validate, // Applies the default user validation.
+
+		// Applies the default user validation.
+		(*User).Validate,
 		UserMustBeOfLegalAge,
 	)
 	fmt.Println(err)

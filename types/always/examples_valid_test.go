@@ -8,19 +8,18 @@ import (
 )
 
 func ExampleValid() {
-	err := always.Valid(
-		new(Author),
-		new(Book),
-		always.ValidFunc(func() error {
-			fmt.Println("this is not called")
-			return nil
-		}),
-	)
+	a := new(Author)
+	b := new(Book)
+
+	err := always.Valid(a, b, always.ValidFunc(func() error {
+		fmt.Println("this is not called")
+		return nil
+	}))
 	fmt.Println(err)
 
 	p := &Publication{
-		Author: new(Author),
-		Book:   new(Book),
+		Author: a,
+		Book:   b,
 	}
 	fmt.Println(p.Valid())
 
