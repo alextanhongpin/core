@@ -1,0 +1,54 @@
+GRPC bufconn/helloworld.v1.GreeterService/RecordGreetings
+md-val-bin: bWQtdmFsLWJpbg
+user-agent: grpc-go/1.56.2
+:authority: bufnet
+content-type: application/grpc
+md-val: md-val
+
+
+###
+
+
+=== header
+header-key-bin: aGVhZGVyLXZhbC1iaW4
+header-key: header-val
+
+=== client: RecordGreetingsRequest
+{
+ "message": "hi sir"
+}
+
+=== client: RecordGreetingsRequest
+{
+ "message": "hi sir"
+}
+
+=== client: RecordGreetingsRequest
+{
+ "message": "hi sir"
+}
+
+=== client: RecordGreetingsRequest
+{
+ "message": "hi sir"
+}
+
+=== client: RecordGreetingsRequest
+{
+ "message": "hi sir"
+}
+
+=== server: RecordGreetingsResponse
+{
+ "count": 5
+}
+
+=== status
+{
+ "code": "OK",
+ "message": ""
+}
+
+=== trailer
+trailer-key: trailer-val
+trailer-key-bin: dHJhaWxlci12YWwtYmlu

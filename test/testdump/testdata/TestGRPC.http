@@ -1,0 +1,31 @@
+GRPC bufconn/helloworld.v1.GreeterService/Chat
+md-key-bin: bWQtdmFsLWJpbg
+md-key: md-val
+
+
+###
+
+
+=== header
+header-key: header-val
+header-key-bin: aGVhZGVyLXZhbC1iaW4
+
+=== client: Message
+{
+ "msg": "Hello"
+}
+
+=== server: Message
+{
+ "msg": "Hi"
+}
+
+=== status
+{
+ "code": "Unauthenticated",
+ "message": "not authenticated"
+}
+
+=== trailer
+trailer-key-bin: dHJhaWxlci12YWwtYmlu
+trailer-key: trailer-val

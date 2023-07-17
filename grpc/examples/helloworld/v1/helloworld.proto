@@ -1,0 +1,54 @@
+syntax = "proto3";
+
+option go_package = "github.com/alextanhongpin/go-grpc-test/helloworld/v1";
+option java_multiple_files = true;
+option java_package = "io.grpc.examples.helloworld";
+option java_outer_classname = "HelloWorldProto";
+
+package helloworld.v1;
+
+// The greeting service definition.
+service GreeterService {
+  // Sends a greeting
+  rpc SayHello (SayHelloRequest) returns (SayHelloResponse) {}
+
+  rpc ListGreetings (ListGreetingsRequest) returns (stream ListGreetingsResponse) {}
+
+  rpc RecordGreetings (stream RecordGreetingsRequest) returns (RecordGreetingsResponse) {}
+
+  rpc Chat(stream ChatRequest) returns (stream ChatResponse) {}
+}
+
+// The request message containing the user's name.
+message SayHelloRequest {
+  string name = 1;
+}
+
+// The response message containing the greetings
+message SayHelloResponse {
+  string message = 1;
+}
+
+message ListGreetingsRequest {
+  int64 count = 1;
+}
+
+message ListGreetingsResponse {
+  string message = 1;
+}
+
+message RecordGreetingsRequest {
+  string message = 1;
+}
+
+message RecordGreetingsResponse {
+  int64 count = 1;
+}
+
+message ChatRequest {
+  string message = 1;
+}
+
+message ChatResponse {
+  string message = 1;
+}

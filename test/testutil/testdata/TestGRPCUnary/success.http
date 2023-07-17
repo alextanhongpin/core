@@ -1,0 +1,36 @@
+GRPC bufconn/helloworld.v1.GreeterService/SayHello
+authorization: xyz
+md-val: md-val
+content-type: application/grpc
+md-val-bin: bWQtdmFsLWJpbg
+:authority: bufnet
+user-agent: grpc-go/1.56.2
+
+
+###
+
+
+=== header
+header-key-bin: aGVhZGVyLXZhbC1iaW4
+content-type: application/grpc
+header-key: header-val
+
+=== client: SayHelloRequest
+{
+ "name": "John Doe"
+}
+
+=== server: SayHelloResponse
+{
+ "message": "Hello John Doe"
+}
+
+=== status
+{
+ "code": "OK",
+ "message": ""
+}
+
+=== trailer
+trailer-key: trailer-val
+trailer-key-bin: dHJhaWxlci12YWwtYmlu

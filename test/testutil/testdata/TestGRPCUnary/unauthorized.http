@@ -1,0 +1,24 @@
+GRPC bufconn/helloworld.v1.GreeterService/SayHello
+content-type: application/grpc
+user-agent: grpc-go/1.56.2
+authorization: abc
+:authority: bufnet
+md-val: md-val
+md-val-bin: bWQtdmFsLWJpbg
+
+
+###
+
+
+
+=== client: SayHelloRequest
+{
+ "name": "John Doe"
+}
+
+=== status
+{
+ "code": "Unauthenticated",
+ "message": "token expired"
+}
+

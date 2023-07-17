@@ -20,7 +20,7 @@ func HTTP(fileName string, dump *HTTPDump, opt *HTTPOption) error {
 		Comparer:     &HTTPComparer{opt: *opt},
 	}
 
-	return Snapshot[*HTTPDump](fileName, dump, &s, opt.Hooks...)
+	return Snapshot(fileName, dump, &s, opt.Hooks...)
 }
 
 type HTTPDump struct {
