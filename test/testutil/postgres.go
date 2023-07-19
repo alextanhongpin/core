@@ -9,6 +9,14 @@ import (
 
 type SQL = testdump.SQL
 
+func NewSQL(query string, args []any, result any) *SQL {
+	return &SQL{
+		Query:  query,
+		Args:   args,
+		Result: result,
+	}
+}
+
 type DumpSQLOption = testdump.SQLOption
 
 type SQLOption func(*SqlOption)

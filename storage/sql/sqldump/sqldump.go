@@ -1,6 +1,8 @@
 package sqldump
 
 import (
+	"bufio"
+	"bytes"
 	"errors"
 	"regexp"
 	"strings"
@@ -29,45 +31,57 @@ type SQL struct {
 }
 
 func Read(b []byte, unmarshalFunc func([]byte) (any, error)) (*SQL, error) {
-	s := string(b)
-	sections := patEols.Split(s, -1)
-	if len(sections) != 5 {
-		return nil, ErrInvalidDumpFormat
-	}
-
 	d := new(SQL)
 
-	for _, section := range sections {
-		i := strings.Index(section, "\n")
-		head := section[:i]
-		body := section[i+1:] // Skip the new line
-		switch head {
+	scanner := bufio.NewScanner(bytes.NewReader(b))
+
+	for scanner.Scan() {
+		text := scanner.Text()
+		switch text {
 		case querySection:
-			d.Query = body
+			d.Query = scanSection(scanner)
 		case normalizedSection:
-			d.Normalized = body
+			d.Normalized = scanSection(scanner)
 		case argsSection:
+			body := scanSection(scanner)
 			a, err := unmarshalFunc([]byte(body))
 			if err != nil {
 				return nil, err
 			}
 			d.ArgMap = a
 		case varsSection:
+			body := scanSection(scanner)
 			a, err := unmarshalFunc([]byte(body))
 			if err != nil {
 				return nil, err
 			}
 			d.VarMap = a
 		case resultSection:
+			body := scanSection(scanner)
 			a, err := unmarshalFunc([]byte(body))
 			if err != nil {
 				return nil, err
 			}
 			d.Result = a
+		default:
+			continue
 		}
 	}
 
 	return d, nil
+}
+
+func scanSection(scanner *bufio.Scanner) string {
+	var res []string
+	for scanner.Scan() {
+		s := scanner.Text()
+		if len(s) == 0 {
+			break
+		}
+		res = append(res, s)
+	}
+
+	return strings.Join(res, "\n")
 }
 
 func dump(q string, args []byte, n string, varMap, result []byte) string {
