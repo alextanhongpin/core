@@ -1,9 +1,9 @@
 GET /user/1 HTTP/1.1
 Host: example.com
-User-Agent: Go-http-client/1.1
-Accept-Encoding: gzip
+
 
 ###
+
 
 HTTP/1.1 500 Internal Server Error
 Connection: close
