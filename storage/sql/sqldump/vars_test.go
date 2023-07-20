@@ -76,8 +76,8 @@ func TestMySQL(t *testing.T) {
 		{"age", "13"},
 		{"description", "foo bar walks in a bar, h'a"},
 		{"email", "john.doe@mail.com"},
-		{"2", `freemium, premium`},
-		{"1", "{Foo,bar,%oo%}"},
+		{"1", `freemium, premium`},
+		{"2", "{Foo,bar,%oo%}"},
 	}
 
 	sort.Slice(want, func(i, j int) bool {
