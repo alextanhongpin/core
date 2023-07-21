@@ -5,19 +5,20 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/alextanhongpin/errcodes"
+	"github.com/alextanhongpin/errors/causes"
+	"github.com/alextanhongpin/errors/codes"
 )
 
 var (
-	ErrBadRequest         = errcodes.New(errcodes.BadRequest, "bad_request", "The input you provided is invalid")
-	ErrConflict           = errcodes.New(errcodes.Conflict, "conflict", "The action may have conflict")
-	ErrExists             = errcodes.New(errcodes.Exists, "exists", "There may be duplicate entries")
-	ErrForbidden          = errcodes.New(errcodes.Forbidden, "forbidden", "You do not have permission to perform this action")
-	ErrInternal           = errcodes.New(errcodes.Internal, "internal_server_error", "Oops, please try again later")
-	ErrNotFound           = errcodes.New(errcodes.NotFound, "not_found", "The thing you are looking for does not exist or may have been deleted")
-	ErrPreconditionFailed = errcodes.New(errcodes.PreconditionFailed, "precondition_failed", "The action cannot be completed")
-	ErrUnauthorized       = errcodes.New(errcodes.Unauthorized, "unauthorized", "You are not logged in")
-	ErrUnknown            = errcodes.New(errcodes.Unknown, "unknown", "An error has occured")
+	ErrBadRequest         = causes.New(codes.BadRequest, "bad_request", "The input you provided is invalid")
+	ErrConflict           = causes.New(codes.Conflict, "conflict", "The action may have conflict")
+	ErrExists             = causes.New(codes.Exists, "exists", "There may be duplicate entries")
+	ErrForbidden          = causes.New(codes.Forbidden, "forbidden", "You do not have permission to perform this action")
+	ErrInternal           = causes.New(codes.Internal, "internal_server_error", "Oops, please try again later")
+	ErrNotFound           = causes.New(codes.NotFound, "not_found", "The thing you are looking for does not exist or may have been deleted")
+	ErrPreconditionFailed = causes.New(codes.PreconditionFailed, "precondition_failed", "The action cannot be completed")
+	ErrUnauthorized       = causes.New(codes.Unauthorized, "unauthorized", "You are not logged in")
+	ErrUnknown            = causes.New(codes.Unknown, "unknown", "An error has occured")
 )
 
 type Error struct {
@@ -26,10 +27,20 @@ type Error struct {
 }
 
 type Payload[T any] struct {
-	Data  *T     `json:"data,omitempty"`
+	Data  T      `json:"data,omitempty"`
 	Error *Error `json:"error,omitempty"`
 	Meta  *Meta  `json:"meta,omitempty"`
 	Links *Links `json:"links,omitempty"`
+}
+
+func (p *Payload[T]) WithLinks(links *Links) *Payload[T] {
+	p.Links = links
+	return p
+}
+
+func (p *Payload[T]) WithMeta(meta *Meta) *Payload[T] {
+	p.Meta = meta
+	return p
 }
 
 type Meta map[string]any
@@ -55,23 +66,25 @@ func JSON[T any](w http.ResponseWriter, res T, statusCode int) {
 // JSONError encodes the error as json response. Status code is inferred from
 // the error kind.
 func JSONError(w http.ResponseWriter, err error) {
-	var c *errcodes.Error
+	var c causes.Detail
 	if !errors.As(err, &c) {
 		JSONError(w, ErrInternal)
 		return
 	}
 
+	d := c.Detail()
+
 	res := &Payload[any]{
 		Error: &Error{
-			Code:    string(c.Code()),
-			Message: c.Message(),
+			Code:    d.Kind(),
+			Message: d.Message(),
 		},
 	}
 
-	JSON(w, res, errcodes.HTTPStatusCode(c.Kind()))
+	JSON(w, res, codes.HTTP(d.Code()))
 }
 
-func OK[T any](t *T) *Payload[T] {
+func OK[T any](t T) *Payload[T] {
 	return &Payload[T]{
 		Data: t,
 	}

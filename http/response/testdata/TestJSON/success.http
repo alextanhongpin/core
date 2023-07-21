@@ -1,17 +1,25 @@
-GET /user/1 HTTP/1.1
+GET /users HTTP/1.1
 Host: example.com
 
-
 ###
-
 
 HTTP/1.1 200 OK
 Connection: close
 Content-Type: application/json
 
 {
- "data": {
-  "accessToken": "xyz"
+ "data": [
+  {
+   "id": "user-1",
+   "Name": "Alice"
+  },
+  {
+   "id": "user-2",
+   "Name": "Bob"
+  }
+ ],
+ "meta": {
+  "count": 2
  },
  "links": {
   "prev": "prev-link",
