@@ -27,13 +27,20 @@ var ErrInvalidDumpFormat = errors.New("grpcdump: invalid dump format")
 
 // https://github.com/bradleyjkemp/grpc-tools/blob/master/grpc-dump/README.md
 type Dump struct {
-	Addr       string      `json:"addr"`
-	FullMethod string      `json:"full_method"`
-	Messages   []Message   `json:"messages"`
-	Status     *Status     `json:"status"`
-	Metadata   metadata.MD `json:"metadata"` // The server receives metadata.
-	Header     metadata.MD `json:"header"`   // The client receives header and trailer.
-	Trailer    metadata.MD `json:"trailer"`
+	Addr           string      `json:"addr"`
+	FullMethod     string      `json:"full_method"`
+	Messages       []Message   `json:"messages"`
+	Status         *Status     `json:"status"`
+	Metadata       metadata.MD `json:"metadata"` // The server receives metadata.
+	Header         metadata.MD `json:"header"`   // The client receives header and trailer.
+	Trailer        metadata.MD `json:"trailer"`
+	isServerStream bool
+	isClientStream bool
+	headerID       string
+}
+
+func (d *Dump) IsUnary() bool {
+	return !d.isClientStream && !d.isServerStream
 }
 
 func (d *Dump) Service() string {
@@ -51,20 +58,32 @@ func (d *Dump) AsText() ([]byte, error) {
 	sb.WriteRune('\n')
 
 	writeMetadata(sb, "", d.Metadata)
-	sb.WriteRune('\n')
-	sb.WriteRune('\n')
 
-	sb.WriteString("###")
-	sb.WriteRune('\n')
-	sb.WriteRune('\n')
-	sb.WriteRune('\n')
+	if d.IsUnary() {
+		// Header is written before any response.
+		writeMetadata(sb, headerPrefix, d.Header)
 
-	// Header is written before any response.
-	writeMetadata(sb, headerPrefix, d.Header)
-	sb.WriteRune('\n')
+		if err := writeMessages(sb, d.Messages...); err != nil {
+			return nil, err
+		}
+	} else {
+		var j int
+		for i := 0; i < len(d.Messages); i++ {
+			if d.Messages[i].id > d.headerID {
+				j = i
+				break
+			}
+		}
 
-	if err := writeMessages(sb, d.Messages...); err != nil {
-		return nil, err
+		if err := writeMessages(sb, d.Messages[:j]...); err != nil {
+			return nil, err
+		}
+
+		writeMetadata(sb, headerPrefix, d.Header)
+
+		if err := writeMessages(sb, d.Messages[j:]...); err != nil {
+			return nil, err
+		}
 	}
 
 	// Status is before trailer.
@@ -76,7 +95,7 @@ func (d *Dump) AsText() ([]byte, error) {
 	// Trailer is the optional, and is the last to be sent.
 	writeMetadata(sb, trailerPrefix, d.Trailer)
 
-	return []byte(sb.String()), nil
+	return []byte(strings.TrimSpace(sb.String())), nil
 }
 
 func (d *Dump) FromText(b []byte) error {
@@ -208,6 +227,11 @@ func writeMetadata(sb *strings.Builder, prefix string, md metadata.MD) {
 
 		}
 	}
+
+	if len(md) > 0 {
+		sb.WriteRune('\n')
+		sb.WriteRune('\n')
+	}
 }
 
 func writeMessages(sb *strings.Builder, msgs ...Message) error {
@@ -228,6 +252,7 @@ func writeMessages(sb *strings.Builder, msgs ...Message) error {
 		sb.WriteString(header)
 		sb.WriteRune('\n')
 		sb.Write(b)
+		sb.WriteRune('\n')
 		sb.WriteRune('\n')
 		sb.WriteRune('\n')
 	}

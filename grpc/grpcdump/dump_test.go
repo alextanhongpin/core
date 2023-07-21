@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/alextanhongpin/go-grpc-test/grpcdump"
+	"github.com/alextanhongpin/core/grpc/grpcdump"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 )
@@ -50,6 +50,7 @@ func TestDump(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	t.Log(string(b))
 
 	d = new(grpcdump.Dump)

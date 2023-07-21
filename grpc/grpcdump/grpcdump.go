@@ -6,6 +6,7 @@ import (
 	"net"
 
 	"github.com/google/uuid"
+	"github.com/rs/xid"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/peer"
@@ -45,6 +46,7 @@ func NewRecorder(ctx context.Context) (context.Context, func() *Dump) {
 }
 
 type Message struct {
+	id      string
 	Origin  string `json:"origin"` // server or client
 	Name    string `json:"name"`
 	Message any    `json:"message"`
@@ -53,6 +55,7 @@ type Message struct {
 type serverStreamWrapper struct {
 	grpc.ServerStream
 	header   metadata.MD
+	headerID string
 	messages []Message
 	trailer  metadata.MD
 }
@@ -68,6 +71,9 @@ func (s *serverStreamWrapper) SendHeader(md metadata.MD) error {
 		return err
 	}
 	s.header = metadata.Join(s.header, md)
+	if s.headerID == "" {
+		s.headerID = xid.New().String()
+	}
 
 	return nil
 }
@@ -78,6 +84,9 @@ func (s *serverStreamWrapper) SetHeader(md metadata.MD) error {
 	}
 
 	s.header = metadata.Join(s.header, md)
+	if s.headerID == "" {
+		s.headerID = xid.New().String()
+	}
 
 	return nil
 }
@@ -90,21 +99,6 @@ func (s *serverStreamWrapper) SendMsg(m interface{}) error {
 	s.messages = append(s.messages, origin(OriginServer, m))
 
 	return nil
-}
-
-func origin(origin string, v any) Message {
-	msg, ok := v.(interface {
-		ProtoReflect() protoreflect.Message
-	})
-	if !ok {
-		panic("message is not valid")
-	}
-
-	return Message{
-		Origin:  origin,
-		Name:    fmt.Sprint(msg.ProtoReflect().Descriptor().FullName().Name()),
-		Message: v,
-	}
 }
 
 func (s *serverStreamWrapper) RecvMsg(m interface{}) error {
@@ -137,13 +131,16 @@ func StreamInterceptor() grpc.ServerOption {
 			err := handler(srv, w)
 
 			testIds[id] = &Dump{
-				Addr:       addrFromContext(ctx),
-				FullMethod: info.FullMethod,
-				Metadata:   md,
-				Messages:   w.messages,
-				Trailer:    w.trailer,
-				Header:     w.header,
-				Status:     NewStatus(err),
+				Addr:           addrFromContext(ctx),
+				FullMethod:     info.FullMethod,
+				Metadata:       md,
+				Messages:       w.messages,
+				Trailer:        w.trailer,
+				Header:         w.header,
+				Status:         NewStatus(err),
+				isServerStream: info.IsServerStream,
+				isClientStream: info.IsClientStream,
+				headerID:       w.headerID,
 			}
 
 			return err
@@ -224,4 +221,25 @@ func addrFromContext(ctx context.Context) string {
 		}
 	}
 	return addr
+}
+
+type sequence struct {
+	id   string
+	name string
+}
+
+func origin(origin string, v any) Message {
+	msg, ok := v.(interface {
+		ProtoReflect() protoreflect.Message
+	})
+	if !ok {
+		panic("message is not valid")
+	}
+
+	return Message{
+		id:      xid.New().String(),
+		Origin:  origin,
+		Name:    fmt.Sprint(msg.ProtoReflect().Descriptor().FullName().Name()),
+		Message: v,
+	}
 }

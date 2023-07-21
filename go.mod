@@ -7,7 +7,6 @@ require golang.org/x/exp v0.0.0-20230626212559-97b1e661b5df
 require (
 	github.com/DATA-DOG/go-txdb v0.1.6
 	github.com/alextanhongpin/errors v0.0.0-20230717124106-3e3c39edaa89
-	github.com/alextanhongpin/go-grpc-test v0.0.0-20230717173728-76e636e7a57b
 	github.com/go-playground/validator/v10 v10.14.1
 	github.com/golang-jwt/jwt/v5 v5.0.0
 	github.com/google/go-cmp v0.5.9
@@ -16,6 +15,7 @@ require (
 	github.com/mitchellh/copystructure v1.2.0
 	github.com/ory/dockertest/v3 v3.10.0
 	github.com/pganalyze/pg_query_go/v4 v4.2.1
+	github.com/rs/xid v1.5.0
 	github.com/stretchr/testify v1.8.4
 	github.com/uptrace/bun v1.1.14
 	github.com/uptrace/bun/dialect/pgdialect v1.1.14
@@ -91,6 +91,7 @@ require (
 	github.com/prometheus/client_model v0.4.0 // indirect
 	github.com/prometheus/common v0.44.0 // indirect
 	github.com/prometheus/procfs v0.11.0 // indirect
+	github.com/rogpeppe/go-internal v1.11.0 // indirect
 	github.com/secure-systems-lab/go-securesystemslib v0.6.0 // indirect
 	github.com/sirupsen/logrus v1.9.3 // indirect
 	github.com/spf13/afero v1.9.5 // indirect

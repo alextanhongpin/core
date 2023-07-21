@@ -9,6 +9,7 @@ import (
 	"github.com/alextanhongpin/core/internal"
 	"github.com/alextanhongpin/core/types/maputil"
 	"github.com/google/go-cmp/cmp"
+	"github.com/google/go-cmp/cmp/cmpopts"
 )
 
 var ErrMetadataNotFound = errors.New("testdump: gRPC metadata not found")
@@ -19,6 +20,9 @@ func GRPC(fileName string, dump *GRPCDump, opt *GRPCOption) error {
 	if opt == nil {
 		opt = new(GRPCOption)
 	}
+
+	// Skip private fields.
+	opt.Message = append(opt.Message, cmpopts.IgnoreFields(grpcdump.Message{}, "id"))
 
 	s := snapshot[*GRPCDump]{
 		Marshaller:   MarshalFunc[*GRPCDump](MarshalGRPC),
