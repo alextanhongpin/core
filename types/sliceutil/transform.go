@@ -40,7 +40,7 @@ func Dedup[T comparable](t []T) []T {
 }
 
 func DedupFunc[T any, K comparable](t []T, fn func(i int) K) []T {
-	var res []T
+	res := make([]T, 0)
 
 	seen := make(map[K]bool)
 	for i := 0; i < len(t); i++ {

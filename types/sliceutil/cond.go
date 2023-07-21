@@ -8,11 +8,15 @@ func All[T any](t []T, fn func(i int) bool) bool {
 		}
 	}
 
-	return true
+	return len(t) > 0
 }
 
 // Any returns true if any of the result returns true.
 func Any[T any](t []T, fn func(i int) bool) bool {
+	if len(t) == 0 {
+		return false
+	}
+
 	for i := 0; i < len(t); i++ {
 		if fn(i) {
 			return true
@@ -35,5 +39,5 @@ func None[T any](t []T, fn func(i int) bool) bool {
 		}
 	}
 
-	return true
+	return len(t) > 0
 }

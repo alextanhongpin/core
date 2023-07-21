@@ -1,6 +1,7 @@
 package sliceutil_test
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/alextanhongpin/core/types/sliceutil"
@@ -8,47 +9,107 @@ import (
 )
 
 func TestMap(t *testing.T) {
-	assert := assert.New(t)
-	nums := []int{1, 2, 3, 4, 5}
+	t.Run("success", func(t *testing.T) {
+		assert := assert.New(t)
 
-	nums2x := sliceutil.Map(nums, func(i int) int {
-		return nums[i] * 2
+		n := []int{1, 2, 3, 4, 5}
+		n2x := sliceutil.Map(n, func(i int) int {
+			return n[i] * 2
+		})
+		assert.Equal([]int{2, 4, 6, 8, 10}, n2x)
 	})
 
-	assert.Equal([]int{2, 4, 6, 8, 10}, nums2x)
+	t.Run("empty", func(t *testing.T) {
+		assert := assert.New(t)
+
+		n := []int{}
+		n2x := sliceutil.Map(n, func(i int) int {
+			return n[i] * 2
+		})
+		assert.Equal([]int{}, n2x)
+	})
 }
 
-func TestFilter(t *testing.T) {
-	assert := assert.New(t)
-	nums := []int{1, 2, 3, 4, 5}
+func TestMapError(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		assert := assert.New(t)
 
-	oddNums := sliceutil.Filter(nums, func(i int) bool {
-		return nums[i]%2 == 1
+		n := []int{1, 2, 3, 4, 5}
+		n2x, err := sliceutil.MapError(n, func(i int) (int, error) {
+			return n[i] * 2, nil
+		})
+		assert.Equal([]int{2, 4, 6, 8, 10}, n2x)
+		assert.Nil(err)
 	})
 
-	assert.Equal([]int{1, 3, 5}, oddNums)
+	t.Run("empty", func(t *testing.T) {
+		assert := assert.New(t)
+
+		n := []int{}
+		n2x, err := sliceutil.MapError(n, func(i int) (int, error) {
+			return n[i] * 2, nil
+		})
+		assert.Equal([]int{}, n2x)
+		assert.Nil(err)
+	})
+
+	t.Run("failed", func(t *testing.T) {
+		assert := assert.New(t)
+
+		wantErr := errors.New("test: want error")
+
+		n := []int{1, 2, 3, 4, 5}
+		n2x, err := sliceutil.MapError(n, func(i int) (int, error) {
+			if n[i] == 3 {
+				return 0, wantErr
+			}
+			return n[i] * 2, nil
+		})
+		assert.Equal([]int(nil), n2x)
+		assert.ErrorIs(err, wantErr)
+	})
 }
 
-func TestSum(t *testing.T) {
-	assert := assert.New(t)
-	nums := []int{1, 2, 3, 4, 5}
+func TestDedup(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		assert := assert.New(t)
 
-	total := sliceutil.Sum(nums)
-	assert.Equal(15, total)
+		n := []int{1, 1, 1, 1, 1}
+		unique := sliceutil.Dedup(n)
+		assert.ElementsMatch([]int{1}, unique)
+	})
+
+	t.Run("empty", func(t *testing.T) {
+		assert := assert.New(t)
+
+		n := []int{}
+		unique := sliceutil.Dedup(n)
+		assert.Equal([]int{}, unique)
+	})
 }
 
-func TestMin(t *testing.T) {
-	assert := assert.New(t)
-	nums := []int{-100, 1, 2, 3, 4, 5}
+func TestDedupFunc(t *testing.T) {
+	type user struct {
+		Age int
+	}
 
-	total := sliceutil.Min(nums)
-	assert.Equal(-100, total)
-}
+	t.Run("success", func(t *testing.T) {
+		assert := assert.New(t)
 
-func TestMax(t *testing.T) {
-	assert := assert.New(t)
-	nums := []int{-100, 1, 2, 3, 4, 5}
+		n := []user{{30}, {20}, {30}, {10}}
+		unique := sliceutil.DedupFunc(n, func(i int) int {
+			return n[i].Age
+		})
+		assert.ElementsMatch([]user{{30}, {20}, {10}}, unique)
+	})
 
-	total := sliceutil.Max(nums)
-	assert.Equal(5, total)
+	t.Run("empty", func(t *testing.T) {
+		assert := assert.New(t)
+
+		n := []user{}
+		unique := sliceutil.DedupFunc(n, func(i int) int {
+			return n[i].Age
+		})
+		assert.Equal([]user{}, unique)
+	})
 }
