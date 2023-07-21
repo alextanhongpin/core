@@ -14,9 +14,9 @@ func TestCircuitBreaker(t *testing.T) {
 	assert := assert.New(t)
 
 	cb := circuitbreaker.New()
-	cb.Timeout = 100 * time.Millisecond
+	cb.SetTimeout(100 * time.Millisecond)
 
-	assert.Equal(circuitbreaker.StatusClosed, cb.Status())
+	assert.Equal(circuitbreaker.Closed, cb.Status())
 
 	var wg sync.WaitGroup
 	wg.Add(10)
@@ -50,12 +50,14 @@ func TestCircuitBreaker(t *testing.T) {
 	err := cb.Do(func() error { return nil })
 
 	assert.ErrorIs(err, circuitbreaker.Unavailable, err)
-	assert.Equal(circuitbreaker.StatusOpen, cb.Status())
+	assert.Equal(circuitbreaker.Open, cb.Status())
+	assert.True(cb.ResetIn() > 0)
 
 	time.Sleep(110 * time.Millisecond)
 
 	_ = cb.Do(func() error { return nil })
-	assert.Equal(circuitbreaker.StatusHalfOpen, cb.Status())
+	assert.Equal(circuitbreaker.HalfOpen, cb.Status())
+	assert.Equal(time.Duration(0), cb.ResetIn())
 
 	for i := 0; i < 10; i++ {
 		err := cb.Do(func() error {
@@ -66,5 +68,5 @@ func TestCircuitBreaker(t *testing.T) {
 
 	err = cb.Do(func() error { return nil })
 	assert.Nil(err)
-	assert.Equal(circuitbreaker.StatusClosed, cb.Status())
+	assert.Equal(circuitbreaker.Closed, cb.Status())
 }

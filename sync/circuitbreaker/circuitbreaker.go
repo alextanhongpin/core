@@ -17,52 +17,29 @@ const (
 // Unavailable returns the error when the circuit breaker is not available.
 var Unavailable = errors.New("circuit-breaker: unavailable")
 
-type Status int64
-
-const (
-	StatusClosed Status = iota
-	StatusOpen
-	StatusHalfOpen
-)
-
-func (s Status) Int64() int64 {
-	return int64(s)
-}
-
-var statusText = map[Status]string{
-	StatusClosed:   "closed",
-	StatusOpen:     "open",
-	StatusHalfOpen: "half-open",
-}
-
-func (s Status) String() string {
-	text := statusText[s]
-	return text
-}
-
 // Group represents the circuit breaker.
 type Group struct {
-	// Private.
+	// State.
 	status   int64
 	counter  int64
 	deadline time.Time
 
-	// Public.
-	Success  int64
-	Failure  int64
-	Timeout  time.Duration
-	Now      func() time.Time
-	Sampling rate.Sometimes
+	// Options.
+	success  int64
+	failure  int64
+	timeout  time.Duration
+	now      func() time.Time
+	sampling *rate.Sometimes
 }
 
 // New returns a pointer to Group.
 func New() *Group {
 	return &Group{
-		Timeout:  timeout,
-		Success:  success,
-		Failure:  failure,
-		Now:      time.Now,
-		Sampling: rate.Sometimes{Every: 1},
+		timeout:  timeout,
+		success:  success,
+		failure:  failure,
+		now:      time.Now,
+		sampling: nil,
 	}
 }
 
@@ -80,64 +57,80 @@ func (g *Group) Do(fn func() error) error {
 
 // ResetIn returns the wait time before the service can be called again.
 func (g *Group) ResetIn() time.Duration {
-	return g.deadline.Sub(g.Now())
+	if g.Status().IsOpen() {
+		return g.deadline.Sub(g.now())
+	}
+
+	return 0
 }
 
 func (g *Group) Status() Status {
 	return Status(atomic.LoadInt64(&g.status))
 }
 
-func (g *Group) IsOpen() bool {
-	return g.Status() == StatusOpen
+func (g *Group) SetSuccessThreshold(n int64) {
+	g.success = n
 }
 
-func (g *Group) IsClosed() bool {
-	return g.Status() == StatusClosed
+func (g *Group) SetFailureThreshold(n int64) {
+	g.failure = n
 }
 
-func (g *Group) IsHalfOpen() bool {
-	return g.Status() == StatusHalfOpen
+func (g *Group) SetTimeout(timeout time.Duration) {
+	g.timeout = timeout
+}
+
+func (g *Group) SetNow(now func() time.Time) {
+	g.now = now
+}
+
+func (g *Group) SetSampling(sample *rate.Sometimes) {
+	g.sampling = sample
 }
 
 func (g *Group) allow() bool {
-	if g.IsOpen() {
+	if g.Status().IsOpen() {
 		g.do(true)
 	}
 
-	return !g.IsOpen()
+	return !g.Status().IsOpen()
 }
 
 func (g *Group) do(ok bool) {
-	g.Sampling.Do(func() {
+	if g.sampling == nil {
+		g.update(ok)
+		return
+	}
+
+	g.sampling.Do(func() {
 		g.update(ok)
 	})
 }
 
 func (g *Group) update(ok bool) {
 	switch g.Status() {
-	case StatusOpen:
-		if g.Now().After(g.deadline) {
-			atomic.StoreInt64(&g.counter, 0)
-			atomic.CompareAndSwapInt64(&g.status, StatusOpen.Int64(), StatusHalfOpen.Int64())
+	case Open:
+		if g.timerExpires() {
+			g.reset()
+			g.transition(Open, HalfOpen)
 		}
-	case StatusHalfOpen:
+	case HalfOpen:
 		// The service is still unhealthy
 		// Reset the counter and revert to Open.
 		if !ok {
-			atomic.StoreInt64(&g.counter, 0)
-			atomic.CompareAndSwapInt64(&g.status, StatusHalfOpen.Int64(), StatusOpen.Int64())
+			g.reset()
+			g.transition(HalfOpen, Open)
 
 			return
 		}
 
 		// The service is healthy.
 		// After a certain threshold, circuit breaker becomes Closed.
-		atomic.AddInt64(&g.counter, 1)
-		if g.counter > g.Success {
-			atomic.StoreInt64(&g.counter, 0)
-			atomic.CompareAndSwapInt64(&g.status, StatusHalfOpen.Int64(), StatusClosed.Int64())
+		if g.incr() > g.success {
+			g.reset()
+			g.transition(HalfOpen, Closed)
 		}
-	case StatusClosed:
+	case Closed:
 		// The service is healthy.
 		if ok {
 			return
@@ -145,10 +138,29 @@ func (g *Group) update(ok bool) {
 
 		// The service is unhealthy.
 		// After a certain threshold, circuit breaker becomes Open.
-		atomic.AddInt64(&g.counter, 1)
-		if g.counter > g.Failure {
-			g.deadline = g.Now().Add(g.Timeout)
-			atomic.CompareAndSwapInt64(&g.status, StatusClosed.Int64(), StatusOpen.Int64())
+		if g.incr() > g.failure {
+			g.startTimer()
+			g.transition(Closed, Open)
 		}
 	}
+}
+
+func (g *Group) reset() {
+	atomic.StoreInt64(&g.counter, 0)
+}
+
+func (g *Group) timerExpires() bool {
+	return g.now().After(g.deadline)
+}
+
+func (g *Group) startTimer() {
+	g.deadline = g.now().Add(g.timeout)
+}
+
+func (g *Group) incr() int64 {
+	return atomic.AddInt64(&g.counter, 1)
+}
+
+func (g *Group) transition(from, to Status) {
+	atomic.CompareAndSwapInt64(&g.status, from.Int64(), to.Int64())
 }
