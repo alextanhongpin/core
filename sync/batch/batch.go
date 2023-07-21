@@ -4,6 +4,7 @@ package batch
 import (
 	"errors"
 	"fmt"
+	"sync"
 
 	"github.com/alextanhongpin/core/types/sliceutil"
 	"github.com/mitchellh/copystructure"
@@ -36,12 +37,10 @@ type Loader[K comparable, V any] struct {
 	batchFn  BatchFn[K, V]
 	keyFn    KeyFn[K, V]
 	done     chan bool
+	mu       sync.Mutex
 }
 
-func NewLoader[K comparable, V any](
-	batchFn BatchFn[K, V],
-	keyFn KeyFn[K, V],
-) *Loader[K, V] {
+func New[K comparable, V any](batchFn BatchFn[K, V], keyFn KeyFn[K, V]) *Loader[K, V] {
 	return &Loader[K, V]{
 		batchFn:  batchFn,
 		kindByID: make(map[int]kind),
@@ -58,16 +57,18 @@ func NewLoader[K comparable, V any](
 // Returns error if the batchFn does not return exactly 1 result.
 // If the same key is loaded multiple times, the result will be deep-copied
 // before returned.
-func (l *Loader[K, V]) Load(k K, v *V) {
+func (l *Loader[K, V]) Load(v *V, k K) error {
 	if v == nil {
-		panic(ErrNilReference)
+		return ErrNilReference
 	}
 
 	if err := l.closed(); err != nil {
-		panic(err)
+		return err
 	}
 
-	l.load(k, v)
+	l.load(v, k)
+
+	return nil
 }
 
 // LoadMany returns zero, one or many results.
@@ -75,16 +76,18 @@ func (l *Loader[K, V]) Load(k K, v *V) {
 // relationships.
 // If the same key is loaded multiple times, the result will be deep-copied
 // before returned.
-func (l *Loader[K, V]) LoadMany(k K, v *[]V) {
+func (l *Loader[K, V]) LoadMany(v *[]V, ks ...K) error {
 	if v == nil {
-		panic(ErrNilReference)
+		return ErrNilReference
 	}
 
 	if err := l.closed(); err != nil {
-		panic(err)
+		return err
 	}
 
-	l.loadMany(k, v)
+	l.loadMany(v, ks...)
+
+	return nil
 }
 
 func (l *Loader[K, V]) Wait() error {
@@ -92,7 +95,8 @@ func (l *Loader[K, V]) Wait() error {
 		return err
 	}
 
-	defer close(l.done)
+	close(l.done)
+
 	return l.wait()
 }
 
@@ -105,7 +109,10 @@ func (l *Loader[K, V]) closed() error {
 	}
 }
 
-func (l *Loader[K, V]) load(k K, v *V) {
+func (l *Loader[K, V]) load(v *V, k K) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
 	id := len(l.keys)
 	l.keys = append(l.keys, k)
 	l.kindByID[id] = one
@@ -113,15 +120,23 @@ func (l *Loader[K, V]) load(k K, v *V) {
 	l.one[id] = v
 }
 
-func (l *Loader[K, V]) loadMany(k K, v *[]V) {
-	id := len(l.keys)
-	l.keys = append(l.keys, k)
-	l.kindByID[id] = many
+func (l *Loader[K, V]) loadMany(v *[]V, ks ...K) {
+	// NOTE: should we support multiple keys?
+	l.mu.Lock()
+	defer l.mu.Unlock()
 
-	l.many[id] = v
+	for _, k := range ks {
+		id := len(l.keys)
+		l.keys = append(l.keys, k)
+		l.kindByID[id] = many
+		l.many[id] = v
+	}
 }
 
 func (l *Loader[K, V]) wait() error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
 	// Don't trigger batchFn if there are no keys.
 	if len(l.keys) == 0 {
 		return nil
@@ -173,14 +188,14 @@ func (l *Loader[K, V]) wait() error {
 			case one:
 				*l.one[i] = c.([]V)[0]
 			case many:
-				*l.many[i] = c.([]V)
+				*l.many[i] = append(*l.many[i], (c.([]V))...)
 			}
 		} else {
 			switch kind {
 			case one:
 				*l.one[i] = v[0]
 			case many:
-				*l.many[i] = v
+				*l.many[i] = append(*l.many[i], v...)
 			}
 			cached[k] = true
 		}

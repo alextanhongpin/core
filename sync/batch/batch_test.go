@@ -5,128 +5,8 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/alextanhongpin/core/data/batch"
+	"github.com/alextanhongpin/core/sync/batch"
 )
-
-func ExampleOneToOne() {
-	// Book belongs to an Author.
-	type Author struct {
-		ID   int
-		Name string
-	}
-
-	type Book struct {
-		ID       int
-		AuthorID int
-		Author   *Author
-	}
-
-	batchFn := func(authorIds ...int) ([]Author, error) {
-		authors := make([]Author, len(authorIds))
-		for i, id := range authorIds {
-			authors[i] = Author{
-				ID:   id,
-				Name: fmt.Sprintf("author of book %d", id),
-			}
-		}
-		return authors, nil
-	}
-
-	keyFn := func(a Author) (authorID int, err error) {
-		authorID = a.ID
-		return
-	}
-
-	loader := batch.NewLoader(batchFn, keyFn)
-
-	// We have a bunch of books, and we want to load the author.
-	books := []Book{
-		{ID: 1, AuthorID: 1},
-		{ID: 2, AuthorID: 1}, // Same author as Book ID 1.
-		{ID: 3, AuthorID: 2},
-	}
-
-	for i := 0; i < len(books); i++ {
-		// Create a non-nil Author.
-		books[i].Author = new(Author)
-
-		// Load and assign Author to Book.
-		loader.Load(books[i].AuthorID, books[i].Author)
-	}
-
-	// Initiate the fetch.
-	if err := loader.Wait(); err != nil {
-		panic(err)
-	}
-
-	fmt.Println(books[0].Author.Name)
-	fmt.Println(books[1].Author.Name)
-	fmt.Println(books[2].Author.Name)
-	// Output:
-	// author of book 1
-	// author of book 1
-	// author of book 2
-}
-
-func ExampleOneToMany() {
-	// An Author has many Books.
-	type Book struct {
-		ID       int
-		AuthorID int
-	}
-
-	type Author struct {
-		ID    int
-		Books []Book
-	}
-
-	batchFn := func(authorIds ...int) ([]Book, error) {
-		var books []Book
-		for _, id := range authorIds {
-			// The number of books is proportional to the AuthorID.
-			// AuthorID 0 will 0 books.
-			// AuthorID 1 will 1 book.
-			// AuthorID n will n books.
-			for j := 0; j < id; j++ {
-				books = append(books, Book{
-					ID:       j,
-					AuthorID: id,
-				})
-			}
-		}
-
-		return books, nil
-	}
-
-	keyFn := func(b Book) (authorID int, err error) {
-		authorID = b.AuthorID
-		return
-	}
-
-	loader := batch.NewLoader(batchFn, keyFn)
-
-	// We have a bunch of books, and we want to load the author.
-	authors := make([]Author, 3)
-	for i := 0; i < len(authors); i++ {
-		authors[i].ID = i
-
-		// Load and assign Books to Author.
-		loader.LoadMany(authors[i].ID, &authors[i].Books)
-	}
-
-	// Initiate the fetch.
-	if err := loader.Wait(); err != nil {
-		panic(err)
-	}
-
-	for i := range authors {
-		fmt.Printf("author %d has %d books\n", authors[i].ID, len(authors[i].Books))
-	}
-	// Output:
-	// author 0 has 0 books
-	// author 1 has 1 books
-	// author 2 has 2 books
-}
 
 func TestLoad(t *testing.T) {
 	l := newUserLoader()
@@ -136,7 +16,7 @@ func TestLoad(t *testing.T) {
 	n := len(ids)
 	users := make([]User, n)
 	for i := 0; i < n; i++ {
-		l.Load(ids[i], &users[i])
+		l.Load(&users[i], ids[i])
 	}
 
 	if err := l.Wait(); err != nil {
@@ -168,7 +48,7 @@ func TestLoadMany(t *testing.T) {
 		n := len(authorIds)
 		books := make([][]Book, n)
 		for i := 0; i < n; i++ {
-			l.LoadMany(authorIds[i], &books[i])
+			l.LoadMany(&books[i], authorIds[i])
 		}
 
 		if err := l.Wait(); err != nil {
@@ -203,7 +83,7 @@ func TestLoadMany(t *testing.T) {
 			l := newBooksLoader()
 
 			var b []Book
-			l.LoadMany(i, &b)
+			l.LoadMany(&b, i)
 			if err := l.Wait(); err != nil {
 				t.Fatalf("want nil error, got %v", err)
 			}
@@ -220,7 +100,7 @@ func TestLoadMany(t *testing.T) {
 		var b Book
 
 		// ID 0 will load 0 books.
-		l.Load(0, &b)
+		l.Load(&b, 0)
 		err := l.Wait()
 		if !errors.Is(err, batch.ErrKeyNotFound) {
 			t.Fatalf("want batch.ErrKeyNotFound, got %v", err)
@@ -232,8 +112,8 @@ func TestLoadMany(t *testing.T) {
 
 		var b Book
 
-		// ID 0 will load 0 books.
-		l.Load(1, &b)
+		// ID 1 will load 1 book.
+		l.Load(&b, 1)
 		err := l.Wait()
 		if err != nil {
 			t.Fatalf("want nil error, got %v", err)
@@ -245,7 +125,7 @@ func TestLoadMany(t *testing.T) {
 
 		var b Book
 		// ID 2 will load 2 books.
-		l.Load(2, &b)
+		l.Load(&b, 2)
 		err := l.Wait()
 		if !errors.Is(err, batch.ErrMultipleValuesFound) {
 			t.Fatalf("want batch.ErrMultipleValuesFound, got %v", err)
@@ -258,7 +138,7 @@ func TestLoadKeyNotFound(t *testing.T) {
 	l := newUserLoader(id)
 
 	var u User
-	l.Load(id, &u)
+	l.Load(&u, id)
 	err := l.Wait()
 
 	if !errors.Is(err, batch.ErrKeyNotFound) {
@@ -300,7 +180,7 @@ func TestLoadNil(t *testing.T) {
 
 	// Panics when a nil reference is passed in.
 	var d Data
-	l.Load(1, d.User)
+	l.Load(d.User, 1)
 	if err := l.Wait(); err != nil {
 		t.Fatalf("want nil error, got %v", err)
 	}
@@ -342,7 +222,7 @@ func newUserLoader(ignoreIds ...int) *batch.Loader[int, User] {
 		return u.ID, nil
 	}
 
-	return batch.NewLoader(batchFn, keyFn)
+	return batch.New(batchFn, keyFn)
 }
 
 type Publication struct {
@@ -382,5 +262,5 @@ func newBooksLoader() *batch.Loader[int, Book] {
 		return b.AuthorID, nil
 	}
 
-	return batch.NewLoader(batchFn, keyFn)
+	return batch.New(batchFn, keyFn)
 }
