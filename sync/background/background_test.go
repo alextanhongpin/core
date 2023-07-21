@@ -42,6 +42,9 @@ func TestBackground(t *testing.T) {
 
 		assert := assert.New(t)
 		assert.Nil(bg.Send(1))
+
+		stop()
+
 		assert.Equal([]int{1}, task.Numbers())
 	})
 
