@@ -1,6 +1,7 @@
 package httpdump
 
 import (
+	"bufio"
 	"bytes"
 	"errors"
 	"net/http"
@@ -8,7 +9,7 @@ import (
 
 var ErrInvalidDumpFormat = errors.New("invalid http dump format")
 
-var sep = []byte("\n###\n")
+var sep = []byte("###")
 
 func DumpHTTP(w *http.Response, r *http.Request) ([]byte, error) {
 	req, err := DumpRequest(r)
@@ -27,10 +28,13 @@ func DumpHTTP(w *http.Response, r *http.Request) ([]byte, error) {
 }
 
 func ReadHTTP(b []byte) (w *http.Response, r *http.Request, err error) {
-	req, res, ok := bytes.Cut(b, sep)
-	if !ok {
-		return nil, nil, ErrInvalidDumpFormat
-	}
+	scanner := bufio.NewScanner(bytes.NewReader(b))
+	req := scanCond(scanner, func(b []byte) bool {
+		return bytes.Equal(b, sep)
+	})
+	res := scanCond(scanner, func(b []byte) bool {
+		return false
+	})
 
 	r, err = ReadRequest(req)
 	if err != nil {
@@ -43,4 +47,18 @@ func ReadHTTP(b []byte) (w *http.Response, r *http.Request, err error) {
 	}
 
 	return
+}
+
+func scanCond(scanner *bufio.Scanner, cond func(b []byte) bool) []byte {
+	bb := new(bytes.Buffer)
+	for scanner.Scan() {
+		b := scanner.Bytes()
+		if cond(b) {
+			return bb.Bytes()
+		}
+		bb.Write(b)
+		bb.WriteRune('\n')
+	}
+
+	return bb.Bytes()
 }
