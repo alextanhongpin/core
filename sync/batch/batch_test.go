@@ -46,7 +46,7 @@ func TestLoadMany(t *testing.T) {
 		authorIds := []int{1, 1, 2, 3, 4}
 
 		n := len(authorIds)
-		books := make([][]Book, n)
+		books := make([][]PaperBook, n)
 		for i := 0; i < n; i++ {
 			l.LoadMany(&books[i], authorIds[i])
 		}
@@ -82,7 +82,7 @@ func TestLoadMany(t *testing.T) {
 		t.Run(fmt.Sprintf("load %d-books", i), func(t *testing.T) {
 			l := newBooksLoader()
 
-			var b []Book
+			var b []PaperBook
 			l.LoadMany(&b, i)
 			if err := l.Wait(); err != nil {
 				t.Fatalf("want nil error, got %v", err)
@@ -97,7 +97,7 @@ func TestLoadMany(t *testing.T) {
 	t.Run("load one when has zero", func(t *testing.T) {
 		l := newBooksLoader()
 
-		var b Book
+		var b PaperBook
 
 		// ID 0 will load 0 books.
 		l.Load(&b, 0)
@@ -110,7 +110,7 @@ func TestLoadMany(t *testing.T) {
 	t.Run("load one when has one", func(t *testing.T) {
 		l := newBooksLoader()
 
-		var b Book
+		var b PaperBook
 
 		// ID 1 will load 1 book.
 		l.Load(&b, 1)
@@ -123,7 +123,7 @@ func TestLoadMany(t *testing.T) {
 	t.Run("load one when has many", func(t *testing.T) {
 		l := newBooksLoader()
 
-		var b Book
+		var b PaperBook
 		// ID 2 will load 2 books.
 		l.Load(&b, 2)
 		err := l.Wait()
@@ -229,7 +229,7 @@ type Publication struct {
 	Year int
 }
 
-type Book struct {
+type PaperBook struct {
 	ID          int
 	AuthorID    int
 	Publication *Publication
@@ -237,15 +237,15 @@ type Book struct {
 
 // newBooksLoader returns a one-to-many loader.
 // one Author id will load multiple books
-func newBooksLoader() *batch.Loader[int, Book] {
-	batchFn := func(ids ...int) ([]Book, error) {
-		var books []Book
+func newBooksLoader() *batch.Loader[int, PaperBook] {
+	batchFn := func(ids ...int) ([]PaperBook, error) {
+		var books []PaperBook
 		// Number of books is proportional to id.
 		// ID 0 will produce 0 books.
 		// ID 1 will produce 2 books.
 		for _, id := range ids {
 			for j := 0; j < id; j++ {
-				books = append(books, Book{
+				books = append(books, PaperBook{
 					ID:       j,
 					AuthorID: id,
 					Publication: &Publication{
@@ -258,7 +258,7 @@ func newBooksLoader() *batch.Loader[int, Book] {
 		return books, nil
 	}
 
-	keyFn := func(b Book) (int, error) {
+	keyFn := func(b PaperBook) (int, error) {
 		return b.AuthorID, nil
 	}
 

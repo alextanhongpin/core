@@ -18,13 +18,8 @@ type SubCategory struct {
 	Meta       map[string]string
 }
 
-type subCategoryLoader interface {
-	LoadMany(cat *[]SubCategory, subCategoryIds ...int) error
-	Wait() error
-}
-
 func ExampleManyToMany() {
-	l := newCategoryLoader()
+	l := newSubCategoryLoader()
 
 	// We have a bunch of subCategories, and we want to load the product.
 
@@ -36,8 +31,10 @@ func ExampleManyToMany() {
 			pdts[i].CategoryIDs = append(pdts[i].CategoryIDs, j+1)
 		}
 
-		// Load and assign Books to Author.
-		l.LoadMany(&pdts[i].SubCategories, pdts[i].CategoryIDs...)
+		// Load subcategories by category id.
+		if err := l.LoadMany(&pdts[i].SubCategories, pdts[i].CategoryIDs...); err != nil {
+			panic(err)
+		}
 	}
 
 	// Initiate the fetch.
@@ -56,7 +53,7 @@ func ExampleManyToMany() {
 	// product 4 has 10 subCategories
 }
 
-func newCategoryLoader() subCategoryLoader {
+func newSubCategoryLoader() *batch.Loader[int, SubCategory] {
 	batchFn := func(categoryIds ...int) ([]SubCategory, error) {
 		var subCategories []SubCategory
 		for _, id := range categoryIds {

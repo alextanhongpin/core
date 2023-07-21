@@ -2,66 +2,70 @@ package batch_test
 
 import (
 	"fmt"
+	"sort"
 
 	"github.com/alextanhongpin/core/sync/batch"
 )
 
+type Order struct {
+	ID       int
+	Shipment Shipment
+}
+
+type Shipment struct {
+	ID      int
+	OrderID int
+}
+
 func ExampleOneToOne() {
-	// Book belongs to an Author.
-	type Author struct {
-		ID   int
-		Name string
+	l := newShipmentLoader()
+
+	// We have a bunch of orders, and we want to load the author.
+	orders := []Order{
+		{ID: 1},
+		{ID: 2}, // Same author as Book ID 1.
+		{ID: 3},
 	}
 
-	type Book struct {
-		ID       int
-		AuthorID int
-		Author   *Author
-	}
-
-	batchFn := func(authorIds ...int) ([]Author, error) {
-		authors := make([]Author, len(authorIds))
-		for i, id := range authorIds {
-			authors[i] = Author{
-				ID:   id,
-				Name: fmt.Sprintf("author of book %d", id),
-			}
+	for i := 0; i < len(orders); i++ {
+		if err := l.Load(&orders[i].Shipment, orders[i].ID); err != nil {
+			panic(err)
 		}
-		return authors, nil
 	}
 
-	keyFn := func(a Author) (authorID int, err error) {
-		authorID = a.ID
-		return
-	}
-
-	loader := batch.New(batchFn, keyFn)
-
-	// We have a bunch of books, and we want to load the author.
-	books := []Book{
-		{ID: 1, AuthorID: 1},
-		{ID: 2, AuthorID: 1}, // Same author as Book ID 1.
-		{ID: 3, AuthorID: 2},
-	}
-
-	for i := 0; i < len(books); i++ {
-		// Create a non-nil Author.
-		books[i].Author = new(Author)
-
-		// Load and assign Author to Book.
-		loader.Load(books[i].Author, books[i].AuthorID)
-	}
-
-	// Initiate the fetch.
-	if err := loader.Wait(); err != nil {
+	if err := l.Wait(); err != nil {
 		panic(err)
 	}
 
-	fmt.Println(books[0].Author.Name)
-	fmt.Println(books[1].Author.Name)
-	fmt.Println(books[2].Author.Name)
+	for _, o := range orders {
+		fmt.Printf("%#v\n", o)
+	}
+
 	// Output:
-	// author of book 1
-	// author of book 1
-	// author of book 2
+	// batch_test.Order{ID:1, Shipment:batch_test.Shipment{ID:0, OrderID:1}}
+	// batch_test.Order{ID:2, Shipment:batch_test.Shipment{ID:1, OrderID:2}}
+	// batch_test.Order{ID:3, Shipment:batch_test.Shipment{ID:2, OrderID:3}}
+}
+
+func newShipmentLoader() *batch.Loader[int, Shipment] {
+	batchFn := func(orderIds ...int) ([]Shipment, error) {
+		// Sort for repeatability.
+		sort.Ints(orderIds)
+
+		shipments := make([]Shipment, len(orderIds))
+		for i, id := range orderIds {
+			shipments[i] = Shipment{
+				ID:      i,
+				OrderID: id,
+			}
+		}
+		return shipments, nil
+	}
+
+	keyFn := func(a Shipment) (orderID int, err error) {
+		orderID = a.OrderID
+		return
+	}
+
+	return batch.New(batchFn, keyFn)
 }
