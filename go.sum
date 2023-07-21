@@ -65,8 +65,8 @@ github.com/Microsoft/go-winio v0.6.1 h1:9/kr64B9VUZrLm5YYwbGtUJnMgqWVOdUAXu6Migc
 github.com/Microsoft/go-winio v0.6.1/go.mod h1:LRdKpFKfdobln8UmuiYcKPot9D2v6svN5+sAH+4kjUM=
 github.com/Nvveen/Gotty v0.0.0-20120604004816-cd527374f1e5 h1:TngWCqHvy9oXAN6lEVMRuU21PR1EtLVZJmdB18Gu3Rw=
 github.com/Nvveen/Gotty v0.0.0-20120604004816-cd527374f1e5/go.mod h1:lmUJ/7eu/Q8D7ML55dXQrVaamCz2vxCfdQBasLZfHKk=
-github.com/alextanhongpin/errcodes v0.0.0-20230712124132-da60799908c6 h1:D9lOmp7xiL2lM1MxH6npjFpB0KWDPCIBuBGEjoPent0=
-github.com/alextanhongpin/errcodes v0.0.0-20230712124132-da60799908c6/go.mod h1:6Uf2j0iGELJqwMjgTlZVDSt01mhEhGfnIZqCRkHa1YU=
+github.com/alextanhongpin/errors v0.0.0-20230717124106-3e3c39edaa89 h1:9i0Ng9p8X+dhU+F26Cu4weVODtCRPamQcCVrv6xGPYY=
+github.com/alextanhongpin/errors v0.0.0-20230717124106-3e3c39edaa89/go.mod h1:5jPdqh1bzNfGBbyIYzKRqJ28RpPOjNtiW7u5ypWoAKc=
 github.com/alextanhongpin/go-grpc-test v0.0.0-20230717173728-76e636e7a57b h1:jWIfNpyssSoLfPlUPl9K2ZLgLJs92jONSKjM4NdDgjo=
 github.com/alextanhongpin/go-grpc-test v0.0.0-20230717173728-76e636e7a57b/go.mod h1:ttdnhun9VI5d4uuT3KTtG8+whq4Npu+MAFnqbS4NYhI=
 github.com/bahlo/generic-list-go v0.2.0 h1:5sz/EEAK+ls5wF+NeqDpk5+iNdMDXrh3z3nPnH1Wvgk=

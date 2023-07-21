@@ -6,7 +6,7 @@ require golang.org/x/exp v0.0.0-20230626212559-97b1e661b5df
 
 require (
 	github.com/DATA-DOG/go-txdb v0.1.6
-	github.com/alextanhongpin/errcodes v0.0.0-20230712124132-da60799908c6
+	github.com/alextanhongpin/errors v0.0.0-20230717124106-3e3c39edaa89
 	github.com/alextanhongpin/go-grpc-test v0.0.0-20230717173728-76e636e7a57b
 	github.com/go-playground/validator/v10 v10.14.1
 	github.com/golang-jwt/jwt/v5 v5.0.0
