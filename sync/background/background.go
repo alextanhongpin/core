@@ -5,6 +5,7 @@ import (
 	"errors"
 	"runtime"
 	"sync"
+	"time"
 
 	"golang.org/x/sync/semaphore"
 )
@@ -47,8 +48,8 @@ func (g *Group[T]) Send(t T) error {
 	case <-g.done:
 		return Stopped
 	case g.ch <- t:
-		// The background worker could be stopped after
-		// successfully sending to the channel too.
+		// The background worker could be stopped after successfully sending to the
+		// channel too.
 		select {
 		case <-g.done:
 			return Stopped
@@ -82,9 +83,7 @@ func (g *Group[T]) stop() {
 
 // worker listens to the channel for new messages.
 func (g *Group[T]) worker() {
-	defer func() {
-		g.flush()
-	}()
+	defer g.flush()
 
 	for {
 		select {
@@ -97,7 +96,10 @@ func (g *Group[T]) worker() {
 }
 
 func (g *Group[T]) exec(v T) {
-	if err := g.sem.Acquire(context.Background(), 1); err != nil {
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
+	defer cancel()
+
+	if err := g.sem.Acquire(ctx, 1); err != nil {
 		// Execute the task immediately if we fail to acquire semaphore.
 		g.task.Exec(v)
 
