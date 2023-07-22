@@ -12,8 +12,9 @@ SELECT *
     AND is_active = TRUE
     AND `name` like ANY('{Foo,bar,%oo%}')
 
+
 -- Args
-v1: "2023-07-11"
+v1: "2023-07-22"
 
 
 -- Normalized
@@ -29,6 +30,7 @@ SELECT *
     AND `is_active` = TRUE
     AND `name` LIKE ANY(:2)
 
+
 -- Vars
 "1": freemium, premium
 "2": '{Foo,bar,%oo%}'
@@ -38,7 +40,7 @@ email: john.doe@mail.com
 
 
 -- Result
-- id: 264887807644915047
+- id: 8511647005632270790
   name: Alice
-- id: 3684197801285700620
+- id: 1455461433628230928
   name: Bob

@@ -93,14 +93,17 @@ func dump(q string, args []byte, n string, varMap, result []byte) string {
 	sb.WriteString(q)
 	sb.WriteRune('\n')
 	sb.WriteRune('\n')
+	sb.WriteRune('\n')
 
 	// Args.
-	sb.WriteString(argsSection)
-	sb.WriteRune('\n')
+	if len(args) != 0 {
+		sb.WriteString(argsSection)
+		sb.WriteRune('\n')
 
-	sb.Write(args)
-	sb.WriteRune('\n')
-	sb.WriteRune('\n')
+		sb.Write(args)
+		sb.WriteRune('\n')
+		sb.WriteRune('\n')
+	}
 
 	// Normalized.
 	sb.WriteString(normalizedSection)
@@ -109,20 +112,25 @@ func dump(q string, args []byte, n string, varMap, result []byte) string {
 	sb.WriteString(n)
 	sb.WriteRune('\n')
 	sb.WriteRune('\n')
+	sb.WriteRune('\n')
 
 	// Vars.
-	sb.WriteString(varsSection)
-	sb.WriteRune('\n')
+	if len(varMap) != 0 {
+		sb.WriteString(varsSection)
+		sb.WriteRune('\n')
 
-	sb.Write(varMap)
-	sb.WriteRune('\n')
-	sb.WriteRune('\n')
+		sb.Write(varMap)
+		sb.WriteRune('\n')
+		sb.WriteRune('\n')
+	}
 
 	// Result.
-	sb.WriteString(resultSection)
-	sb.WriteRune('\n')
+	if result != nil {
+		sb.WriteString(resultSection)
+		sb.WriteRune('\n')
 
-	sb.Write(result)
+		sb.Write(result)
+	}
 
-	return sb.String()
+	return strings.TrimSpace(sb.String())
 }

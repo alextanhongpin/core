@@ -30,30 +30,39 @@ func DumpPostgres(sql *SQL, marshalFunc func(v any) ([]byte, error)) ([]byte, er
 		return nil, err
 	}
 
-	args := make(map[string]any)
-	for i, v := range sql.Args {
-		k := fmt.Sprintf("$%d", i+1)
-		args[k] = v
+	var a []byte
+	if len(sql.Args) > 0 {
+		args := make(map[string]any)
+		for i, v := range sql.Args {
+			k := fmt.Sprintf("$%d", i+1)
+			args[k] = v
+		}
+
+		a, err = marshalFunc(args)
+		if err != nil {
+			return nil, err
+		}
 	}
 
-	a, err := marshalFunc(args)
-	if err != nil {
-		return nil, err
+	var v []byte
+	if len(vars) > 0 {
+		kv := make(map[string]any)
+		for _, v := range vars {
+			kv[v.Name] = v.Value
+		}
+
+		v, err = marshalFunc(kv)
+		if err != nil {
+			return nil, err
+		}
 	}
 
-	kv := make(map[string]any)
-	for _, v := range vars {
-		kv[v.Name] = v.Value
-	}
-
-	v, err := marshalFunc(kv)
-	if err != nil {
-		return nil, err
-	}
-
-	b, err := marshalFunc(sql.Result)
-	if err != nil {
-		return nil, err
+	var b []byte
+	if sql.Result != nil {
+		b, err = marshalFunc(sql.Result)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	return []byte(dump(q, a, n, v, b)), nil

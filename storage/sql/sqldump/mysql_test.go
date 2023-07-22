@@ -52,11 +52,12 @@ func TestDumpMySQL(t *testing.T) {
 }
 
 func TestMatchMySQLQuery(t *testing.T) {
-	a := `select * from users where name = 'john'`
+	a := `select * from users where name = 'john' and id = 1`
 	b := `
 	SELECT *
 	FROM users
-	WHERE name = 'Jane'
+	WHERE id = 1
+	AND name = 'Jane'
 	`
 	ok, err := sqldump.MatchMySQLQuery(a, b)
 	if err != nil {

@@ -20,12 +20,20 @@ func DumpMySQL(sql *SQL, marshalFunc func(v any) ([]byte, error)) ([]byte, error
 		return nil, err
 	}
 
-	args := make(map[string]any)
-	for i, v := range sql.Args {
-		// sqlparser replaces all '?' with ':v1', ':v2', ':vn'
-		// ...
-		k := fmt.Sprintf("v%d", i+1)
-		args[k] = v
+	var a []byte
+	if len(sql.Args) > 0 {
+		args := make(map[string]any)
+		for i, v := range sql.Args {
+			// sqlparser replaces all '?' with ':v1', ':v2', ':vn'
+			// ...
+			k := fmt.Sprintf("v%d", i+1)
+			args[k] = v
+		}
+
+		a, err = marshalFunc(args)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	n, vars, err := mySQLVars(sql.Query)
@@ -38,24 +46,25 @@ func DumpMySQL(sql *SQL, marshalFunc func(v any) ([]byte, error)) ([]byte, error
 		return nil, err
 	}
 
-	kv := make(map[string]any)
-	for _, v := range vars {
-		kv[fmt.Sprintf("%v", v.Name)] = v.Value
+	var v []byte
+	if len(vars) > 0 {
+		kv := make(map[string]any)
+		for _, v := range vars {
+			kv[fmt.Sprintf("%v", v.Name)] = v.Value
+		}
+
+		v, err = marshalFunc(kv)
+		if err != nil {
+			return nil, err
+		}
 	}
 
-	v, err := marshalFunc(kv)
-	if err != nil {
-		return nil, err
-	}
-
-	a, err := marshalFunc(args)
-	if err != nil {
-		return nil, err
-	}
-
-	b, err := marshalFunc(sql.Result)
-	if err != nil {
-		return nil, err
+	var b []byte
+	if sql.Result != nil {
+		b, err = marshalFunc(sql.Result)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	return []byte(dump(q, a, n, v, b)), nil

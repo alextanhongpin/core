@@ -13,8 +13,9 @@ SELECT *
     AND name LIKE ANY('{Foo,bar,%oo%}')
     AND id <> ALL(ARRAY[1, 2])
 
+
 -- Args
-$1: "2023-07-11"
+$1: "2023-07-22"
 
 
 -- Normalized
@@ -32,6 +33,7 @@ SELECT *
     AND name LIKE ANY($9)
     AND id <> ALL(ARRAY[$10, $11])
 
+
 -- Vars
 $1: $1
 $2: $2
@@ -47,7 +49,7 @@ $11: "2"
 
 
 -- Result
-- id: 3792812930514611454
+- id: 3485811625068814135
   name: Alice
-- id: 3790524236796936682
+- id: 5513124146316674753
   name: Bob

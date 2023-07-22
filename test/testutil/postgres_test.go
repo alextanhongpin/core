@@ -1,12 +1,17 @@
 package testutil_test
 
 import (
+	"context"
+	"database/sql"
+	"log"
 	"math/rand"
 	"testing"
 	"time"
 
+	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/alextanhongpin/core/test/testutil"
 	"github.com/google/uuid"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestDumpPostgres(t *testing.T) {
@@ -54,4 +59,93 @@ func TestDumpPostgres(t *testing.T) {
 			testutil.IgnoreResultFields("id"),
 		)
 	})
+}
+
+func TestPostgresRepository(t *testing.T) {
+	assert := assert.New(t)
+	db := newMockDB(t)
+	dbtx := &postgresDBHook{
+		t:    t,
+		dbtx: db,
+		opts: []testutil.SQLOption{
+			testutil.SQLFileName("find_user"),
+		},
+	}
+	repo := newMockUserRepository(dbtx, "postgres")
+	user, err := repo.FindUser(context.Background(), "1")
+	assert.Nil(err)
+	assert.Equal("1", user.ID)
+	assert.Equal("Alice", user.Name)
+	testutil.DumpYAML(t, user)
+}
+
+func newMockDB(t *testing.T) *sql.DB {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		db.Close()
+	})
+	rows := sqlmock.NewRows([]string{"id", "name"}).
+		AddRow("1", "Alice")
+	mock.ExpectQuery("select(.+)").WillReturnRows(rows)
+
+	return db
+}
+
+type mockUserRepository struct {
+	// Use this instead of *sql.DB or *sql.Tx to allow
+	// interception etc.
+	db      dbtx
+	dialect string
+}
+
+func newMockUserRepository(db dbtx, dialect string) *mockUserRepository {
+	return &mockUserRepository{
+		db:      db,
+		dialect: dialect,
+	}
+}
+
+func (r *mockUserRepository) FindUser(ctx context.Context, id string) (*User, error) {
+	var u User
+	if err := r.db.QueryRowContext(ctx, r.query(), id).Scan(&u.ID, &u.Name); err != nil {
+		return nil, err
+	}
+
+	return &u, nil
+}
+
+func (r *mockUserRepository) query() string {
+	switch r.dialect {
+	case "postgres":
+		return `select * from users where id = $1`
+	case "mysql":
+		return `select * from users where id = ?`
+	default:
+		log.Fatalf("unknown dialect: %s", r.dialect)
+		return ""
+	}
+}
+
+type User struct {
+	ID   string
+	Name string
+}
+
+type dbtx interface {
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
+type postgresDBHook struct {
+	dbtx
+	t    *testing.T
+	opts []testutil.SQLOption
+}
+
+func (h *postgresDBHook) QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row {
+	testutil.DumpPostgres(h.t, testutil.NewSQL(query, args, nil), h.opts...)
+
+	return h.dbtx.QueryRowContext(ctx, query, args...)
 }

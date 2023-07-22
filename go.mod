@@ -5,6 +5,7 @@ go 1.20
 require golang.org/x/exp v0.0.0-20230626212559-97b1e661b5df
 
 require (
+	github.com/DATA-DOG/go-sqlmock v1.5.0
 	github.com/DATA-DOG/go-txdb v0.1.6
 	github.com/alextanhongpin/errors v0.0.0-20230717124106-3e3c39edaa89
 	github.com/go-playground/validator/v10 v10.14.1

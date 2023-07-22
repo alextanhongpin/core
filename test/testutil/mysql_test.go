@@ -1,12 +1,15 @@
 package testutil_test
 
 import (
+	"context"
+	"database/sql"
 	"math/rand"
 	"testing"
 	"time"
 
 	"github.com/alextanhongpin/core/test/testutil"
 	"github.com/google/uuid"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestDumpMySQL(t *testing.T) {
@@ -52,4 +55,34 @@ func TestDumpMySQL(t *testing.T) {
 			testutil.IgnoreResultFields("id"),
 		)
 	})
+}
+
+func TestMySQLRepository(t *testing.T) {
+	assert := assert.New(t)
+	db := newMockDB(t)
+	dbtx := &mysqlDBHook{
+		t:    t,
+		dbtx: db,
+		opts: []testutil.SQLOption{
+			testutil.SQLFileName("find_user"),
+		},
+	}
+	repo := newMockUserRepository(dbtx, "mysql")
+	user, err := repo.FindUser(context.Background(), "1")
+	assert.Nil(err)
+	assert.Equal("1", user.ID)
+	assert.Equal("Alice", user.Name)
+	testutil.DumpYAML(t, user)
+}
+
+type mysqlDBHook struct {
+	dbtx
+	t    *testing.T
+	opts []testutil.SQLOption
+}
+
+func (h *mysqlDBHook) QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row {
+	testutil.DumpMySQL(h.t, testutil.NewSQL(query, args, nil), h.opts...)
+
+	return h.dbtx.QueryRowContext(ctx, query, args...)
 }

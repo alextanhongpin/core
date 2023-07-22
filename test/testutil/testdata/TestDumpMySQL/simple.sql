@@ -4,8 +4,9 @@ SELECT *
   WHERE id = :v1
     AND deleted_at IS NULL
 
+
 -- Args
-v1: 7115bcb4-b765-43fe-9770-bb1ce48cad10
+v1: a6935281-15ae-44a3-99c1-32d44ecb4f0f
 
 
 -- Normalized
@@ -13,9 +14,6 @@ SELECT *
   FROM `users`
   WHERE `id` = :v1
     AND `deleted_at` IS NULL
-
--- Vars
-{}
 
 
 -- Result
