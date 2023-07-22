@@ -12,6 +12,7 @@ import (
 	"github.com/alextanhongpin/core/grpc/grpctest"
 	"github.com/alextanhongpin/core/test/testutil"
 	"github.com/stretchr/testify/assert"
+	"google.golang.org/genproto/googleapis/rpc/errdetails"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
@@ -109,41 +110,61 @@ func TestGRPCBidirectionalStreaming(t *testing.T) {
 }
 
 func TestGRPCServerStreaming(t *testing.T) {
-	ctx := context.Background()
-	conn := grpcDialContext(t, ctx)
-
-	// Create a new client.
-	client := pb.NewGreeterServiceClient(conn)
-
-	// Create a new recorder.
-	ctx = testutil.DumpGRPC(t, ctx)
-
-	ctx = metadata.AppendToOutgoingContext(ctx,
-		"md-val", "md-val",
-		"md-val-bin", "md-val-bin",
-	)
-
-	assert := assert.New(t)
-	stream, err := client.ListGreetings(ctx, &pb.ListGreetingsRequest{
-		Count: 5,
+	t.Run("success", func(t *testing.T) {
+		assert := assert.New(t)
+		err := testServerStreaming(t, &pb.ListGreetingsRequest{
+			Count: 5,
+		})
+		assert.Nil(err)
 	})
-	assert.Nil(err)
 
-	done := make(chan bool)
+	t.Run("failed", func(t *testing.T) {
+		assert := assert.New(t)
+		err := testServerStreaming(t, &pb.ListGreetingsRequest{
+			Count: -99,
+		})
+		assert.NotNil(err)
 
-	go func() {
-		defer close(done)
-		for {
-			_, err := stream.Recv()
-			if err == io.EOF {
-				break
+		// Convert the error to gRPC status.
+		st := status.Convert(err)
+		for _, detail := range st.Details() {
+			switch v := detail.(type) {
+			case *errdetails.BadRequest:
+				for _, violation := range v.FieldViolations {
+					assert.Equal("Count", violation.GetField())
+					assert.Equal("Count cannot be negative", violation.GetDescription())
+				}
+			default:
+				t.Fatalf("unhandled error: %v", v)
 			}
-
-			assert.Nil(err)
 		}
-	}()
+	})
 
-	<-done
+	t.Run("zero", func(t *testing.T) {
+		// NOTE: In testdata/TestGRPCServerStreaming/zero.http, you will see the
+		// ListGreetingsRequest to be `{}`. This is expected, as zero values won't
+		// be serialized.
+		// https://protobuf.dev/programming-guides/proto3/#default:~:text=Note%20that%20for,on%20the%20wire.
+		assert := assert.New(t)
+		err := testServerStreaming(t, &pb.ListGreetingsRequest{
+			Count: 0,
+		})
+		assert.NotNil(err)
+
+		// Convert the error to gRPC status.
+		st := status.Convert(err)
+		for _, detail := range st.Details() {
+			switch v := detail.(type) {
+			case *errdetails.BadRequest:
+				for _, violation := range v.FieldViolations {
+					assert.Equal("Count", violation.GetField())
+					assert.Equal("Count cannot be negative", violation.GetDescription())
+				}
+			default:
+				t.Fatalf("unhandled error: %v", v)
+			}
+		}
+	})
 }
 
 func TestGRPCUnary(t *testing.T) {
@@ -301,6 +322,23 @@ func (s *server) ListGreetings(in *pb.ListGreetingsRequest, stream pb.GreeterSer
 	}
 
 	n := in.GetCount()
+	if n <= 0 {
+		// Implement custom error using errdetails.
+		var d errdetails.BadRequest
+		d.FieldViolations = append(d.FieldViolations, &errdetails.BadRequest_FieldViolation{
+			Field:       "Count",
+			Description: "Count cannot be negative",
+		})
+
+		st := status.New(codes.InvalidArgument, "Failed to get count")
+		st, err := st.WithDetails(&d)
+		if err != nil {
+			panic(err)
+		}
+
+		return st.Err()
+	}
+
 	for i := 0; i < int(n); i++ {
 		err := stream.Send(&pb.ListGreetingsResponse{
 			Message: fmt.Sprintf("hi sir (%d)", i+1),
@@ -371,4 +409,44 @@ func grpcDialContext(t *testing.T, ctx context.Context) *grpc.ClientConn {
 	})
 
 	return conn
+}
+
+func testServerStreaming(t *testing.T, req *pb.ListGreetingsRequest) error {
+	t.Helper()
+
+	ctx := context.Background()
+	conn := grpcDialContext(t, ctx)
+
+	// Create a new client.
+	client := pb.NewGreeterServiceClient(conn)
+
+	// Create a new recorder.
+	ctx = testutil.DumpGRPC(t, ctx)
+
+	ctx = metadata.AppendToOutgoingContext(ctx,
+		"md-val", "md-val",
+		"md-val-bin", "md-val-bin",
+	)
+
+	assert := assert.New(t)
+	stream, err := client.ListGreetings(ctx, req)
+	assert.Nil(err)
+
+	ch := make(chan error)
+
+	go func() {
+		for {
+			_, err := stream.Recv()
+			if err == io.EOF {
+				ch <- nil
+				return
+			}
+			if err != nil {
+				ch <- err
+				return
+			}
+		}
+	}()
+
+	return <-ch
 }

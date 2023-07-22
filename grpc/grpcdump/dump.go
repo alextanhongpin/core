@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"path/filepath"
 	"strings"
 
@@ -14,13 +15,15 @@ import (
 )
 
 const (
-	linePrefix    = "GRPC "
-	separator     = "=== "
-	statusPrefix  = "=== status"
-	clientPrefix  = "=== client"
-	serverPrefix  = "=== server"
-	headerPrefix  = "=== header"
-	trailerPrefix = "=== trailer"
+	linePrefix         = "GRPC "
+	separator          = "=== "
+	statusPrefix       = "=== status"
+	clientPrefix       = "=== client"
+	clientStreamPrefix = "=== client stream"
+	serverPrefix       = "=== server"
+	serverStreamPrefix = "=== server stream"
+	headerPrefix       = "=== header"
+	trailerPrefix      = "=== trailer"
 )
 
 var ErrInvalidDumpFormat = errors.New("grpcdump: invalid dump format")
@@ -34,13 +37,9 @@ type Dump struct {
 	Metadata       metadata.MD `json:"metadata"` // The server receives metadata.
 	Header         metadata.MD `json:"header"`   // The client receives header and trailer.
 	Trailer        metadata.MD `json:"trailer"`
-	isServerStream bool
-	isClientStream bool
-	headerID       string
-}
-
-func (d *Dump) IsUnary() bool {
-	return !d.isClientStream && !d.isServerStream
+	IsServerStream bool        `json:"isServerStream"`
+	IsClientStream bool        `json:"isClientStream"`
+	HeaderIdx      int         `json:"-"`
 }
 
 func (d *Dump) Service() string {
@@ -59,31 +58,15 @@ func (d *Dump) AsText() ([]byte, error) {
 
 	writeMetadata(sb, "", d.Metadata)
 
-	if d.IsUnary() {
-		// Header is written before any response.
-		writeMetadata(sb, headerPrefix, d.Header)
+	i := d.HeaderIdx
+	if err := writeMessages(sb, d.IsClientStream, d.IsServerStream, d.Messages[:i]...); err != nil {
+		return nil, err
+	}
 
-		if err := writeMessages(sb, d.Messages...); err != nil {
-			return nil, err
-		}
-	} else {
-		var j int
-		for i := 0; i < len(d.Messages); i++ {
-			if d.Messages[i].id > d.headerID {
-				j = i
-				break
-			}
-		}
+	writeMetadata(sb, headerPrefix, d.Header)
 
-		if err := writeMessages(sb, d.Messages[:j]...); err != nil {
-			return nil, err
-		}
-
-		writeMetadata(sb, headerPrefix, d.Header)
-
-		if err := writeMessages(sb, d.Messages[j:]...); err != nil {
-			return nil, err
-		}
+	if err := writeMessages(sb, d.IsClientStream, d.IsServerStream, d.Messages[i:]...); err != nil {
+		return nil, err
 	}
 
 	// Status is before trailer.
@@ -95,7 +78,10 @@ func (d *Dump) AsText() ([]byte, error) {
 	// Trailer is the optional, and is the last to be sent.
 	writeMetadata(sb, trailerPrefix, d.Trailer)
 
-	return []byte(strings.TrimSpace(sb.String())), nil
+	s := sb.String()
+	s = strings.TrimSpace(s) // Clear any trailing new lines.
+
+	return []byte(s), nil
 }
 
 func (d *Dump) FromText(b []byte) error {
@@ -136,6 +122,7 @@ func (d *Dump) FromText(b []byte) error {
 
 		switch {
 		case
+			// NOTE: We don't need to check clientStreamPrefix and serverStreamPrefix.
 			strings.HasPrefix(text, clientPrefix),
 			strings.HasPrefix(text, serverPrefix):
 
@@ -150,6 +137,20 @@ func (d *Dump) FromText(b []byte) error {
 			origin, name, ok := strings.Cut(text, ": ")
 			if !ok {
 				return ErrInvalidDumpFormat
+			}
+
+			if origin == clientStreamPrefix && !d.IsClientStream {
+				d.IsClientStream = true
+			} else if origin == serverStreamPrefix && !d.IsServerStream {
+				d.IsServerStream = true
+			}
+
+			if d.IsClientStream && origin != clientStreamPrefix {
+				panic(fmt.Errorf("%w: bad client stream prefix", ErrInvalidDumpFormat))
+			}
+
+			if d.IsServerStream && origin != serverStreamPrefix {
+				panic(fmt.Errorf("%w: bad server stream prefix", ErrInvalidDumpFormat))
 			}
 
 			d.Messages = append(d.Messages, Message{
@@ -194,10 +195,12 @@ func writeStatus(sb *strings.Builder, status *Status) error {
 	if err != nil {
 		return err
 	}
+
 	sb.WriteString(statusPrefix)
 	sb.WriteRune('\n')
 	sb.Write(b)
 	sb.WriteRune('\n')
+
 	return nil
 }
 
@@ -234,7 +237,7 @@ func writeMetadata(sb *strings.Builder, prefix string, md metadata.MD) {
 	}
 }
 
-func writeMessages(sb *strings.Builder, msgs ...Message) error {
+func writeMessages(sb *strings.Builder, isClientStream, isServerStream bool, msgs ...Message) error {
 	for _, msg := range msgs {
 		b, err := json.MarshalIndent(msg.Message, "", " ")
 		if err != nil {
@@ -242,10 +245,17 @@ func writeMessages(sb *strings.Builder, msgs ...Message) error {
 		}
 
 		var prefix string
-		if msg.Origin == OriginServer {
+		isServer := msg.Origin == OriginServer
+		if isServer && isServerStream {
+			prefix = serverStreamPrefix
+		} else if isServer && !isServerStream {
 			prefix = serverPrefix
-		} else {
+		} else if !isServer && isClientStream {
+			prefix = clientStreamPrefix
+		} else if !isServer && !isClientStream {
 			prefix = clientPrefix
+		} else {
+			log.Fatalf("grpcdump: unknown message origin: %q", msg.Origin)
 		}
 		header := fmt.Sprintf("%s: %s", prefix, msg.Name)
 

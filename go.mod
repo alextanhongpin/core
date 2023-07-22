@@ -15,7 +15,6 @@ require (
 	github.com/mitchellh/copystructure v1.2.0
 	github.com/ory/dockertest/v3 v3.10.0
 	github.com/pganalyze/pg_query_go/v4 v4.2.1
-	github.com/rs/xid v1.5.0
 	github.com/stretchr/testify v1.8.4
 	github.com/uptrace/bun v1.1.14
 	github.com/uptrace/bun/dialect/pgdialect v1.1.14
@@ -24,6 +23,7 @@ require (
 	github.com/wk8/go-ordered-map/v2 v2.1.8
 	golang.org/x/sync v0.3.0
 	golang.org/x/time v0.3.0
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20230711160842-782d3b101e98
 	google.golang.org/grpc v1.56.2
 	google.golang.org/protobuf v1.31.0
 	gopkg.in/yaml.v3 v3.0.1
@@ -119,7 +119,6 @@ require (
 	golang.org/x/text v0.11.0 // indirect
 	golang.org/x/tools v0.10.0 // indirect
 	golang.org/x/xerrors v0.0.0-20220907171357-04be3eba64a2 // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20230711160842-782d3b101e98 // indirect
 	gopkg.in/DataDog/dd-trace-go.v1 v1.52.0 // indirect
 	gopkg.in/ini.v1 v1.67.0 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect

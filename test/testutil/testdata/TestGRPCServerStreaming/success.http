@@ -1,0 +1,59 @@
+GRPC bufconn/helloworld.v1.GreeterService/ListGreetings
+md-val: md-val
+md-val-bin: bWQtdmFsLWJpbg
+user-agent: grpc-go/1.56.2
+content-type: application/grpc
+:authority: bufnet
+
+
+=== client: helloworld.v1.ListGreetingsRequest
+{
+ "count": 5
+}
+
+
+=== header
+header-key: header-val
+header-key-bin: aGVhZGVyLXZhbC1iaW4
+
+
+=== server stream: helloworld.v1.ListGreetingsResponse
+{
+ "message": "hi sir (1)"
+}
+
+
+=== server stream: helloworld.v1.ListGreetingsResponse
+{
+ "message": "hi sir (2)"
+}
+
+
+=== server stream: helloworld.v1.ListGreetingsResponse
+{
+ "message": "hi sir (3)"
+}
+
+
+=== server stream: helloworld.v1.ListGreetingsResponse
+{
+ "message": "hi sir (4)"
+}
+
+
+=== server stream: helloworld.v1.ListGreetingsResponse
+{
+ "message": "hi sir (5)"
+}
+
+
+=== status
+{
+ "code": "OK",
+ "number": 0,
+ "message": ""
+}
+
+=== trailer
+trailer-key: trailer-val
+trailer-key-bin: dHJhaWxlci12YWwtYmlu

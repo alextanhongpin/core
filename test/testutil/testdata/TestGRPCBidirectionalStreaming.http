@@ -1,7 +1,7 @@
 GRPC bufconn/helloworld.v1.GreeterService/Chat
+md-val-bin: bWQtdmFsLWJpbg
 content-type: application/grpc
 user-agent: grpc-go/1.56.2
-md-val-bin: bWQtdmFsLWJpbg
 :authority: bufnet
 md-val: md-val
 
@@ -11,25 +11,25 @@ header-key: header-val
 header-key-bin: aGVhZGVyLXZhbC1iaW4
 
 
-=== client: ChatRequest
+=== client stream: helloworld.v1.ChatRequest
 {
  "message": "foo"
 }
 
 
-=== server: ChatResponse
+=== server stream: helloworld.v1.ChatResponse
 {
  "message": "REPLY: foo"
 }
 
 
-=== client: ChatRequest
+=== client stream: helloworld.v1.ChatRequest
 {
  "message": "bar"
 }
 
 
-=== server: ChatResponse
+=== server stream: helloworld.v1.ChatResponse
 {
  "message": "REPLY: bar"
 }
@@ -38,6 +38,7 @@ header-key-bin: aGVhZGVyLXZhbC1iaW4
 === status
 {
  "code": "OK",
+ "number": 0,
  "message": ""
 }
 

@@ -1,0 +1,25 @@
+GRPC bufconn/helloworld.v1.GreeterService/ListGreetings
+user-agent: grpc-go/1.56.2
+md-val-bin: bWQtdmFsLWJpbg
+:authority: bufnet
+content-type: application/grpc
+md-val: md-val
+
+
+=== client: helloworld.v1.ListGreetingsRequest
+{
+ "count": -99
+}
+
+
+=== header
+header-key-bin: aGVhZGVyLXZhbC1iaW4
+header-key: header-val
+
+
+=== status
+{
+ "code": "InvalidArgument",
+ "number": 3,
+ "message": "Failed to get count"
+}

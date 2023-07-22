@@ -1,13 +1,13 @@
 GRPC bufconn/helloworld.v1.GreeterService/SayHello
 :authority: bufnet
-authorization: abc
 content-type: application/grpc
 user-agent: grpc-go/1.56.2
-md-val: md-val
 md-val-bin: bWQtdmFsLWJpbg
+md-val: md-val
+authorization: abc
 
 
-=== client: SayHelloRequest
+=== client: helloworld.v1.SayHelloRequest
 {
  "name": "John Doe"
 }
@@ -16,5 +16,6 @@ md-val-bin: bWQtdmFsLWJpbg
 === status
 {
  "code": "Unauthenticated",
+ "number": 16,
  "message": "token expired"
 }

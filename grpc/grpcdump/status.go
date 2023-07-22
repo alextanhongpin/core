@@ -1,12 +1,14 @@
 package grpcdump
 
 import (
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
 
 type Status struct {
-	Code    string `json:"code"`
-	Message string `json:"message"`
+	Code    string     `json:"code"`
+	Number  codes.Code `json:"number"`
+	Message string     `json:"message"`
 }
 
 func NewStatus(err error) *Status {
@@ -17,6 +19,7 @@ func NewStatus(err error) *Status {
 
 	return &Status{
 		Code:    sts.Code().String(),
+		Number:  sts.Code(),
 		Message: sts.Message(),
 	}
 }

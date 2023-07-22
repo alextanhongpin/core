@@ -322,8 +322,6 @@ github.com/richardartoul/molecule v1.0.1-0.20221107223329-32cfee06a052 h1:Qp27Id
 github.com/rogpeppe/go-internal v1.3.0/go.mod h1:M8bDsm7K2OlrFYOpmOWEs/qY81heoFRclV5y23lUDJ4=
 github.com/rogpeppe/go-internal v1.11.0 h1:cWPaGQEPrBb5/AsnsZesgZZ9yb1OQ+GOISoDNXVBh4M=
 github.com/rogpeppe/go-internal v1.11.0/go.mod h1:ddIwULY96R17DhadqLgMfk9H9tvdUzkipdSkR5nkCZA=
-github.com/rs/xid v1.5.0 h1:mKX4bl4iPYJtEIxp6CYiUuLQ/8DYMoz0PUdtGgMFRVc=
-github.com/rs/xid v1.5.0/go.mod h1:trrq9SKmegXys3aeAKXMUTdJsYXVwGY3RLcfgqegfbg=
 github.com/secure-systems-lab/go-securesystemslib v0.3.1/go.mod h1:o8hhjkbNl2gOamKUA/eNW3xUrntHT9L4W89W1nfj43U=
 github.com/secure-systems-lab/go-securesystemslib v0.6.0 h1:T65atpAVCJQK14UA57LMdZGpHi4QYSH/9FZyNGqMYIA=
 github.com/secure-systems-lab/go-securesystemslib v0.6.0/go.mod h1:8Mtpo9JKks/qhPG4HGZ2LGMvrPbzuxwfz/f/zLfEWkk=

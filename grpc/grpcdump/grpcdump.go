@@ -6,7 +6,6 @@ import (
 	"net"
 
 	"github.com/google/uuid"
-	"github.com/rs/xid"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/peer"
@@ -46,69 +45,65 @@ func NewRecorder(ctx context.Context) (context.Context, func() *Dump) {
 }
 
 type Message struct {
-	id      string
 	Origin  string `json:"origin"` // server or client
 	Name    string `json:"name"`
 	Message any    `json:"message"`
 }
 
-type serverStreamWrapper struct {
+type serverStreamInterceptor struct {
 	grpc.ServerStream
-	header   metadata.MD
-	headerID string
-	messages []Message
-	trailer  metadata.MD
+	header    metadata.MD
+	headerIdx int
+	messages  []Message
+	trailer   metadata.MD
 }
 
-func (s *serverStreamWrapper) SetTrailer(md metadata.MD) {
+func (s *serverStreamInterceptor) SetTrailer(md metadata.MD) {
 	s.ServerStream.SetTrailer(md)
 
 	s.trailer = metadata.Join(s.trailer, md)
 }
 
-func (s *serverStreamWrapper) SendHeader(md metadata.MD) error {
-	if err := s.ServerStream.SendHeader(md); err != nil {
-		return err
-	}
+func (s *serverStreamInterceptor) SendHeader(md metadata.MD) error {
+	err := s.ServerStream.SendHeader(md)
 	s.header = metadata.Join(s.header, md)
-	if s.headerID == "" {
-		s.headerID = xid.New().String()
+	if s.headerIdx == 0 {
+		s.headerIdx = len(s.messages)
 	}
 
-	return nil
+	return err
 }
 
-func (s *serverStreamWrapper) SetHeader(md metadata.MD) error {
-	if err := s.ServerStream.SetHeader(md); err != nil {
-		return err
+func (s *serverStreamInterceptor) SetHeader(md metadata.MD) error {
+	err := s.ServerStream.SetHeader(md)
+
+	if err == nil {
+		s.header = metadata.Join(s.header, md)
+		if s.headerIdx == 0 {
+			s.headerIdx = len(s.messages)
+		}
 	}
 
-	s.header = metadata.Join(s.header, md)
-	if s.headerID == "" {
-		s.headerID = xid.New().String()
-	}
-
-	return nil
+	return err
 }
 
-func (s *serverStreamWrapper) SendMsg(m interface{}) error {
-	if err := s.ServerStream.SendMsg(m); err != nil {
-		return err
+func (s *serverStreamInterceptor) SendMsg(m interface{}) error {
+	err := s.ServerStream.SendMsg(m)
+	if err == nil {
+		s.messages = append(s.messages, origin(OriginServer, m))
 	}
 
-	s.messages = append(s.messages, origin(OriginServer, m))
-
-	return nil
+	return err
 }
 
-func (s *serverStreamWrapper) RecvMsg(m interface{}) error {
-	if err := s.ServerStream.RecvMsg(m); err != nil {
-		return err
+func (s *serverStreamInterceptor) RecvMsg(m interface{}) error {
+	err := s.ServerStream.RecvMsg(m)
+	fmt.Println("RECV", m, err)
+	if err == nil {
+		s.messages = append(s.messages, origin(OriginClient, m))
 	}
 
-	s.messages = append(s.messages, origin(OriginClient, m))
-
-	return nil
+	return err
 }
 
 func StreamInterceptor() grpc.ServerOption {
@@ -127,7 +122,7 @@ func StreamInterceptor() grpc.ServerOption {
 			id := md.Get(headerTestID)[0]
 			md.Delete(headerTestID)
 
-			w := &serverStreamWrapper{ServerStream: stream}
+			w := &serverStreamInterceptor{ServerStream: stream}
 			err := handler(srv, w)
 
 			testIds[id] = &Dump{
@@ -138,9 +133,9 @@ func StreamInterceptor() grpc.ServerOption {
 				Trailer:        w.trailer,
 				Header:         w.header,
 				Status:         NewStatus(err),
-				isServerStream: info.IsServerStream,
-				isClientStream: info.IsClientStream,
-				headerID:       w.headerID,
+				IsServerStream: info.IsServerStream,
+				IsClientStream: info.IsClientStream,
+				HeaderIdx:      w.headerIdx,
 			}
 
 			return err
@@ -237,9 +232,8 @@ func origin(origin string, v any) Message {
 	}
 
 	return Message{
-		id:      xid.New().String(),
 		Origin:  origin,
-		Name:    fmt.Sprint(msg.ProtoReflect().Descriptor().FullName().Name()),
+		Name:    fmt.Sprint(msg.ProtoReflect().Descriptor().FullName()),
 		Message: v,
 	}
 }

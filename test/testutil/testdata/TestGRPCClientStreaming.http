@@ -1,9 +1,9 @@
 GRPC bufconn/helloworld.v1.GreeterService/RecordGreetings
-content-type: application/grpc
 user-agent: grpc-go/1.56.2
-md-val: md-val
 md-val-bin: bWQtdmFsLWJpbg
 :authority: bufnet
+md-val: md-val
+content-type: application/grpc
 
 
 === header
@@ -11,37 +11,37 @@ header-key: header-val
 header-key-bin: aGVhZGVyLXZhbC1iaW4
 
 
-=== client: RecordGreetingsRequest
+=== client stream: helloworld.v1.RecordGreetingsRequest
 {
  "message": "hi sir"
 }
 
 
-=== client: RecordGreetingsRequest
+=== client stream: helloworld.v1.RecordGreetingsRequest
 {
  "message": "hi sir"
 }
 
 
-=== client: RecordGreetingsRequest
+=== client stream: helloworld.v1.RecordGreetingsRequest
 {
  "message": "hi sir"
 }
 
 
-=== client: RecordGreetingsRequest
+=== client stream: helloworld.v1.RecordGreetingsRequest
 {
  "message": "hi sir"
 }
 
 
-=== client: RecordGreetingsRequest
+=== client stream: helloworld.v1.RecordGreetingsRequest
 {
  "message": "hi sir"
 }
 
 
-=== server: RecordGreetingsResponse
+=== server: helloworld.v1.RecordGreetingsResponse
 {
  "count": 5
 }
@@ -50,9 +50,10 @@ header-key-bin: aGVhZGVyLXZhbC1iaW4
 === status
 {
  "code": "OK",
+ "number": 0,
  "message": ""
 }
 
 === trailer
-trailer-key-bin: dHJhaWxlci12YWwtYmlu
 trailer-key: trailer-val
+trailer-key-bin: dHJhaWxlci12YWwtYmlu
