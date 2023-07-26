@@ -98,7 +98,6 @@ func (s *serverStreamInterceptor) SendMsg(m interface{}) error {
 
 func (s *serverStreamInterceptor) RecvMsg(m interface{}) error {
 	err := s.ServerStream.RecvMsg(m)
-	fmt.Println("RECV", m, err)
 	if err == nil {
 		s.messages = append(s.messages, origin(OriginClient, m))
 	}
@@ -216,11 +215,6 @@ func addrFromContext(ctx context.Context) string {
 		}
 	}
 	return addr
-}
-
-type sequence struct {
-	id   string
-	name string
 }
 
 func origin(origin string, v any) Message {
