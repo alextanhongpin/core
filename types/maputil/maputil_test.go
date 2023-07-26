@@ -37,6 +37,23 @@ func TestKeys(t *testing.T) {
 		assert.Equal(t, want, keys)
 	})
 
+	t.Run("values", func(t *testing.T) {
+		values := maputil.Values(m)
+		assert.NotNil(t, values)
+	})
+
+	t.Run("Invert", func(t *testing.T) {
+		m := make(map[int]int)
+		m[1] = 100
+		m[2] = 200
+
+		im := maputil.Invert(m)
+		assert.Equal(t, map[int]int{
+			100: 1,
+			200: 2,
+		}, im)
+	})
+
 	t.Run("all keys", func(t *testing.T) {
 		keys := maputil.AllKeys(m)
 		want := []string{
@@ -72,14 +89,8 @@ func TestGroupBy(t *testing.T) {
 		return pdts[i].category
 	})
 
-	if want, got := "p1", m[1][0].name; want != got {
-		t.Fatalf("want %s, got %s", want, got)
-	}
-
-	if want, got := "p2", m[2][0].name; want != got {
-		t.Fatalf("want %s, got %s", want, got)
-	}
-	if want, got := "p3", m[2][1].name; want != got {
-		t.Fatalf("want %s, got %s", want, got)
-	}
+	assert := assert.New(t)
+	assert.Equal(m[1][0].name, "p1")
+	assert.Equal(m[2][0].name, "p2")
+	assert.Equal(m[2][1].name, "p3")
 }
