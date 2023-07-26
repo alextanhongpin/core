@@ -1,7 +1,11 @@
+# The GODEBUG option is to allow the gRPC test that is configured with the
+# certificate to pass the test.
+
 gofiles := $(shell go list ./... | grep -v 'database')
+gotest := GODEBUG=x509sha1=1 gotest
 
 cover:
-	@go test -v -race -cover -coverprofile=cover.out $(gofiles)
+	@$(gotest) -v -failfast -race -cover -covermode=atomic -coverprofile=cover.out $(flag) $(gofiles)
 	@go tool cover -html cover.out
 
 
