@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"google.golang.org/grpc/metadata"
@@ -210,7 +211,14 @@ func writeMetadata(sb *strings.Builder, prefix string, md metadata.MD) {
 		sb.WriteRune('\n')
 	}
 
-	for k, vs := range md {
+	var keys []string
+	for k := range md {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	for _, k := range keys {
+		vs := md[k]
 		fn := func(s string) string {
 			if isBinHeader(k) {
 				// https://github.com/grpc/grpc-go/pull/1209/files

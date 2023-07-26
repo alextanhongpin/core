@@ -16,6 +16,7 @@ var (
 	ErrInvalidOrigin         = errors.New("grpcdump: invalid origin")
 	ErrBadClientStreamPrefix = errors.New("grpcdump: bad client stream prefix")
 	ErrBadServerStreamPrefix = errors.New("grpcdump: bad server stream prefix")
+	ErrMissingGRPCTestID     = errors.New("grpcdump: missing grpcdump test id")
 )
 
 func InvalidLineError(line string) error {

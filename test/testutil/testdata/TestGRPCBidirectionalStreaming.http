@@ -1,9 +1,10 @@
 GRPC bufconn/helloworld.v1.GreeterService/Chat
-md-val-bin: bWQtdmFsLWJpbg
 content-type: application/grpc
-user-agent: grpc-go/1.56.2
-:authority: bufnet
 md-val: md-val
+md-val-bin: bWQtdmFsLWJpbg
+:authority: x.test.example.com
+user-agent: grpc-go/1.56.2
+authorization: Bearer xyz
 
 
 === header
@@ -43,5 +44,5 @@ header-key-bin: aGVhZGVyLXZhbC1iaW4
 }
 
 === trailer
-trailer-key-bin: dHJhaWxlci12YWwtYmlu
 trailer-key: trailer-val
+trailer-key-bin: dHJhaWxlci12YWwtYmlu

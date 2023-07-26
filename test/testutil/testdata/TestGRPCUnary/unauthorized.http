@@ -1,10 +1,10 @@
 GRPC bufconn/helloworld.v1.GreeterService/SayHello
-:authority: bufnet
-content-type: application/grpc
+:authority: x.test.example.com
 user-agent: grpc-go/1.56.2
-md-val-bin: bWQtdmFsLWJpbg
+authorization: Bearer abc
 md-val: md-val
-authorization: abc
+md-val-bin: bWQtdmFsLWJpbg
+content-type: application/grpc
 
 
 === client: helloworld.v1.SayHelloRequest

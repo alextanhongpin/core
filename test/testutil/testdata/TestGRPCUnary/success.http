@@ -1,10 +1,10 @@
 GRPC bufconn/helloworld.v1.GreeterService/SayHello
+user-agent: grpc-go/1.56.2
+authorization: Bearer xyz
+:authority: x.test.example.com
 md-val: md-val
 md-val-bin: bWQtdmFsLWJpbg
-:authority: bufnet
 content-type: application/grpc
-user-agent: grpc-go/1.56.2
-authorization: xyz
 
 
 === header

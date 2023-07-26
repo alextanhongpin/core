@@ -15,7 +15,7 @@ import (
 const OriginServer = "server"
 const OriginClient = "client"
 
-const headerTestID = "x-test-id"
+const grpcdumpTestID = "x-grpcdump-testid"
 
 // NOTE: hackish implementation to extract the dump from the grpc server.
 var testIds = make(map[string]*Dump)
@@ -30,7 +30,7 @@ func NewRecorder(ctx context.Context) (context.Context, func() *Dump) {
 	// Generate a new unique id per test.
 	id := uuid.New().String()
 
-	ctx = metadata.AppendToOutgoingContext(ctx, headerTestID, id)
+	ctx = metadata.AppendToOutgoingContext(ctx, grpcdumpTestID, id)
 
 	return ctx, func() *Dump {
 		dump := testIds[id]
@@ -102,103 +102,102 @@ func (s *serverStreamInterceptor) RecvMsg(m interface{}) error {
 }
 
 func StreamInterceptor() grpc.ServerOption {
-	return grpc.StreamInterceptor(
-		func(srv any, stream grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
-
-			ctx := stream.Context()
-			md, ok := metadata.FromIncomingContext(ctx)
-			if !ok {
-				return ErrMetadataNotFound
-			}
-
-			// Extract the test-id from the header.
-			// We do not want to log this, so delete it from the
-			// existing header.
-			id := md.Get(headerTestID)[0]
-			md.Delete(headerTestID)
-
-			w := &serverStreamInterceptor{ServerStream: stream}
-			err := handler(srv, w)
-
-			testIds[id] = &Dump{
-				Addr:           addrFromContext(ctx),
-				FullMethod:     info.FullMethod,
-				Metadata:       md,
-				Messages:       w.messages,
-				Trailer:        w.trailer,
-				Header:         w.header,
-				Status:         NewStatus(err),
-				IsServerStream: info.IsServerStream,
-				IsClientStream: info.IsClientStream,
-				HeaderIdx:      w.headerIdx,
-			}
-
-			return err
-		},
-	)
+	return grpc.StreamInterceptor(StreamServerInterceptor)
 }
 
 func UnaryInterceptor() grpc.ServerOption {
-	return grpc.UnaryInterceptor(
-		func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (resp interface{}, err error) {
-			md, ok := metadata.FromIncomingContext(ctx)
-			if !ok {
-				panic(ErrMetadataNotFound)
-			}
-
-			// Extract the test-id from the header.
-			// We do not want to log this, so delete it from the
-			// existing header.
-			id := md.Get(headerTestID)[0]
-			md.Delete(headerTestID)
-
-			res, err := handler(ctx, req)
-			messages := []Message{origin(OriginClient, req)}
-
-			if err == nil {
-				messages = append(messages, origin(OriginServer, res))
-			}
-
-			testIds[id] = &Dump{
-				Addr:       addrFromContext(ctx),
-				FullMethod: info.FullMethod,
-				Metadata:   md,
-				Messages:   messages,
-				Status:     NewStatus(err),
-			}
-
-			return res, err
-		},
-	)
+	return grpc.UnaryInterceptor(UnaryServerInterceptor)
 }
 
 func WithUnaryInterceptor() grpc.DialOption {
-	return grpc.WithUnaryInterceptor(grpc.UnaryClientInterceptor(
-		func(ctx context.Context, method string, req, res interface{}, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
-			md, ok := metadata.FromOutgoingContext(ctx)
-			if !ok {
-				panic("grpcdump: missing test header id")
-			}
+	return grpc.WithUnaryInterceptor(UnaryClientInterceptor)
+}
 
-			testID := md.Get(headerTestID)[0]
+func StreamServerInterceptor(srv any, stream grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
+	ctx := stream.Context()
+	md, ok := metadata.FromIncomingContext(ctx)
+	if !ok {
+		return ErrMetadataNotFound
+	}
 
-			ctx = metadata.NewOutgoingContext(ctx, md)
+	// Extract the test-id from the header.
+	// We do not want to log this, so delete it from the
+	// existing header.
+	id := md.Get(grpcdumpTestID)[0]
+	md.Delete(grpcdumpTestID)
 
-			var header, trailer metadata.MD
-			opts = append(opts, grpc.Header(&header), grpc.Trailer(&trailer))
+	w := &serverStreamInterceptor{ServerStream: stream}
+	err := handler(srv, w)
 
-			if err := invoker(ctx, method, req, res, cc, opts...); err != nil {
-				return err
-			}
+	testIds[id] = &Dump{
+		Addr:           addrFromContext(ctx),
+		FullMethod:     info.FullMethod,
+		Metadata:       md,
+		Messages:       w.messages,
+		Trailer:        w.trailer,
+		Header:         w.header,
+		Status:         NewStatus(err),
+		IsServerStream: info.IsServerStream,
+		IsClientStream: info.IsClientStream,
+		HeaderIdx:      w.headerIdx,
+	}
 
-			header.Delete(headerTestID)
+	return err
+}
 
-			testIds[testID].Trailer = trailer
-			testIds[testID].Header = header
+func UnaryServerInterceptor(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (resp interface{}, err error) {
+	md, ok := metadata.FromIncomingContext(ctx)
+	if !ok {
+		return nil, ErrMetadataNotFound
+	}
 
-			return nil
-		},
-	))
+	// Extract the test-id from the header.
+	// We do not want to log this, so delete it from the
+	// existing header.
+	id := md.Get(grpcdumpTestID)[0]
+	md.Delete(grpcdumpTestID)
+
+	res, err := handler(ctx, req)
+	messages := []Message{origin(OriginClient, req)}
+
+	if err == nil {
+		messages = append(messages, origin(OriginServer, res))
+	}
+
+	testIds[id] = &Dump{
+		Addr:       addrFromContext(ctx),
+		FullMethod: info.FullMethod,
+		Metadata:   md,
+		Messages:   messages,
+		Status:     NewStatus(err),
+	}
+
+	return res, err
+}
+
+func UnaryClientInterceptor(ctx context.Context, method string, req, res interface{}, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
+	md, ok := metadata.FromOutgoingContext(ctx)
+	if !ok {
+		return ErrMissingGRPCTestID
+	}
+
+	testID := md.Get(grpcdumpTestID)[0]
+
+	ctx = metadata.NewOutgoingContext(ctx, md)
+
+	var header, trailer metadata.MD
+	opts = append(opts, grpc.Header(&header), grpc.Trailer(&trailer))
+
+	if err := invoker(ctx, method, req, res, cc, opts...); err != nil {
+		return err
+	}
+
+	header.Delete(grpcdumpTestID)
+
+	testIds[testID].Trailer = trailer
+	testIds[testID].Header = header
+
+	return nil
 }
 
 func addrFromContext(ctx context.Context) string {

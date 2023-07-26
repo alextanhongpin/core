@@ -1,9 +1,10 @@
 GRPC bufconn/helloworld.v1.GreeterService/ListGreetings
-user-agent: grpc-go/1.56.2
 md-val: md-val
-md-val-bin: bWQtdmFsLWJpbg
-:authority: bufnet
+:authority: x.test.example.com
 content-type: application/grpc
+authorization: Bearer xyz
+md-val-bin: bWQtdmFsLWJpbg
+user-agent: grpc-go/1.56.2
 
 
 === client: helloworld.v1.ListGreetingsRequest
