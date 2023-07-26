@@ -26,24 +26,24 @@ func TestDumpJSON(t *testing.T) {
 	type T = Person
 
 	testutil.DumpJSON(t, p,
-		testutil.IgnoreFields[T]("bornAt"))
+		testutil.IgnoreFields("bornAt"))
 
 	testutil.DumpJSON(t, p,
-		testutil.IgnoreFields[T]("bornAt"),
-		testutil.JSONFileName[T]("person.json"),
+		testutil.IgnoreFields("bornAt"),
+		testutil.FileName("person.json"),
 	)
 
 	testutil.DumpJSON(t, p,
-		testutil.IgnoreFields[T]("bornAt"),
-		testutil.JSONFileName[T]("person_no_ext"),
+		testutil.IgnoreFields("bornAt"),
+		testutil.FileName("person_no_ext"),
 	)
 
 	testutil.DumpJSON(t, p,
-		testutil.IgnoreFields[T]("bornAt"),
-		testutil.JSONFileName[T]("person_yaml.yaml"),
+		testutil.IgnoreFields("bornAt"),
+		testutil.FileName("person_yaml.yaml"),
 	)
 	testutil.DumpJSON(t, p,
-		testutil.JSONCmpOption[T](
+		testutil.CmpOpts(
 			cmpopts.IgnoreMapEntries(func(key string, _ any) bool {
 				return key == "bornAt"
 			}),

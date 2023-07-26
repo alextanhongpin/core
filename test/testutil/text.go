@@ -1,6 +1,7 @@
 package testutil
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/alextanhongpin/core/test/testdump"
@@ -8,18 +9,23 @@ import (
 
 type DumpTextOption = testdump.TextOption
 
-type TextOption func(*TxtOption)
-
-type TxtOption struct {
-	Dump     *DumpTextOption
-	FileName string
+type TextOption interface {
+	isText()
 }
 
 func DumpText(t *testing.T, s string, opts ...TextOption) {
 	t.Helper()
 
-	o := new(TxtOption)
+	o := new(textOption)
 	o.Dump = new(DumpTextOption)
+	for _, opt := range opts {
+		switch ot := opt.(type) {
+		case FileName:
+			o.FileName = string(ot)
+		default:
+			panic(fmt.Errorf("testutil: unhandled text option: %#v", opt))
+		}
+	}
 
 	p := Path{
 		Dir:      "testdata",
@@ -33,21 +39,24 @@ func DumpText(t *testing.T, s string, opts ...TextOption) {
 	}
 }
 
-func TextFileName(name string) TextOption {
-	return func(o *TxtOption) {
-		o.FileName = name
-	}
+type textOptionHook func(*textOption)
+
+func (textOptionHook) IsText() {}
+
+type textOption struct {
+	Dump     *DumpTextOption
+	FileName string
 }
 
-func InspectText(hook func(snapshot, received string) error) TextOption {
-	return func(o *TxtOption) {
+func InspectText(hook func(snapshot, received string) error) textOptionHook {
+	return func(o *textOption) {
 		o.Dump.Hooks = append(o.Dump.Hooks,
 			testdump.CompareHook(hook))
 	}
 }
 
-func InterceptText(hook func(dump string) (string, error)) TextOption {
-	return func(o *TxtOption) {
+func InterceptText(hook func(dump string) (string, error)) textOptionHook {
+	return func(o *textOption) {
 		o.Dump.Hooks = append(o.Dump.Hooks,
 			testdump.MarshalHook(hook))
 	}

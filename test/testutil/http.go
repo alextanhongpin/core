@@ -2,6 +2,7 @@ package testutil
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -18,11 +19,8 @@ type HTTPHook = testdump.HTTPHook
 
 type Path = internal.Path
 
-type HTTPOption func(o *HttpOption)
-
-type HttpOption struct {
-	Dump     *HTTPDumpOption
-	FileName string
+type HTTPOption interface {
+	isHTTP()
 }
 
 func DumpHTTPHandler(t *testing.T, r *http.Request, handler http.HandlerFunc, opts ...HTTPOption) {
@@ -61,10 +59,17 @@ func DumpHTTPHandler(t *testing.T, r *http.Request, handler http.HandlerFunc, op
 func DumpHTTP(t *testing.T, w *http.Response, r *http.Request, opts ...HTTPOption) {
 	t.Helper()
 
-	o := new(HttpOption)
+	o := new(httpOption)
 	o.Dump = new(HTTPDumpOption)
 	for _, opt := range opts {
-		opt(o)
+		switch ot := opt.(type) {
+		case FileName:
+			o.FileName = string(ot)
+		case httpOptionHook:
+			ot(o)
+		default:
+			panic(fmt.Errorf("testutil: unhandled HTTP option: %#v", opt))
+		}
 	}
 
 	p := Path{
@@ -109,76 +114,81 @@ func (t *RoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 	return w, err
 }
 
-func IgnoreHeaders(headers ...string) HTTPOption {
-	return func(o *HttpOption) {
+type httpOptionHook func(o *httpOption)
+
+func (httpOptionHook) isHTTP() {}
+
+type httpOption struct {
+	Dump     *HTTPDumpOption
+	FileName string
+}
+
+func IgnoreHeaders(headers ...string) httpOptionHook {
+	return func(o *httpOption) {
 		o.Dump.Header = append(o.Dump.Header,
 			internal.IgnoreMapEntries(headers...),
 		)
 	}
 }
-func IgnoreTrailers(headers ...string) HTTPOption {
-	return func(o *HttpOption) {
+
+func IgnoreTrailers(headers ...string) httpOptionHook {
+	return func(o *httpOption) {
 		o.Dump.Trailer = append(o.Dump.Trailer,
 			internal.IgnoreMapEntries(headers...),
 		)
 	}
 }
-func IgnoreBodyFields(fields ...string) HTTPOption {
-	return func(o *HttpOption) {
+
+func IgnoreBodyFields(fields ...string) httpOptionHook {
+	return func(o *httpOption) {
 		o.Dump.Body = append(o.Dump.Body,
 			internal.IgnoreMapEntries(fields...),
 		)
 	}
 }
 
-func MaskRequestHeaders(headers ...string) HTTPOption {
-	return func(o *HttpOption) {
+func MaskRequestHeaders(headers ...string) httpOptionHook {
+	return func(o *httpOption) {
 		o.Dump.Hooks = append(o.Dump.Hooks,
 			testdump.MaskRequestHeaders(headers...),
 		)
 	}
 }
 
-func MaskResponseHeaders(headers ...string) HTTPOption {
-	return func(o *HttpOption) {
+func MaskResponseHeaders(headers ...string) httpOptionHook {
+	return func(o *httpOption) {
 		o.Dump.Hooks = append(o.Dump.Hooks,
 			testdump.MaskResponseHeaders(headers...),
 		)
 	}
 }
 
-func MaskRequestBody(fields ...string) HTTPOption {
-	return func(o *HttpOption) {
+func MaskRequestBody(fields ...string) httpOptionHook {
+	return func(o *httpOption) {
 		o.Dump.Hooks = append(o.Dump.Hooks,
 			testdump.MaskRequestBody(fields...),
 		)
 	}
 }
 
-func MaskResponseBody(fields ...string) HTTPOption {
-	return func(o *HttpOption) {
+func MaskResponseBody(fields ...string) httpOptionHook {
+	return func(o *httpOption) {
 		o.Dump.Hooks = append(o.Dump.Hooks,
 			testdump.MaskResponseBody(fields...),
 		)
 	}
 }
 
-func InspectHTTP(hook func(snapshot, received *HTTPDump) error) HTTPOption {
-	return func(o *HttpOption) {
+func InspectHTTP(hook func(snapshot, received *HTTPDump) error) httpOptionHook {
+	return func(o *httpOption) {
 		o.Dump.Hooks = append(o.Dump.Hooks,
 			testdump.CompareHook(hook))
 	}
 }
 
-func InterceptHTTP(hook func(dump *HTTPDump) (*HTTPDump, error)) HTTPOption {
-	return func(o *HttpOption) {
+func InterceptHTTP(hook func(dump *HTTPDump) (*HTTPDump, error)) httpOptionHook {
+	return func(o *httpOption) {
 		o.Dump.Hooks = append(o.Dump.Hooks,
 			testdump.MarshalHook(hook))
-	}
-}
-
-func HTTPFileName(name string) HTTPOption {
-	return func(o *HttpOption) {
-		o.FileName = name
 	}
 }

@@ -322,7 +322,7 @@ func TestHTTPTrailer(t *testing.T) {
 
 	// Dump using round tripper (doesn't consume request body).
 	rt := testutil.DumpRoundTrip(t,
-		testutil.HTTPFileName("round_tripper"),
+		testutil.FileName("round_tripper"),
 		testutil.IgnoreHeaders("Host", "Date"),
 	)
 	client := &http.Client{
@@ -339,7 +339,7 @@ func TestHTTPTrailer(t *testing.T) {
 	body.Seek(0, 0)
 	r.Body = io.NopCloser(body)
 	testutil.DumpHTTP(t, resp, r,
-		testutil.HTTPFileName("dump_http"),
+		testutil.FileName("dump_http"),
 		testutil.IgnoreHeaders("Host", "Date"),
 	)
 }

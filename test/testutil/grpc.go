@@ -2,6 +2,7 @@ package testutil
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/alextanhongpin/core/grpc/grpcdump"
@@ -13,21 +14,25 @@ type GRPCDumpOption = testdump.GRPCOption
 type GRPCDump = testdump.GRPCDump
 type GRPCHook = testdump.GRPCHook
 
-type GRPCOption func(o *GrpcOption)
-
-type GrpcOption struct {
-	Dump     *GRPCDumpOption
-	FileName string
+type GRPCOption interface {
+	isGRPC()
 }
 
 func DumpGRPC(t *testing.T, ctx context.Context, opts ...GRPCOption) context.Context {
 	t.Helper()
 	ctx, flush := grpcdump.NewRecorder(ctx)
 
-	o := new(GrpcOption)
+	o := new(grpcOption)
 	o.Dump = new(GRPCDumpOption)
 	for _, opt := range opts {
-		opt(o)
+		switch ot := opt.(type) {
+		case FileName:
+			o.FileName = string(ot)
+		case grpcOptionHook:
+			ot(o)
+		default:
+			panic(fmt.Errorf("testutil: unhandled gRPC option: %#v", opt))
+		}
 	}
 
 	p := Path{
@@ -48,54 +53,57 @@ func DumpGRPC(t *testing.T, ctx context.Context, opts ...GRPCOption) context.Con
 	return ctx
 }
 
-func IgnoreMetadata(headers ...string) GRPCOption {
-	return func(o *GrpcOption) {
+type grpcOptionHook func(o *grpcOption)
+
+func (grpcOptionHook) isGRPC() {}
+
+type grpcOption struct {
+	Dump     *GRPCDumpOption
+	FileName string
+}
+
+func IgnoreMetadata(headers ...string) grpcOptionHook {
+	return func(o *grpcOption) {
 		o.Dump.Metadata = append(o.Dump.Metadata,
 			internal.IgnoreMapEntries(headers...),
 		)
 	}
 }
 
-func IgnoreMessageFields(fields ...string) GRPCOption {
-	return func(o *GrpcOption) {
+func IgnoreMessageFields(fields ...string) grpcOptionHook {
+	return func(o *grpcOption) {
 		o.Dump.Message = append(o.Dump.Message,
 			internal.IgnoreMapEntries(fields...),
 		)
 	}
 }
 
-func MaskMetadata(headers ...string) GRPCOption {
-	return func(o *GrpcOption) {
+func MaskMetadata(headers ...string) grpcOptionHook {
+	return func(o *grpcOption) {
 		o.Dump.Hooks = append(o.Dump.Hooks,
 			testdump.MaskMetadata(headers...),
 		)
 	}
 }
 
-func MaskMessage(fields ...string) GRPCOption {
-	return func(o *GrpcOption) {
+func MaskMessage(fields ...string) grpcOptionHook {
+	return func(o *grpcOption) {
 		o.Dump.Hooks = append(o.Dump.Hooks,
 			testdump.MaskMessage(fields...),
 		)
 	}
 }
 
-func InspectGRPC(hook func(snapshot, received *GRPCDump) error) GRPCOption {
-	return func(o *GrpcOption) {
+func InspectGRPC(hook func(snapshot, received *GRPCDump) error) grpcOptionHook {
+	return func(o *grpcOption) {
 		o.Dump.Hooks = append(o.Dump.Hooks,
 			testdump.CompareHook(hook))
 	}
 }
 
-func InterceptGRPC(hook func(dump *GRPCDump) (*GRPCDump, error)) GRPCOption {
-	return func(o *GrpcOption) {
+func InterceptGRPC(hook func(dump *GRPCDump) (*GRPCDump, error)) grpcOptionHook {
+	return func(o *grpcOption) {
 		o.Dump.Hooks = append(o.Dump.Hooks,
 			testdump.MarshalHook(hook))
-	}
-}
-
-func GRPCFileName(name string) GRPCOption {
-	return func(o *GrpcOption) {
-		o.FileName = name
 	}
 }

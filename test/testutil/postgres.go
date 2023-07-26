@@ -1,6 +1,7 @@
 package testutil
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/alextanhongpin/core/internal"
@@ -17,23 +18,27 @@ func NewSQL(query string, args []any, result any) *SQL {
 	}
 }
 
-type DumpSQLOption = testdump.SQLOption
-
-type SQLOption func(*SqlOption)
-
-type SqlOption struct {
-	Dump     *DumpSQLOption
-	FileName string
+type SQLOption interface {
+	isSQL()
 }
 
-func DumpPostgres(t *testing.T, dump *testdump.SQL, opts ...SQLOption) {
+type DumpSQLOption = testdump.SQLOption
+
+func DumpPostgres(t *testing.T, dump *SQL, opts ...SQLOption) {
 	t.Helper()
 
-	o := new(SqlOption)
+	o := new(sqlOption)
 	o.Dump = new(DumpSQLOption)
 
 	for _, opt := range opts {
-		opt(o)
+		switch ot := opt.(type) {
+		case FileName:
+			o.FileName = string(ot)
+		case sqlOptionHook:
+			ot(o)
+		default:
+			panic(fmt.Errorf("testutil: unhandled SQL option: %#v", opt))
+		}
 	}
 
 	p := Path{
@@ -48,39 +53,42 @@ func DumpPostgres(t *testing.T, dump *testdump.SQL, opts ...SQLOption) {
 	}
 }
 
-func IgnoreResultFields(fields ...string) SQLOption {
-	return func(o *SqlOption) {
+type sqlOptionHook func(*sqlOption)
+
+func (s sqlOptionHook) isSQL() {}
+
+type sqlOption struct {
+	Dump     *DumpSQLOption
+	FileName string
+}
+
+func IgnoreResultFields(fields ...string) sqlOptionHook {
+	return func(o *sqlOption) {
 		o.Dump.Result = append(o.Dump.Result, internal.IgnoreMapEntries(fields...))
 	}
 }
 
-func IgnoreArgs(fields ...string) SQLOption {
-	return func(o *SqlOption) {
+func IgnoreArgs(fields ...string) sqlOptionHook {
+	return func(o *sqlOption) {
 		o.Dump.Args = append(o.Dump.Args, internal.IgnoreMapEntries(fields...))
 	}
 }
 
-func IgnoreVars(fields ...string) SQLOption {
-	return func(o *SqlOption) {
+func IgnoreVars(fields ...string) sqlOptionHook {
+	return func(o *sqlOption) {
 		o.Dump.Vars = append(o.Dump.Vars, internal.IgnoreMapEntries(fields...))
 	}
 }
 
-func SQLFileName(name string) SQLOption {
-	return func(o *SqlOption) {
-		o.FileName = name
-	}
-}
-
-func InspectSQL(hook func(snapshot, received *SQL) error) SQLOption {
-	return func(o *SqlOption) {
+func InspectSQL(hook func(snapshot, received *SQL) error) sqlOptionHook {
+	return func(o *sqlOption) {
 		o.Dump.Hooks = append(o.Dump.Hooks,
 			testdump.CompareHook(hook))
 	}
 }
 
-func InterceptSQL(hook func(t *SQL) (*SQL, error)) SQLOption {
-	return func(o *SqlOption) {
+func InterceptSQL(hook func(t *SQL) (*SQL, error)) sqlOptionHook {
+	return func(o *sqlOption) {
 		o.Dump.Hooks = append(o.Dump.Hooks,
 			testdump.MarshalHook(hook))
 	}

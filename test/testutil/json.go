@@ -2,6 +2,7 @@ package testutil
 
 import (
 	"encoding/json"
+	"fmt"
 	"testing"
 
 	"github.com/alextanhongpin/core/internal"
@@ -10,21 +11,29 @@ import (
 	"github.com/google/go-cmp/cmp"
 )
 
-type JSONOption[T any] func(*JsonOption[T])
-
-type JsonOption[T any] struct {
-	Dump     *testdump.JSONOption[T]
-	FileName string
+type JSONOption interface {
+	isJSON()
 }
 
-func DumpJSON[T any](t *testing.T, v T, opts ...JSONOption[T]) {
+func DumpJSON[T any](t *testing.T, v T, opts ...JSONOption) {
 	t.Helper()
 
-	o := new(JsonOption[T])
+	o := new(jsonOption[T])
 	o.Dump = new(testdump.JSONOption[T])
 
 	for _, opt := range opts {
-		opt(o)
+		switch ot := opt.(type) {
+		case JSONCmpOption:
+			o.Dump.Body = append(o.Dump.Body, ot...)
+		case CmpOption:
+			o.Dump.Body = append(o.Dump.Body, ot...)
+		case FileName:
+			o.FileName = string(ot)
+		case jsonOptionHook[T]:
+			ot(o)
+		default:
+			panic(fmt.Errorf("testutil: unhandled JSON option: %#v", opt))
+		}
 	}
 
 	p := Path{
@@ -39,26 +48,25 @@ func DumpJSON[T any](t *testing.T, v T, opts ...JSONOption[T]) {
 	}
 }
 
-func IgnoreFields[T any](fields ...string) JSONOption[T] {
-	return func(o *JsonOption[T]) {
-		o.Dump.Body = append(o.Dump.Body, internal.IgnoreMapEntries(fields...))
-	}
+type jsonOptionHook[T any] func(*jsonOption[T])
+
+func (j jsonOptionHook[T]) isJSON() {}
+
+type jsonOption[T any] struct {
+	Dump     *testdump.JSONOption[T]
+	FileName string
 }
 
-func JSONFileName[T any](name string) JSONOption[T] {
-	return func(o *JsonOption[T]) {
-		o.FileName = name
-	}
+type JSONCmpOption []cmp.Option
+
+func (x JSONCmpOption) isJSON() {}
+
+func IgnoreFields(fields ...string) JSONCmpOption {
+	return JSONCmpOption([]cmp.Option{internal.IgnoreMapEntries(fields...)})
 }
 
-func JSONCmpOption[T any](opts ...cmp.Option) JSONOption[T] {
-	return func(o *JsonOption[T]) {
-		o.Dump.Body = append(o.Dump.Body, opts...)
-	}
-}
-
-func MaskFields[T any](fields ...string) JSONOption[T] {
-	return func(o *JsonOption[T]) {
+func MaskFields[T any](fields ...string) jsonOptionHook[T] {
+	return func(o *jsonOption[T]) {
 		o.Dump.Hooks = append(o.Dump.Hooks, testdump.MarshalHook(func(t T) (T, error) {
 			b, err := json.Marshal(t)
 			if err != nil {
@@ -80,15 +88,15 @@ func MaskFields[T any](fields ...string) JSONOption[T] {
 	}
 }
 
-func InspectJSON[T any](hook func(snapshot, received T) error) JSONOption[T] {
-	return func(o *JsonOption[T]) {
+func InspectJSON[T any](hook func(snapshot, received T) error) jsonOptionHook[T] {
+	return func(o *jsonOption[T]) {
 		o.Dump.Hooks = append(o.Dump.Hooks,
 			testdump.CompareHook(hook))
 	}
 }
 
-func InterceptJSON[T any](hook func(t T) (T, error)) JSONOption[T] {
-	return func(o *JsonOption[T]) {
+func InterceptJSON[T any](hook func(t T) (T, error)) jsonOptionHook[T] {
+	return func(o *jsonOption[T]) {
 		o.Dump.Hooks = append(o.Dump.Hooks,
 			testdump.MarshalHook(hook))
 	}

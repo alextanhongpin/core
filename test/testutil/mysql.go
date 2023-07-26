@@ -1,6 +1,7 @@
 package testutil
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/alextanhongpin/core/test/testdump"
@@ -11,14 +12,21 @@ type MySQLOption struct {
 	FileName string
 }
 
-func DumpMySQL(t *testing.T, dump *testdump.SQL, opts ...SQLOption) {
+func DumpMySQL(t *testing.T, dump *SQL, opts ...SQLOption) {
 	t.Helper()
 
-	o := new(SqlOption)
+	o := new(sqlOption)
 	o.Dump = new(DumpSQLOption)
 
 	for _, opt := range opts {
-		opt(o)
+		switch ot := opt.(type) {
+		case FileName:
+			o.FileName = string(ot)
+		case sqlOptionHook:
+			ot(o)
+		default:
+			panic(fmt.Errorf("testutil: unhandled SQL option: %#v", opt))
+		}
 	}
 
 	p := Path{

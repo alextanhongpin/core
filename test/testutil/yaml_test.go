@@ -28,7 +28,7 @@ And to rinse and repeat it all again`,
 	}
 
 	type T = Person
-	testutil.DumpYAML(t, p, testutil.IgnoreKeys[T]("BornAt"))
+	testutil.DumpYAML(t, p, testutil.IgnoreKeys("BornAt"))
 }
 
 func TestDumpYAMLNonStruct(t *testing.T) {

@@ -64,7 +64,7 @@ func TestMySQLRepository(t *testing.T) {
 		t:    t,
 		dbtx: db,
 		opts: []testutil.SQLOption{
-			testutil.SQLFileName("find_user"),
+			testutil.FileName("find_user"),
 		},
 	}
 	repo := newMockUserRepository(dbtx, "mysql")
