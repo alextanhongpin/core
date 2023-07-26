@@ -1,10 +1,10 @@
 GRPC bufconn/helloworld.v1.GreeterService/RecordGreetings
-user-agent: grpc-go/1.56.2
+:authority: x.test.example.com
 authorization: Bearer xyz
-md-val-bin: bWQtdmFsLWJpbg
 content-type: application/grpc
 md-val: md-val
-:authority: x.test.example.com
+md-val-bin: bWQtdmFsLWJpbg
+user-agent: grpc-go/1.56.2
 
 
 === header

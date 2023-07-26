@@ -1,8 +1,8 @@
 GRPC bufconn/helloworld.v1.GreeterService/ListGreetings
-md-val: md-val
 :authority: x.test.example.com
-content-type: application/grpc
 authorization: Bearer xyz
+content-type: application/grpc
+md-val: md-val
 md-val-bin: bWQtdmFsLWJpbg
 user-agent: grpc-go/1.56.2
 

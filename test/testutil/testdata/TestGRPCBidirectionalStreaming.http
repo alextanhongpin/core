@@ -1,10 +1,10 @@
 GRPC bufconn/helloworld.v1.GreeterService/Chat
+:authority: x.test.example.com
+authorization: Bearer xyz
 content-type: application/grpc
 md-val: md-val
 md-val-bin: bWQtdmFsLWJpbg
-:authority: x.test.example.com
 user-agent: grpc-go/1.56.2
-authorization: Bearer xyz
 
 
 === header

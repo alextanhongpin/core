@@ -2,9 +2,11 @@ package testutil_test
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"testing"
 
 	pb "github.com/alextanhongpin/core/grpc/examples/helloworld/v1"
@@ -12,22 +14,39 @@ import (
 	"github.com/alextanhongpin/core/grpc/grpctest"
 	"github.com/alextanhongpin/core/test/testutil"
 	"github.com/stretchr/testify/assert"
+	"golang.org/x/oauth2"
 	"google.golang.org/genproto/googleapis/rpc/errdetails"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/credentials/oauth"
+	"google.golang.org/grpc/examples/data"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 )
 
 func TestMain(m *testing.M) {
+	cert, err := tls.LoadX509KeyPair(data.Path("x509/server_cert.pem"), data.Path("x509/server_key.pem"))
+	if err != nil {
+		panic(err)
+	}
+
+	opts := []grpc.ServerOption{
+		// Setup grpcdump on the server side.
+		// Also set on the client side, but only the `WithUnaryInterceptor`.
+		grpcdump.StreamInterceptor(),
+		grpc.ChainUnaryInterceptor(
+			grpcdump.UnaryServerInterceptor,
+			ensureValidToken,
+		),
+		grpc.Creds(credentials.NewServerTLSFromCert(&cert)),
+	}
+
 	stop := grpctest.ListenAndServe(func(srv *grpc.Server) {
 		// Register your server here.
 		pb.RegisterGreeterServiceServer(srv, &server{})
 	},
-		// Setup grpcdump on the server side.
-		// Also set on the client side, but only the `WithUnaryInterceptor`.
-		grpcdump.UnaryInterceptor(),
-		grpcdump.StreamInterceptor(),
+		opts...,
 	)
 
 	code := m.Run()
@@ -51,7 +70,7 @@ func TestGRPCClientStreaming(t *testing.T) {
 
 	assert := assert.New(t)
 	stream, err := client.RecordGreetings(ctx)
-	assert.Nil(err)
+	assert.Nil(err, err)
 
 	// Send 5 greetings.
 	n := 5
@@ -173,19 +192,11 @@ func TestGRPCUnary(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		conn := grpcDialContext(t, ctx)
 
-		// Send token.
-		md := metadata.New(map[string]string{
-			"authorization": "xyz",
-		})
-
-		// This will override all other context, so call this first.
-		ctx = metadata.NewOutgoingContext(ctx, md)
-
 		// Create a new client.
 		client := pb.NewGreeterServiceClient(conn)
 
 		// Create a new recorder.
-		ctx = testutil.DumpGRPC(t, ctx)
+		ctx = testutil.DumpGRPC(t, ctx, testutil.MaskMetadata("authorization"))
 
 		ctx = metadata.AppendToOutgoingContext(ctx,
 			"md-val", "md-val",
@@ -199,15 +210,10 @@ func TestGRPCUnary(t *testing.T) {
 	})
 
 	t.Run("unauthorized", func(t *testing.T) {
+		ctx := context.Background()
+		ctx = context.WithValue(ctx, tokenCtxKey, "abc")
+
 		conn := grpcDialContext(t, ctx)
-
-		// Send token.
-		md := metadata.New(map[string]string{
-			"authorization": "abc",
-		})
-
-		// This will override all other context, so call this first.
-		ctx = metadata.NewOutgoingContext(ctx, md)
 
 		// Create a new client.
 		client := pb.NewGreeterServiceClient(conn)
@@ -234,16 +240,6 @@ type server struct {
 
 // SayHello implements helloworld.GreeterServer
 func (s *server) SayHello(ctx context.Context, in *pb.SayHelloRequest) (*pb.SayHelloResponse, error) {
-	md, ok := metadata.FromIncomingContext(ctx)
-	if !ok {
-		return nil, status.Error(codes.Unauthenticated, "no token present")
-	}
-
-	token := md.Get("authorization")[0]
-	if token != "xyz" {
-		return nil, status.Error(codes.Unauthenticated, "token expired")
-	}
-
 	ctx = metadata.NewOutgoingContext(ctx, nil)
 	ctx = metadata.AppendToOutgoingContext(ctx,
 		"header-key", "header-val",
@@ -394,23 +390,6 @@ func (s *server) Chat(stream pb.GreeterService_ChatServer) error {
 	}
 }
 
-func grpcDialContext(t *testing.T, ctx context.Context) *grpc.ClientConn {
-	conn, err := grpctest.DialContext(ctx,
-		grpc.WithInsecure(),
-		// Setup grpcdump on the client side.
-		grpcdump.WithUnaryInterceptor(),
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	t.Cleanup(func() {
-		conn.Close()
-	})
-
-	return conn
-}
-
 func testServerStreaming(t *testing.T, req *pb.ListGreetingsRequest) error {
 	t.Helper()
 
@@ -450,3 +429,64 @@ func testServerStreaming(t *testing.T, req *pb.ListGreetingsRequest) error {
 
 	return <-ch
 }
+
+func ensureValidToken(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
+	md, ok := metadata.FromIncomingContext(ctx)
+	if !ok {
+		return nil, status.Error(codes.InvalidArgument, "missing metadata")
+	}
+
+	authz := md["authorization"]
+	if len(authz) < 1 {
+		return nil, status.Error(codes.Unauthenticated, "no token present")
+	}
+
+	token := strings.TrimPrefix(authz[0], "Bearer ")
+	if token != "xyz" {
+		return nil, status.Error(codes.Unauthenticated, "token expired")
+	}
+
+	return handler(ctx, req)
+}
+
+func grpcDialContext(t *testing.T, ctx context.Context, opts ...grpc.DialOption) *grpc.ClientConn {
+	t.Helper()
+
+	token, ok := ctx.Value(tokenCtxKey).(string)
+	if !ok {
+		// Assign a default token.
+		token = "xyz"
+	}
+
+	perRPC := oauth.TokenSource{
+		TokenSource: oauth2.StaticTokenSource(&oauth2.Token{
+			AccessToken: token,
+		}),
+	}
+
+	// Setup credentials for the connection.
+	creds, err := credentials.NewClientTLSFromFile(data.Path("x509/ca_cert.pem"), "x.test.example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	conn, err := grpctest.DialContext(ctx,
+		// Setup grpcdump on the client side.
+		grpcdump.WithUnaryInterceptor(),
+		grpc.WithPerRPCCredentials(perRPC),
+		grpc.WithTransportCredentials(creds),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Cleanup(func() {
+		conn.Close()
+	})
+
+	return conn
+}
+
+type ctxKey string
+
+var tokenCtxKey ctxKey = "token"

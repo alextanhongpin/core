@@ -1,10 +1,10 @@
 GRPC bufconn/helloworld.v1.GreeterService/ListGreetings
 :authority: x.test.example.com
-content-type: application/grpc
 authorization: Bearer xyz
+content-type: application/grpc
+md-val: md-val
 md-val-bin: bWQtdmFsLWJpbg
 user-agent: grpc-go/1.56.2
-md-val: md-val
 
 
 === client: helloworld.v1.ListGreetingsRequest
@@ -14,8 +14,8 @@ md-val: md-val
 
 
 === header
-header-key-bin: aGVhZGVyLXZhbC1iaW4
 header-key: header-val
+header-key-bin: aGVhZGVyLXZhbC1iaW4
 
 
 === server stream: helloworld.v1.ListGreetingsResponse
@@ -56,5 +56,5 @@ header-key: header-val
 }
 
 === trailer
-trailer-key-bin: dHJhaWxlci12YWwtYmlu
 trailer-key: trailer-val
+trailer-key-bin: dHJhaWxlci12YWwtYmlu
