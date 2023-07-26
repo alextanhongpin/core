@@ -2,7 +2,6 @@ package testdump
 
 import (
 	"bytes"
-	"errors"
 	"os"
 
 	"github.com/alextanhongpin/core/internal"
@@ -92,17 +91,6 @@ type MarshalFunc[T any] (func(T) ([]byte, error))
 
 func (f MarshalFunc[T]) Marshal(t T) ([]byte, error) {
 	return f(t)
-}
-
-type MarshalFuncType[T, V any] (func(V) ([]byte, error))
-
-func (f MarshalFuncType[T, V]) Marshal(t T) ([]byte, error) {
-	v, ok := any(t).(V)
-	if ok {
-		return f(v)
-	}
-
-	return nil, errors.New("type casting failed")
 }
 
 type UnmarshalFunc[T any] (func([]byte) (T, error))
