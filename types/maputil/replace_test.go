@@ -25,8 +25,8 @@ func TestReplace(t *testing.T) {
 
 		type T = map[string]any
 		assert.Equal(t, want, keys)
-		testutil.DumpJSON(t, m, testutil.JSONFileName[T]("before"))
-		testutil.DumpJSON(t, got, testutil.JSONFileName[T]("after"))
+		testutil.DumpJSON(t, m, testutil.FileName("before"))
+		testutil.DumpJSON(t, got, testutil.FileName("after"))
 	})
 
 	t.Run("string", func(t *testing.T) {
@@ -49,8 +49,8 @@ func TestReplace(t *testing.T) {
 
 		assert.Equal(t, want, keys)
 		type T = map[string]any
-		testutil.DumpJSON(t, m, testutil.JSONFileName[T]("before"))
-		testutil.DumpJSON(t, got, testutil.JSONFileName[T]("after"))
+		testutil.DumpJSON(t, m, testutil.FileName("before"))
+		testutil.DumpJSON(t, got, testutil.FileName("after"))
 	})
 
 	t.Run("float64", func(t *testing.T) {
@@ -72,8 +72,8 @@ func TestReplace(t *testing.T) {
 		sort.Strings(keys)
 		assert.Equal(t, want, keys)
 		type T = map[string]any
-		testutil.DumpJSON(t, m, testutil.JSONFileName[T]("before"))
-		testutil.DumpJSON(t, got, testutil.JSONFileName[T]("after"))
+		testutil.DumpJSON(t, m, testutil.FileName("before"))
+		testutil.DumpJSON(t, got, testutil.FileName("after"))
 	})
 }
 
