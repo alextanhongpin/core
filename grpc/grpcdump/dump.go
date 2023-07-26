@@ -5,9 +5,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"log"
 	"path/filepath"
 	"strings"
 
@@ -25,8 +23,6 @@ const (
 	headerPrefix       = "=== header"
 	trailerPrefix      = "=== trailer"
 )
-
-var ErrInvalidDumpFormat = errors.New("grpcdump: invalid dump format")
 
 // https://github.com/bradleyjkemp/grpc-tools/blob/master/grpc-dump/README.md
 type Dump struct {
@@ -90,18 +86,18 @@ func (d *Dump) FromText(b []byte) error {
 	scanner := bufio.NewScanner(bytes.NewReader(b))
 
 	if !scanner.Scan() {
-		return ErrInvalidDumpFormat
+		return ErrInvalidDump
 	}
 
 	text := scanner.Text()
-	if !strings.HasPrefix(text, linePrefix) {
-		return fmt.Errorf("%w: invalid line %q", ErrInvalidDumpFormat, text)
+	if err := InvalidLineError(text); err != nil {
+		return err
 	}
 
 	text = strings.TrimPrefix(text, linePrefix)
 	addr, fullMethod, ok := strings.Cut(text, "/")
 	if !ok {
-		return fmt.Errorf("%w: invalid line %q", ErrInvalidDumpFormat, text)
+		return InvalidMethodError(text)
 	}
 
 	d.Addr = addr
@@ -136,7 +132,7 @@ func (d *Dump) FromText(b []byte) error {
 			text = strings.TrimPrefix(text, separator)
 			origin, name, ok := strings.Cut(text, ": ")
 			if !ok {
-				return ErrInvalidDumpFormat
+				return InvalidOriginError(text)
 			}
 
 			if origin == clientStreamPrefix && !d.IsClientStream {
@@ -146,11 +142,11 @@ func (d *Dump) FromText(b []byte) error {
 			}
 
 			if d.IsClientStream && origin != clientStreamPrefix {
-				panic(fmt.Errorf("%w: bad client stream prefix", ErrInvalidDumpFormat))
+				panic(BadClientStreamPrefixError(origin))
 			}
 
 			if d.IsServerStream && origin != serverStreamPrefix {
-				panic(fmt.Errorf("%w: bad server stream prefix", ErrInvalidDumpFormat))
+				panic(BadServerStreamPrefixError(origin))
 			}
 
 			d.Messages = append(d.Messages, Message{
@@ -255,7 +251,7 @@ func writeMessages(sb *strings.Builder, isClientStream, isServerStream bool, msg
 		} else if !isServer && !isClientStream {
 			prefix = clientPrefix
 		} else {
-			log.Fatalf("grpcdump: unknown message origin: %q", msg.Origin)
+			return UnknownMessageOriginError(msg.Origin)
 		}
 		header := fmt.Sprintf("%s: %s", prefix, msg.Name)
 
@@ -311,7 +307,7 @@ func scanMetadata(scanner *bufio.Scanner) (metadata.MD, error) {
 
 		k, v, ok := strings.Cut(text, ": ")
 		if !ok {
-			return nil, fmt.Errorf("%w: invalid metadata %q", ErrInvalidDumpFormat, text)
+			return nil, InvalidMetadataError(text)
 		}
 
 		if isBinHeader(k) {

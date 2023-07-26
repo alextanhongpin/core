@@ -12,10 +12,6 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 )
 
-// TODO: Separate grpctest and grpcdump
-// Update unary client to accept calloptions to extract header.
-// Add metadata and trailers
-
 const OriginServer = "server"
 const OriginClient = "client"
 
@@ -112,7 +108,7 @@ func StreamInterceptor() grpc.ServerOption {
 			ctx := stream.Context()
 			md, ok := metadata.FromIncomingContext(ctx)
 			if !ok {
-				panic("grpcdump: no metadata from incoming context")
+				return ErrMetadataNotFound
 			}
 
 			// Extract the test-id from the header.
@@ -147,7 +143,7 @@ func UnaryInterceptor() grpc.ServerOption {
 		func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (resp interface{}, err error) {
 			md, ok := metadata.FromIncomingContext(ctx)
 			if !ok {
-				panic("grpcdump: no metadata from incoming context")
+				panic(ErrMetadataNotFound)
 			}
 
 			// Extract the test-id from the header.
@@ -222,7 +218,7 @@ func origin(origin string, v any) Message {
 		ProtoReflect() protoreflect.Message
 	})
 	if !ok {
-		panic("message is not valid")
+		panic("grpcdump: message is not valid")
 	}
 
 	return Message{
