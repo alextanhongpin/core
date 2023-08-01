@@ -18,7 +18,7 @@ type task[T any] interface {
 
 var Stopped = errors.New("background: already stopped")
 
-type Group[T any] struct {
+type Worker[T any] struct {
 	sem   *semaphore.Weighted
 	wg    sync.WaitGroup
 	ch    chan T
@@ -26,32 +26,39 @@ type Group[T any] struct {
 	task  task[T]
 	begin sync.Once
 	end   sync.Once
+	set   sync.Once
 }
 
 // New returns a new background manager.
-func New[T any](task task[T]) (*Group[T], func()) {
-	g := &Group[T]{
+func New[T any](task task[T]) (*Worker[T], func()) {
+	w := &Worker[T]{
 		sem:  semaphore.NewWeighted(int64(maxWorkers)),
 		ch:   make(chan T),
 		done: make(chan struct{}),
 		task: task,
 	}
 
-	return g, g.stop
+	return w, w.stop
+}
+
+func (w *Worker[T]) SetMaxWorkers(n int) {
+	w.set.Do(func() {
+		w.sem = semaphore.NewWeighted(int64(n))
+	})
 }
 
 // Send sends a new message to the channel.
-func (g *Group[T]) Send(t T) error {
-	g.init()
+func (w *Worker[T]) Send(t T) error {
+	w.init()
 
 	select {
-	case <-g.done:
+	case <-w.done:
 		return Stopped
-	case g.ch <- t:
+	case w.ch <- t:
 		// The background worker could be stopped after successfully sending to the
 		// channel too.
 		select {
-		case <-g.done:
+		case <-w.done:
 			return Stopped
 		default:
 			return nil
@@ -60,59 +67,59 @@ func (g *Group[T]) Send(t T) error {
 }
 
 // init inits the goroutine that listens for messages from the channel.
-func (g *Group[T]) init() {
-	g.begin.Do(func() {
-		g.wg.Add(1)
+func (w *Worker[T]) init() {
+	w.begin.Do(func() {
+		w.wg.Add(1)
 
 		go func() {
-			defer g.wg.Done()
+			defer w.wg.Done()
 
-			g.worker()
+			w.worker()
 		}()
 	})
 }
 
 // stop stops the channel and waits for the channel messages to be flushed.
-func (g *Group[T]) stop() {
-	g.end.Do(func() {
-		close(g.done)
+func (w *Worker[T]) stop() {
+	w.end.Do(func() {
+		close(w.done)
 
-		g.wg.Wait()
+		w.wg.Wait()
 	})
 }
 
 // worker listens to the channel for new messages.
-func (g *Group[T]) worker() {
-	defer g.flush()
+func (w *Worker[T]) worker() {
+	defer w.flush()
 
 	for {
 		select {
-		case <-g.done:
+		case <-w.done:
 			return
-		case v := <-g.ch:
-			g.exec(v)
+		case v := <-w.ch:
+			w.exec(v)
 		}
 	}
 }
 
-func (g *Group[T]) exec(v T) {
+func (w *Worker[T]) exec(v T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
 	defer cancel()
 
-	if err := g.sem.Acquire(ctx, 1); err != nil {
+	if err := w.sem.Acquire(ctx, 1); err != nil {
 		// Execute the task immediately if we fail to acquire semaphore.
-		g.task.Exec(v)
+		w.task.Exec(v)
 
 		return
 	}
 
 	go func() {
-		defer g.sem.Release(1)
+		defer w.sem.Release(1)
 
-		g.task.Exec(v)
+		w.task.Exec(v)
 	}()
 }
 
-func (g *Group[T]) flush() {
-	_ = g.sem.Acquire(context.Background(), int64(maxWorkers))
+func (w *Worker[T]) flush() {
+	_ = w.sem.Acquire(context.Background(), int64(maxWorkers))
 }
