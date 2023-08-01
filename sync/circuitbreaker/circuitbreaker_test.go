@@ -11,6 +11,8 @@ import (
 )
 
 func TestCircuitBreaker(t *testing.T) {
+	var wantErr = errors.New("want error")
+
 	assert := assert.New(t)
 
 	cb := circuitbreaker.New()
@@ -18,55 +20,52 @@ func TestCircuitBreaker(t *testing.T) {
 
 	assert.Equal(circuitbreaker.Closed, cb.Status())
 
+	// Hit the failure threshold first.
+	assert.ErrorIs(fire(10, wantErr, cb), wantErr)
+	assert.Equal(circuitbreaker.Closed, cb.Status())
+
+	// Above failure threshold, circuitbreaker becomes open.
+	assert.ErrorIs(fire(1, wantErr, cb), wantErr)
+	assert.ErrorIs(fire(1, wantErr, cb), circuitbreaker.Unavailable)
+	assert.Equal(circuitbreaker.Open, cb.Status())
+	assert.True(cb.ResetIn() > 0)
+
+	// After timeout, it becomes half-open. But we need to trigger it once to
+	// update the status first.
+	time.Sleep(105 * time.Millisecond)
+	assert.Nil(fire(1, nil, cb))
+	assert.Equal(circuitbreaker.HalfOpen, cb.Status())
+	assert.Equal(time.Duration(0), cb.ResetIn())
+
+	// Hit the success threshold first.
+	assert.Nil(fire(4, nil, cb))
+	assert.Equal(circuitbreaker.HalfOpen, cb.Status())
+
+	// After success threshold, it becomes closed again.
+	assert.Nil(fire(1, nil, cb))
+	assert.Equal(circuitbreaker.Closed, cb.Status())
+}
+
+type circuit interface {
+	Do(func() error) error
+}
+
+func fire(n int, err error, cb circuit) error {
 	var wg sync.WaitGroup
-	wg.Add(10)
-	for i := 0; i < 10; i++ {
+	wg.Add(n - 1)
+
+	for i := 0; i < n-1; i++ {
 		go func() {
 			defer wg.Done()
 
-			err := cb.Do(func() error {
-				return errors.New("bad request")
+			_ = cb.Do(func() error {
+				return err
 			})
-			t.Log(err, cb.Status())
 		}()
 	}
 	wg.Wait()
 
-	conc := make(chan bool)
-	done := make(chan bool)
-
-	go func() {
-		<-conc
-		err := cb.Do(func() error {
-			return errors.New("bad request")
-		})
-		t.Log(err, cb.Status())
-		close(done)
-	}()
-
-	// Trigger concurrent run.
-	close(conc)
-	<-done
-	err := cb.Do(func() error { return nil })
-
-	assert.ErrorIs(err, circuitbreaker.Unavailable, err)
-	assert.Equal(circuitbreaker.Open, cb.Status())
-	assert.True(cb.ResetIn() > 0)
-
-	time.Sleep(110 * time.Millisecond)
-
-	_ = cb.Do(func() error { return nil })
-	assert.Equal(circuitbreaker.HalfOpen, cb.Status())
-	assert.Equal(time.Duration(0), cb.ResetIn())
-
-	for i := 0; i < 10; i++ {
-		err := cb.Do(func() error {
-			return nil
-		})
-		t.Log(err, cb.Status())
-	}
-
-	err = cb.Do(func() error { return nil })
-	assert.Nil(err)
-	assert.Equal(circuitbreaker.Closed, cb.Status())
+	return cb.Do(func() error {
+		return err
+	})
 }

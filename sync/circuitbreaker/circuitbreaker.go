@@ -1,3 +1,8 @@
+// package circuitbreaker is an in-memory implementation of circuit breaker.
+// The idea is that each local node (server) should maintain it's own knowledge
+// of the service availability, instead of depending on external infrastructure
+// like distributed cache.
+
 package circuitbreaker
 
 import (
@@ -58,7 +63,12 @@ func (g *Group) Do(fn func() error) error {
 // ResetIn returns the wait time before the service can be called again.
 func (g *Group) ResetIn() time.Duration {
 	if g.Status().IsOpen() {
-		return g.deadline.Sub(g.now())
+		delta := g.deadline.Sub(g.now())
+		if delta < 0 {
+			return 0
+		}
+
+		return delta
 	}
 
 	return 0
