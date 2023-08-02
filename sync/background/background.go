@@ -70,6 +70,7 @@ func (w *Worker[T]) Send(t T) error {
 func (w *Worker[T]) init() {
 	w.begin.Do(func() {
 		w.wg.Add(1)
+		w.set.Do(func() {})
 
 		go func() {
 			defer w.wg.Done()
