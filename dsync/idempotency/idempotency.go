@@ -11,7 +11,7 @@ import (
 )
 
 var (
-	ErrParallelRequest = errors.New("idempotency: parallel request running")
+	ErrRequestInFlight = errors.New("idempotency: request in flight")
 	ErrRequestMismatch = errors.New("idempotency: request payload mismatch")
 )
 
@@ -30,106 +30,65 @@ const (
 
 var keyTemplate = Key("idempotency:%s")
 
-type Option[T comparable, V any] struct {
-	ExecTimeout     time.Duration
-	RetentionPeriod time.Duration
-	Handler         func(ctx context.Context, req T) (V, error)
+type data[T, V any] struct {
+	Status   Status `json:"status"`
+	Request  T      `json:"request,omitempty"`
+	Response V      `json:"response,omitempty"`
 }
 
-type Group[T comparable, V any] struct {
-	client          *redis.Client
-	execTimeout     time.Duration
-	retentionPeriod time.Duration
-	handler         func(ctx context.Context, req T) (V, error)
+type store[T, V any] interface {
+	lock(ctx context.Context, idempotencyKey string, lockTimeout time.Duration) (bool, error)
+	unlock(ctx context.Context, idempotencyKey string) error
+	load(ctx context.Context, idempotencyKey string) (*data[T, V], error)
+	save(ctx context.Context, idempotencyKey string, d data[T, V], duration time.Duration) error
 }
 
-func New[T comparable, V any](client *redis.Client, opt Option[T, V]) *Group[T, V] {
-	if opt.ExecTimeout == 0 {
-		opt.ExecTimeout = 1 * time.Minute
-	}
-	if opt.RetentionPeriod == 0 {
-		opt.RetentionPeriod = 24 * time.Hour
-	}
+type redisStore[T any, V any] struct {
+	client *redis.Client
+}
 
-	return &Group[T, V]{
-		client:          client,
-		execTimeout:     opt.ExecTimeout,
-		retentionPeriod: opt.RetentionPeriod,
-		handler:         opt.Handler,
+func newRedisStore[T, V any](client *redis.Client) *redisStore[T, V] {
+	return &redisStore[T, V]{
+		client: client,
 	}
 }
 
-// TODO: Idempotent exec.
-func (r *Group[T, V]) Query(ctx context.Context, idempotencyKey string, req T) (V, error) {
-	k := keyTemplate.Format(idempotencyKey)
+func (s *redisStore[T, V]) lock(ctx context.Context, idempotencyKey string, lockTimeout time.Duration) (bool, error) {
+	key := keyTemplate.Format(idempotencyKey)
 
-	// Set the idempotency operation status to started.
-	var v V
-	ok, err := r.client.SetNX(ctx, k, fmt.Sprintf(`{"status":%q}`, Started), r.execTimeout).Result()
+	ok, err := s.client.SetNX(ctx, key, fmt.Sprintf(`{"status":%q}`, Started), lockTimeout).Result()
+	return ok, err
+}
+
+func (s *redisStore[T, V]) unlock(ctx context.Context, idempotencyKey string) error {
+	key := keyTemplate.Format(idempotencyKey)
+
+	return s.client.Del(ctx, key).Err()
+}
+
+func (s *redisStore[T, V]) load(ctx context.Context, idempotencyKey string) (*data[T, V], error) {
+
+	key := keyTemplate.Format(idempotencyKey)
+
+	b, err := s.client.Get(ctx, key).Bytes()
 	if err != nil {
-		return v, err
-	}
-
-	// Successfully set, now do the idempotent operation and store the request/response.
-	if ok {
-		v, err = r.handler(ctx, req)
-		if err != nil {
-			// If there is an error, delete the key.
-			return v, errors.Join(err, r.client.Del(ctx, k).Err())
-		}
-
-		return v, r.save(ctx, idempotencyKey, req, v, r.retentionPeriod)
-	}
-
-	// Already exists, fetch from cache.
-	// The status may still be started.
-	return r.load(ctx, idempotencyKey, req)
-}
-
-func (r *Group[T, V]) load(ctx context.Context, key string, req T) (V, error) {
-	k := keyTemplate.Format(key)
-
-	// Compare the request field first.
-	var v V
-	b, err := r.client.Get(ctx, k).Bytes()
-	if err != nil {
-		return v, err
+		return nil, err
 	}
 
 	var d data[T, V]
 	if err := json.Unmarshal(b, &d); err != nil {
-		return v, err
+		return nil, err
 	}
 
-	if d.Status == Started {
-		return v, ErrParallelRequest
-	}
-
-	if d.Request != req {
-		return v, ErrRequestMismatch
-	}
-
-	return d.Response, nil
+	return &d, nil
 }
 
-func (r *Group[T, V]) save(ctx context.Context, key string, req T, res V, duration time.Duration) error {
-	d := data[T, V]{
-		Status:   Success,
-		Request:  req,
-		Response: res,
-	}
-
+func (s *redisStore[T, V]) save(ctx context.Context, idempotencyKey string, d data[T, V], duration time.Duration) error {
 	b, err := json.Marshal(d)
 	if err != nil {
 		return err
 	}
 
-	k := keyTemplate.Format(key)
-	return r.client.Set(ctx, k, string(b), duration).Err()
-}
-
-type data[T, V any] struct {
-	Status   Status `json:"status"`
-	Request  T      `json:"request,omitempty"`
-	Response V      `json:"response,omitempty"`
+	key := keyTemplate.Format(idempotencyKey)
+	return s.client.Set(ctx, key, string(b), duration).Err()
 }
