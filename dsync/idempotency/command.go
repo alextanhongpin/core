@@ -55,6 +55,15 @@ func (r *Cmd[T]) Exec(ctx context.Context, key string, req T) error {
 	return r.load(ctx, key, req)
 }
 
+func (r *Cmd[T]) save(ctx context.Context, key string, req T, timeout time.Duration) error {
+	d := data[T, any]{
+		Status:  Success,
+		Request: req,
+	}
+
+	return r.store.save(ctx, key, d, timeout)
+}
+
 func (r *Cmd[T]) load(ctx context.Context, key string, req T) error {
 	d, err := r.store.load(ctx, key)
 	if err != nil {
@@ -70,13 +79,4 @@ func (r *Cmd[T]) load(ctx context.Context, key string, req T) error {
 	}
 
 	return nil
-}
-
-func (r *Cmd[T]) save(ctx context.Context, key string, req T, timeout time.Duration) error {
-	d := data[T, any]{
-		Status:  Success,
-		Request: req,
-	}
-
-	return r.store.save(ctx, key, d, timeout)
 }
