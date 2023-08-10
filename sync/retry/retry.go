@@ -37,7 +37,7 @@ func WithHardLimit(ts []time.Duration, limit time.Duration) []time.Duration {
 	for i := range ts {
 		total += ts[i]
 		if total > limit {
-			allowed := ts[i] - (limit - total)
+			allowed := ts[i] - (total - limit)
 			res = append(res, allowed)
 			break
 		}
