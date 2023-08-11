@@ -1,11 +1,13 @@
 package maputil_test
 
 import (
+	"bytes"
 	"errors"
 	"testing"
 
 	"github.com/alextanhongpin/core/test/testutil"
 	"github.com/alextanhongpin/core/types/maputil"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestMask(t *testing.T) {
@@ -37,10 +39,17 @@ func TestMask(t *testing.T) {
 	testutil.DumpJSON(t, credsMask)
 }
 
-func TestMaskFieldNotFound(t *testing.T) {
-
+func TestMaskBytesFieldNotFound(t *testing.T) {
 	_, err := maputil.MaskBytes([]byte(`{"name": "john"}`), "age")
 	if !errors.Is(err, maputil.ErrMaskKeyNotFound) {
 		t.Fatalf("want error mask key not found, got %v", err)
 	}
+}
+
+func TestMaskBytes(t *testing.T) {
+	assert := assert.New(t)
+	b, err := maputil.MaskBytes([]byte(`[{"name": "john"}]`), "name")
+	assert.Nil(err)
+	want := []byte(`[{"name":"/* !REDACTED */"}]`)
+	assert.True(bytes.Equal(want, b))
 }

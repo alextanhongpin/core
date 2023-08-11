@@ -7,15 +7,6 @@ import (
 	"golang.org/x/exp/slices"
 )
 
-func Keys[K comparable, V any](m map[K]V) []K {
-	keys := make([]K, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-
-	return keys
-}
-
 // AllKeys returns all the keys from map[string]any.
 func AllKeys(m map[string]any) []string {
 	var fields []string
@@ -48,15 +39,6 @@ func AllKeys(m map[string]any) []string {
 
 	slices.Sort(fields)
 	return slices.Compact(fields)
-}
-
-func Values[K comparable, V any](m map[K]V) []V {
-	vals := make([]V, 0, len(m))
-	for _, v := range m {
-		vals = append(vals, v)
-	}
-
-	return vals
 }
 
 func Invert[K, V comparable](m map[K]V) map[V]K {

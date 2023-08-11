@@ -28,20 +28,6 @@ func TestKeys(t *testing.T) {
 		},
 	}
 
-	t.Run("keys", func(t *testing.T) {
-		keys := maputil.Keys(m)
-		want := []string{"foo", "1", "tags", "nested"}
-
-		sort.Strings(keys)
-		sort.Strings(want)
-		assert.Equal(t, want, keys)
-	})
-
-	t.Run("values", func(t *testing.T) {
-		values := maputil.Values(m)
-		assert.NotNil(t, values)
-	})
-
 	t.Run("Invert", func(t *testing.T) {
 		m := make(map[int]int)
 		m[1] = 100
