@@ -22,11 +22,11 @@ type Cmd[T comparable] struct {
 }
 
 func NewCmd[T comparable](client *redis.Client, opt CmdOption[T]) *Cmd[T] {
-	if opt.LockTimeout == 0 {
+	if opt.LockTimeout <= 0 {
 		opt.LockTimeout = 1 * time.Minute
 	}
 
-	if opt.RetentionPeriod == 0 {
+	if opt.RetentionPeriod <= 0 {
 		opt.RetentionPeriod = 24 * time.Hour
 	}
 

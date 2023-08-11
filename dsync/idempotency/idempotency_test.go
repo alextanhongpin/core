@@ -21,6 +21,8 @@ type Response struct {
 	Name string `json:"name"`
 }
 
+var SomeOperationKey = idempotency.Key("some-operation:%s")
+
 func TestQuery(t *testing.T) {
 	assert := assert.New(t)
 	ctx := context.Background()
@@ -33,7 +35,7 @@ func TestQuery(t *testing.T) {
 	defer client.Close()
 
 	do := func() {
-		idem := idempotency.NewQuery(client, idempotency.QueryOption[Request, *Response]{
+		handler := idempotency.NewQuery(client, idempotency.QueryOption[Request, *Response]{
 			LockTimeout:     5 * time.Second, // Default is 1 minute.
 			RetentionPeriod: 1 * time.Minute, // Default is 24 hour.
 			Handler: func(ctx context.Context, req Request) (*Response, error) {
@@ -46,7 +48,7 @@ func TestQuery(t *testing.T) {
 			},
 		})
 
-		res, err := idem.Query(ctx, "xyz", Request{
+		res, err := handler.Query(ctx, SomeOperationKey.Format("xyz"), Request{
 			ID:   "payout-123",
 			Name: "foo",
 		})
@@ -83,7 +85,7 @@ func TestQuery(t *testing.T) {
 
 	wg.Wait()
 
-	s.CheckGet(t, "idempotency:xyz", `{"status":"success","request":{"id":"payout-123","name":"foo"},"response":{"name":"replied:foo"}}`)
+	s.CheckGet(t, "i9y:some-operation:xyz", `{"status":"success","request":{"id":"payout-123","name":"foo"},"response":{"name":"replied:foo"}}`)
 }
 
 func TestCommand(t *testing.T) {
@@ -98,7 +100,7 @@ func TestCommand(t *testing.T) {
 	defer client.Close()
 
 	do := func() {
-		idem := idempotency.NewCmd(client, idempotency.CmdOption[Request]{
+		handler := idempotency.NewCmd(client, idempotency.CmdOption[Request]{
 			LockTimeout:     5 * time.Second, // Default is 1 minute.
 			RetentionPeriod: 1 * time.Minute, // Default is 24 hour.
 			Handler: func(ctx context.Context, req Request) error {
@@ -109,7 +111,7 @@ func TestCommand(t *testing.T) {
 			},
 		})
 
-		err := idem.Exec(ctx, "xyz", Request{
+		err := handler.Exec(ctx, SomeOperationKey.Format("xyz"), Request{
 			ID:   "payout-123",
 			Name: "foo",
 		})
@@ -144,5 +146,5 @@ func TestCommand(t *testing.T) {
 
 	wg.Wait()
 
-	s.CheckGet(t, "idempotency:xyz", `{"status":"success","request":{"id":"payout-123","name":"foo"}}`)
+	s.CheckGet(t, "i9y:some-operation:xyz", `{"status":"success","request":{"id":"payout-123","name":"foo"}}`)
 }

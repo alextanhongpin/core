@@ -22,11 +22,11 @@ type Query[T comparable, V any] struct {
 }
 
 func NewQuery[T comparable, V any](client *redis.Client, opt QueryOption[T, V]) *Query[T, V] {
-	if opt.LockTimeout == 0 {
+	if opt.LockTimeout <= 0 {
 		opt.LockTimeout = 1 * time.Minute
 	}
 
-	if opt.RetentionPeriod == 0 {
+	if opt.RetentionPeriod <= 0 {
 		opt.RetentionPeriod = 24 * time.Hour
 	}
 

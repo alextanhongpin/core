@@ -28,7 +28,7 @@ const (
 	Success Status = "success"
 )
 
-var keyTemplate = Key("idempotency:%s")
+var keyTemplate = Key("i9y:%s")
 
 type data[T, V any] struct {
 	Status   Status `json:"status"`
@@ -67,7 +67,6 @@ func (s *redisStore[T, V]) unlock(ctx context.Context, idempotencyKey string) er
 }
 
 func (s *redisStore[T, V]) load(ctx context.Context, idempotencyKey string) (*data[T, V], error) {
-
 	key := keyTemplate.Format(idempotencyKey)
 
 	b, err := s.client.Get(ctx, key).Bytes()
