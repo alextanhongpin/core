@@ -2,6 +2,7 @@ package idempotency
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"time"
 
@@ -15,7 +16,7 @@ type QueryOption[T comparable, V any] struct {
 }
 
 type Query[T comparable, V any] struct {
-	store     store[T, V]
+	store     store[V]
 	lock      time.Duration
 	retention time.Duration
 	handler   func(ctx context.Context, req T) (V, error)
@@ -31,7 +32,7 @@ func NewQuery[T comparable, V any](client *redis.Client, opt QueryOption[T, V]) 
 	}
 
 	return &Query[T, V]{
-		store:     newRedisStore[T, V](client),
+		store:     newRedisStore[V](client),
 		lock:      opt.LockTimeout,
 		retention: opt.RetentionPeriod,
 		handler:   opt.Handler,
@@ -64,9 +65,14 @@ func (r *Query[T, V]) Query(ctx context.Context, key string, req T) (V, error) {
 }
 
 func (r *Query[T, V]) save(ctx context.Context, key string, req T, res V, timeout time.Duration) error {
-	d := data[T, V]{
+	b, err := json.Marshal(req)
+	if err != nil {
+		return err
+	}
+
+	d := data[V]{
 		Status:   Success,
-		Request:  req,
+		Request:  hash(b),
 		Response: res,
 	}
 
@@ -84,7 +90,12 @@ func (r *Query[T, V]) load(ctx context.Context, key string, req T) (V, error) {
 		return v, ErrRequestInFlight
 	}
 
-	if d.Request != req {
+	b, err := json.Marshal(req)
+	if err != nil {
+		return v, err
+	}
+
+	if d.Request != hash(b) {
 		return v, ErrRequestMismatch
 	}
 

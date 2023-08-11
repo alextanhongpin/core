@@ -2,26 +2,27 @@ package idempotency
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"time"
 
 	redis "github.com/redis/go-redis/v9"
 )
 
-type CmdOption[T comparable] struct {
+type CmdOption[T any] struct {
 	LockTimeout     time.Duration
 	RetentionPeriod time.Duration
 	Handler         func(ctx context.Context, req T) error
 }
 
-type Cmd[T comparable] struct {
-	store     store[T, any]
+type Cmd[T any] struct {
+	store     store[any]
 	lock      time.Duration
 	retention time.Duration
 	handler   func(ctx context.Context, req T) error
 }
 
-func NewCmd[T comparable](client *redis.Client, opt CmdOption[T]) *Cmd[T] {
+func NewCmd[T any](client *redis.Client, opt CmdOption[T]) *Cmd[T] {
 	if opt.LockTimeout <= 0 {
 		opt.LockTimeout = 1 * time.Minute
 	}
@@ -31,7 +32,7 @@ func NewCmd[T comparable](client *redis.Client, opt CmdOption[T]) *Cmd[T] {
 	}
 
 	return &Cmd[T]{
-		store:     newRedisStore[T, any](client),
+		store:     newRedisStore[any](client),
 		lock:      opt.LockTimeout,
 		retention: opt.RetentionPeriod,
 		handler:   opt.Handler,
@@ -56,9 +57,14 @@ func (r *Cmd[T]) Exec(ctx context.Context, key string, req T) error {
 }
 
 func (r *Cmd[T]) save(ctx context.Context, key string, req T, timeout time.Duration) error {
-	d := data[T, any]{
+	b, err := json.Marshal(req)
+	if err != nil {
+		return err
+	}
+
+	d := data[any]{
 		Status:  Success,
-		Request: req,
+		Request: hash(b),
 	}
 
 	return r.store.save(ctx, key, d, timeout)
@@ -74,7 +80,12 @@ func (r *Cmd[T]) load(ctx context.Context, key string, req T) error {
 		return ErrRequestInFlight
 	}
 
-	if d.Request != req {
+	b, err := json.Marshal(req)
+	if err != nil {
+		return err
+	}
+
+	if d.Request != hash(b) {
 		return ErrRequestMismatch
 	}
 

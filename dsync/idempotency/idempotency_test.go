@@ -85,7 +85,7 @@ func TestQuery(t *testing.T) {
 
 	wg.Wait()
 
-	s.CheckGet(t, "i9y:some-operation:xyz", `{"status":"success","request":{"id":"payout-123","name":"foo"},"response":{"name":"replied:foo"}}`)
+	s.CheckGet(t, "i9y:some-operation:xyz", `{"status":"success","request":"w93v/T90sFbhkHDcVqEfX1HWwArDAIFdNnppRNwjuKg=","response":{"name":"replied:foo"}}`)
 }
 
 func TestCommand(t *testing.T) {
@@ -146,5 +146,5 @@ func TestCommand(t *testing.T) {
 
 	wg.Wait()
 
-	s.CheckGet(t, "i9y:some-operation:xyz", `{"status":"success","request":{"id":"payout-123","name":"foo"}}`)
+	s.CheckGet(t, "i9y:some-operation:xyz", `{"status":"success","request":"w93v/T90sFbhkHDcVqEfX1HWwArDAIFdNnppRNwjuKg="}`)
 }
