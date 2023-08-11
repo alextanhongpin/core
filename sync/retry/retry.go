@@ -6,8 +6,8 @@ import (
 )
 
 var (
-	Linear      = WithJitter(linear())
-	Exponential = WithJitter(exponential())
+	Linear      = apply(WithJitter, linear())
+	Exponential = apply(WithJitter, exponential())
 )
 
 // WithSoftLimit applies soft limit to the total duration. The total duration
@@ -119,4 +119,10 @@ func exponential() []time.Duration {
 
 func jitter(d time.Duration) time.Duration {
 	return time.Duration(rand.Intn(int(d / 2))).Round(5 * time.Millisecond)
+}
+
+func apply(fn func([]time.Duration) []time.Duration, ts []time.Duration) func() []time.Duration {
+	return func() []time.Duration {
+		return fn(ts)
+	}
 }
