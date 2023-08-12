@@ -23,20 +23,20 @@ func ExampleTransition() {
 	// Already pending.
 	fmt.Println(sm.Transition(Pending))
 
-	fmt.Println(sm.Validate(Pending, Success))
-	fmt.Println(sm.Validate(Pending, Failed))
-	fmt.Println(sm.Validate(Success, Failed))
-	fmt.Println(sm.Validate(Failed, Success))
+	fmt.Println(sm.IsValidTransition(Pending, Success))
+	fmt.Println(sm.IsValidTransition(Pending, Failed))
+	fmt.Println(sm.IsValidTransition(Success, Failed))
+	fmt.Println(sm.IsValidTransition(Failed, Success))
 
 	fmt.Println(sm.Transition(Success))
 	fmt.Println(sm.State())
 	fmt.Println(sm.Transition(Failed))
 	// Output:
 	// false
-	// success true
-	// failed true
-	//  false
-	//  false
+	// true
+	// true
+	// false
+	// false
 	// true
 	// success
 	// false

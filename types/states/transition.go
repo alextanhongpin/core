@@ -30,13 +30,31 @@ func (s *State[T]) State() T {
 	return s.state
 }
 
-func (s *State[T]) Transition(to T) bool {
-	if s.state == to {
-		return false
+func (s *State[T]) Exec(name string) (ok bool, found bool) {
+	for _, st := range s.states {
+		if st.Name == name {
+			return s.Transition(st.To), true
+		}
 	}
 
-	_, ok := s.Validate(s.state, to)
-	if ok {
+	return false, false
+}
+
+func (s *State[T]) TransitionFunc(to T, fn func() error) (bool, error) {
+	if !s.CanTransition(to) {
+		return false, nil
+	}
+
+	if err := fn(); err != nil {
+		return false, err
+	}
+
+	s.state = to
+	return true, nil
+}
+
+func (s *State[T]) Transition(to T) bool {
+	if s.CanTransition(to) {
 		s.state = to
 		return true
 	}
@@ -44,12 +62,20 @@ func (s *State[T]) Transition(to T) bool {
 	return false
 }
 
-func (s *State[T]) Validate(from, to T) (string, bool) {
+func (s *State[T]) CanTransition(to T) bool {
+	if s.state == to {
+		return false
+	}
+
+	return s.IsValidTransition(s.state, to)
+}
+
+func (s *State[T]) IsValidTransition(from, to T) bool {
 	for _, s := range s.states {
 		if s.From == from && s.To == to {
-			return s.Name, true
+			return true
 		}
 	}
 
-	return "", false
+	return false
 }

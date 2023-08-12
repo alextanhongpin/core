@@ -34,24 +34,29 @@ func NewSequential(steps ...Step) *Sequential {
 }
 
 func (s *Sequential) Current() (string, bool) {
-	var stopIdx int
+	idx := -1
 
 	// Check which steps are completed.
 	for i, step := range s.steps {
-		if !step.cond() {
-			stopIdx = i
+		if step.cond() {
+			idx = i
+		} else {
 			break
 		}
 	}
 
 	// All other steps after must be not completed.
-	for _, step := range s.steps[stopIdx:] {
+	for _, step := range s.steps[idx+1:] {
 		if step.cond() {
 			return "", false
 		}
 	}
 
-	return s.steps[stopIdx].name, stopIdx > -1
+	if idx == -1 {
+		return "", false
+	}
+
+	return s.steps[idx].name, true
 }
 
 // XOR returns true if at least n conditional is true.

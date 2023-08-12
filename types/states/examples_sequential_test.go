@@ -38,9 +38,9 @@ func ExampleSequential() {
 	s.LastMile = false
 	fmt.Println(seq.Current())
 	// Output:
+	//  false
 	// has_first_mile true
 	// has_mid_mile true
 	// has_last_mile true
-	//  false
 	//  false
 }
