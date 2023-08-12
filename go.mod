@@ -18,6 +18,7 @@ require (
 	github.com/ory/dockertest/v3 v3.10.0
 	github.com/pganalyze/pg_query_go/v4 v4.2.1
 	github.com/redis/go-redis/v9 v9.0.0
+	github.com/segmentio/kafka-go v0.4.29
 	github.com/stretchr/testify v1.8.4
 	github.com/uptrace/bun v1.1.14
 	github.com/uptrace/bun/dialect/pgdialect v1.1.14
@@ -77,6 +78,7 @@ require (
 	github.com/hashicorp/hcl v1.0.0 // indirect
 	github.com/imdario/mergo v0.3.16 // indirect
 	github.com/jinzhu/inflection v1.0.0 // indirect
+	github.com/klauspost/compress v1.16.5 // indirect
 	github.com/leodido/go-urn v1.2.4 // indirect
 	github.com/magiconair/properties v1.8.7 // indirect
 	github.com/mailru/easyjson v0.7.7 // indirect
@@ -94,6 +96,7 @@ require (
 	github.com/outcaste-io/ristretto v0.2.2 // indirect
 	github.com/pelletier/go-toml/v2 v2.0.8 // indirect
 	github.com/philhofer/fwd v1.1.2 // indirect
+	github.com/pierrec/lz4/v4 v4.1.15 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/prometheus/client_golang v1.16.0 // indirect
