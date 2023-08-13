@@ -43,7 +43,7 @@ type Handler func(ctx context.Context) error
 type Vacuum struct {
 	unix     atomic.Int64
 	policies []policy
-	every    time.Duration
+	tick     time.Duration
 	count    atomic.Int64
 	doneCh   chan struct{}
 	errCh    chan error
@@ -51,13 +51,20 @@ type Vacuum struct {
 	end      sync.Once
 }
 
-type Option struct {
-	Policies []Policy
+func NewPolicy(count int64, interval time.Duration) Policy {
+	return Policy{
+		Count:    count,
+		Interval: interval,
+	}
 }
 
-func New(opt Option) *Vacuum {
-	policies, err := sliceutil.MapError(opt.Policies, func(i int) (policy, error) {
-		p := opt.Policies[i]
+func New(opts []Policy) *Vacuum {
+	if len(opts) == 0 {
+		panic("vacuum: cannot instantiate new vacuum with no policies")
+	}
+
+	policies, err := sliceutil.MapError(opts, func(i int) (policy, error) {
+		p := opts[i]
 
 		if err := p.Valid(); err != nil {
 			return policy{}, err
@@ -84,10 +91,10 @@ func New(opt Option) *Vacuum {
 	// If the given policy interval is 3s, 6s, and 9s for example,
 	// the GCD will be 3s.
 	gcd := internal.GCD(periods)
-	every := time.Duration(gcd) * time.Second
+	tick := time.Duration(gcd) * time.Second
 
 	return &Vacuum{
-		every:    every,
+		tick:     tick,
 		policies: policies,
 		doneCh:   make(chan struct{}),
 		errCh:    make(chan error, 1),
@@ -120,7 +127,7 @@ func (v *Vacuum) Run(ctx context.Context, h Handler) func() error {
 }
 
 func (v *Vacuum) start(ctx context.Context, h Handler) error {
-	t := time.NewTicker(v.every)
+	t := time.NewTicker(v.tick)
 	defer t.Stop()
 
 	for {

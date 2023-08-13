@@ -14,14 +14,12 @@ import (
 )
 
 func main() {
-	vac := vacuum.New(vacuum.Option{
-		Policies: []vacuum.Policy{
-			{Count: 10_000, Interval: 5 * time.Second},
-			{Count: 1_000, Interval: 10 * time.Second},
-			{Count: 100, Interval: 20 * time.Second},
-			{Count: 10, Interval: 30 * time.Second},
-			{Count: 1, Interval: 1 * time.Minute},
-		},
+	vac := vacuum.New([]vacuum.Policy{
+		{Count: 10_000, Interval: 5 * time.Second},
+		{Count: 1_000, Interval: 10 * time.Second},
+		{Count: 100, Interval: 20 * time.Second},
+		{Count: 10, Interval: 30 * time.Second},
+		{Count: 1, Interval: 1 * time.Minute},
 	})
 
 	ctx := context.Background()
