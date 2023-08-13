@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"os"
 	"os/signal"
 	"syscall"
@@ -15,11 +14,11 @@ import (
 
 func main() {
 	vac := vacuum.New([]vacuum.Policy{
-		{Count: 10_000, Interval: 5 * time.Second},
-		{Count: 1_000, Interval: 10 * time.Second},
-		{Count: 100, Interval: 20 * time.Second},
-		{Count: 10, Interval: 30 * time.Second},
-		{Count: 1, Interval: 1 * time.Minute},
+		{Every: 10_000, Interval: 5 * time.Second},
+		{Every: 1_000, Interval: 10 * time.Second},
+		{Every: 100, Interval: 20 * time.Second},
+		{Every: 10, Interval: 30 * time.Second},
+		{Every: 1, Interval: 1 * time.Minute},
 	})
 
 	ctx := context.Background()
@@ -30,16 +29,10 @@ func main() {
 
 	stop := vac.Run(ctx, func(ctx context.Context) error {
 		fmt.Println("run")
-		return errors.New("intended")
+		return errors.New("bad error")
 	})
 
-	defer func() {
-		if err := stop(); err != nil && !errors.Is(err, vacuum.ErrClosed) {
-			log.Fatal(err)
-		}
-
-		fmt.Println("terminated")
-	}()
+	defer stop()
 
 	<-ctx.Done()
 
