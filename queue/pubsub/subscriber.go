@@ -34,6 +34,7 @@ func (s *Subscriber) Receive(ctx context.Context, h Handler) (func(), <-chan err
 
 		go func() {
 			defer s.wg.Done()
+			defer close(s.errCh)
 
 			for {
 				select {
