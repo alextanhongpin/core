@@ -16,8 +16,8 @@ var (
 
 func ExampleTransition() {
 	sm := states.NewState(Pending,
-		states.NewTransition("success", Pending, Success),
-		states.NewTransition("failed", Pending, Failed),
+		states.NewTransition("resolve", Pending, Success),
+		states.NewTransition("reject", Pending, Failed),
 	)
 
 	// Already pending.

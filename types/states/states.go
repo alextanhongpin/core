@@ -23,88 +23,61 @@ func NewStepFunc(name string, cond Handler) Step {
 	}
 }
 
-type Sequential struct {
+type Sequence struct {
 	steps []Step
 }
 
-func NewSequential(steps ...Step) *Sequential {
-	return &Sequential{
+func NewSequence(steps ...Step) *Sequence {
+	return &Sequence{
 		steps: steps,
 	}
 }
 
-func (s *Sequential) Current() (string, bool) {
-	idx := -1
+func (s *Sequence) None() bool {
+	return s.success() == 0
+}
 
-	// Check which steps are completed.
+func (s *Sequence) All() bool {
+	return s.success() == len(s.steps)
+}
+
+func (s *Sequence) Pending() string {
+	if !s.Valid() {
+		return ""
+	}
+
+	for _, step := range s.steps {
+		if !step.cond() {
+			return step.name
+		}
+	}
+
+	return ""
+}
+
+func (s *Sequence) Valid() bool {
 	for i, step := range s.steps {
 		if step.cond() {
-			idx = i
-		} else {
-			break
+			continue
+		}
+
+		for _, step := range s.steps[i+1:] {
+			if step.cond() {
+				return false
+			}
 		}
 	}
 
-	// All other steps after must be not completed.
-	for _, step := range s.steps[idx+1:] {
+	return true
+}
+
+func (s *Sequence) success() int {
+	var count int
+	for _, step := range s.steps {
 		if step.cond() {
-			return "", false
+			count++
 		}
 	}
 
-	if idx == -1 {
-		return "", false
-	}
-
-	return s.steps[idx].name, true
-}
-
-// XOR returns true if at least n conditional is true.
-// Useful for checking polymorphic conditions.
-func XOR(n int, ts ...bool) bool {
-	var success int
-	for _, t := range ts {
-		if t {
-			success++
-		}
-	}
-
-	return success == n
-}
-
-func XORFunc(n int, hs ...Handler) bool {
-	var success int
-	for _, h := range hs {
-		if h() {
-			success++
-		}
-	}
-
-	return success == n
-}
-
-// AllOrNone returns true if all condition is true, or all
-// is false.
-// Useful to check if a set of fields are all set or none
-// are set.
-func AllOrNone(ts ...bool) bool {
-	var success int
-	for _, t := range ts {
-		if t {
-			success++
-		}
-	}
-
-	return success == 0 || success == len(ts)
-}
-
-func AllOrNoneFunc(hs ...Handler) bool {
-	var success int
-	for _, h := range hs {
-		if h() {
-			success++
-		}
-	}
-
-	return success == 0 || success == len(hs)
+	return count
 }

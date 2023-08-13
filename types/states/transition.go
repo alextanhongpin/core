@@ -1,5 +1,7 @@
 package states
 
+import "fmt"
+
 type Transition[T comparable] struct {
 	Name string
 	From T
@@ -30,14 +32,14 @@ func (s *State[T]) State() T {
 	return s.state
 }
 
-func (s *State[T]) Exec(name string) (ok bool, found bool) {
+func (s *State[T]) Exec(name string) bool {
 	for _, st := range s.states {
 		if st.Name == name {
-			return s.Transition(st.To), true
+			return s.Transition(st.To)
 		}
 	}
 
-	return false, false
+	panic(fmt.Errorf("states: step %q not found", name))
 }
 
 func (s *State[T]) TransitionFunc(to T, fn func() error) (bool, error) {
