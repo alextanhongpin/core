@@ -21,57 +21,38 @@ const (
 	consumerGroup    = "consumers/events"
 )
 
-var EventPublisher = pubsub.NewPublisher(pubsub.PublisherOption{
+var EventPublisher = pubsub.NewPublisher(
 	// NOTE: kafka.NewWriter is deprecated.
-	Writer: &kafka.Writer{
+	&kafka.Writer{
 		Addr:     kafka.TCP(kafkaHost),
 		Topic:    eventsTopic,
 		Balancer: &kafka.Hash{},
 	},
-})
+)
 
-var EventRetryPublisher = pubsub.NewPublisher(pubsub.PublisherOption{
-	Writer: &kafka.Writer{
+var EventRetryPublisher = pubsub.NewPublisher(
+	&kafka.Writer{
 		Addr:     kafka.TCP(kafkaHost),
 		Topic:    eventsRetryTopic,
 		Balancer: &kafka.Hash{},
 	},
-})
+)
 
-var EventSubscriber = pubsub.NewSubscriber(pubsub.SubscriberOption{
-	Reader: kafka.NewReader(kafka.ReaderConfig{
+var EventSubscriber = pubsub.NewSubscriber(
+	kafka.NewReader(kafka.ReaderConfig{
 		Brokers: []string{kafkaHost},
 		GroupID: consumerGroup,
 		Topic:   eventsTopic,
 	}),
-	Handler: func(ctx context.Context, msg pubsub.Message) error {
-		fmt.Printf("received: key=%s value=%s\n", msg.Key(), msg.Value())
-		return EventRetryPublisher.Publish(ctx, msg)
-	},
-})
+)
 
-var EventRetrySubscriber = pubsub.NewSubscriber(pubsub.SubscriberOption{
-	Reader: kafka.NewReader(kafka.ReaderConfig{
+var EventRetrySubscriber = pubsub.NewSubscriber(
+	kafka.NewReader(kafka.ReaderConfig{
 		Brokers: []string{kafkaHost},
 		GroupID: consumerGroup,
 		Topic:   eventsRetryTopic,
 	}),
-	Handler: func(ctx context.Context, msg pubsub.Message) error {
-		pkm, ok := msg.(*pubsub.KafkaMessage)
-		if !ok {
-			panic("not kafka message")
-		}
-		km := pkm.Message
-		// Retry after 10 seconds.
-		sleep := km.Time.Add(10 * time.Second).Sub(time.Now())
-		fmt.Printf("received dead letter: key=%s value=%s retry-after=%s\n", msg.Key(), msg.Value(), sleep)
-		time.Sleep(sleep)
-
-		fmt.Println("retried successfully")
-		// TODO: Save to database if still fails.
-		return nil
-	},
-})
+)
 
 func main() {
 	var isConsumer bool
@@ -86,16 +67,34 @@ func main() {
 		ctx, cancel := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 		defer cancel()
 
-		stop := EventSubscriber.Subscribe(ctx)
+		stop := EventSubscriber.Receive(ctx, func(ctx context.Context, msg pubsub.Message) error {
+			fmt.Printf("received: key=%s value=%s\n", msg.Key(), msg.Value())
+			return EventRetryPublisher.Publish(ctx, msg)
+		})
+
 		defer func() {
-			if err := stop(); err != nil && !errors.Is(err, context.Canceled) {
+			if err := stop(); err != nil && !errors.Is(err, pubsub.Closed) {
 				panic(err)
 			}
 		}()
 
-		stopRetry := EventRetrySubscriber.Subscribe(ctx)
+		stopRetry := EventRetrySubscriber.Receive(ctx, func(ctx context.Context, msg pubsub.Message) error {
+			pkm, ok := msg.(*pubsub.KafkaMessage)
+			if !ok {
+				panic("not kafka message")
+			}
+			km := pkm.Message
+			// Retry after 10 seconds.
+			sleep := km.Time.Add(10 * time.Second).Sub(time.Now())
+			fmt.Printf("received dead letter: key=%s value=%s retry-after=%s\n", msg.Key(), msg.Value(), sleep)
+			time.Sleep(sleep)
+
+			fmt.Println("retried successfully")
+			// TODO: Save to database if still fails.
+			return nil
+		})
 		defer func() {
-			if err := stopRetry(); err != nil && !errors.Is(err, context.Canceled) {
+			if err := stopRetry(); err != nil && !errors.Is(err, pubsub.Closed) {
 				panic(err)
 			}
 		}()

@@ -11,13 +11,9 @@ type Publisher struct {
 	topic  string
 }
 
-type PublisherOption struct {
-	Writer *kafka.Writer
-}
-
-func NewPublisher(opt PublisherOption) *Publisher {
+func NewPublisher(w *kafka.Writer) *Publisher {
 	return &Publisher{
-		writer: opt.Writer,
+		writer: w,
 	}
 }
 
