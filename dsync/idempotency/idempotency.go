@@ -39,36 +39,38 @@ type data[T any] struct {
 }
 
 type store[T any] interface {
-	lock(ctx context.Context, idempotencyKey string, lockTimeout time.Duration) (bool, error)
-	unlock(ctx context.Context, idempotencyKey string) error
-	load(ctx context.Context, idempotencyKey string) (*data[T], error)
-	save(ctx context.Context, idempotencyKey string, d data[T], duration time.Duration) error
+	Lock(ctx context.Context, idempotencyKey string, lockTimeout time.Duration) (bool, error)
+	Unlock(ctx context.Context, idempotencyKey string) error
+	Load(ctx context.Context, idempotencyKey string) (*data[T], error)
+	Save(ctx context.Context, idempotencyKey string, d data[T], duration time.Duration) error
 }
+
+var _ store[any] = (*redisStore[any])(nil)
 
 type redisStore[T any] struct {
 	client *redis.Client
 }
 
-func newRedisStore[T any](client *redis.Client) *redisStore[T] {
+func NewRedisStore[T any](client *redis.Client) store[T] {
 	return &redisStore[T]{
 		client: client,
 	}
 }
 
-func (s *redisStore[T]) lock(ctx context.Context, idempotencyKey string, lockTimeout time.Duration) (bool, error) {
+func (s *redisStore[T]) Lock(ctx context.Context, idempotencyKey string, lockTimeout time.Duration) (bool, error) {
 	key := keyTemplate.Format(idempotencyKey)
 
 	ok, err := s.client.SetNX(ctx, key, fmt.Sprintf(`{"status":%q}`, Started), lockTimeout).Result()
 	return ok, err
 }
 
-func (s *redisStore[T]) unlock(ctx context.Context, idempotencyKey string) error {
+func (s *redisStore[T]) Unlock(ctx context.Context, idempotencyKey string) error {
 	key := keyTemplate.Format(idempotencyKey)
 
 	return s.client.Del(ctx, key).Err()
 }
 
-func (s *redisStore[T]) load(ctx context.Context, idempotencyKey string) (*data[T], error) {
+func (s *redisStore[T]) Load(ctx context.Context, idempotencyKey string) (*data[T], error) {
 	key := keyTemplate.Format(idempotencyKey)
 
 	b, err := s.client.Get(ctx, key).Bytes()
@@ -84,7 +86,7 @@ func (s *redisStore[T]) load(ctx context.Context, idempotencyKey string) (*data[
 	return &d, nil
 }
 
-func (s *redisStore[T]) save(ctx context.Context, idempotencyKey string, d data[T], duration time.Duration) error {
+func (s *redisStore[T]) Save(ctx context.Context, idempotencyKey string, d data[T], duration time.Duration) error {
 	b, err := json.Marshal(d)
 	if err != nil {
 		return err

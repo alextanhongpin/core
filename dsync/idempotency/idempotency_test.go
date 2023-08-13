@@ -35,7 +35,8 @@ func TestQuery(t *testing.T) {
 	defer client.Close()
 
 	do := func() {
-		handler := idempotency.NewQuery(client, idempotency.QueryOption[Request, *Response]{
+		store := idempotency.NewRedisStore[*Response](client)
+		handler := idempotency.NewQuery(store, idempotency.QueryOption[Request, *Response]{
 			LockTimeout:     5 * time.Second, // Default is 1 minute.
 			RetentionPeriod: 1 * time.Minute, // Default is 24 hour.
 			Handler: func(ctx context.Context, req Request) (*Response, error) {
@@ -100,7 +101,8 @@ func TestCommand(t *testing.T) {
 	defer client.Close()
 
 	do := func() {
-		handler := idempotency.NewCmd(client, idempotency.CmdOption[Request]{
+		store := idempotency.NewRedisStore[any](client)
+		handler := idempotency.NewCmd(store, idempotency.CmdOption[Request]{
 			LockTimeout:     5 * time.Second, // Default is 1 minute.
 			RetentionPeriod: 1 * time.Minute, // Default is 24 hour.
 			Handler: func(ctx context.Context, req Request) error {

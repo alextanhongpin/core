@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"time"
-
-	redis "github.com/redis/go-redis/v9"
 )
 
 type QueryOption[T comparable, V any] struct {
@@ -22,7 +20,7 @@ type Query[T comparable, V any] struct {
 	handler   func(ctx context.Context, req T) (V, error)
 }
 
-func NewQuery[T comparable, V any](client *redis.Client, opt QueryOption[T, V]) *Query[T, V] {
+func NewQuery[T comparable, V any](store store[V], opt QueryOption[T, V]) *Query[T, V] {
 	if opt.LockTimeout <= 0 {
 		opt.LockTimeout = 1 * time.Minute
 	}
@@ -32,7 +30,7 @@ func NewQuery[T comparable, V any](client *redis.Client, opt QueryOption[T, V]) 
 	}
 
 	return &Query[T, V]{
-		store:     newRedisStore[V](client),
+		store:     store,
 		lock:      opt.LockTimeout,
 		retention: opt.RetentionPeriod,
 		handler:   opt.Handler,
@@ -43,7 +41,7 @@ func (r *Query[T, V]) Query(ctx context.Context, key string, req T) (V, error) {
 	// Sets the idempotency operation status to "started".
 	// Can only be executed by one client.
 	var v V
-	ok, err := r.store.lock(ctx, key, r.lock)
+	ok, err := r.store.Lock(ctx, key, r.lock)
 	if err != nil {
 		return v, err
 	}
@@ -53,7 +51,7 @@ func (r *Query[T, V]) Query(ctx context.Context, key string, req T) (V, error) {
 		v, err = r.handler(ctx, req)
 		if err != nil {
 			// Delete the lock on fail.
-			return v, errors.Join(err, r.store.unlock(ctx, key))
+			return v, errors.Join(err, r.store.Unlock(ctx, key))
 		}
 
 		// Save the request/response pair on success.
@@ -76,12 +74,12 @@ func (r *Query[T, V]) save(ctx context.Context, key string, req T, res V, timeou
 		Response: res,
 	}
 
-	return r.store.save(ctx, key, d, timeout)
+	return r.store.Save(ctx, key, d, timeout)
 }
 
 func (r *Query[T, V]) load(ctx context.Context, key string, req T) (V, error) {
 	var v V
-	d, err := r.store.load(ctx, key)
+	d, err := r.store.Load(ctx, key)
 	if err != nil {
 		return v, err
 	}

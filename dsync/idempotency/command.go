@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"time"
-
-	redis "github.com/redis/go-redis/v9"
 )
 
 type CmdOption[T any] struct {
@@ -22,7 +20,7 @@ type Cmd[T any] struct {
 	handler   func(ctx context.Context, req T) error
 }
 
-func NewCmd[T any](client *redis.Client, opt CmdOption[T]) *Cmd[T] {
+func NewCmd[T any](store store[any], opt CmdOption[T]) *Cmd[T] {
 	if opt.LockTimeout <= 0 {
 		opt.LockTimeout = 1 * time.Minute
 	}
@@ -32,7 +30,7 @@ func NewCmd[T any](client *redis.Client, opt CmdOption[T]) *Cmd[T] {
 	}
 
 	return &Cmd[T]{
-		store:     newRedisStore[any](client),
+		store:     store,
 		lock:      opt.LockTimeout,
 		retention: opt.RetentionPeriod,
 		handler:   opt.Handler,
@@ -40,14 +38,14 @@ func NewCmd[T any](client *redis.Client, opt CmdOption[T]) *Cmd[T] {
 }
 
 func (r *Cmd[T]) Exec(ctx context.Context, key string, req T) error {
-	ok, err := r.store.lock(ctx, key, r.lock)
+	ok, err := r.store.Lock(ctx, key, r.lock)
 	if err != nil {
 		return err
 	}
 
 	if ok {
 		if err = r.handler(ctx, req); err != nil {
-			return errors.Join(err, r.store.unlock(ctx, key))
+			return errors.Join(err, r.store.Unlock(ctx, key))
 		}
 
 		return r.save(ctx, key, req, r.retention)
@@ -67,11 +65,11 @@ func (r *Cmd[T]) save(ctx context.Context, key string, req T, timeout time.Durat
 		Request: hash(b),
 	}
 
-	return r.store.save(ctx, key, d, timeout)
+	return r.store.Save(ctx, key, d, timeout)
 }
 
 func (r *Cmd[T]) load(ctx context.Context, key string, req T) error {
-	d, err := r.store.load(ctx, key)
+	d, err := r.store.Load(ctx, key)
 	if err != nil {
 		return err
 	}
