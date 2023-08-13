@@ -2,13 +2,10 @@ package pubsub
 
 import (
 	"context"
-	"errors"
 	"sync"
 
 	"github.com/segmentio/kafka-go"
 )
-
-var Closed = errors.New("pubsub: closed")
 
 type Handler func(ctx context.Context, msg Message) error
 
@@ -18,40 +15,44 @@ type Subscriber struct {
 	doneCh chan struct{}
 	begin  sync.Once
 	end    sync.Once
+	wg     sync.WaitGroup
 }
 
 func NewSubscriber(r *kafka.Reader) *Subscriber {
 	return &Subscriber{
 		reader: r,
-		errCh:  make(chan error, 1),
+		errCh:  make(chan error),
 		doneCh: make(chan struct{}),
 	}
 }
 
 // Receive handles the message received from the message queue.
 // Returning an error will not commit the offset.
-func (s *Subscriber) Receive(ctx context.Context, h Handler) func() error {
+func (s *Subscriber) Receive(ctx context.Context, h Handler) (func(), <-chan error) {
 	s.begin.Do(func() {
+		s.wg.Add(1)
+
 		go func() {
+			defer s.wg.Done()
+
 			for {
-				err := s.receive(ctx, h)
-				if errors.Is(err, Closed) {
-					s.errCh <- err
-					close(s.errCh)
+				select {
+				case <-s.doneCh:
 					return
+				case s.errCh <- s.receive(ctx, h):
 				}
 			}
 		}()
 	})
 
-	return s.stop
+	return s.stop, s.errCh
 }
 
 func (s *Subscriber) receive(ctx context.Context, h Handler) error {
 	for {
 		select {
 		case <-s.doneCh:
-			return Closed
+			return nil
 		default:
 			msg, err := s.reader.FetchMessage(ctx)
 			if err != nil {
@@ -69,10 +70,10 @@ func (s *Subscriber) receive(ctx context.Context, h Handler) error {
 	}
 }
 
-func (s *Subscriber) stop() (err error) {
+func (s *Subscriber) stop() {
 	s.end.Do(func() {
 		close(s.doneCh)
-		err = <-s.errCh
+		s.wg.Wait()
 	})
 
 	return

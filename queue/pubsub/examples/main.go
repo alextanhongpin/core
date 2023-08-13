@@ -2,9 +2,9 @@ package main
 
 import (
 	"context"
-	"errors"
 	"flag"
 	"fmt"
+	"log"
 	"os/signal"
 	"syscall"
 	"time"
@@ -67,18 +67,13 @@ func main() {
 		ctx, cancel := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 		defer cancel()
 
-		stop := EventSubscriber.Receive(ctx, func(ctx context.Context, msg pubsub.Message) error {
+		stop, eventErrCh := EventSubscriber.Receive(ctx, func(ctx context.Context, msg pubsub.Message) error {
 			fmt.Printf("received: key=%s value=%s\n", msg.Key(), msg.Value())
 			return EventRetryPublisher.Publish(ctx, msg)
 		})
+		defer stop()
 
-		defer func() {
-			if err := stop(); err != nil && !errors.Is(err, pubsub.Closed) {
-				panic(err)
-			}
-		}()
-
-		stopRetry := EventRetrySubscriber.Receive(ctx, func(ctx context.Context, msg pubsub.Message) error {
+		stopRetry, eventRetryErrCh := EventRetrySubscriber.Receive(ctx, func(ctx context.Context, msg pubsub.Message) error {
 			pkm, ok := msg.(*pubsub.KafkaMessage)
 			if !ok {
 				panic("not kafka message")
@@ -93,15 +88,19 @@ func main() {
 			// TODO: Save to database if still fails.
 			return nil
 		})
-		defer func() {
-			if err := stopRetry(); err != nil && !errors.Is(err, pubsub.Closed) {
-				panic(err)
+		defer stopRetry()
+
+		for {
+			select {
+			case <-ctx.Done():
+				fmt.Println("terminated")
+				return
+			case err := <-eventErrCh:
+				log.Println(err)
+			case err := <-eventRetryErrCh:
+				log.Println(err)
 			}
-		}()
-
-		<-ctx.Done()
-		fmt.Println("terminated")
-
+		}
 	} else {
 		fmt.Println("publishing ...")
 
