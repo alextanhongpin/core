@@ -70,6 +70,16 @@ func (v *Vacuum) Inc(n int64) int64 {
 	return v.every.Add(n)
 }
 
+// Exec allows lazy execution.
+func (v *Vacuum) Exec(ctx context.Context, h Handler) {
+	if !v.allow() {
+		return
+	}
+
+	h.Exec(ctx)
+	v.reset()
+}
+
 // Run executes whenever the condition is fulfilled. Returning an error will
 // cause the every and timer not to reset.
 // The client should be responsible for logging and handling the error.
@@ -105,12 +115,7 @@ func (v *Vacuum) start(ctx context.Context, h Handler) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			if !v.allow() {
-				continue
-			}
-
-			h.Exec(ctx)
-			v.reset()
+			v.Exec(ctx)
 		}
 	}
 }
