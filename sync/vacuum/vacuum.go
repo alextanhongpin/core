@@ -30,8 +30,6 @@ type Vacuum struct {
 	unix     atomic.Int64
 	every    atomic.Int64
 	policies []Policy
-	tick     time.Duration
-	begin    sync.Once
 }
 
 func NewPolicy(every int64, interval time.Duration) Policy {
@@ -50,18 +48,7 @@ func New(policies []Policy) *Vacuum {
 		return a.IntervalSeconds() < b.IntervalSeconds()
 	})
 
-	intervals := sliceutil.Map(policies, func(i int) int64 {
-		return policies[i].IntervalSeconds()
-	})
-
-	// Find the greatest common denominator to run the pooling.
-	// If the given policy interval is 3s, 6s, and 9s for example,
-	// the GCD will be 3s.
-	gcd := internal.GCD(intervals)
-	tick := time.Duration(gcd) * time.Second
-
 	return &Vacuum{
-		tick:     tick,
 		policies: policies,
 	}
 }
@@ -83,31 +70,29 @@ func (v *Vacuum) Exec(ctx context.Context, h Handler) {
 // Run executes whenever the condition is fulfilled. Returning an error will
 // cause the every and timer not to reset.
 // The client should be responsible for logging and handling the error.
-func (v *Vacuum) Run(ctx context.Context, h Handler) (stop func()) {
-	v.begin.Do(func() {
-		var wg sync.WaitGroup
-		ctx, cancel := context.WithCancel(ctx)
-		wg.Add(1)
+func (v *Vacuum) Run(ctx context.Context, h Handler) func() {
+	var wg sync.WaitGroup
+	ctx, cancel := context.WithCancel(ctx)
+	wg.Add(1)
 
-		stop = func() {
-			cancel()
+	stop := func() {
+		cancel()
 
-			wg.Wait()
-		}
+		wg.Wait()
+	}
 
-		go func() {
-			defer cancel()
-			defer wg.Done()
+	go func() {
+		defer cancel()
+		defer wg.Done()
 
-			v.start(ctx, h)
-		}()
-	})
+		v.start(ctx, h)
+	}()
 
-	return
+	return stop
 }
 
 func (v *Vacuum) start(ctx context.Context, h Handler) {
-	t := time.NewTicker(v.tick)
+	t := time.NewTicker(v.tick())
 	defer t.Stop()
 
 	for {
@@ -115,7 +100,7 @@ func (v *Vacuum) start(ctx context.Context, h Handler) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			v.Exec(ctx)
+			v.Exec(ctx, h)
 		}
 	}
 }
@@ -140,4 +125,17 @@ func (v *Vacuum) allow() bool {
 	}
 
 	return false
+}
+
+func (v *Vacuum) tick() time.Duration {
+	intervals := sliceutil.Map(v.policies, func(i int) int64 {
+		return v.policies[i].IntervalSeconds()
+	})
+
+	// Find the greatest common denominator to run the pooling.
+	// If the given policy interval is 3s, 6s, and 9s for example,
+	// the GCD will be 3s.
+	gcd := internal.GCD(intervals)
+
+	return time.Duration(gcd) * time.Second
 }
