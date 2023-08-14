@@ -11,8 +11,6 @@ type Handler func(ctx context.Context, msg Message) error
 
 type Subscriber struct {
 	reader *kafka.Reader
-	begin  sync.Once
-	wg     sync.WaitGroup
 }
 
 func NewSubscriber(r *kafka.Reader) *Subscriber {
@@ -24,35 +22,31 @@ func NewSubscriber(r *kafka.Reader) *Subscriber {
 // Receive handles the message received from the message queue.
 // Returning an error will not commit the offset.
 func (s *Subscriber) Receive(ctx context.Context, h Handler) (func(), <-chan error) {
-	var errCh chan error
-	var stop func()
+	ctx, cancel := context.WithCancel(ctx)
 
-	s.begin.Do(func() {
-		ctx, cancel := context.WithCancel(ctx)
+	var wg sync.WaitGroup
+	errCh := make(chan error)
+	stop := func() {
+		cancel()
 
-		errCh = make(chan error)
-		stop = func() {
-			cancel()
+		wg.Wait()
+	}
 
-			s.wg.Wait()
-		}
+	wg.Add(1)
 
-		s.wg.Add(1)
+	go func() {
+		defer wg.Done()
+		defer close(errCh)
+		defer cancel()
 
-		go func() {
-			defer close(errCh)
-			defer s.wg.Done()
-			defer cancel()
-
-			for {
-				select {
-				case <-ctx.Done():
-					return
-				case errCh <- s.receive(ctx, h):
-				}
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case errCh <- s.receive(ctx, h):
 			}
-		}()
-	})
+		}
+	}()
 
 	return stop, errCh
 }
