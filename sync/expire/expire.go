@@ -44,14 +44,20 @@ func (w *Worker) Add(deadline time.Time) {
 	c.L.Lock()
 
 	w.count++
+	if len(w.times) > 0 && next < w.times[0] {
+		c.L.Unlock()
+
+		return
+	}
+
 	if w.count >= w.threshold {
 		w.count = 0
 		w.times = append(w.times, next)
+		slices.Sort(w.times)
 		w.times = slices.Compact(w.times)
 		c.Broadcast()
 	}
 
-	c.Broadcast()
 	c.L.Unlock()
 }
 
