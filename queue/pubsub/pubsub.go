@@ -23,6 +23,15 @@ type KafkaMessage struct {
 	kafka.Message
 }
 
+func AsKafkaMessage(msg Message) kafka.Message {
+	m, ok := msg.(*KafkaMessage)
+	if !ok {
+		panic("pubsub: not kafka message")
+	}
+
+	return m.Message
+}
+
 func NewMessage(msg kafka.Message) *KafkaMessage {
 	return &KafkaMessage{
 		Message: msg,

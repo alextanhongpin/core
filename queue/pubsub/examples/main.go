@@ -67,20 +67,16 @@ func main() {
 		ctx, cancel := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 		defer cancel()
 
-		stop, eventErrCh := EventSubscriber.Receive(ctx, func(ctx context.Context, msg pubsub.Message) error {
+		stop, errCh := EventSubscriber.Receive(ctx, func(ctx context.Context, msg pubsub.Message) error {
 			fmt.Printf("received: key=%s value=%s\n", msg.Key(), msg.Value())
 			return EventRetryPublisher.Publish(ctx, msg)
 		})
 		defer stop()
 
-		stopRetry, eventRetryErrCh := EventRetrySubscriber.Receive(ctx, func(ctx context.Context, msg pubsub.Message) error {
-			pkm, ok := msg.(*pubsub.KafkaMessage)
-			if !ok {
-				panic("not kafka message")
-			}
-			km := pkm.Message
+		stopRetry, retryErrCh := EventRetrySubscriber.Receive(ctx, func(ctx context.Context, msg pubsub.Message) error {
+			kmsg := pubsub.AsKafkaMessage(msg)
 			// Retry after 10 seconds.
-			sleep := km.Time.Add(10 * time.Second).Sub(time.Now())
+			sleep := kmsg.Time.Add(10 * time.Second).Sub(time.Now())
 			fmt.Printf("received dead letter: key=%s value=%s retry-after=%s\n", msg.Key(), msg.Value(), sleep)
 			time.Sleep(sleep)
 
@@ -95,9 +91,9 @@ func main() {
 			case <-ctx.Done():
 				fmt.Println("terminated")
 				return
-			case err := <-eventErrCh:
+			case err := <-errCh:
 				log.Println(err)
-			case err := <-eventRetryErrCh:
+			case err := <-retryErrCh:
 				log.Println(err)
 			}
 		}
