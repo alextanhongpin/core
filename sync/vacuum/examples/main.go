@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -27,9 +26,8 @@ func main() {
 
 	vac.Inc(10_000)
 
-	stop := vac.Run(ctx, func(ctx context.Context) error {
+	stop := vac.Run(ctx, func(ctx context.Context) {
 		fmt.Println("run")
-		return errors.New("bad error")
 	})
 
 	defer stop()

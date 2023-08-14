@@ -2,7 +2,6 @@ package vacuum
 
 import (
 	"context"
-	"errors"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -11,8 +10,6 @@ import (
 	"github.com/alextanhongpin/core/types/sliceutil"
 	"golang.org/x/exp/slices"
 )
-
-var ErrClosed = errors.New("vacuum: closed")
 
 type Policy struct {
 	Every    int64
@@ -23,26 +20,18 @@ func (p Policy) IntervalSeconds() int64 {
 	return p.Interval.Nanoseconds() / 1e9
 }
 
-type policy struct {
-	every     int64
-	threshold int64
-}
+type Handler func(ctx context.Context)
 
-type Handler func(ctx context.Context) error
-
-func (h Handler) Exec(ctx context.Context) error {
-	return h(ctx)
+func (h Handler) Exec(ctx context.Context) {
+	h(ctx)
 }
 
 type Vacuum struct {
 	unix     atomic.Int64
 	every    atomic.Int64
-	policies []policy
+	policies []Policy
 	tick     time.Duration
-	done     chan struct{}
 	begin    sync.Once
-	end      sync.Once
-	wg       sync.WaitGroup
 }
 
 func NewPolicy(every int64, interval time.Duration) Policy {
@@ -52,38 +41,28 @@ func NewPolicy(every int64, interval time.Duration) Policy {
 	}
 }
 
-func New(opts []Policy) *Vacuum {
-	if len(opts) == 0 {
+func New(policies []Policy) *Vacuum {
+	if len(policies) == 0 {
 		panic("vacuum: cannot instantiate new vacuum with no policies")
 	}
 
-	policies := sliceutil.Map(opts, func(i int) policy {
-		p := opts[i]
-
-		return policy{
-			every:     p.Every,
-			threshold: p.IntervalSeconds(),
-		}
+	slices.SortFunc(policies, func(a, b Policy) bool {
+		return a.IntervalSeconds() < b.IntervalSeconds()
 	})
 
-	slices.SortFunc(policies, func(a, b policy) bool {
-		return a.threshold < b.threshold
-	})
-
-	thresholds := sliceutil.Map(policies, func(i int) int64 {
-		return policies[i].threshold
+	intervals := sliceutil.Map(policies, func(i int) int64 {
+		return policies[i].IntervalSeconds()
 	})
 
 	// Find the greatest common denominator to run the pooling.
 	// If the given policy interval is 3s, 6s, and 9s for example,
 	// the GCD will be 3s.
-	gcd := internal.GCD(thresholds)
+	gcd := internal.GCD(intervals)
 	tick := time.Duration(gcd) * time.Second
 
 	return &Vacuum{
 		tick:     tick,
 		policies: policies,
-		done:     make(chan struct{}),
 	}
 }
 
@@ -94,18 +73,27 @@ func (v *Vacuum) Inc(n int64) int64 {
 // Run executes whenever the condition is fulfilled. Returning an error will
 // cause the every and timer not to reset.
 // The client should be responsible for logging and handling the error.
-func (v *Vacuum) Run(ctx context.Context, h Handler) func() {
+func (v *Vacuum) Run(ctx context.Context, h Handler) (stop func()) {
 	v.begin.Do(func() {
-		v.wg.Add(1)
+		var wg sync.WaitGroup
+		ctx, cancel := context.WithCancel(ctx)
+		wg.Add(1)
+
+		stop = func() {
+			cancel()
+
+			wg.Wait()
+		}
 
 		go func() {
-			defer v.wg.Done()
+			defer cancel()
+			defer wg.Done()
 
 			v.start(ctx, h)
 		}()
 	})
 
-	return v.stop
+	return
 }
 
 func (v *Vacuum) start(ctx context.Context, h Handler) {
@@ -116,27 +104,15 @@ func (v *Vacuum) start(ctx context.Context, h Handler) {
 		select {
 		case <-ctx.Done():
 			return
-		case <-v.done:
-			return
 		case <-t.C:
 			if !v.allow() {
 				continue
 			}
 
-			if err := h(ctx); err != nil {
-				continue
-			}
-
+			h.Exec(ctx)
 			v.reset()
 		}
 	}
-}
-
-func (v *Vacuum) stop() {
-	v.end.Do(func() {
-		close(v.done)
-		v.wg.Wait()
-	})
 }
 
 func (v *Vacuum) reset() {
@@ -149,11 +125,11 @@ func (v *Vacuum) allow() bool {
 	every := v.every.Load()
 
 	for _, p := range v.policies {
-		if delta < p.threshold {
+		if delta < p.IntervalSeconds() {
 			return false
 		}
 
-		if every >= p.every {
+		if every >= p.Every {
 			return true
 		}
 	}
