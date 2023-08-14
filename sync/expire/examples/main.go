@@ -14,8 +14,8 @@ import (
 
 func main() {
 	worker := expire.New(expire.Option{
-		Every:  10,
-		Window: 5 * time.Second,
+		Threshold: 10,
+		Interval:  5 * time.Second,
 	})
 
 	ctx := context.Background()

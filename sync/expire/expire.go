@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"golang.org/x/exp/event"
+	"golang.org/x/exp/slices"
 )
 
 type Handler func(ctx context.Context) error
@@ -16,75 +17,39 @@ func (h Handler) Exec(ctx context.Context) error {
 
 type Worker struct {
 	count     int           // The current count.
-	every     int           // The maximum count within a time window.
+	threshold int           // The maximum count (or unit bytes) within a time interval.
 	cond      *sync.Cond    // For conditional wait.
-	window    time.Duration // The time window.
-	deadlines []time.Time   // The list of deadlines to be executed from first to last.
-	last      time.Time     // The last execution time.
+	interval  time.Duration // The time interval.
+	times     []time.Time   // The list of times to be executed from first to last.
 }
 
 type Option struct {
-	Every  int
-	Window time.Duration
+	Threshold int
+	Interval  time.Duration
 }
 
 func New(opt Option) *Worker {
 	return &Worker{
-		window: opt.Window,
-		every:  opt.Every,
-		cond:   sync.NewCond(&sync.Mutex{}),
+		interval:  opt.Interval,
+		threshold: opt.Threshold,
+		cond:      sync.NewCond(&sync.Mutex{}),
 	}
 }
 
 func (w *Worker) Add(deadline time.Time) {
 	// Round up the deadline to batch ttls.
-	next := deadline.Truncate(w.window).Add(w.window)
+	next := deadline.Truncate(w.interval).Add(w.interval)
 
 	c := w.cond
 	c.L.Lock()
 
-	// The current batch is already executing.
-	// Skip.
-	// Alternative is to add to the next window.
-	if w.last == next {
-		c.L.Unlock()
-
-		return
-	}
-
-	// No deadlines yet. Add and broadcast.
-	if len(w.deadlines) == 0 {
-		w.count++
-		w.deadlines = append(w.deadlines, next)
+	w.count++
+	if w.count >= w.threshold {
+		w.count = 0
+		w.times = append(w.times, next)
+		w.times = slices.Compact(w.times)
 		c.Broadcast()
-		c.L.Unlock()
-
-		return
 	}
-
-	// Last deadline is within the same window.
-	if w.deadlines[len(w.deadlines)-1] == next {
-		w.count++
-		c.Broadcast()
-		c.L.Unlock()
-
-		return
-	}
-
-	// Threshold not yet exceeded, push to the next window.
-	if w.count < w.every {
-		w.count++
-		w.deadlines[len(w.deadlines)-1] = next
-
-		c.Broadcast()
-		c.L.Unlock()
-
-		return
-	}
-
-	// Threshold exceeded. Add as a new time window.
-	w.deadlines = append(w.deadlines, next)
-	w.count = 1
 
 	c.Broadcast()
 	c.L.Unlock()
@@ -118,35 +83,36 @@ func (w *Worker) loop(ctx context.Context, h Handler) {
 		c := w.cond
 		c.L.Lock()
 
-	cond:
-		for {
+		for len(w.times) == 0 {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+
+			c.Wait()
+
 			select {
 			case <-ctx.Done():
 				c.L.Unlock()
 
 				return
 			default:
-				// Wait if there are no deadlines.
-				if len(w.deadlines) == 0 {
-					c.Wait()
-				}
-
-				break cond
 			}
 		}
 
 		// Shift.
-		next := w.deadlines[0]
-		w.deadlines = w.deadlines[1:]
-
-		// Ensures that after shifting, no new similar deadline was pushed to the
-		// array, which will trigger the execution twice.
-		w.last = next
+		next := w.times[0]
+		w.times = w.times[1:]
 
 		c.L.Unlock()
 
 		// Sleep until the execution.
 		sleep := next.Sub(time.Now())
+		if sleep < 0 {
+			continue
+		}
+
 		<-time.After(sleep)
 
 		if err := h.Exec(ctx); err != nil {
