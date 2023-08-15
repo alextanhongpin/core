@@ -5,8 +5,9 @@ import (
 	"sync"
 	"time"
 
+	"slices"
+
 	"golang.org/x/exp/event"
-	"golang.org/x/exp/slices"
 )
 
 type Handler func(ctx context.Context) error
@@ -44,7 +45,7 @@ func (w *Worker) Add(deadline time.Time) {
 	c.L.Lock()
 
 	w.count++
-	if len(w.times) > 0 && next < w.times[0] {
+	if len(w.times) > 0 && next.Before(w.times[0]) {
 		c.L.Unlock()
 
 		return
@@ -53,7 +54,10 @@ func (w *Worker) Add(deadline time.Time) {
 	if w.count >= w.threshold {
 		w.count = 0
 		w.times = append(w.times, next)
-		slices.Sort(w.times)
+		// Sort in ascending order.
+		slices.SortFunc(w.times, func(a, b time.Time) int {
+			return int(a.UnixNano() - b.UnixNano())
+		})
 		w.times = slices.Compact(w.times)
 		c.Broadcast()
 	}
