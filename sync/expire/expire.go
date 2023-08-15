@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"slices"
+	"golang.org/x/exp/slices"
 
 	"golang.org/x/exp/event"
 )
@@ -55,8 +55,8 @@ func (w *Worker) Add(deadline time.Time) {
 		w.count = 0
 		w.times = append(w.times, next)
 		// Sort in ascending order.
-		slices.SortFunc(w.times, func(a, b time.Time) int {
-			return int(a.UnixNano() - b.UnixNano())
+		slices.SortFunc(w.times, func(a, b time.Time) bool {
+			return a.Before(b)
 		})
 		w.times = slices.Compact(w.times)
 		c.Broadcast()
