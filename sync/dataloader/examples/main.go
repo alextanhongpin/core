@@ -43,7 +43,8 @@ func main() {
 		fmt.Println(u.Await())
 	}()
 
-	time.Sleep(1 * time.Millisecond)
+	time.Sleep(5 * time.Millisecond)
+
 	dl.Stop()
 
 	u := dl.LoadMany(ctx, []string{"1", "2", "3"})

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/exp/maps"
@@ -22,9 +23,9 @@ type Promise[T any] interface {
 type Option[K comparable, V any] struct {
 	BatchMaxKeys int
 	BatchTimeout time.Duration
+	IdleTimeout  time.Duration
 	BatchFn      batchFunc[K, V]
 	KeyFn        keyFunc[K, V]
-	Debounce     bool
 }
 
 type DataLoader[K comparable, V any] struct {
@@ -32,13 +33,13 @@ type DataLoader[K comparable, V any] struct {
 	ch           chan K
 	mu           sync.Mutex
 	wg           sync.WaitGroup
-	begin        sync.Once
+	awake        atomic.Bool
 	end          sync.Once
 	batchMaxKeys int
 	batchTimeout time.Duration
 	batchFn      batchFunc[K, V]
+	idleTimeout  time.Duration
 	keyFn        keyFunc[K, V]
-	debounce     bool
 	done         chan struct{}
 }
 
@@ -49,6 +50,14 @@ func New[K comparable, V any](opt Option[K, V]) *DataLoader[K, V] {
 
 	if opt.BatchTimeout == 0 {
 		opt.BatchTimeout = 1 * time.Millisecond
+	}
+
+	if opt.IdleTimeout == 0 {
+		opt.IdleTimeout = 10 * opt.BatchTimeout
+	}
+
+	if opt.IdleTimeout < opt.BatchTimeout {
+		panic("dataloader: idle timeout must be greater than batch timeout")
 	}
 
 	if opt.BatchFn == nil {
@@ -62,12 +71,12 @@ func New[K comparable, V any](opt Option[K, V]) *DataLoader[K, V] {
 	return &DataLoader[K, V]{
 		cache:        make(map[K]*thunk[V]),
 		done:         make(chan struct{}),
-		debounce:     opt.Debounce,
 		ch:           make(chan K),
 		batchMaxKeys: opt.BatchMaxKeys,
 		batchTimeout: opt.BatchTimeout,
 		batchFn:      opt.BatchFn,
 		keyFn:        opt.KeyFn,
+		idleTimeout:  opt.IdleTimeout,
 	}
 }
 
@@ -76,11 +85,11 @@ func (d *DataLoader[K, V]) Set(ctx context.Context, k K, v V) {
 	d.mu.Lock()
 	e, ok := d.cache[k]
 	if ok {
-		e.SetError(KeyRejectedError(k))
+		e.reject(KeyRejectedError(k))
 	}
 
 	t := newThunk[V]()
-	t.SetData(v)
+	t.resolve(v)
 	d.cache[k] = t
 
 	d.mu.Unlock()
@@ -97,7 +106,7 @@ func (d *DataLoader[K, V]) SetNX(ctx context.Context, k K, v V) bool {
 	}
 
 	t := newThunk[V]()
-	t.SetData(v)
+	t.resolve(v)
 	d.cache[k] = t
 
 	d.mu.Unlock()
@@ -106,7 +115,7 @@ func (d *DataLoader[K, V]) SetNX(ctx context.Context, k K, v V) bool {
 }
 
 func (d *DataLoader[K, V]) Load(ctx context.Context, k K) Promise[V] {
-	d.begin.Do(d.start)
+	_ = d.wake(ctx)
 
 	d.mu.Lock()
 	v, ok := d.cache[k]
@@ -123,7 +132,7 @@ func (d *DataLoader[K, V]) Load(ctx context.Context, k K) Promise[V] {
 
 	select {
 	case <-d.done:
-		t.SetError(KeyRejectedError(k))
+		t.reject(KeyRejectedError(k))
 	case d.ch <- k:
 	}
 
@@ -135,7 +144,7 @@ func (d *DataLoader[K, V]) LoadMany(ctx context.Context, ks []K) Promises[V] {
 		return nil
 	}
 
-	d.begin.Do(d.start)
+	_ = d.wake(ctx)
 
 	result := make([]Promise[V], len(ks))
 
@@ -152,7 +161,7 @@ func (d *DataLoader[K, V]) LoadMany(ctx context.Context, ks []K) Promises[V] {
 
 			select {
 			case <-d.done:
-				t.SetError(KeyRejectedError(k))
+				t.reject(KeyRejectedError(k))
 			case d.ch <- k:
 			}
 		}
@@ -167,22 +176,42 @@ func (d *DataLoader[K, V]) Stop() {
 	d.stop()
 }
 
-func (d *DataLoader[K, V]) start() {
+func (d *DataLoader[K, V]) wake(ctx context.Context) bool {
+	if d.isDone() {
+		return false
+	}
+
+	if d.awake.Swap(true) {
+		return false
+	}
+
+	d.start(ctx)
+	return true
+}
+
+func (d *DataLoader[K, V]) isDone() bool {
+	select {
+	case <-d.done:
+		return true
+	default:
+		return false
+	}
+}
+
+func (d *DataLoader[K, V]) start(ctx context.Context) {
 	d.wg.Add(1)
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(ctx)
 
 	go func() {
 		defer d.wg.Done()
 		defer cancel()
+		defer d.awake.Swap(false)
 
 		d.loop(ctx)
 	}()
 }
 
 func (d *DataLoader[K, V]) stop() {
-	d.begin.Do(func() {
-		// Waste the Do to ensure it is no longer executed.
-	})
 	d.end.Do(func() {
 		close(d.done)
 
@@ -191,8 +220,11 @@ func (d *DataLoader[K, V]) stop() {
 }
 
 func (d *DataLoader[K, V]) loop(ctx context.Context) {
-	t := time.NewTicker(d.batchTimeout)
-	defer t.Stop()
+	tick := time.NewTicker(d.batchTimeout)
+	defer tick.Stop()
+
+	idle := time.NewTicker(d.idleTimeout)
+	defer idle.Stop()
 
 	keys := make(map[K]struct{})
 
@@ -225,16 +257,22 @@ func (d *DataLoader[K, V]) loop(ctx context.Context) {
 		select {
 		case <-d.done:
 			return
+		case <-idle.C:
+			return
 		case k := <-d.ch:
+			// Two strategy for optimizing fetching data:
+			// 1. Batch: when the number of keys hits the threshold
+			// 2. Debounce: when no new keys after the timeout.
 			keys[k] = struct{}{}
-			if len(keys) > d.batchMaxKeys {
+			if len(keys) >= d.batchMaxKeys {
 				flush(fetch())
 			}
 
-			if d.debounce {
-				t.Reset(d.batchTimeout)
-			}
-		case <-t.C:
+			idle.Reset(d.idleTimeout)
+
+			// Fire after batchTimeout.
+			tick.Reset(d.batchTimeout)
+		case <-tick.C:
 			flush(fetch())
 		}
 	}
@@ -245,7 +283,7 @@ func (d *DataLoader[K, V]) batch(ctx context.Context, keys []K) {
 	if err != nil {
 		d.mu.Lock()
 		for _, k := range keys {
-			d.cache[k].SetError(KeyNotFoundError(k))
+			d.cache[k].reject(KeyNotFoundError(k))
 		}
 		d.mu.Unlock()
 
@@ -256,14 +294,14 @@ func (d *DataLoader[K, V]) batch(ctx context.Context, keys []K) {
 	for _, v := range vals {
 		k, err := d.keyFn(v)
 		if err != nil {
-			d.cache[k].SetError(err)
+			d.cache[k].reject(err)
 		} else {
-			d.cache[k].SetData(v)
+			d.cache[k].resolve(v)
 		}
 	}
 
 	for _, k := range keys {
-		d.cache[k].SetError(KeyNotFoundError(k))
+		d.cache[k].reject(KeyNotFoundError(k))
 	}
 
 	d.mu.Unlock()
@@ -286,14 +324,14 @@ func newThunk[T any]() *thunk[T] {
 	return t
 }
 
-func (t *thunk[T]) SetData(v T) {
+func (t *thunk[T]) resolve(v T) {
 	t.begin.Do(func() {
 		t.data = v
 		t.wg.Done()
 	})
 }
 
-func (t *thunk[T]) SetError(err error) {
+func (t *thunk[T]) reject(err error) {
 	t.begin.Do(func() {
 		t.err = err
 		t.wg.Done()
