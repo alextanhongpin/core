@@ -1,4 +1,4 @@
-package vacuum
+package snapshot
 
 import (
 	"context"
@@ -26,7 +26,7 @@ func (h Handler) Exec(ctx context.Context) {
 	h(ctx)
 }
 
-type Vacuum struct {
+type Manager struct {
 	unix     atomic.Int64
 	every    atomic.Int64
 	policies []Policy
@@ -39,7 +39,7 @@ func NewPolicy(every int64, interval time.Duration) Policy {
 	}
 }
 
-func New(policies []Policy) *Vacuum {
+func New(policies []Policy) *Manager {
 	if len(policies) == 0 {
 		panic("vacuum: cannot instantiate new vacuum with no policies")
 	}
@@ -48,29 +48,29 @@ func New(policies []Policy) *Vacuum {
 		return a.IntervalSeconds() < b.IntervalSeconds()
 	})
 
-	return &Vacuum{
+	return &Manager{
 		policies: policies,
 	}
 }
 
-func (v *Vacuum) Inc(n int64) int64 {
-	return v.every.Add(n)
+func (m *Manager) Inc(n int64) int64 {
+	return m.every.Add(n)
 }
 
 // Exec allows lazy execution.
-func (v *Vacuum) Exec(ctx context.Context, h Handler) {
-	if !v.allow() {
+func (m *Manager) Exec(ctx context.Context, h Handler) {
+	if !m.allow() {
 		return
 	}
 
 	h.Exec(ctx)
-	v.reset()
+	m.reset()
 }
 
 // Run executes whenever the condition is fulfilled. Returning an error will
 // cause the every and timer not to reset.
 // The client should be responsible for logging and handling the error.
-func (v *Vacuum) Run(ctx context.Context, h Handler) func() {
+func (m *Manager) Run(ctx context.Context, h Handler) func() {
 	var wg sync.WaitGroup
 	ctx, cancel := context.WithCancel(ctx)
 	wg.Add(1)
@@ -85,14 +85,14 @@ func (v *Vacuum) Run(ctx context.Context, h Handler) func() {
 		defer cancel()
 		defer wg.Done()
 
-		v.start(ctx, h)
+		m.start(ctx, h)
 	}()
 
 	return stop
 }
 
-func (v *Vacuum) start(ctx context.Context, h Handler) {
-	t := time.NewTicker(v.tick())
+func (m *Manager) start(ctx context.Context, h Handler) {
+	t := time.NewTicker(m.tick())
 	defer t.Stop()
 
 	for {
@@ -100,21 +100,21 @@ func (v *Vacuum) start(ctx context.Context, h Handler) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			v.Exec(ctx, h)
+			m.Exec(ctx, h)
 		}
 	}
 }
 
-func (v *Vacuum) reset() {
-	v.every.Store(0)
-	v.unix.Store(time.Now().Unix())
+func (m *Manager) reset() {
+	m.every.Store(0)
+	m.unix.Store(time.Now().Unix())
 }
 
-func (v *Vacuum) allow() bool {
-	delta := time.Now().Unix() - v.unix.Load()
-	every := v.every.Load()
+func (m *Manager) allow() bool {
+	delta := time.Now().Unix() - m.unix.Load()
+	every := m.every.Load()
 
-	for _, p := range v.policies {
+	for _, p := range m.policies {
 		if delta < p.IntervalSeconds() {
 			return false
 		}
@@ -127,9 +127,9 @@ func (v *Vacuum) allow() bool {
 	return false
 }
 
-func (v *Vacuum) tick() time.Duration {
-	intervals := sliceutil.Map(v.policies, func(i int) int64 {
-		return v.policies[i].IntervalSeconds()
+func (m *Manager) tick() time.Duration {
+	intervals := sliceutil.Map(m.policies, func(i int) int64 {
+		return m.policies[i].IntervalSeconds()
 	})
 
 	// Find the greatest common denominator to run the pooling.
