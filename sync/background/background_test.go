@@ -1,6 +1,7 @@
 package background_test
 
 import (
+	"context"
 	"sync"
 	"testing"
 	"time"
@@ -9,30 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-type numberTask struct {
-	sleep time.Duration
-	nums  []int
-	mu    sync.RWMutex
-}
-
-func (t *numberTask) Exec(n int) {
-	// Pretend to do some work.
-	time.Sleep(t.sleep)
-
-	t.mu.Lock()
-	t.nums = append(t.nums, n)
-	t.mu.Unlock()
-}
-
-func (t *numberTask) Numbers() []int {
-	t.mu.RLock()
-
-	nums := make([]int, len(t.nums))
-	copy(nums, t.nums)
-
-	t.mu.RUnlock()
-	return nums
-}
+var ctx = context.Background()
 
 func TestBackground(t *testing.T) {
 
@@ -47,7 +25,7 @@ func TestBackground(t *testing.T) {
 		defer stop()
 
 		assert := assert.New(t)
-		assert.Nil(bg.Send(1))
+		assert.Nil(bg.Send(ctx, 1))
 
 		stop()
 
@@ -64,10 +42,10 @@ func TestBackground(t *testing.T) {
 		bg, stop := background.New(opt)
 
 		assert := assert.New(t)
-		assert.Nil(bg.Send(1))
+		assert.Nil(bg.Send(ctx, 1))
 		stop()
 
-		assert.Equal(background.Stopped, bg.Send(2))
+		assert.Equal(background.Stopped, bg.Send(ctx, 2))
 		assert.Equal([]int{1}, task.Numbers())
 	})
 
@@ -91,14 +69,14 @@ func TestBackground(t *testing.T) {
 			defer wg.Done()
 
 			<-race
-			assert.Nil(bg.Send(1))
+			assert.Nil(bg.Send(ctx, 1))
 		}()
 
 		go func() {
 			defer wg.Done()
 
 			<-race
-			assert.Nil(bg.Send(2))
+			assert.Nil(bg.Send(ctx, 2))
 		}()
 
 		// Signal sending.
@@ -120,14 +98,39 @@ func TestBackground(t *testing.T) {
 
 		assert := assert.New(t)
 		assert.True(bg.IsIdle())
-		assert.Nil(bg.Send(1))
-		assert.Nil(bg.Send(2))
-		assert.Nil(bg.Send(3))
+		assert.Nil(bg.Send(ctx, 1))
+		assert.Nil(bg.Send(ctx, 2))
+		assert.Nil(bg.Send(ctx, 3))
 		assert.False(bg.IsIdle())
 		stop()
 		assert.True(bg.IsIdle())
-		assert.Equal(background.Stopped, bg.Send(4))
+		assert.Equal(background.Stopped, bg.Send(ctx, 4))
 
 		assert.ElementsMatch([]int{1, 2, 3}, task.Numbers())
 	})
+}
+
+type numberTask struct {
+	sleep time.Duration
+	nums  []int
+	mu    sync.RWMutex
+}
+
+func (t *numberTask) Exec(ctx context.Context, n int) {
+	// Pretend to do some work.
+	time.Sleep(t.sleep)
+
+	t.mu.Lock()
+	t.nums = append(t.nums, n)
+	t.mu.Unlock()
+}
+
+func (t *numberTask) Numbers() []int {
+	t.mu.RLock()
+
+	nums := make([]int, len(t.nums))
+	copy(nums, t.nums)
+
+	t.mu.RUnlock()
+	return nums
 }
