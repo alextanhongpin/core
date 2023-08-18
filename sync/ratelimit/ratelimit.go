@@ -1,11 +1,11 @@
 package ratelimit
 
 import (
+	"sort"
 	"time"
 )
 
 type Limiter struct {
-	name     string
 	count    int           // The current number of request.
 	limit    int           // The number of request.
 	interval time.Duration // The period for the request limit.
@@ -13,18 +13,12 @@ type Limiter struct {
 	now      func() time.Time
 }
 
-func New(name string, n int, interval time.Duration) *Limiter {
+func New(n int, interval time.Duration) *Limiter {
 	return &Limiter{
-		name:     name,
 		limit:    n,
 		interval: interval,
 		now:      time.Now,
 	}
-}
-
-// period returns the time taken for one request to complete.
-func (l *Limiter) Period() time.Duration {
-	return l.interval / time.Duration(l.limit)
 }
 
 func (l *Limiter) Remaining() int {
@@ -36,21 +30,13 @@ func (l *Limiter) Limit() int {
 }
 
 func (l *Limiter) Allow() bool {
-	period := l.Period()
 	now := l.now()
 
 	end := l.last.Add(l.interval)
 	if end.Before(now) {
 		// Reset.
-		l.last = now.Truncate(period)
+		l.last = now
 		l.count = 0
-	}
-
-	prev := l.last.Add(period * time.Duration(l.count))
-	next := prev.Add(period)
-
-	if !between(now, prev, next) {
-		return false
 	}
 
 	l.count++
@@ -62,9 +48,73 @@ func (l *Limiter) SetNow(now func() time.Time) {
 	l.now = now
 }
 
-// between returns true if time t fulfils: min <= t < max
-func between(a, lo, hi time.Time) bool {
-	return !a.Before(lo) && a.Before(hi)
+type MultiRateLimiter struct {
+	limiters []*Limiter
+}
+
+type MultiOption struct {
+	Month  int
+	Day    int
+	Hour   int
+	Minute int
+	Second int
+}
+
+func (m *MultiOption) ToLimiters() []*Limiter {
+	var res []*Limiter
+
+	if m.Month > 0 {
+		res = append(res, New(m.Month, 30*24*time.Hour))
+	}
+
+	if m.Day > 0 {
+		res = append(res, New(m.Day, 24*time.Hour))
+	}
+
+	if m.Hour > 0 {
+		res = append(res, New(m.Hour, time.Hour))
+	}
+
+	if m.Minute > 0 {
+		res = append(res, New(m.Minute, time.Minute))
+	}
+
+	if m.Second > 0 {
+		res = append(res, New(m.Second, time.Second))
+	}
+
+	sort.Slice(res, func(i, j int) bool {
+		return res[i].interval < res[j].interval
+	})
+
+	return res
+}
+
+func NewMulti(opt MultiOption) *MultiRateLimiter {
+	return &MultiRateLimiter{
+		limiters: opt.ToLimiters(),
+	}
+}
+
+func (r *MultiRateLimiter) SetNow(now func() time.Time) {
+	for _, lim := range r.limiters {
+		lim.SetNow(now)
+	}
+}
+
+func (r *MultiRateLimiter) Remaining() int {
+	lim := r.limiters[len(r.limiters)-1]
+	return lim.Remaining()
+}
+
+func (r *MultiRateLimiter) Allow() bool {
+	for _, lim := range r.limiters {
+		if !lim.Allow() {
+			return false
+		}
+	}
+
+	return true
 }
 
 func max(a, b int) int {
