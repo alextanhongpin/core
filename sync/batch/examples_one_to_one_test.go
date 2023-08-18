@@ -67,5 +67,8 @@ func newShipmentLoader() *batch.Loader[int, Shipment] {
 		return
 	}
 
-	return batch.New(batchFn, keyFn)
+	return batch.New(batch.Option[int, Shipment]{
+		BatchFn: batchFn,
+		KeyFn:   keyFn,
+	})
 }

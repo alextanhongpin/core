@@ -75,5 +75,8 @@ func newSubCategoryLoader() *batch.Loader[int, SubCategory] {
 		return
 	}
 
-	return batch.New(batchFn, keyFn)
+	return batch.New(batch.Option[int, SubCategory]{
+		BatchFn: batchFn,
+		KeyFn:   keyFn,
+	})
 }

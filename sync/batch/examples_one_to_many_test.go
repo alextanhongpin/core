@@ -69,5 +69,8 @@ func newBookLoader() *batch.Loader[int, Book] {
 		return
 	}
 
-	return batch.New(batchFn, keyFn)
+	return batch.New(batch.Option[int, Book]{
+		BatchFn: batchFn,
+		KeyFn:   keyFn,
+	})
 }

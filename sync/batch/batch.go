@@ -25,28 +25,50 @@ var (
 	ErrNilReference        = errors.New("batch: nil reference is passed in")
 )
 
-type BatchFn[K comparable, V any] func(...K) ([]V, error)
+type batchFn[K, V any] func(...K) ([]V, error)
 
-type KeyFn[K comparable, V any] func(V) (K, error)
+type keyFn[K, V any] func(V) (K, error)
+
+type hookFn[T any] func([]T) ([]T, error)
 
 type Loader[K comparable, V any] struct {
 	kindByID map[int]kind
 	keys     []K
 	one      map[int]*V
 	many     map[int]*[]V
-	batchFn  BatchFn[K, V]
-	keyFn    KeyFn[K, V]
+	batchFn  batchFn[K, V]
+	keyFn    keyFn[K, V]
 	done     chan bool
 	mu       sync.Mutex
+	hookFn   hookFn[V]
 }
 
-func New[K comparable, V any](batchFn BatchFn[K, V], keyFn KeyFn[K, V]) *Loader[K, V] {
+type Option[K, V any] struct {
+	BatchFn batchFn[K, V]
+	KeyFn   keyFn[K, V]
+	HookFn  hookFn[V]
+}
+
+func New[K comparable, V any](opt Option[K, V]) *Loader[K, V] {
+	if opt.BatchFn == nil {
+		panic("batch: BatchFn missing in constructor")
+	}
+
+	if opt.KeyFn == nil {
+		panic("batch: KeyFn missing in constructor")
+	}
+
+	if opt.HookFn == nil {
+		opt.HookFn = Copier[V]
+	}
+
 	return &Loader[K, V]{
-		batchFn:  batchFn,
+		batchFn:  opt.BatchFn,
 		kindByID: make(map[int]kind),
 		one:      make(map[int]*V),
 		many:     make(map[int]*[]V),
-		keyFn:    keyFn,
+		keyFn:    opt.KeyFn,
+		hookFn:   opt.HookFn,
 		done:     make(chan bool),
 	}
 }
@@ -160,7 +182,6 @@ func (l *Loader[K, V]) wait() error {
 		valsByKey[k] = append(valsByKey[k], v)
 	}
 
-	cached := make(map[K]bool)
 	for i, k := range l.keys {
 		kind := l.kindByID[i]
 		v, ok := valsByKey[k]
@@ -175,31 +196,28 @@ func (l *Loader[K, V]) wait() error {
 			}
 		}
 
-		if cached[k] {
-			// If there are duplicate keys, clone the subsequent value.
-			// This prevents sharing reference for the same value, which is a common
-			// mistake.
-			c, err := copystructure.Copy(v)
-			if err != nil {
-				return err
-			}
+		c, err := l.hookFn(v)
+		if err != nil {
+			return err
+		}
 
-			switch kind {
-			case one:
-				*l.one[i] = c.([]V)[0]
-			case many:
-				*l.many[i] = append(*l.many[i], (c.([]V))...)
-			}
-		} else {
-			switch kind {
-			case one:
-				*l.one[i] = v[0]
-			case many:
-				*l.many[i] = append(*l.many[i], v...)
-			}
-			cached[k] = true
+		switch kind {
+		case one:
+			*l.one[i] = c[0]
+		case many:
+			*l.many[i] = append(*l.many[i], c...)
 		}
 	}
 
 	return nil
+}
+
+func Copier[V any](v []V) ([]V, error) {
+	u, err := copystructure.Copy(v)
+	if err != nil {
+		return v, err
+	}
+
+	t := u.([]V)
+	return t, nil
 }

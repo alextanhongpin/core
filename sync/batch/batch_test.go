@@ -222,7 +222,10 @@ func newUserLoader(ignoreIds ...int) *batch.Loader[int, User] {
 		return u.ID, nil
 	}
 
-	return batch.New(batchFn, keyFn)
+	return batch.New(batch.Option[int, User]{
+		BatchFn: batchFn,
+		KeyFn:   keyFn,
+	})
 }
 
 type Publication struct {
@@ -262,5 +265,8 @@ func newBooksLoader() *batch.Loader[int, PaperBook] {
 		return b.AuthorID, nil
 	}
 
-	return batch.New(batchFn, keyFn)
+	return batch.New(batch.Option[int, PaperBook]{
+		BatchFn: batchFn,
+		KeyFn:   keyFn,
+	})
 }
