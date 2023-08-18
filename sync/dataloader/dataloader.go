@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/mitchellh/copystructure"
 	"golang.org/x/exp/maps"
 )
 
@@ -26,6 +27,7 @@ type Option[K comparable, V any] struct {
 	IdleTimeout  time.Duration
 	BatchFn      batchFunc[K, V]
 	KeyFn        keyFunc[K, V]
+	PromiseFn    promiseFn[V]
 }
 
 type DataLoader[K comparable, V any] struct {
@@ -41,6 +43,7 @@ type DataLoader[K comparable, V any] struct {
 	idleTimeout  time.Duration
 	keyFn        keyFunc[K, V]
 	done         chan struct{}
+	promiseFn    promiseFn[V]
 }
 
 func New[K comparable, V any](opt Option[K, V]) *DataLoader[K, V] {
@@ -68,6 +71,12 @@ func New[K comparable, V any](opt Option[K, V]) *DataLoader[K, V] {
 		panic("dataloader: missing option KeyFn in constructor")
 	}
 
+	if opt.PromiseFn == nil {
+		opt.PromiseFn = func(p Promise[V]) Promise[V] {
+			return p
+		}
+	}
+
 	return &DataLoader[K, V]{
 		cache:        make(map[K]*thunk[V]),
 		done:         make(chan struct{}),
@@ -77,6 +86,7 @@ func New[K comparable, V any](opt Option[K, V]) *DataLoader[K, V] {
 		batchFn:      opt.BatchFn,
 		keyFn:        opt.KeyFn,
 		idleTimeout:  opt.IdleTimeout,
+		promiseFn:    opt.PromiseFn,
 	}
 }
 
@@ -122,7 +132,7 @@ func (d *DataLoader[K, V]) Load(ctx context.Context, k K) Promise[V] {
 	if ok {
 		d.mu.Unlock()
 
-		return v
+		return d.promiseFn(v)
 	}
 
 	t := newThunk[V]()
@@ -136,7 +146,7 @@ func (d *DataLoader[K, V]) Load(ctx context.Context, k K) Promise[V] {
 	case d.ch <- k:
 	}
 
-	return t
+	return d.promiseFn(t)
 }
 
 func (d *DataLoader[K, V]) LoadMany(ctx context.Context, ks []K) Promises[V] {
@@ -153,11 +163,12 @@ func (d *DataLoader[K, V]) LoadMany(ctx context.Context, ks []K) Promises[V] {
 	for i, k := range ks {
 		v, ok := d.cache[k]
 		if ok {
-			result[i] = v
+			result[i] = d.promiseFn(v)
 		} else {
 			t := newThunk[V]()
 			d.cache[k] = t
-			result[i] = t
+
+			result[i] = d.promiseFn(t)
 
 			select {
 			case <-d.done:
@@ -311,6 +322,8 @@ type keyFunc[K comparable, V any] func(v V) (K, error)
 
 type batchFunc[K comparable, V any] func(ctx context.Context, keys []K) ([]V, error)
 
+type promiseFn[V any] func(Promise[V]) Promise[V]
+
 type thunk[T any] struct {
 	wg    sync.WaitGroup
 	begin sync.Once
@@ -371,4 +384,26 @@ func KeyNotFoundError(k any) error {
 
 func KeyRejectedError(k any) error {
 	return fmt.Errorf("%w: %s", ErrKeyRejected, k)
+}
+
+type promiseCopier[T any] struct {
+	p Promise[T]
+}
+
+func (pc *promiseCopier[T]) Await() (T, error) {
+	v, err := pc.p.Await()
+	if err != nil {
+		return v, err
+	}
+
+	u, err := copystructure.Copy(v)
+	if err != nil {
+		return v, err
+	}
+
+	return u.(T), nil
+}
+
+func Copier[T any](p Promise[T]) Promise[T] {
+	return &promiseCopier[T]{p}
 }

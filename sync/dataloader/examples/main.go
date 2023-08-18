@@ -30,6 +30,7 @@ func main() {
 		KeyFn: func(u User) (string, error) {
 			return u.ID, nil
 		},
+		PromiseFn: dataloader.Copier[User],
 	})
 
 	ctx := context.Background()
