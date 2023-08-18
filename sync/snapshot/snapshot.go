@@ -1,3 +1,5 @@
+// package snapshot implements redis-snapshot like mechanism - the higher the
+// frequency, the more frequent the execution.
 package snapshot
 
 import (
@@ -41,7 +43,7 @@ func NewPolicy(every int64, interval time.Duration) Policy {
 
 func New(policies []Policy) *Manager {
 	if len(policies) == 0 {
-		panic("vacuum: cannot instantiate new vacuum with no policies")
+		panic("snapshot: cannot instantiate new snapshot with no policies")
 	}
 
 	slices.SortFunc(policies, func(a, b Policy) bool {
