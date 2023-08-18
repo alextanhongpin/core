@@ -35,9 +35,15 @@ func (t *numberTask) Numbers() []int {
 }
 
 func TestBackground(t *testing.T) {
+
 	t.Run("success", func(t *testing.T) {
 		task := &numberTask{}
-		bg, stop := background.New[int](task)
+
+		opt := background.Option[int]{
+			IdleTimeout: 1 * time.Second,
+			Handler:     task,
+		}
+		bg, stop := background.New(opt)
 		defer stop()
 
 		assert := assert.New(t)
@@ -50,7 +56,12 @@ func TestBackground(t *testing.T) {
 
 	t.Run("early stop", func(t *testing.T) {
 		task := &numberTask{}
-		bg, stop := background.New[int](task)
+
+		opt := background.Option[int]{
+			IdleTimeout: 1 * time.Second,
+			Handler:     task,
+		}
+		bg, stop := background.New(opt)
 
 		assert := assert.New(t)
 		assert.Nil(bg.Send(1))
@@ -64,7 +75,12 @@ func TestBackground(t *testing.T) {
 		assert := assert.New(t)
 
 		task := &numberTask{}
-		bg, stop := background.New[int](task)
+
+		opt := background.Option[int]{
+			IdleTimeout: 1 * time.Second,
+			Handler:     task,
+		}
+		bg, stop := background.New(opt)
 
 		race := make(chan bool)
 
@@ -93,15 +109,23 @@ func TestBackground(t *testing.T) {
 		assert.ElementsMatch([]int{1, 2}, task.Numbers())
 	})
 
-	t.Run("buffer with early stop", func(t *testing.T) {
+	t.Run("idle", func(t *testing.T) {
 		task := &numberTask{sleep: 50 * time.Millisecond}
-		bg, stop := background.New[int](task)
+
+		opt := background.Option[int]{
+			Handler: task,
+		}
+
+		bg, stop := background.New(opt)
 
 		assert := assert.New(t)
+		assert.True(bg.IsIdle())
 		assert.Nil(bg.Send(1))
 		assert.Nil(bg.Send(2))
 		assert.Nil(bg.Send(3))
+		assert.False(bg.IsIdle())
 		stop()
+		assert.True(bg.IsIdle())
 		assert.Equal(background.Stopped, bg.Send(4))
 
 		assert.ElementsMatch([]int{1, 2, 3}, task.Numbers())

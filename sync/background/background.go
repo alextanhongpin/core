@@ -5,6 +5,7 @@ import (
 	"errors"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/sync/semaphore"
@@ -12,30 +13,46 @@ import (
 
 var maxWorkers = runtime.GOMAXPROCS(0)
 
-type task[T any] interface {
+type Handler[T any] interface {
 	Exec(T)
+}
+
+type Task[T any] func(T)
+
+func (h Task[T]) Exec(t T) {
+	h(t)
 }
 
 var Stopped = errors.New("background: already stopped")
 
 type Worker[T any] struct {
-	sem   *semaphore.Weighted
-	wg    sync.WaitGroup
-	ch    chan T
-	done  chan struct{}
-	task  task[T]
-	begin sync.Once
-	end   sync.Once
-	set   sync.Once
+	sem     *semaphore.Weighted
+	wg      sync.WaitGroup
+	ch      chan T
+	done    chan struct{}
+	handler Handler[T]
+	idle    time.Duration
+	end     sync.Once
+	set     sync.Once
+	awake   atomic.Bool
+}
+
+type Option[T any] struct {
+	IdleTimeout time.Duration
+	Handler     Handler[T]
 }
 
 // New returns a new background manager.
-func New[T any](task task[T]) (*Worker[T], func()) {
+func New[T any](opt Option[T]) (*Worker[T], func()) {
+	if opt.IdleTimeout <= 0 {
+		opt.IdleTimeout = 1 * time.Second
+	}
 	w := &Worker[T]{
-		sem:  semaphore.NewWeighted(int64(maxWorkers)),
-		ch:   make(chan T),
-		done: make(chan struct{}),
-		task: task,
+		sem:     semaphore.NewWeighted(int64(maxWorkers)),
+		ch:      make(chan T),
+		done:    make(chan struct{}),
+		handler: opt.Handler,
+		idle:    opt.IdleTimeout,
 	}
 
 	return w, w.stop
@@ -47,9 +64,13 @@ func (w *Worker[T]) SetMaxWorkers(n int) {
 	})
 }
 
+func (w *Worker[T]) IsIdle() bool {
+	return !w.awake.Load()
+}
+
 // Send sends a new message to the channel.
 func (w *Worker[T]) Send(t T) error {
-	w.init()
+	w.start()
 
 	select {
 	case <-w.done:
@@ -67,23 +88,26 @@ func (w *Worker[T]) Send(t T) error {
 }
 
 // init inits the goroutine that listens for messages from the channel.
-func (w *Worker[T]) init() {
-	w.begin.Do(func() {
-		w.wg.Add(1)
-		w.set.Do(func() {})
+func (w *Worker[T]) start() {
+	if w.awake.Swap(true) {
+		return
+	}
 
-		go func() {
-			defer w.wg.Done()
+	w.wg.Add(1)
+	w.set.Do(func() {})
 
-			w.worker()
-		}()
-	})
+	go func() {
+		defer w.wg.Done()
+
+		w.worker()
+	}()
 }
 
 // stop stops the channel and waits for the channel messages to be flushed.
 func (w *Worker[T]) stop() {
 	w.end.Do(func() {
 		close(w.done)
+		w.awake.Store(false)
 
 		w.wg.Wait()
 	})
@@ -93,23 +117,27 @@ func (w *Worker[T]) stop() {
 func (w *Worker[T]) worker() {
 	defer w.flush()
 
+	t := time.NewTicker(w.idle)
+	defer t.Stop()
+
 	for {
 		select {
 		case <-w.done:
 			return
+		case <-t.C:
+			w.awake.Store(false)
 		case v := <-w.ch:
 			w.exec(v)
+			t.Reset(w.idle)
 		}
 	}
 }
 
 func (w *Worker[T]) exec(v T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
-	defer cancel()
-
+	ctx := context.Background()
 	if err := w.sem.Acquire(ctx, 1); err != nil {
-		// Execute the task immediately if we fail to acquire semaphore.
-		w.task.Exec(v)
+		// Execute the handler immediately if we fail to acquire semaphore.
+		w.handler.Exec(v)
 
 		return
 	}
@@ -117,7 +145,7 @@ func (w *Worker[T]) exec(v T) {
 	go func() {
 		defer w.sem.Release(1)
 
-		w.task.Exec(v)
+		w.handler.Exec(v)
 	}()
 }
 
