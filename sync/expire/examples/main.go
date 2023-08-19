@@ -15,6 +15,7 @@ import (
 func main() {
 	worker := expire.New(expire.Option{
 		Threshold: 10,
+		Expiry:    10 * time.Second,
 		Interval:  5 * time.Second,
 	})
 
@@ -38,7 +39,7 @@ func main() {
 				time.Sleep(sleep)
 
 				fmt.Println("added 1s")
-				worker.Add(time.Now().Add(1 * time.Second))
+				worker.Add(ctx, rand.Intn(5))
 			}
 		}
 	}()

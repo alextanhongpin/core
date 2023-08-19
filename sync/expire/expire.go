@@ -1,5 +1,5 @@
-// package expire queues deadlines in a given time window and executes the
-// handler when the queue size hits the threshold.
+// package expire optimally wait for the next deadline
+// when there are at least n number of items to expire.
 package expire
 
 import (
@@ -9,6 +9,20 @@ import (
 
 	"github.com/alextanhongpin/core/types/sliceutil"
 	"golang.org/x/exp/event"
+)
+
+var (
+	addCounter = event.NewCounter("expire.add", &event.MetricOptions{
+		Description: "the number of keys added",
+	})
+
+	execCounter = event.NewCounter("expire.exec", &event.MetricOptions{
+		Description: "the number times the handler executes",
+	})
+
+	goroutineCounter = event.NewCounter("expire.goroutine", &event.MetricOptions{
+		Description: "the number of goroutines spawn by the workers",
+	})
 )
 
 type Handler func(ctx context.Context) error
@@ -22,38 +36,48 @@ type Worker struct {
 	threshold int           // The maximum count (or unit bytes) within a time interval.
 	cond      *sync.Cond    // For conditional wait.
 	interval  time.Duration // The time interval.
-	times     []time.Time   // The list of times to be executed from first to last.
+	expiry    time.Duration
+	times     []time.Time // The list of times to be executed from first to last.
+	last      time.Time   // The last execution time.
 }
 
 type Option struct {
-	Threshold int
-	Interval  time.Duration
+	Threshold int           // How many expired keys to keep before cleaning.
+	Expiry    time.Duration // How long before a key expires (it must be the same for all).
+	Interval  time.Duration // The time window to accumulate the keys.
 }
 
 func New(opt Option) *Worker {
 	return &Worker{
 		interval:  opt.Interval,
 		threshold: opt.Threshold,
+		expiry:    opt.Expiry,
 		cond:      sync.NewCond(&sync.Mutex{}),
 	}
 }
 
-// Add adds a new deadline to execute. The next deadline is calculated by
-// rounding the deadline to the next interval.
-func (w *Worker) Add(deadline time.Time) {
+// Add adds n number of keys to expire.
+func (w *Worker) Add(ctx context.Context, n int) {
 	// Round up the deadline to batch ttls.
-	next := deadline.Truncate(w.interval).Add(w.interval)
+	next := time.Now().Add(w.expiry).Truncate(w.interval).Add(w.interval)
 
 	c := w.cond
 	c.L.Lock()
-
-	w.count++
 
 	if w.isPast(next) {
 		c.L.Unlock()
 
 		return
 	}
+
+	select {
+	case <-ctx.Done():
+		return
+	default:
+	}
+
+	w.count += n
+	addCounter.Record(ctx, int64(n))
 
 	if w.isCheckpoint() {
 		w.count = 0
@@ -101,6 +125,8 @@ func (w *Worker) loop(ctx context.Context, h Handler) {
 			// Before and after waiting, check if it is done.
 			select {
 			case <-ctx.Done():
+				c.L.Unlock()
+
 				return
 			default:
 			}
@@ -117,8 +143,16 @@ func (w *Worker) loop(ctx context.Context, h Handler) {
 			}
 		}
 
+		select {
+		case <-ctx.Done():
+			c.L.Unlock()
+			return
+		default:
+		}
+
 		// Take the next deadline to wait for.
 		next := w.times[0]
+		w.last = next
 
 		// Remove the deadline.
 		w.times = w.times[1:]
@@ -135,18 +169,15 @@ func (w *Worker) loop(ctx context.Context, h Handler) {
 		<-time.After(sleep)
 
 		// Execute the handler.
+		execCounter.Record(ctx, 1)
 		if err := h.Exec(ctx); err != nil {
-			event.Log(ctx, err.Error())
+			event.Error(ctx, "failed to execute handler", err)
 		}
 	}
 }
 
 func (w *Worker) isPast(deadline time.Time) bool {
-	if len(w.times) == 0 {
-		return false
-	}
-
-	return deadline.Before(w.times[0])
+	return deadline == w.last
 }
 
 func (w *Worker) isCheckpoint() bool {
