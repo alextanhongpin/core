@@ -13,19 +13,17 @@ import (
 var ctx = context.Background()
 
 func TestBackground(t *testing.T) {
-
 	t.Run("success", func(t *testing.T) {
 		task := &numberTask{}
 
 		opt := background.Option[int]{
-			IdleTimeout: 1 * time.Second,
-			Handler:     task,
+			Handler: task,
 		}
 		bg, stop := background.New(opt)
 		defer stop()
 
 		assert := assert.New(t)
-		assert.Nil(bg.Send(ctx, 1))
+		bg.Send(ctx, 1)
 
 		stop()
 
@@ -36,58 +34,23 @@ func TestBackground(t *testing.T) {
 		task := &numberTask{}
 
 		opt := background.Option[int]{
-			IdleTimeout: 1 * time.Second,
-			Handler:     task,
+			Handler: task,
 		}
 		bg, stop := background.New(opt)
 
 		assert := assert.New(t)
-		assert.Nil(bg.Send(ctx, 1))
+		bg.Send(ctx, 1)
 		stop()
 
-		assert.Equal(background.Stopped, bg.Send(ctx, 2))
 		assert.Equal([]int{1}, task.Numbers())
-	})
 
-	t.Run("concurrent send", func(t *testing.T) {
-		assert := assert.New(t)
-
-		task := &numberTask{}
-
-		opt := background.Option[int]{
-			IdleTimeout: 1 * time.Second,
-			Handler:     task,
-		}
-		bg, stop := background.New(opt)
-
-		race := make(chan bool)
-
-		var wg sync.WaitGroup
-		wg.Add(2)
-
-		go func() {
-			defer wg.Done()
-
-			<-race
-			assert.Nil(bg.Send(ctx, 1))
-		}()
-
-		go func() {
-			defer wg.Done()
-
-			<-race
-			assert.Nil(bg.Send(ctx, 2))
-		}()
-
-		// Signal sending.
-		close(race)
-		wg.Wait()
-
+		bg.Send(ctx, 2)
 		stop()
-		assert.ElementsMatch([]int{1, 2}, task.Numbers())
+
+		assert.Equal([]int{1, 2}, task.Numbers())
 	})
 
-	t.Run("idle", func(t *testing.T) {
+	t.Run("send wait", func(t *testing.T) {
 		task := &numberTask{sleep: 50 * time.Millisecond}
 
 		opt := background.Option[int]{
@@ -95,16 +58,9 @@ func TestBackground(t *testing.T) {
 		}
 
 		bg, stop := background.New(opt)
-
+		defer stop()
 		assert := assert.New(t)
-		assert.True(bg.IsIdle())
-		assert.Nil(bg.Send(ctx, 1))
-		assert.Nil(bg.Send(ctx, 2))
-		assert.Nil(bg.Send(ctx, 3))
-		assert.False(bg.IsIdle())
-		stop()
-		assert.True(bg.IsIdle())
-		assert.Equal(background.Stopped, bg.Send(ctx, 4))
+		bg.SendWait(ctx, 1, 2, 3)
 
 		assert.ElementsMatch([]int{1, 2, 3}, task.Numbers())
 	})
