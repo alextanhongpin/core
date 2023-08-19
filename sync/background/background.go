@@ -14,10 +14,6 @@ var (
 		Description: "the number of processed async message",
 	})
 
-	sendWaitCounter = event.NewCounter("background.send_wait", &event.MetricOptions{
-		Description: "the number of processed sync message",
-	})
-
 	goroutineCounter = event.NewCounter("background.goroutine", &event.MetricOptions{
 		Description: "the number of goroutines spawn by the workers",
 	})
@@ -63,16 +59,66 @@ func (w *Worker[T]) Send(ctx context.Context, vs ...T) {
 	sendCounter.Record(ctx, int64(len(vs)))
 
 	for _, v := range vs {
+		v := v
+
 		w.exec(ctx, v)
 	}
 }
 
 func (w *Worker[T]) SendWait(ctx context.Context, vs ...T) {
-	sendWaitCounter.Record(ctx, int64(len(vs)))
+	sendCounter.Record(ctx, int64(len(vs)))
+
+	var wg sync.WaitGroup
+	wg.Add(len(vs))
 
 	for _, v := range vs {
-		w.handler.Exec(ctx, v)
+		v := v
+
+		go func(v T) {
+			defer wg.Done()
+
+			w.handler.Exec(ctx, v)
+		}(v)
 	}
+
+	wg.Wait()
+}
+
+// SendWaitN is similar to SendWait, excepts it limits the running goroutine to
+// size n. Executes everything concurrently if the number of messages is less
+// than n.
+func (w *Worker[T]) SendWaitN(ctx context.Context, n int, vs ...T) {
+	sendCounter.Record(ctx, int64(len(vs)))
+
+	if len(vs) < n {
+		w.SendWait(ctx, vs...)
+
+		return
+	}
+
+	sem := semaphore.NewWeighted(int64(n))
+
+	var wg sync.WaitGroup
+	wg.Add(len(vs))
+
+	for _, v := range vs {
+		v := v
+
+		// If we fail to acquire a semaphore, just run it synchronously.
+		if err := sem.Acquire(ctx, 1); err != nil {
+			w.handler.Exec(ctx, v)
+			continue
+		}
+
+		go func(v T) {
+			defer wg.Done()
+			defer sem.Release(1)
+
+			w.handler.Exec(ctx, v)
+		}(v)
+	}
+
+	wg.Wait()
 }
 
 // stop stops the channel and waits for the channel messages to be flushed.
