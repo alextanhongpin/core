@@ -20,13 +20,13 @@ func GRPC(fileName string, dump *GRPCDump, opt *GRPCOption) error {
 		opt = new(GRPCOption)
 	}
 
-	s := snapshot[*GRPCDump]{
-		Marshaller:   MarshalFunc[*GRPCDump](MarshalGRPC),
-		Unmarshaller: UnmarshalFunc[*GRPCDump](UnmarshalGRPC),
-		Comparer:     &GRPCComparer{opt: *opt},
+	var s S[*GRPCDump] = &snapshot[*GRPCDump]{
+		marshaler:   MarshalFunc[*GRPCDump](MarshalGRPC),
+		unmarshaler: UnmarshalFunc[*GRPCDump](UnmarshalGRPC),
+		comparer:    &GRPCComparer{opt: *opt},
 	}
 
-	return Snapshot(fileName, dump, &s, opt.Hooks...)
+	return Snapshot(newFileReaderWriter(fileName), dump, s, opt.Hooks...)
 }
 
 func MarshalGRPC(d *GRPCDump) ([]byte, error) {

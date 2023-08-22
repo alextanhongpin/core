@@ -7,28 +7,27 @@ import (
 	"github.com/alextanhongpin/core/internal"
 )
 
-type Marshaller[T any] interface {
-	Marshal(T) ([]byte, error)
+type fileReaderWriter struct {
+	fileName string
 }
 
-type Unmarshaller[T any] interface {
-	Unmarshal([]byte) (T, error)
+func newFileReaderWriter(fileName string) *fileReaderWriter {
+	return &fileReaderWriter{
+		fileName: fileName,
+	}
 }
 
-type Comparer[T any] interface {
-	Compare(snapshot, received T) error
+func (rw *fileReaderWriter) Read() ([]byte, error) {
+	return os.ReadFile(rw.fileName)
 }
 
-type S[T any] interface {
-	Marshaller[T]
-	Unmarshaller[T]
-	Comparer[T]
+func (rw *fileReaderWriter) Write(b []byte) error {
+	return internal.WriteIfNotExists(rw.fileName, b)
 }
 
 type Hook[T any] func(S[T]) S[T]
 
-func Snapshot[T any](fileName string, t T, ss *snapshot[T], hooks ...Hook[T]) error {
-	var s S[T] = ss
+func Snapshot[T any](rw readerWriter, t T, s S[T], hooks ...Hook[T]) error {
 	// Run middleware in reverse order, so that the first
 	// will execute first.
 	for i := 0; i < len(hooks); i++ {
@@ -41,7 +40,7 @@ func Snapshot[T any](fileName string, t T, ss *snapshot[T], hooks ...Hook[T]) er
 		return err
 	}
 
-	if err := internal.WriteIfNotExists(fileName, b); err != nil {
+	if err := rw.Write(b); err != nil {
 		return err
 	}
 
@@ -54,7 +53,7 @@ func Snapshot[T any](fileName string, t T, ss *snapshot[T], hooks ...Hook[T]) er
 		return err
 	}
 
-	b, err = os.ReadFile(fileName)
+	b, err = rw.Read()
 	if err != nil {
 		return err
 	}
@@ -68,41 +67,21 @@ func Snapshot[T any](fileName string, t T, ss *snapshot[T], hooks ...Hook[T]) er
 	// This is required when comparing JSON/YAML type, because
 	// unmarshalling the type to map[any]interface{} will cause
 	// information to be lost (e.g. additional fields).
-	if ss.unmarshalAny != nil && ss.compareAny != nil {
-		x, err := ss.unmarshalAny.Unmarshal(snapshotBytes)
-		if err != nil {
-			return err
-		}
+	sb, err := s.UnmarshalAny(snapshotBytes)
+	if err != nil {
+		return err
+	}
 
-		y, err := ss.unmarshalAny.Unmarshal(receivedBytes)
-		if err != nil {
-			return err
-		}
+	rb, err := s.UnmarshalAny(receivedBytes)
+	if err != nil {
+		return err
+	}
 
-		if err := ss.compareAny.Compare(x, y); err != nil {
-			return err
-		}
+	if err := s.CompareAny(sb, rb); err != nil {
+		return err
 	}
 
 	return s.Compare(snapshot, received)
-}
-
-type MarshalFunc[T any] (func(T) ([]byte, error))
-
-func (f MarshalFunc[T]) Marshal(t T) ([]byte, error) {
-	return f(t)
-}
-
-type UnmarshalFunc[T any] (func([]byte) (T, error))
-
-func (f UnmarshalFunc[T]) Unmarshal(b []byte) (T, error) {
-	return f(b)
-}
-
-type CompareFunc[T any] (func(a, b T) error)
-
-func (f CompareFunc[T]) Compare(a, b T) error {
-	return f(a, b)
 }
 
 func MarshalHook[T any](hook func(T) (T, error)) Hook[T] {
@@ -121,15 +100,6 @@ func CompareHook[T any](hook func(snapshot T, received T) error) Hook[T] {
 			hook: hook,
 		}
 	}
-}
-
-type snapshot[T any] struct {
-	Marshaller[T]
-	Unmarshaller[T]
-	Comparer[T]
-
-	unmarshalAny Unmarshaller[any]
-	compareAny   Comparer[any]
 }
 
 type marshalHook[T any] struct {
@@ -161,10 +131,6 @@ func (m *compareHook[T]) Compare(snapshot, received T) error {
 	}
 
 	return m.S.Compare(snapshot, received)
-}
-
-func nopComparer[T any](a, b T) error {
-	return nil
 }
 
 func Copier[T any]() Hook[T] {

@@ -62,7 +62,7 @@ func TestGRPCClientStreaming(t *testing.T) {
 	client := pb.NewGreeterServiceClient(conn)
 
 	// Create a new recorder.
-	ctx = testutil.DumpGRPC(t, ctx)
+	ctx = testutil.DumpGRPC(t, ctx, testutil.IgnoreMetadata("user-agent"))
 	ctx = metadata.AppendToOutgoingContext(ctx,
 		"md-val", "md-val",
 		"md-val-bin", "md-val-bin",
@@ -94,7 +94,7 @@ func TestGRPCBidirectionalStreaming(t *testing.T) {
 	client := pb.NewGreeterServiceClient(conn)
 
 	// Create a new recorder.
-	ctx = testutil.DumpGRPC(t, ctx)
+	ctx = testutil.DumpGRPC(t, ctx, testutil.IgnoreMetadata("user-agent"))
 	ctx = metadata.AppendToOutgoingContext(ctx,
 		"md-val", "md-val",
 		"md-val-bin", "md-val-bin",
@@ -196,7 +196,7 @@ func TestGRPCUnary(t *testing.T) {
 		client := pb.NewGreeterServiceClient(conn)
 
 		// Create a new recorder.
-		ctx = testutil.DumpGRPC(t, ctx, testutil.MaskMetadata("authorization"))
+		ctx = testutil.DumpGRPC(t, ctx, testutil.MaskMetadata("authorization"), testutil.IgnoreMetadata("user-agent"))
 
 		ctx = metadata.AppendToOutgoingContext(ctx,
 			"md-val", "md-val",
@@ -219,7 +219,7 @@ func TestGRPCUnary(t *testing.T) {
 		client := pb.NewGreeterServiceClient(conn)
 
 		// Create a new recorder.
-		ctx = testutil.DumpGRPC(t, ctx)
+		ctx = testutil.DumpGRPC(t, ctx, testutil.IgnoreMetadata("user-agent"))
 
 		ctx = metadata.AppendToOutgoingContext(ctx,
 			"md-val", "md-val",
@@ -400,7 +400,7 @@ func testServerStreaming(t *testing.T, req *pb.ListGreetingsRequest) error {
 	client := pb.NewGreeterServiceClient(conn)
 
 	// Create a new recorder.
-	ctx = testutil.DumpGRPC(t, ctx)
+	ctx = testutil.DumpGRPC(t, ctx, testutil.IgnoreMetadata("user-agent"))
 
 	ctx = metadata.AppendToOutgoingContext(ctx,
 		"md-val", "md-val",

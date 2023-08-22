@@ -24,17 +24,17 @@ func MySQL(fileName string, sql *SQL, opt *SQLOption) error {
 
 	type T = *SQL
 
-	s := snapshot[T]{
-		Marshaller:   MarshalFunc[T](MarshalMySQL),
-		Unmarshaller: UnmarshalFunc[T](UnmarshalMySQL),
-		Comparer: &MySQLComparer{
+	var s S[T] = &snapshot[T]{
+		marshaler:   MarshalFunc[T](MarshalMySQL),
+		unmarshaler: UnmarshalFunc[T](UnmarshalMySQL),
+		comparer: &MySQLComparer{
 			args:   opt.Args,
 			vars:   opt.Vars,
 			result: opt.Result,
 		},
 	}
 
-	return Snapshot(fileName, sql, &s, opt.Hooks...)
+	return Snapshot(newFileReaderWriter(fileName), sql, s, opt.Hooks...)
 }
 
 func MarshalMySQL(s *SQL) ([]byte, error) {

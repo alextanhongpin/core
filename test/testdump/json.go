@@ -16,18 +16,16 @@ func JSON[T any](fileName string, t T, opt *JSONOption[T]) error {
 		opt = new(JSONOption[T])
 	}
 
-	s := snapshot[T]{
-		Marshaller: MarshalFunc[T](MarshalJSON[T]),
+	var s S[T] = &snapshot[T]{
+		marshaler: MarshalFunc[T](MarshalJSON[T]),
 		// This is only used for custom comparison. It does not benefit as much as
 		// using map[string]any for comparison due to loss of information.
-		Unmarshaller: UnmarshalFunc[T](UnmarshalJSON[T]),
-		Comparer:     CompareFunc[T](nopComparer[T]),
-		// The core logic, unmarshalling into map type and comparing it.
-		unmarshalAny: UnmarshalFunc[any](UnmarshalJSON[any]),
-		compareAny:   CompareFunc[any](CompareJSON[any](opt.Body...)),
+		unmarshaler:    UnmarshalFunc[T](UnmarshalJSON[T]),
+		anyUnmarshaler: UnmarshalAnyFunc(UnmarshalJSON[any]),
+		anyComparer:    CompareAnyFunc((&JSONComparer[any]{opts: opt.Body}).Compare),
 	}
 
-	return Snapshot(fileName, t, &s, opt.Hooks...)
+	return Snapshot(newFileReaderWriter(fileName), t, s, opt.Hooks...)
 }
 
 func MarshalJSON[T any](t T) ([]byte, error) {
@@ -44,10 +42,12 @@ func UnmarshalJSON[T any](b []byte) (T, error) {
 	return t, nil
 }
 
-func CompareJSON[T any](opts ...cmp.Option) func(a, b T) error {
-	return func(snapshot, received T) error {
-		return internal.ANSIDiff(snapshot, received, opts...)
-	}
+type JSONComparer[T any] struct {
+	opts []cmp.Option
+}
+
+func (c *JSONComparer[T]) Compare(snapshot, received T) error {
+	return internal.ANSIDiff(snapshot, received, c.opts...)
 }
 
 type JSONOption[T any] struct {

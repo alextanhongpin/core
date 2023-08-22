@@ -15,17 +15,17 @@ func Postgres(fileName string, sql *SQL, opt *SQLOption) error {
 
 	type T = *SQL
 
-	s := snapshot[T]{
-		Marshaller:   MarshalFunc[T](MarshalPostgres),
-		Unmarshaller: UnmarshalFunc[T](UnmarshalPostgres),
-		Comparer: &PostgresComparer{
+	var s S[T] = &snapshot[T]{
+		marshaler:   MarshalFunc[T](MarshalPostgres),
+		unmarshaler: UnmarshalFunc[T](UnmarshalPostgres),
+		comparer: &PostgresComparer{
 			args:   opt.Args,
 			result: opt.Result,
 			vars:   opt.Vars,
 		},
 	}
 
-	return Snapshot(fileName, sql, &s, opt.Hooks...)
+	return Snapshot(newFileReaderWriter(fileName), sql, s, opt.Hooks...)
 }
 
 func MarshalPostgres(s *SQL) ([]byte, error) {

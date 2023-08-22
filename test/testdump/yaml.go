@@ -10,16 +10,14 @@ func YAML[T any](fileName string, t T, opt *YAMLOption[T]) error {
 		opt = new(YAMLOption[T])
 	}
 
-	s := snapshot[T]{
-		Marshaller:   MarshalFunc[T](MarshalYAML[T]),
-		Unmarshaller: UnmarshalFunc[T](UnmarshalYAML[T]),
-		Comparer:     CompareFunc[T](nopComparer[T]),
-		// Custom.
-		unmarshalAny: UnmarshalFunc[any](UnmarshalYAML[any]),
-		compareAny:   CompareFunc[any](CompareYAML[any](opt.Body...)),
+	var s S[T] = &snapshot[T]{
+		marshaler:      MarshalFunc[T](MarshalYAML[T]),
+		unmarshaler:    UnmarshalFunc[T](UnmarshalYAML[T]),
+		anyUnmarshaler: UnmarshalAnyFunc(UnmarshalYAML[any]),
+		anyComparer:    CompareAnyFunc((&YAMLComparer[any]{opts: opt.Body}).Compare),
 	}
 
-	return Snapshot(fileName, t, &s, opt.Hooks...)
+	return Snapshot(newFileReaderWriter(fileName), t, s, opt.Hooks...)
 }
 
 type YAMLOption[T any] struct {
@@ -35,8 +33,10 @@ func UnmarshalYAML[T any](b []byte) (T, error) {
 	return internal.UnmarshalYAMLPreserveKeysOrder[T](b)
 }
 
-func CompareYAML[T any](opts ...cmp.Option) func(a, b T) error {
-	return func(snapshot, received T) error {
-		return internal.ANSIDiff(snapshot, received, opts...)
-	}
+type YAMLComparer[T any] struct {
+	opts []cmp.Option
+}
+
+func (c *YAMLComparer[T]) Compare(snapshot, received T) error {
+	return internal.ANSIDiff(snapshot, received, c.opts...)
 }

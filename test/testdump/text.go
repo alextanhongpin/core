@@ -6,14 +6,15 @@ func Text(fileName string, str string, opt *TextOption) error {
 	if opt == nil {
 		opt = new(TextOption)
 	}
+
 	type T = string
-	s := snapshot[T]{
-		Marshaller:   MarshalFunc[string](MarshalText),
-		Unmarshaller: UnmarshalFunc[string](UnmarshalText),
-		Comparer:     CompareFunc[string](CompareText),
+	var s S[T] = &snapshot[T]{
+		marshaler:   MarshalFunc[string](MarshalText),
+		unmarshaler: UnmarshalFunc[string](UnmarshalText),
+		comparer:    CompareFunc[string](CompareText),
 	}
 
-	return Snapshot(fileName, str, &s, opt.Hooks...)
+	return Snapshot(newFileReaderWriter(fileName), str, s, opt.Hooks...)
 }
 
 type TextOption struct {

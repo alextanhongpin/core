@@ -14,13 +14,13 @@ func HTTP(fileName string, dump *HTTPDump, opt *HTTPOption) error {
 		opt = new(HTTPOption)
 	}
 
-	s := snapshot[*HTTPDump]{
-		Marshaller:   MarshalFunc[*HTTPDump](MarshalHTTP),
-		Unmarshaller: UnmarshalFunc[*HTTPDump](UnmarshalHTTP),
-		Comparer:     &HTTPComparer{opt: *opt},
+	var s S[*HTTPDump] = &snapshot[*HTTPDump]{
+		marshaler:   MarshalFunc[*HTTPDump](MarshalHTTP),
+		unmarshaler: UnmarshalFunc[*HTTPDump](UnmarshalHTTP),
+		comparer:    &HTTPComparer{opt: *opt},
 	}
 
-	return Snapshot(fileName, dump, &s, opt.Hooks...)
+	return Snapshot(newFileReaderWriter(fileName), dump, s, opt.Hooks...)
 }
 
 type HTTPDump struct {
