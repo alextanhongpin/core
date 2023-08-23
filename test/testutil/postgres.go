@@ -48,7 +48,8 @@ func DumpPostgres(t *testing.T, dump *SQL, opts ...SQLOption) {
 		FileExt:  ".sql",
 	}
 
-	if err := testdump.Postgres(p.String(), dump, o.Dump); err != nil {
+	fileName := p.String()
+	if err := testdump.Postgres(testdump.NewFile(fileName), dump, o.Dump); err != nil {
 		t.Fatal(err)
 	}
 }

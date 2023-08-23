@@ -36,7 +36,8 @@ func DumpMySQL(t *testing.T, dump *SQL, opts ...SQLOption) {
 		FileExt:  ".sql",
 	}
 
-	if err := testdump.MySQL(p.String(), dump, o.Dump); err != nil {
+	fileName := p.String()
+	if err := testdump.MySQL(testdump.NewFile(fileName), dump, o.Dump); err != nil {
 		t.Fatal(err)
 	}
 }

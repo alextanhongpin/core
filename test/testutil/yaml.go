@@ -43,7 +43,8 @@ func DumpYAML[T any](t *testing.T, v T, opts ...YAMLOption) {
 		FileExt:  ".yaml",
 	}
 
-	if err := testdump.YAML(p.String(), v, o.Dump); err != nil {
+	fileName := p.String()
+	if err := testdump.YAML(testdump.NewFile(fileName), v, o.Dump); err != nil {
 		t.Fatal(err)
 	}
 }

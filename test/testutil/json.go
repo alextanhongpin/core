@@ -43,7 +43,8 @@ func DumpJSON[T any](t *testing.T, v T, opts ...JSONOption) {
 		FileExt:  ".json",
 	}
 
-	if err := testdump.JSON(p.String(), v, o.Dump); err != nil {
+	fileName := p.String()
+	if err := testdump.JSON(testdump.NewFile(fileName), v, o.Dump); err != nil {
 		t.Fatal(err)
 	}
 }

@@ -80,11 +80,7 @@ func DumpHTTP(t *testing.T, w *http.Response, r *http.Request, opts ...HTTPOptio
 	}
 
 	fileName := p.String()
-
-	if err := testdump.HTTP(fileName, &HTTPDump{
-		W: w,
-		R: r,
-	}, o.Dump); err != nil {
+	if err := testdump.HTTP(testdump.NewFile(fileName), &HTTPDump{W: w, R: r}, o.Dump); err != nil {
 		t.Fatal(err)
 	}
 }

@@ -41,11 +41,12 @@ func DumpGRPC(t *testing.T, ctx context.Context, opts ...GRPCOption) context.Con
 		FileName: o.FileName,
 		FileExt:  ".http",
 	}
-	fileName := p.String()
 
 	t.Cleanup(func() {
 		dump := flush()
-		if err := testdump.GRPC(fileName, dump, o.Dump); err != nil {
+
+		fileName := p.String()
+		if err := testdump.GRPC(testdump.NewFile(fileName), dump, o.Dump); err != nil {
 			t.Fatal(err)
 		}
 	})
