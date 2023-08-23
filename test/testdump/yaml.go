@@ -5,7 +5,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 )
 
-func YAML[T any](fileName string, t T, opt *YAMLOption[T]) error {
+func YAML[T any](rw readerWriter, t T, opt *YAMLOption[T]) error {
 	if opt == nil {
 		opt = new(YAMLOption[T])
 	}
@@ -17,7 +17,7 @@ func YAML[T any](fileName string, t T, opt *YAMLOption[T]) error {
 		anyComparer:    CompareAnyFunc((&YAMLComparer[any]{opts: opt.Body}).Compare),
 	}
 
-	return Snapshot(newFileReaderWriter(fileName), t, s, opt.Hooks...)
+	return Snapshot(rw, t, s, opt.Hooks...)
 }
 
 type YAMLOption[T any] struct {

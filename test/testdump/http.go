@@ -9,7 +9,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 )
 
-func HTTP(fileName string, dump *HTTPDump, opt *HTTPOption) error {
+func HTTP(rw readerWriter, dump *HTTPDump, opt *HTTPOption) error {
 	if opt == nil {
 		opt = new(HTTPOption)
 	}
@@ -20,7 +20,7 @@ func HTTP(fileName string, dump *HTTPDump, opt *HTTPOption) error {
 		comparer:    &HTTPComparer{opt: *opt},
 	}
 
-	return Snapshot(newFileReaderWriter(fileName), dump, s, opt.Hooks...)
+	return Snapshot(rw, dump, s, opt.Hooks...)
 }
 
 type HTTPDump struct {

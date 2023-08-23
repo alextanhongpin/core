@@ -43,7 +43,7 @@ func TestHTTP(t *testing.T) {
 		R: r,
 	}
 
-	if err := testdump.HTTP(fileName, dump, &testdump.HTTPOption{
+	if err := testdump.HTTP(testdump.NewFile(fileName), dump, &testdump.HTTPOption{
 		Header: []cmp.Option{
 			cmpopts.IgnoreMapEntries(func(k string, v any) bool {
 				return k == "Host" || k == "Date"

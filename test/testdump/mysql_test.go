@@ -48,7 +48,7 @@ func TestMySQL(t *testing.T) {
 			internal.IgnoreMapEntries("id"),
 		},
 	}
-	if err := testdump.MySQL(fileName, &data, &opt); err != nil {
+	if err := testdump.MySQL(testdump.NewFile(fileName), &data, &opt); err != nil {
 		t.Fatal(err)
 	}
 }

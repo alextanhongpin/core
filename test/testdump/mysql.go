@@ -17,7 +17,7 @@ type SQLOption struct {
 	Result []cmp.Option
 }
 
-func MySQL(fileName string, sql *SQL, opt *SQLOption) error {
+func MySQL(rw readerWriter, sql *SQL, opt *SQLOption) error {
 	if opt == nil {
 		opt = new(SQLOption)
 	}
@@ -34,7 +34,7 @@ func MySQL(fileName string, sql *SQL, opt *SQLOption) error {
 		},
 	}
 
-	return Snapshot(newFileReaderWriter(fileName), sql, s, opt.Hooks...)
+	return Snapshot(rw, sql, s, opt.Hooks...)
 }
 
 func MarshalMySQL(s *SQL) ([]byte, error) {

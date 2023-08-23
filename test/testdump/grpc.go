@@ -15,7 +15,7 @@ var ErrMetadataNotFound = errors.New("testdump: gRPC metadata not found")
 
 type GRPCDump = grpcdump.Dump
 
-func GRPC(fileName string, dump *GRPCDump, opt *GRPCOption) error {
+func GRPC(rw readerWriter, dump *GRPCDump, opt *GRPCOption) error {
 	if opt == nil {
 		opt = new(GRPCOption)
 	}
@@ -26,7 +26,7 @@ func GRPC(fileName string, dump *GRPCDump, opt *GRPCOption) error {
 		comparer:    &GRPCComparer{opt: *opt},
 	}
 
-	return Snapshot(newFileReaderWriter(fileName), dump, s, opt.Hooks...)
+	return Snapshot(rw, dump, s, opt.Hooks...)
 }
 
 func MarshalGRPC(d *GRPCDump) ([]byte, error) {

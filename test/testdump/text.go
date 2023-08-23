@@ -2,7 +2,7 @@ package testdump
 
 import "github.com/alextanhongpin/core/internal"
 
-func Text(fileName string, str string, opt *TextOption) error {
+func Text(rw readerWriter, str string, opt *TextOption) error {
 	if opt == nil {
 		opt = new(TextOption)
 	}
@@ -14,7 +14,7 @@ func Text(fileName string, str string, opt *TextOption) error {
 		comparer:    CompareFunc[string](CompareText),
 	}
 
-	return Snapshot(newFileReaderWriter(fileName), str, s, opt.Hooks...)
+	return Snapshot(rw, str, s, opt.Hooks...)
 }
 
 type TextOption struct {

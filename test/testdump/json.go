@@ -11,7 +11,7 @@ import (
 // that are removed won't be compared.
 // Ideally, using map[string]any or just any should work better for snapshot
 // testing.
-func JSON[T any](fileName string, t T, opt *JSONOption[T]) error {
+func JSON[T any](rw readerWriter, t T, opt *JSONOption[T]) error {
 	if opt == nil {
 		opt = new(JSONOption[T])
 	}
@@ -25,7 +25,7 @@ func JSON[T any](fileName string, t T, opt *JSONOption[T]) error {
 		anyComparer:    CompareAnyFunc((&JSONComparer[any]{opts: opt.Body}).Compare),
 	}
 
-	return Snapshot(newFileReaderWriter(fileName), t, s, opt.Hooks...)
+	return Snapshot(rw, t, s, opt.Hooks...)
 }
 
 func MarshalJSON[T any](t T) ([]byte, error) {

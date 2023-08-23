@@ -25,7 +25,7 @@ func TestJSON(t *testing.T) {
 		Email: "john.appleseed@mail.com",
 	}
 
-	if err := testdump.JSON(fileName, data, nil); err != nil {
+	if err := testdump.JSON(testdump.NewFile(fileName), data, nil); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -65,7 +65,7 @@ func TestJSONHook(t *testing.T) {
 		}),
 	)
 
-	if err := testdump.JSON(fileName, data, opt); err != nil {
+	if err := testdump.JSON(testdump.NewFile(fileName), data, opt); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -98,7 +98,7 @@ func TestJSONMap(t *testing.T) {
 		}),
 	)
 
-	if err := testdump.JSON(fileName, data, opt); err != nil {
+	if err := testdump.JSON(testdump.NewFile(fileName), data, opt); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -131,7 +131,7 @@ func TestJSONDiff(t *testing.T) {
 			return t, nil
 		}),
 	)
-	if err := testdump.JSON(fileName, u, opt); err != nil {
+	if err := testdump.JSON(testdump.NewFile(fileName), u, opt); err != nil {
 		t.Fatal(err)
 	}
 
@@ -159,7 +159,7 @@ func TestJSONDiff(t *testing.T) {
 		)
 
 		assert := assert.New(t)
-		err := testdump.JSON(fileName, u, opt)
+		err := testdump.JSON(testdump.NewFile(fileName), u, opt)
 		assert.NotNil(err)
 
 		var diffErr *internal.DiffError
@@ -198,7 +198,7 @@ func TestJSONDiff(t *testing.T) {
 		)
 
 		assert := assert.New(t)
-		err := testdump.JSON(fileName, u, opt)
+		err := testdump.JSON(testdump.NewFile(fileName), u, opt)
 		assert.NotNil(err)
 
 		var diffErr *internal.DiffError
@@ -220,7 +220,7 @@ func TestJSONDiff(t *testing.T) {
 		}
 
 		assert := assert.New(t)
-		err := testdump.JSON(fileName, u, opt)
+		err := testdump.JSON(testdump.NewFile(fileName), u, opt)
 		assert.NotNil(err)
 
 		var diffErr *internal.DiffError

@@ -49,7 +49,7 @@ func TestPostgres(t *testing.T) {
 			internal.IgnoreMapEntries("id"),
 		},
 	}
-	if err := testdump.Postgres(fileName, &data, &opt); err != nil {
+	if err := testdump.Postgres(testdump.NewFile(fileName), &data, &opt); err != nil {
 		t.Fatal(err)
 	}
 }

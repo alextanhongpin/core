@@ -25,7 +25,7 @@ func TestYAML(t *testing.T) {
 		EmailAddress: "john.appleseed@mail.com",
 	}
 
-	if err := testdump.YAML(fileName, data, nil); err != nil {
+	if err := testdump.YAML(testdump.NewFile(fileName), data, nil); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -70,7 +70,7 @@ func TestYAMLHook(t *testing.T) {
 		},
 	}
 
-	if err := testdump.YAML(fileName, data, &opt); err != nil {
+	if err := testdump.YAML(testdump.NewFile(fileName), data, &opt); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -114,7 +114,7 @@ func TestYAMLMap(t *testing.T) {
 		},
 	}
 
-	if err := testdump.YAML(fileName, data, &opt); err != nil {
+	if err := testdump.YAML(testdump.NewFile(fileName), data, &opt); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -147,7 +147,7 @@ func TestYAMLDiff(t *testing.T) {
 			return t, nil
 		}),
 	)
-	if err := testdump.YAML(fileName, u, opt); err != nil {
+	if err := testdump.YAML(testdump.NewFile(fileName), u, opt); err != nil {
 		t.Fatal(err)
 	}
 
@@ -175,7 +175,7 @@ func TestYAMLDiff(t *testing.T) {
 		)
 
 		assert := assert.New(t)
-		err := testdump.YAML(fileName, u, opt)
+		err := testdump.YAML(testdump.NewFile(fileName), u, opt)
 		assert.NotNil(err)
 
 		var diffErr *internal.DiffError
@@ -214,7 +214,7 @@ func TestYAMLDiff(t *testing.T) {
 		)
 
 		assert := assert.New(t)
-		err := testdump.YAML(fileName, u, opt)
+		err := testdump.YAML(testdump.NewFile(fileName), u, opt)
 		assert.NotNil(err)
 
 		var diffErr *internal.DiffError
@@ -236,7 +236,7 @@ func TestYAMLDiff(t *testing.T) {
 		}
 
 		assert := assert.New(t)
-		err := testdump.YAML(fileName, u, opt)
+		err := testdump.YAML(testdump.NewFile(fileName), u, opt)
 		assert.NotNil(err)
 
 		var diffErr *internal.DiffError

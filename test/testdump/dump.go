@@ -2,27 +2,17 @@ package testdump
 
 import (
 	"bytes"
+	"errors"
 	"os"
 
 	"github.com/alextanhongpin/core/internal"
 )
 
-type fileReaderWriter struct {
-	fileName string
-}
+type DiffError = internal.DiffError
 
-func newFileReaderWriter(fileName string) *fileReaderWriter {
-	return &fileReaderWriter{
-		fileName: fileName,
-	}
-}
-
-func (rw *fileReaderWriter) Read() ([]byte, error) {
-	return os.ReadFile(rw.fileName)
-}
-
-func (rw *fileReaderWriter) Write(b []byte) error {
-	return internal.WriteIfNotExists(rw.fileName, b)
+func AsDiffError(err error) (*DiffError, bool) {
+	var diffErr *DiffError
+	return diffErr, errors.As(err, &diffErr)
 }
 
 type Hook[T any] func(S[T]) S[T]
@@ -142,4 +132,48 @@ func Copier[T any]() Hook[T] {
 			},
 		}
 	}
+}
+
+type File struct {
+	Name string
+}
+
+func NewFile(name string) *File {
+	return &File{
+		Name: name,
+	}
+}
+
+func (rw *File) Read() ([]byte, error) {
+	return os.ReadFile(rw.Name)
+}
+
+func (rw *File) Write(b []byte) error {
+	return internal.WriteIfNotExists(rw.Name, b)
+}
+
+type InMemory struct {
+	Idempotent bool
+	Data       []byte
+}
+
+func NewInMemory() *InMemory {
+	return &InMemory{
+		Idempotent: true,
+		Data:       nil,
+	}
+}
+
+func (rw *InMemory) Read() ([]byte, error) {
+	return rw.Data, nil
+}
+
+func (rw *InMemory) Write(b []byte) error {
+	if rw.Idempotent && len(rw.Data) > 0 {
+		return nil
+	}
+
+	rw.Data = b
+
+	return nil
 }
