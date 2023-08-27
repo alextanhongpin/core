@@ -18,19 +18,20 @@ type JSONOption interface {
 func DumpJSON[T any](t *testing.T, v T, opts ...JSONOption) {
 	t.Helper()
 
-	o := new(jsonOption[T])
-	o.Dump = new(testdump.JSONOption[T])
+	var fileName string
+	var hooks []testdump.Hook[T]
+	jsonOpt := new(testdump.JSONOption)
 
 	for _, opt := range opts {
-		switch ot := opt.(type) {
+		switch o := opt.(type) {
 		case JSONCmpOption:
-			o.Dump.Body = append(o.Dump.Body, ot...)
+			jsonOpt.Body = append(jsonOpt.Body, o...)
 		case CmpOption:
-			o.Dump.Body = append(o.Dump.Body, ot...)
+			jsonOpt.Body = append(jsonOpt.Body, o...)
 		case FileName:
-			o.FileName = string(ot)
-		case jsonOptionHook[T]:
-			ot(o)
+			fileName = string(o)
+		case *jsonHookOption[T]:
+			hooks = append(hooks, o.hook)
 		default:
 			panic(fmt.Errorf("testutil: unhandled JSON option: %#v", opt))
 		}
@@ -39,24 +40,20 @@ func DumpJSON[T any](t *testing.T, v T, opts ...JSONOption) {
 	p := Path{
 		Dir:      "testdata",
 		FilePath: t.Name(),
-		FileName: internal.Or(o.FileName, internal.TypeName(v)),
+		FileName: internal.Or(fileName, internal.TypeName(v)),
 		FileExt:  ".json",
 	}
 
-	fileName := p.String()
-	if err := testdump.JSON(testdump.NewFile(fileName), v, o.Dump); err != nil {
+	if err := testdump.JSON[T](testdump.NewFile(p.String()), v, jsonOpt, hooks...); err != nil {
 		t.Fatal(err)
 	}
 }
 
-type jsonOptionHook[T any] func(*jsonOption[T])
-
-func (j jsonOptionHook[T]) isJSON() {}
-
-type jsonOption[T any] struct {
-	Dump     *testdump.JSONOption[T]
-	FileName string
+type jsonHookOption[T any] struct {
+	hook testdump.Hook[T]
 }
+
+func (j jsonHookOption[T]) isJSON() {}
 
 type JSONCmpOption []cmp.Option
 
@@ -66,9 +63,9 @@ func IgnoreFields(fields ...string) JSONCmpOption {
 	return JSONCmpOption([]cmp.Option{internal.IgnoreMapEntries(fields...)})
 }
 
-func MaskFields[T any](fields ...string) jsonOptionHook[T] {
-	return func(o *jsonOption[T]) {
-		o.Dump.Hooks = append(o.Dump.Hooks, testdump.MarshalHook(func(t T) (T, error) {
+func MaskFields[T any](fields ...string) *jsonHookOption[T] {
+	return &jsonHookOption[T]{
+		hook: testdump.MarshalHook(func(t T) (T, error) {
 			b, err := json.Marshal(t)
 			if err != nil {
 				return t, err
@@ -85,20 +82,18 @@ func MaskFields[T any](fields ...string) jsonOptionHook[T] {
 			}
 
 			return tt, nil
-		}))
+		}),
 	}
 }
 
-func InspectJSON[T any](hook func(snapshot, received T) error) jsonOptionHook[T] {
-	return func(o *jsonOption[T]) {
-		o.Dump.Hooks = append(o.Dump.Hooks,
-			testdump.CompareHook(hook))
+func InspectJSON[T any](hook func(snapshot, received T) error) *jsonHookOption[T] {
+	return &jsonHookOption[T]{
+		hook: testdump.CompareHook(hook),
 	}
 }
 
-func InterceptJSON[T any](hook func(t T) (T, error)) jsonOptionHook[T] {
-	return func(o *jsonOption[T]) {
-		o.Dump.Hooks = append(o.Dump.Hooks,
-			testdump.MarshalHook(hook))
+func InterceptJSON[T any](hook func(t T) (T, error)) *jsonHookOption[T] {
+	return &jsonHookOption[T]{
+		hook: testdump.MarshalHook(hook),
 	}
 }

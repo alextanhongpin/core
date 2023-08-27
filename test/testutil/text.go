@@ -7,8 +7,6 @@ import (
 	"github.com/alextanhongpin/core/test/testdump"
 )
 
-type DumpTextOption = testdump.TextOption
-
 type TextOption interface {
 	isText()
 }
@@ -16,12 +14,14 @@ type TextOption interface {
 func DumpText(t *testing.T, s string, opts ...TextOption) {
 	t.Helper()
 
-	o := new(textOption)
-	o.Dump = new(DumpTextOption)
+	var fileName string
+	var hooks []testdump.Hook[string]
 	for _, opt := range opts {
-		switch ot := opt.(type) {
+		switch o := opt.(type) {
 		case FileName:
-			o.FileName = string(ot)
+			fileName = string(o)
+		case *textHookOption:
+			hooks = append(hooks, o.hook)
 		default:
 			panic(fmt.Errorf("testutil: unhandled text option: %#v", opt))
 		}
@@ -30,35 +30,29 @@ func DumpText(t *testing.T, s string, opts ...TextOption) {
 	p := Path{
 		Dir:      "testdata",
 		FilePath: t.Name(),
-		FileName: o.FileName,
+		FileName: fileName,
 		FileExt:  ".txt",
 	}
 
-	fileName := p.String()
-	if err := testdump.Text(testdump.NewFile(fileName), s, o.Dump); err != nil {
+	if err := testdump.Text(testdump.NewFile(p.String()), s, nil, hooks...); err != nil {
 		t.Fatal(err)
 	}
 }
 
-type textOptionHook func(*textOption)
-
-func (textOptionHook) IsText() {}
-
-type textOption struct {
-	Dump     *DumpTextOption
-	FileName string
+type textHookOption struct {
+	hook testdump.Hook[string]
 }
 
-func InspectText(hook func(snapshot, received string) error) textOptionHook {
-	return func(o *textOption) {
-		o.Dump.Hooks = append(o.Dump.Hooks,
-			testdump.CompareHook(hook))
+func (*textHookOption) isText() {}
+
+func InspectText(hook func(snapshot, received string) error) *textHookOption {
+	return &textHookOption{
+		hook: testdump.CompareHook(hook),
 	}
 }
 
-func InterceptText(hook func(dump string) (string, error)) textOptionHook {
-	return func(o *textOption) {
-		o.Dump.Hooks = append(o.Dump.Hooks,
-			testdump.MarshalHook(hook))
+func InterceptText(hook func(dump string) (string, error)) *textHookOption {
+	return &textHookOption{
+		hook: testdump.MarshalHook(hook),
 	}
 }

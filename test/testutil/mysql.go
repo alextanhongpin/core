@@ -7,23 +7,23 @@ import (
 	"github.com/alextanhongpin/core/test/testdump"
 )
 
-type MySQLOption struct {
-	Dump     *DumpSQLOption
-	FileName string
-}
-
 func DumpMySQL(t *testing.T, dump *SQL, opts ...SQLOption) {
 	t.Helper()
 
-	o := new(sqlOption)
-	o.Dump = new(DumpSQLOption)
+	var fileName string
+	var hooks []testdump.Hook[*SQL]
+	sqlOpt := new(testdump.MySQLOption)
 
 	for _, opt := range opts {
-		switch ot := opt.(type) {
+		switch o := opt.(type) {
 		case FileName:
-			o.FileName = string(ot)
-		case sqlOptionHook:
-			ot(o)
+			fileName = string(o)
+		case *sqlHookOption:
+			hooks = append(hooks, o.hook)
+		case *sqlCmpOption:
+			sqlOpt.Args = append(sqlOpt.Args, o.args...)
+			sqlOpt.Vars = append(sqlOpt.Vars, o.vars...)
+			sqlOpt.Result = append(sqlOpt.Result, o.result...)
 		default:
 			panic(fmt.Errorf("testutil: unhandled SQL option: %#v", opt))
 		}
@@ -32,12 +32,11 @@ func DumpMySQL(t *testing.T, dump *SQL, opts ...SQLOption) {
 	p := Path{
 		Dir:      "testdata",
 		FilePath: t.Name(),
-		FileName: o.FileName,
+		FileName: fileName,
 		FileExt:  ".sql",
 	}
 
-	fileName := p.String()
-	if err := testdump.MySQL(testdump.NewFile(fileName), dump, o.Dump); err != nil {
+	if err := testdump.MySQL(testdump.NewFile(p.String()), dump, sqlOpt, hooks...); err != nil {
 		t.Fatal(err)
 	}
 }

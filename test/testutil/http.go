@@ -11,9 +11,9 @@ import (
 	"github.com/alextanhongpin/core/http/httputil"
 	"github.com/alextanhongpin/core/internal"
 	"github.com/alextanhongpin/core/test/testdump"
+	"github.com/google/go-cmp/cmp"
 )
 
-type HTTPDumpOption = testdump.HTTPOption
 type HTTPDump = testdump.HTTPDump
 type HTTPHook = testdump.HTTPHook
 
@@ -59,14 +59,20 @@ func DumpHTTPHandler(t *testing.T, r *http.Request, handler http.HandlerFunc, op
 func DumpHTTP(t *testing.T, w *http.Response, r *http.Request, opts ...HTTPOption) {
 	t.Helper()
 
-	o := new(httpOption)
-	o.Dump = new(HTTPDumpOption)
+	var fileName string
+	var hooks []testdump.Hook[*HTTPDump]
+	httpOpt := new(testdump.HTTPOption)
+
 	for _, opt := range opts {
-		switch ot := opt.(type) {
+		switch o := opt.(type) {
 		case FileName:
-			o.FileName = string(ot)
-		case httpOptionHook:
-			ot(o)
+			fileName = string(o)
+		case *httpHookOption:
+			hooks = append(hooks, o.hook)
+		case *httpCmpOption:
+			httpOpt.Header = append(httpOpt.Header, o.header...)
+			httpOpt.Body = append(httpOpt.Body, o.body...)
+			httpOpt.Trailer = append(httpOpt.Trailer, o.trailer...)
 		default:
 			panic(fmt.Errorf("testutil: unhandled HTTP option: %#v", opt))
 		}
@@ -75,12 +81,11 @@ func DumpHTTP(t *testing.T, w *http.Response, r *http.Request, opts ...HTTPOptio
 	p := Path{
 		Dir:      "testdata",
 		FilePath: t.Name(),
-		FileName: o.FileName,
+		FileName: fileName,
 		FileExt:  ".http",
 	}
 
-	fileName := p.String()
-	if err := testdump.HTTP(testdump.NewFile(fileName), &HTTPDump{W: w, R: r}, o.Dump); err != nil {
+	if err := testdump.HTTP(testdump.NewFile(p.String()), &HTTPDump{W: w, R: r}, httpOpt, hooks...); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -110,81 +115,70 @@ func (t *RoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 	return w, err
 }
 
-type httpOptionHook func(o *httpOption)
-
-func (httpOptionHook) isHTTP() {}
-
-type httpOption struct {
-	Dump     *HTTPDumpOption
-	FileName string
+type httpHookOption struct {
+	hook testdump.Hook[*HTTPDump]
 }
 
-func IgnoreHeaders(headers ...string) httpOptionHook {
-	return func(o *httpOption) {
-		o.Dump.Header = append(o.Dump.Header,
-			internal.IgnoreMapEntries(headers...),
-		)
+func (httpHookOption) isHTTP() {}
+
+type httpCmpOption struct {
+	header  []cmp.Option
+	body    []cmp.Option
+	trailer []cmp.Option
+}
+
+func (httpCmpOption) isHTTP() {}
+
+func IgnoreHeaders(headers ...string) *httpCmpOption {
+	return &httpCmpOption{
+		header: []cmp.Option{internal.IgnoreMapEntries(headers...)},
 	}
 }
 
-func IgnoreTrailers(headers ...string) httpOptionHook {
-	return func(o *httpOption) {
-		o.Dump.Trailer = append(o.Dump.Trailer,
-			internal.IgnoreMapEntries(headers...),
-		)
+func IgnoreTrailers(headers ...string) *httpCmpOption {
+	return &httpCmpOption{
+		trailer: []cmp.Option{internal.IgnoreMapEntries(headers...)},
 	}
 }
 
-func IgnoreBodyFields(fields ...string) httpOptionHook {
-	return func(o *httpOption) {
-		o.Dump.Body = append(o.Dump.Body,
-			internal.IgnoreMapEntries(fields...),
-		)
+func IgnoreBodyFields(fields ...string) *httpCmpOption {
+	return &httpCmpOption{
+		body: []cmp.Option{internal.IgnoreMapEntries(fields...)},
 	}
 }
 
-func MaskRequestHeaders(headers ...string) httpOptionHook {
-	return func(o *httpOption) {
-		o.Dump.Hooks = append(o.Dump.Hooks,
-			testdump.MaskRequestHeaders(headers...),
-		)
+func MaskRequestHeaders(headers ...string) *httpHookOption {
+	return &httpHookOption{
+		hook: testdump.MaskRequestHeaders(headers...),
 	}
 }
 
-func MaskResponseHeaders(headers ...string) httpOptionHook {
-	return func(o *httpOption) {
-		o.Dump.Hooks = append(o.Dump.Hooks,
-			testdump.MaskResponseHeaders(headers...),
-		)
+func MaskResponseHeaders(headers ...string) *httpHookOption {
+	return &httpHookOption{
+		hook: testdump.MaskResponseHeaders(headers...),
 	}
 }
 
-func MaskRequestBody(fields ...string) httpOptionHook {
-	return func(o *httpOption) {
-		o.Dump.Hooks = append(o.Dump.Hooks,
-			testdump.MaskRequestBody(fields...),
-		)
+func MaskRequestBody(fields ...string) *httpHookOption {
+	return &httpHookOption{
+		hook: testdump.MaskRequestBody(fields...),
 	}
 }
 
-func MaskResponseBody(fields ...string) httpOptionHook {
-	return func(o *httpOption) {
-		o.Dump.Hooks = append(o.Dump.Hooks,
-			testdump.MaskResponseBody(fields...),
-		)
+func MaskResponseBody(fields ...string) *httpHookOption {
+	return &httpHookOption{
+		hook: testdump.MaskResponseBody(fields...),
 	}
 }
 
-func InspectHTTP(hook func(snapshot, received *HTTPDump) error) httpOptionHook {
-	return func(o *httpOption) {
-		o.Dump.Hooks = append(o.Dump.Hooks,
-			testdump.CompareHook(hook))
+func InspectHTTP(hook func(snapshot, received *HTTPDump) error) *httpHookOption {
+	return &httpHookOption{
+		hook: testdump.CompareHook(hook),
 	}
 }
 
-func InterceptHTTP(hook func(dump *HTTPDump) (*HTTPDump, error)) httpOptionHook {
-	return func(o *httpOption) {
-		o.Dump.Hooks = append(o.Dump.Hooks,
-			testdump.MarshalHook(hook))
+func InterceptHTTP(hook func(dump *HTTPDump) (*HTTPDump, error)) *httpHookOption {
+	return &httpHookOption{
+		hook: testdump.MarshalHook(hook),
 	}
 }

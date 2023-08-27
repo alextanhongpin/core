@@ -50,7 +50,7 @@ func TestGRPC(t *testing.T) {
 
 	fileName := fmt.Sprintf("testdata/%s.http", t.Name())
 
-	if err := testdump.GRPC(testdump.NewFile(fileName), dump, &testdump.GRPCOption{}); err != nil {
+	if err := testdump.GRPC(testdump.NewFile(fileName), dump, nil); err != nil {
 		t.Fatal(err)
 	}
 }

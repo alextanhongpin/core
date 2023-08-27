@@ -8,9 +8,15 @@ import (
 	"github.com/google/go-cmp/cmp"
 )
 
-func Postgres(rw readerWriter, sql *SQL, opt *SQLOption) error {
+type PostgresOption struct {
+	Args   []cmp.Option
+	Vars   []cmp.Option
+	Result []cmp.Option
+}
+
+func Postgres(rw readerWriter, sql *SQL, opt *PostgresOption, hooks ...Hook[*SQL]) error {
 	if opt == nil {
-		opt = new(SQLOption)
+		opt = new(PostgresOption)
 	}
 
 	type T = *SQL
@@ -19,13 +25,15 @@ func Postgres(rw readerWriter, sql *SQL, opt *SQLOption) error {
 		marshaler:   MarshalFunc[T](MarshalPostgres),
 		unmarshaler: UnmarshalFunc[T](UnmarshalPostgres),
 		comparer: &PostgresComparer{
-			args:   opt.Args,
-			result: opt.Result,
-			vars:   opt.Vars,
+			Args:   opt.Args,
+			Vars:   opt.Vars,
+			Result: opt.Result,
 		},
 	}
 
-	return Snapshot(rw, sql, s, opt.Hooks...)
+	s = Hooks[T](hooks).Apply(s)
+
+	return Snapshot(rw, sql, s)
 }
 
 func MarshalPostgres(s *SQL) ([]byte, error) {
@@ -37,9 +45,9 @@ func UnmarshalPostgres(b []byte) (*SQL, error) {
 }
 
 type PostgresComparer struct {
-	args   []cmp.Option
-	vars   []cmp.Option
-	result []cmp.Option
+	Args   []cmp.Option
+	Vars   []cmp.Option
+	Result []cmp.Option
 }
 
 func (cmp *PostgresComparer) Compare(snapshot, received *SQL) error {
@@ -55,15 +63,15 @@ func (cmp *PostgresComparer) Compare(snapshot, received *SQL) error {
 		return fmt.Errorf("Query: %w", internal.ANSIDiff(x.Query, y.Query))
 	}
 
-	if err := internal.ANSIDiff(x.ArgMap, y.ArgMap, cmp.args...); err != nil {
+	if err := internal.ANSIDiff(x.ArgMap, y.ArgMap, cmp.Args...); err != nil {
 		return fmt.Errorf("Args: %w", err)
 	}
 
-	if err := internal.ANSIDiff(x.VarMap, y.VarMap, cmp.vars...); err != nil {
+	if err := internal.ANSIDiff(x.VarMap, y.VarMap, cmp.Vars...); err != nil {
 		return fmt.Errorf("Vars: %w", err)
 	}
 
-	if err := internal.ANSIDiff(x.Result, y.Result, cmp.result...); err != nil {
+	if err := internal.ANSIDiff(x.Result, y.Result, cmp.Result...); err != nil {
 		return fmt.Errorf("Result: %w", err)
 	}
 

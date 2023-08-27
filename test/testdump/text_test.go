@@ -2,7 +2,6 @@ package testdump_test
 
 import (
 	"fmt"
-	"strings"
 	"testing"
 
 	"github.com/alextanhongpin/core/test/testdump"
@@ -31,37 +30,28 @@ func TestTextInMemory(t *testing.T) {
 	diffErr.SetColor(false)
 
 	diff := diffErr.Error()
-	lines := strings.Split(diff, "\n")
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "+") {
-			assert.True(ok)
-			assert.Contains(line, "bar")
-		}
+	plus, minus := parseDiff(diff)
+	assert.Len(plus, 1)
+	assert.Len(minus, 1)
 
-		if strings.HasPrefix(line, "-") {
-			assert.True(ok)
-			assert.Contains(line, "foo")
-		}
-	}
+	assert.Equal(`"bar",`, plus[0])
+	assert.Equal(`"foo",`, minus[0])
 }
 
 func TestTextHook(t *testing.T) {
 	fileName := fmt.Sprintf("testdata/%s.txt", t.Name())
 	text := "hello world"
 
-	opt := testdump.TextOption{
-		Hooks: []testdump.Hook[string]{
-			testdump.MarshalHook(func(str string) (string, error) {
-				return fmt.Sprintf("%s %s", str, "1..."), nil
-			}),
-			testdump.MarshalHook(func(str string) (string, error) {
-				return fmt.Sprintf("%s %s", str, "2..."), nil
-			}),
-		},
+	hooks := []testdump.Hook[string]{
+		testdump.MarshalHook(func(str string) (string, error) {
+			return fmt.Sprintf("%s %s", str, "1..."), nil
+		}),
+		testdump.MarshalHook(func(str string) (string, error) {
+			return fmt.Sprintf("%s %s", str, "2..."), nil
+		}),
 	}
 
-	if err := testdump.Text(testdump.NewFile(fileName), text, &opt); err != nil {
+	if err := testdump.Text(testdump.NewFile(fileName), text, nil, hooks...); err != nil {
 		t.Fatal(err)
 	}
 }

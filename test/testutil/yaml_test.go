@@ -27,7 +27,6 @@ We are designed to love and break
 And to rinse and repeat it all again`,
 	}
 
-	type T = Person
 	testutil.DumpYAML(t, p, testutil.IgnoreKeys("BornAt"))
 }
 
@@ -47,19 +46,16 @@ func TestDumpYAMLMaskField(t *testing.T) {
 		Password: "s3cr3t",
 	}
 
-	type T = Credentials
 	testutil.DumpYAML(t, creds,
-		testutil.MaskKeys[T]("password"),
+		testutil.MaskKeys[Credentials]("password"),
 	)
 }
 
 func TestDumpYAMLIntercept(t *testing.T) {
 	nums := []int{1, 2, 3}
 
-	type T = []int
-
 	testutil.DumpYAML(t, nums,
-		testutil.InterceptYAML(func(t T) (T, error) {
+		testutil.InterceptYAML(func(t []int) ([]int, error) {
 			// Double the value
 			for i, v := range t {
 				t[i] = v * 2

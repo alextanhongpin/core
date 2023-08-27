@@ -5,24 +5,25 @@ import (
 	"github.com/google/go-cmp/cmp"
 )
 
-func YAML[T any](rw readerWriter, t T, opt *YAMLOption[T]) error {
+type YAMLOption struct {
+	Body []cmp.Option
+}
+
+func YAML[T any](rw readerWriter, t T, opt *YAMLOption, hooks ...Hook[T]) error {
 	if opt == nil {
-		opt = new(YAMLOption[T])
+		opt = new(YAMLOption)
 	}
 
 	var s S[T] = &snapshot[T]{
 		marshaler:      MarshalFunc[T](MarshalYAML[T]),
 		unmarshaler:    UnmarshalFunc[T](UnmarshalYAML[T]),
 		anyUnmarshaler: UnmarshalAnyFunc(UnmarshalYAML[any]),
-		anyComparer:    CompareAnyFunc((&YAMLComparer[any]{opts: opt.Body}).Compare),
+		anyComparer:    CompareAnyFunc((&YAMLComparer[any]{Body: opt.Body}).Compare),
 	}
 
-	return Snapshot(rw, t, s, opt.Hooks...)
-}
+	s = Hooks[T](hooks).Apply(s)
 
-type YAMLOption[T any] struct {
-	Hooks []Hook[T]
-	Body  []cmp.Option
+	return Snapshot(rw, t, s)
 }
 
 func MarshalYAML[T any](t T) ([]byte, error) {
@@ -34,9 +35,9 @@ func UnmarshalYAML[T any](b []byte) (T, error) {
 }
 
 type YAMLComparer[T any] struct {
-	opts []cmp.Option
+	Body []cmp.Option
 }
 
 func (c *YAMLComparer[T]) Compare(snapshot, received T) error {
-	return internal.ANSIDiff(snapshot, received, c.opts...)
+	return internal.ANSIDiff(snapshot, received, c.Body...)
 }

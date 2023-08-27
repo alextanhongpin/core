@@ -7,13 +7,17 @@ import (
 	"github.com/google/go-cmp/cmp"
 )
 
+type JSONOption struct {
+	Body []cmp.Option
+}
+
 // NOTE: Why using a type is bad - because if we serialize to structs, the keys
 // that are removed won't be compared.
 // Ideally, using map[string]any or just any should work better for snapshot
 // testing.
-func JSON[T any](rw readerWriter, t T, opt *JSONOption[T]) error {
+func JSON[T any](rw readerWriter, t T, opt *JSONOption, hooks ...Hook[T]) error {
 	if opt == nil {
-		opt = new(JSONOption[T])
+		opt = new(JSONOption)
 	}
 
 	var s S[T] = &snapshot[T]{
@@ -22,10 +26,12 @@ func JSON[T any](rw readerWriter, t T, opt *JSONOption[T]) error {
 		// using map[string]any for comparison due to loss of information.
 		unmarshaler:    UnmarshalFunc[T](UnmarshalJSON[T]),
 		anyUnmarshaler: UnmarshalAnyFunc(UnmarshalJSON[any]),
-		anyComparer:    CompareAnyFunc((&JSONComparer[any]{opts: opt.Body}).Compare),
+		anyComparer:    CompareAnyFunc((&JSONComparer[any]{Body: opt.Body}).Compare),
 	}
 
-	return Snapshot(rw, t, s, opt.Hooks...)
+	s = Hooks[T](hooks).Apply(s)
+
+	return Snapshot(rw, t, s)
 }
 
 func MarshalJSON[T any](t T) ([]byte, error) {
@@ -43,14 +49,9 @@ func UnmarshalJSON[T any](b []byte) (T, error) {
 }
 
 type JSONComparer[T any] struct {
-	opts []cmp.Option
+	Body []cmp.Option
 }
 
 func (c *JSONComparer[T]) Compare(snapshot, received T) error {
-	return internal.ANSIDiff(snapshot, received, c.opts...)
-}
-
-type JSONOption[T any] struct {
-	Hooks []Hook[T]
-	Body  []cmp.Option
+	return internal.ANSIDiff(snapshot, received, c.Body...)
 }

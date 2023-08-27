@@ -47,9 +47,9 @@ func TestJSONHook(t *testing.T) {
 	// Alias to shorten the types.
 	type T = Credentials
 
-	opt := new(testdump.JSONOption[T])
+	opt := new(testdump.JSONOption)
 	opt.Body = append(opt.Body, internal.IgnoreMapEntries("createdAt"))
-	opt.Hooks = append(opt.Hooks,
+	hooks := []testdump.Hook[T]{
 		// Mask the password value.
 		testdump.MarshalHook(func(t T) (T, error) {
 			t.Password = maputil.MaskValue
@@ -63,9 +63,9 @@ func TestJSONHook(t *testing.T) {
 
 			return nil
 		}),
-	)
+	}
 
-	if err := testdump.JSON(testdump.NewFile(fileName), data, opt); err != nil {
+	if err := testdump.JSON(testdump.NewFile(fileName), data, opt, hooks...); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -80,9 +80,9 @@ func TestJSONMap(t *testing.T) {
 
 	type T = map[string]any
 
-	opt := new(testdump.JSONOption[T])
+	opt := new(testdump.JSONOption)
 	opt.Body = append(opt.Body, internal.IgnoreMapEntries("createdAt"))
-	opt.Hooks = append(opt.Hooks,
+	hooks := []testdump.Hook[T]{
 		testdump.MarshalHook(func(m T) (T, error) {
 			// WARN: this will only add the field even if it is deleted.
 			m["password"] = maputil.MaskValue
@@ -96,9 +96,9 @@ func TestJSONMap(t *testing.T) {
 				internal.IsNonZeroTime(recv, "createdAt"),
 			)
 		}),
-	)
+	}
 
-	if err := testdump.JSON(testdump.NewFile(fileName), data, opt); err != nil {
+	if err := testdump.JSON(testdump.NewFile(fileName), data, opt, hooks...); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -122,16 +122,16 @@ func TestJSONDiff(t *testing.T) {
 	// Alias to shorten the types.
 	type T = User
 
-	opt := new(testdump.JSONOption[T])
+	opt := new(testdump.JSONOption)
 	opt.Body = append(opt.Body, internal.IgnoreMapEntries("createdAt"))
-	opt.Hooks = append(opt.Hooks,
+	hooks := []testdump.Hook[T]{
 		testdump.MarshalHook(func(t T) (T, error) {
 			t.Password = maputil.MaskValue
 
 			return t, nil
 		}),
-	)
-	if err := testdump.JSON(testdump.NewFile(fileName), u, opt); err != nil {
+	}
+	if err := testdump.JSON(testdump.NewFile(fileName), u, opt, hooks...); err != nil {
 		t.Fatal(err)
 	}
 
@@ -148,18 +148,18 @@ func TestJSONDiff(t *testing.T) {
 			Hobbies: []string{"coding"},
 		}
 
-		opt := new(testdump.JSONOption[T])
+		opt := new(testdump.JSONOption)
 		opt.Body = append(opt.Body, internal.IgnoreMapEntries("createdAt"))
-		opt.Hooks = append(opt.Hooks,
+		hooks := []testdump.Hook[T]{
 			testdump.MarshalHook(func(t T) (T, error) {
 				t.Password = maputil.MaskValue
 
 				return t, nil
 			}),
-		)
+		}
 
 		assert := assert.New(t)
-		err := testdump.JSON(testdump.NewFile(fileName), u, opt)
+		err := testdump.JSON(testdump.NewFile(fileName), u, opt, hooks...)
 		assert.NotNil(err)
 
 		var diffErr *internal.DiffError
@@ -187,18 +187,18 @@ func TestJSONDiff(t *testing.T) {
 			CreatedAt: u.CreatedAt,
 		}
 
-		opt := new(testdump.JSONOption[T])
+		opt := new(testdump.JSONOption)
 		opt.Body = append(opt.Body, internal.IgnoreMapEntries("createdAt"))
-		opt.Hooks = append(opt.Hooks,
+		hooks := []testdump.Hook[T]{
 			testdump.MarshalHook(func(t T) (T, error) {
 				t.Password = maputil.MaskValue
 
 				return t, nil
 			}),
-		)
+		}
 
 		assert := assert.New(t)
-		err := testdump.JSON(testdump.NewFile(fileName), u, opt)
+		err := testdump.JSON(testdump.NewFile(fileName), u, opt, hooks...)
 		assert.NotNil(err)
 
 		var diffErr *internal.DiffError
@@ -220,7 +220,7 @@ func TestJSONDiff(t *testing.T) {
 		}
 
 		assert := assert.New(t)
-		err := testdump.JSON(testdump.NewFile(fileName), u, opt)
+		err := testdump.JSON(testdump.NewFile(fileName), u, opt, hooks...)
 		assert.NotNil(err)
 
 		var diffErr *internal.DiffError

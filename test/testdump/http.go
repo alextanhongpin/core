@@ -9,7 +9,20 @@ import (
 	"github.com/google/go-cmp/cmp"
 )
 
-func HTTP(rw readerWriter, dump *HTTPDump, opt *HTTPOption) error {
+type HTTPDump struct {
+	W *http.Response
+	R *http.Request
+}
+
+type HTTPHook = Hook[*HTTPDump]
+
+type HTTPOption struct {
+	Header  []cmp.Option
+	Body    []cmp.Option
+	Trailer []cmp.Option
+}
+
+func HTTP(rw readerWriter, dump *HTTPDump, opt *HTTPOption, hooks ...HTTPHook) error {
 	if opt == nil {
 		opt = new(HTTPOption)
 	}
@@ -17,15 +30,16 @@ func HTTP(rw readerWriter, dump *HTTPDump, opt *HTTPOption) error {
 	var s S[*HTTPDump] = &snapshot[*HTTPDump]{
 		marshaler:   MarshalFunc[*HTTPDump](MarshalHTTP),
 		unmarshaler: UnmarshalFunc[*HTTPDump](UnmarshalHTTP),
-		comparer:    &HTTPComparer{opt: *opt},
+		comparer: &HTTPComparer{
+			Header:  opt.Header,
+			Body:    opt.Body,
+			Trailer: opt.Trailer,
+		},
 	}
 
-	return Snapshot(rw, dump, s, opt.Hooks...)
-}
+	s = Hooks[*HTTPDump](hooks).Apply(s)
 
-type HTTPDump struct {
-	W *http.Response
-	R *http.Request
+	return Snapshot(rw, dump, s)
 }
 
 func MarshalHTTP(d *HTTPDump) ([]byte, error) {
@@ -44,17 +58,10 @@ func UnmarshalHTTP(b []byte) (*HTTPDump, error) {
 	}, nil
 }
 
-type HTTPHook = Hook[*HTTPDump]
-
-type HTTPOption struct {
+type HTTPComparer struct {
 	Header  []cmp.Option
 	Body    []cmp.Option
 	Trailer []cmp.Option
-	Hooks   []HTTPHook
-}
-
-type HTTPComparer struct {
-	opt HTTPOption
 }
 
 func (c HTTPComparer) Compare(snapshot, received *HTTPDump) error {
@@ -69,7 +76,7 @@ func (c HTTPComparer) Compare(snapshot, received *HTTPDump) error {
 			return err
 		}
 
-		if err := compareHTTPDump(snap, recv, c.opt); err != nil {
+		if err := c.compare(snap, recv); err != nil {
 			return fmt.Errorf("Request does not match snapshot. %w", err)
 		}
 	}
@@ -85,7 +92,7 @@ func (c HTTPComparer) Compare(snapshot, received *HTTPDump) error {
 			return err
 		}
 
-		if err := compareHTTPDump(snap, recv, c.opt); err != nil {
+		if err := c.compare(snap, recv); err != nil {
 			return fmt.Errorf("Response does not match snapshot. %w", err)
 		}
 	}
@@ -93,7 +100,7 @@ func (c HTTPComparer) Compare(snapshot, received *HTTPDump) error {
 	return nil
 }
 
-func compareHTTPDump(snapshot, received *httpdump.Dump, opt HTTPOption) error {
+func (c *HTTPComparer) compare(snapshot, received *httpdump.Dump) error {
 	x := snapshot
 	y := received
 
@@ -101,15 +108,15 @@ func compareHTTPDump(snapshot, received *httpdump.Dump, opt HTTPOption) error {
 		return fmt.Errorf("Line: %w", err)
 	}
 
-	if err := internal.ANSIDiff(x.Body, y.Body, opt.Body...); err != nil {
+	if err := internal.ANSIDiff(x.Body, y.Body, c.Body...); err != nil {
 		return fmt.Errorf("Body: %w", err)
 	}
 
-	if err := internal.ANSIDiff(x.Header, y.Header, opt.Header...); err != nil {
+	if err := internal.ANSIDiff(x.Header, y.Header, c.Header...); err != nil {
 		return fmt.Errorf("Header: %w", err)
 	}
 
-	if err := internal.ANSIDiff(x.Trailer, y.Trailer, opt.Trailer...); err != nil {
+	if err := internal.ANSIDiff(x.Trailer, y.Trailer, c.Trailer...); err != nil {
 		return fmt.Errorf("Trailer: %w", err)
 	}
 

@@ -2,11 +2,9 @@ package testdump
 
 import "github.com/alextanhongpin/core/internal"
 
-func Text(rw readerWriter, str string, opt *TextOption) error {
-	if opt == nil {
-		opt = new(TextOption)
-	}
+type TextOption struct{}
 
+func Text(rw readerWriter, str string, opt *TextOption, hooks ...Hook[string]) error {
 	type T = string
 	var s S[T] = &snapshot[T]{
 		marshaler:   MarshalFunc[string](MarshalText),
@@ -14,11 +12,9 @@ func Text(rw readerWriter, str string, opt *TextOption) error {
 		comparer:    CompareFunc[string](CompareText),
 	}
 
-	return Snapshot(rw, str, s, opt.Hooks...)
-}
+	s = Hooks[T](hooks).Apply(s)
 
-type TextOption struct {
-	Hooks []Hook[string]
+	return Snapshot(rw, str, s)
 }
 
 func MarshalText(str string) ([]byte, error) {

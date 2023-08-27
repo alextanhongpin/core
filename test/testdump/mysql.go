@@ -10,16 +10,15 @@ import (
 
 type SQL = sqldump.SQL
 
-type SQLOption struct {
-	Hooks  []Hook[*SQL]
+type MySQLOption struct {
 	Args   []cmp.Option
 	Vars   []cmp.Option
 	Result []cmp.Option
 }
 
-func MySQL(rw readerWriter, sql *SQL, opt *SQLOption) error {
+func MySQL(rw readerWriter, sql *SQL, opt *MySQLOption, hooks ...Hook[*SQL]) error {
 	if opt == nil {
-		opt = new(SQLOption)
+		opt = new(MySQLOption)
 	}
 
 	type T = *SQL
@@ -28,13 +27,15 @@ func MySQL(rw readerWriter, sql *SQL, opt *SQLOption) error {
 		marshaler:   MarshalFunc[T](MarshalMySQL),
 		unmarshaler: UnmarshalFunc[T](UnmarshalMySQL),
 		comparer: &MySQLComparer{
-			args:   opt.Args,
-			vars:   opt.Vars,
-			result: opt.Result,
+			Args:   opt.Args,
+			Vars:   opt.Vars,
+			Result: opt.Result,
 		},
 	}
 
-	return Snapshot(rw, sql, s, opt.Hooks...)
+	s = Hooks[T](hooks).Apply(s)
+
+	return Snapshot(rw, sql, s)
 }
 
 func MarshalMySQL(s *SQL) ([]byte, error) {
@@ -46,9 +47,9 @@ func UnmarshalMySQL(b []byte) (*SQL, error) {
 }
 
 type MySQLComparer struct {
-	args   []cmp.Option
-	vars   []cmp.Option
-	result []cmp.Option
+	Args   []cmp.Option
+	Vars   []cmp.Option
+	Result []cmp.Option
 }
 
 func (cmp *MySQLComparer) Compare(snapshot, received *SQL) error {
@@ -64,15 +65,15 @@ func (cmp *MySQLComparer) Compare(snapshot, received *SQL) error {
 		return fmt.Errorf("Query: %w", internal.ANSIDiff(x.Query, y.Query))
 	}
 
-	if err := internal.ANSIDiff(x.ArgMap, y.ArgMap, cmp.args...); err != nil {
+	if err := internal.ANSIDiff(x.ArgMap, y.ArgMap, cmp.Args...); err != nil {
 		return fmt.Errorf("Args: %w", err)
 	}
 
-	if err := internal.ANSIDiff(x.VarMap, y.VarMap, cmp.vars...); err != nil {
+	if err := internal.ANSIDiff(x.VarMap, y.VarMap, cmp.Vars...); err != nil {
 		return fmt.Errorf("Vars: %w", err)
 	}
 
-	if err := internal.ANSIDiff(x.Result, y.Result, cmp.result...); err != nil {
+	if err := internal.ANSIDiff(x.Result, y.Result, cmp.Result...); err != nil {
 		return fmt.Errorf("Result: %w", err)
 	}
 

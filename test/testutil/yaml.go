@@ -18,19 +18,20 @@ type YAMLOption interface {
 func DumpYAML[T any](t *testing.T, v T, opts ...YAMLOption) {
 	t.Helper()
 
-	o := new(yamlOption[T])
-	o.Dump = new(testdump.YAMLOption[T])
+	var fileName string
+	var hooks []testdump.Hook[T]
+	yamlOpt := new(testdump.YAMLOption)
 
 	for _, opt := range opts {
-		switch ot := opt.(type) {
+		switch o := opt.(type) {
 		case YAMLCmpOption:
-			o.Dump.Body = append(o.Dump.Body, ot...)
+			yamlOpt.Body = append(yamlOpt.Body, o...)
 		case CmpOption:
-			o.Dump.Body = append(o.Dump.Body, ot...)
+			yamlOpt.Body = append(yamlOpt.Body, o...)
 		case FileName:
-			o.FileName = string(ot)
-		case yamlOptionHook[T]:
-			ot(o)
+			fileName = string(o)
+		case *yamlHookOption[T]:
+			hooks = append(hooks, o.hook)
 		default:
 			panic(fmt.Errorf("testutil: unhandled YAML option: %#v", opt))
 		}
@@ -39,24 +40,20 @@ func DumpYAML[T any](t *testing.T, v T, opts ...YAMLOption) {
 	p := Path{
 		Dir:      "testdata",
 		FilePath: t.Name(),
-		FileName: internal.Or(o.FileName, internal.TypeName(v)),
+		FileName: internal.Or(fileName, internal.TypeName(v)),
 		FileExt:  ".yaml",
 	}
 
-	fileName := p.String()
-	if err := testdump.YAML(testdump.NewFile(fileName), v, o.Dump); err != nil {
+	if err := testdump.YAML(testdump.NewFile(p.String()), v, yamlOpt, hooks...); err != nil {
 		t.Fatal(err)
 	}
 }
 
-type yamlOptionHook[T any] func(*yamlOption[T])
-
-func (yamlOptionHook[T]) isYAML() {}
-
-type yamlOption[T any] struct {
-	Dump     *testdump.YAMLOption[T]
-	FileName string
+type yamlHookOption[T any] struct {
+	hook testdump.Hook[T]
 }
+
+func (yamlHookOption[T]) isYAML() {}
 
 type YAMLCmpOption []cmp.Option
 
@@ -66,9 +63,9 @@ func IgnoreKeys(fields ...string) YAMLCmpOption {
 	return YAMLCmpOption([]cmp.Option{internal.IgnoreMapEntries(fields...)})
 }
 
-func MaskKeys[T any](fields ...string) yamlOptionHook[T] {
-	return func(o *yamlOption[T]) {
-		o.Dump.Hooks = append(o.Dump.Hooks, testdump.MarshalHook(func(t T) (T, error) {
+func MaskKeys[T any](fields ...string) *yamlHookOption[T] {
+	return &yamlHookOption[T]{
+		hook: testdump.MarshalHook(func(t T) (T, error) {
 			b, err := json.Marshal(t)
 			if err != nil {
 				return t, err
@@ -85,20 +82,18 @@ func MaskKeys[T any](fields ...string) yamlOptionHook[T] {
 			}
 
 			return tt, nil
-		}))
+		}),
 	}
 }
 
-func InspectYAML[T any](hook func(snapshot, received T) error) yamlOptionHook[T] {
-	return func(o *yamlOption[T]) {
-		o.Dump.Hooks = append(o.Dump.Hooks,
-			testdump.CompareHook(hook))
+func InspectYAML[T any](hook func(snapshot, received T) error) *yamlHookOption[T] {
+	return &yamlHookOption[T]{
+		hook: testdump.CompareHook(hook),
 	}
 }
 
-func InterceptYAML[T any](hook func(T) (T, error)) yamlOptionHook[T] {
-	return func(o *yamlOption[T]) {
-		o.Dump.Hooks = append(o.Dump.Hooks,
-			testdump.MarshalHook(hook))
+func InterceptYAML[T any](hook func(T) (T, error)) *yamlHookOption[T] {
+	return &yamlHookOption[T]{
+		hook: testdump.MarshalHook(hook),
 	}
 }

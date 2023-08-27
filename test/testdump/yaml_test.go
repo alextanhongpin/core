@@ -47,30 +47,31 @@ func TestYAMLHook(t *testing.T) {
 	// Alias to shorten the types.
 	type T = Credentials
 
-	opt := testdump.YAMLOption[T]{
+	opt := testdump.YAMLOption{
 		Body: []cmp.Option{
 			// Ignore CreatedAt field for comparison.
 			internal.IgnoreMapEntries("CreatedAt"),
 		},
-		Hooks: []testdump.Hook[T]{
-			// Mask the password value.
-			testdump.MarshalHook(func(t T) (T, error) {
-				t.Password = maputil.MaskValue
-				return t, nil
-			}),
-
-			// Validate that the time is not zero.
-			testdump.CompareHook(func(snap, recv T) error {
-				// You can access the concrete type.
-				if snap.CreatedAt.IsZero() || recv.CreatedAt.IsZero() {
-					return errors.New("zero time")
-				}
-				return nil
-			}),
-		},
 	}
 
-	if err := testdump.YAML(testdump.NewFile(fileName), data, &opt); err != nil {
+	hooks := []testdump.Hook[T]{
+		// Mask the password value.
+		testdump.MarshalHook(func(t T) (T, error) {
+			t.Password = maputil.MaskValue
+			return t, nil
+		}),
+
+		// Validate that the time is not zero.
+		testdump.CompareHook(func(snap, recv T) error {
+			// You can access the concrete type.
+			if snap.CreatedAt.IsZero() || recv.CreatedAt.IsZero() {
+				return errors.New("zero time")
+			}
+			return nil
+		}),
+	}
+
+	if err := testdump.YAML(testdump.NewFile(fileName), data, &opt, hooks...); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -85,36 +86,36 @@ func TestYAMLMap(t *testing.T) {
 
 	type T = map[string]any
 
-	opt := testdump.YAMLOption[T]{
+	opt := testdump.YAMLOption{
 		Body: []cmp.Option{
 			// Ignore CreatedAt field for comparison.
 			internal.IgnoreMapEntries("createdAt"),
 		},
-		Hooks: []testdump.Hook[T]{
-			// Mask the password value.
-			testdump.MarshalHook(func(t T) (T, error) {
-				// WARN: This will set the field even if it doesn't exists.
-				t["password"] = maputil.MaskValue
-				return t, nil
-			}),
+	}
+	hooks := []testdump.Hook[T]{
+		// Mask the password value.
+		testdump.MarshalHook(func(t T) (T, error) {
+			// WARN: This will set the field even if it doesn't exists.
+			t["password"] = maputil.MaskValue
+			return t, nil
+		}),
 
-			// Validate that the time is not zero.
-			testdump.CompareHook(func(snap, recv T) error {
-				x := snap
-				y := recv
-				if err := internal.IsNonZeroTime(x, "createdAt"); err != nil {
-					return err
-				}
-				if err := internal.IsNonZeroTime(y, "createdAt"); err != nil {
-					return err
-				}
+		// Validate that the time is not zero.
+		testdump.CompareHook(func(snap, recv T) error {
+			x := snap
+			y := recv
+			if err := internal.IsNonZeroTime(x, "createdAt"); err != nil {
+				return err
+			}
+			if err := internal.IsNonZeroTime(y, "createdAt"); err != nil {
+				return err
+			}
 
-				return nil
-			}),
-		},
+			return nil
+		}),
 	}
 
-	if err := testdump.YAML(testdump.NewFile(fileName), data, &opt); err != nil {
+	if err := testdump.YAML(testdump.NewFile(fileName), data, &opt, hooks...); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -138,16 +139,16 @@ func TestYAMLDiff(t *testing.T) {
 	// Alias to shorten the types.
 	type T = User
 
-	opt := new(testdump.YAMLOption[T])
+	opt := new(testdump.YAMLOption)
 	opt.Body = append(opt.Body, internal.IgnoreMapEntries("createdAt"))
-	opt.Hooks = append(opt.Hooks,
+	hooks := []testdump.Hook[T]{
 		testdump.MarshalHook(func(t T) (T, error) {
 			t.Password = maputil.MaskValue
 
 			return t, nil
 		}),
-	)
-	if err := testdump.YAML(testdump.NewFile(fileName), u, opt); err != nil {
+	}
+	if err := testdump.YAML(testdump.NewFile(fileName), u, opt, hooks...); err != nil {
 		t.Fatal(err)
 	}
 
@@ -164,18 +165,18 @@ func TestYAMLDiff(t *testing.T) {
 			Hobbies: []string{"coding"},
 		}
 
-		opt := new(testdump.YAMLOption[T])
+		opt := new(testdump.YAMLOption)
 		opt.Body = append(opt.Body, internal.IgnoreMapEntries("createdAt"))
-		opt.Hooks = append(opt.Hooks,
+		hooks := []testdump.Hook[T]{
 			testdump.MarshalHook(func(t T) (T, error) {
 				t.Password = maputil.MaskValue
 
 				return t, nil
 			}),
-		)
+		}
 
 		assert := assert.New(t)
-		err := testdump.YAML(testdump.NewFile(fileName), u, opt)
+		err := testdump.YAML(testdump.NewFile(fileName), u, opt, hooks...)
 		assert.NotNil(err)
 
 		var diffErr *internal.DiffError
@@ -203,18 +204,18 @@ func TestYAMLDiff(t *testing.T) {
 			CreatedAt: u.CreatedAt,
 		}
 
-		opt := new(testdump.YAMLOption[T])
+		opt := new(testdump.YAMLOption)
 		opt.Body = append(opt.Body, internal.IgnoreMapEntries("createdAt"))
-		opt.Hooks = append(opt.Hooks,
+		hooks := []testdump.Hook[T]{
 			testdump.MarshalHook(func(t T) (T, error) {
 				t.Password = maputil.MaskValue
 
 				return t, nil
 			}),
-		)
+		}
 
 		assert := assert.New(t)
-		err := testdump.YAML(testdump.NewFile(fileName), u, opt)
+		err := testdump.YAML(testdump.NewFile(fileName), u, opt, hooks...)
 		assert.NotNil(err)
 
 		var diffErr *internal.DiffError
@@ -236,7 +237,7 @@ func TestYAMLDiff(t *testing.T) {
 		}
 
 		assert := assert.New(t)
-		err := testdump.YAML(testdump.NewFile(fileName), u, opt)
+		err := testdump.YAML(testdump.NewFile(fileName), u, opt, hooks...)
 		assert.NotNil(err)
 
 		var diffErr *internal.DiffError

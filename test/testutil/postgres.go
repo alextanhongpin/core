@@ -6,6 +6,7 @@ import (
 
 	"github.com/alextanhongpin/core/internal"
 	"github.com/alextanhongpin/core/test/testdump"
+	"github.com/google/go-cmp/cmp"
 )
 
 type SQL = testdump.SQL
@@ -22,20 +23,24 @@ type SQLOption interface {
 	isSQL()
 }
 
-type DumpSQLOption = testdump.SQLOption
-
 func DumpPostgres(t *testing.T, dump *SQL, opts ...SQLOption) {
 	t.Helper()
 
-	o := new(sqlOption)
-	o.Dump = new(DumpSQLOption)
+	var fileName string
+	var hooks []testdump.Hook[*SQL]
+	sqlOpt := new(testdump.PostgresOption)
 
 	for _, opt := range opts {
-		switch ot := opt.(type) {
+		switch o := opt.(type) {
 		case FileName:
-			o.FileName = string(ot)
-		case sqlOptionHook:
-			ot(o)
+			fileName = string(o)
+		case *sqlHookOption:
+			hooks = append(hooks, o.hook)
+		case *sqlCmpOption:
+			sqlOpt.Args = append(sqlOpt.Args, o.args...)
+			sqlOpt.Vars = append(sqlOpt.Vars, o.vars...)
+			sqlOpt.Result = append(sqlOpt.Result, o.result...)
+
 		default:
 			panic(fmt.Errorf("testutil: unhandled SQL option: %#v", opt))
 		}
@@ -44,53 +49,55 @@ func DumpPostgres(t *testing.T, dump *SQL, opts ...SQLOption) {
 	p := Path{
 		Dir:      "testdata",
 		FilePath: t.Name(),
-		FileName: o.FileName,
+		FileName: fileName,
 		FileExt:  ".sql",
 	}
 
-	fileName := p.String()
-	if err := testdump.Postgres(testdump.NewFile(fileName), dump, o.Dump); err != nil {
+	if err := testdump.Postgres(testdump.NewFile(p.String()), dump, sqlOpt, hooks...); err != nil {
 		t.Fatal(err)
 	}
 }
 
-type sqlOptionHook func(*sqlOption)
-
-func (s sqlOptionHook) isSQL() {}
-
-type sqlOption struct {
-	Dump     *DumpSQLOption
-	FileName string
+type sqlHookOption struct {
+	hook testdump.Hook[*SQL]
 }
 
-func IgnoreResultFields(fields ...string) sqlOptionHook {
-	return func(o *sqlOption) {
-		o.Dump.Result = append(o.Dump.Result, internal.IgnoreMapEntries(fields...))
+func (sqlHookOption) isSQL() {}
+
+type sqlCmpOption struct {
+	args   []cmp.Option
+	vars   []cmp.Option
+	result []cmp.Option
+}
+
+func (sqlCmpOption) isSQL() {}
+
+func IgnoreResultFields(fields ...string) *sqlCmpOption {
+	return &sqlCmpOption{
+		result: []cmp.Option{internal.IgnoreMapEntries(fields...)},
 	}
 }
 
-func IgnoreArgs(fields ...string) sqlOptionHook {
-	return func(o *sqlOption) {
-		o.Dump.Args = append(o.Dump.Args, internal.IgnoreMapEntries(fields...))
+func IgnoreArgs(fields ...string) *sqlCmpOption {
+	return &sqlCmpOption{
+		args: []cmp.Option{internal.IgnoreMapEntries(fields...)},
 	}
 }
 
-func IgnoreVars(fields ...string) sqlOptionHook {
-	return func(o *sqlOption) {
-		o.Dump.Vars = append(o.Dump.Vars, internal.IgnoreMapEntries(fields...))
+func IgnoreVars(fields ...string) *sqlCmpOption {
+	return &sqlCmpOption{
+		vars: []cmp.Option{internal.IgnoreMapEntries(fields...)},
 	}
 }
 
-func InspectSQL(hook func(snapshot, received *SQL) error) sqlOptionHook {
-	return func(o *sqlOption) {
-		o.Dump.Hooks = append(o.Dump.Hooks,
-			testdump.CompareHook(hook))
+func InspectSQL(hook func(snapshot, received *SQL) error) *sqlHookOption {
+	return &sqlHookOption{
+		hook: testdump.CompareHook(hook),
 	}
 }
 
-func InterceptSQL(hook func(t *SQL) (*SQL, error)) sqlOptionHook {
-	return func(o *sqlOption) {
-		o.Dump.Hooks = append(o.Dump.Hooks,
-			testdump.MarshalHook(hook))
+func InterceptSQL(hook func(t *SQL) (*SQL, error)) *sqlHookOption {
+	return &sqlHookOption{
+		hook: testdump.MarshalHook(hook),
 	}
 }

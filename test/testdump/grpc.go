@@ -15,7 +15,12 @@ var ErrMetadataNotFound = errors.New("testdump: gRPC metadata not found")
 
 type GRPCDump = grpcdump.Dump
 
-func GRPC(rw readerWriter, dump *GRPCDump, opt *GRPCOption) error {
+type GRPCOption struct {
+	Message  []cmp.Option
+	Metadata []cmp.Option
+}
+
+func GRPC(rw readerWriter, dump *GRPCDump, opt *GRPCOption, hooks ...Hook[*GRPCDump]) error {
 	if opt == nil {
 		opt = new(GRPCOption)
 	}
@@ -23,10 +28,15 @@ func GRPC(rw readerWriter, dump *GRPCDump, opt *GRPCOption) error {
 	var s S[*GRPCDump] = &snapshot[*GRPCDump]{
 		marshaler:   MarshalFunc[*GRPCDump](MarshalGRPC),
 		unmarshaler: UnmarshalFunc[*GRPCDump](UnmarshalGRPC),
-		comparer:    &GRPCComparer{opt: *opt},
+		comparer: &GRPCComparer{
+			Message:  opt.Message,
+			Metadata: opt.Metadata,
+		},
 	}
 
-	return Snapshot(rw, dump, s, opt.Hooks...)
+	s = Hooks[*GRPCDump](hooks).Apply(s)
+
+	return Snapshot(rw, dump, s)
 }
 
 func MarshalGRPC(d *GRPCDump) ([]byte, error) {
@@ -39,16 +49,9 @@ func UnmarshalGRPC(b []byte) (*GRPCDump, error) {
 	return d, err
 }
 
-type GRPCHook = Hook[*GRPCDump]
-
-type GRPCOption struct {
+type GRPCComparer struct {
 	Message  []cmp.Option
 	Metadata []cmp.Option
-	Hooks    []GRPCHook
-}
-
-type GRPCComparer struct {
-	opt GRPCOption
 }
 
 func (c GRPCComparer) Compare(snapshot, received *GRPCDump) error {
@@ -63,7 +66,7 @@ func (c GRPCComparer) Compare(snapshot, received *GRPCDump) error {
 		return fmt.Errorf("Full Method: %w", err)
 	}
 
-	if err := internal.ANSIDiff(x.Messages, y.Messages, c.opt.Message...); err != nil {
+	if err := internal.ANSIDiff(x.Messages, y.Messages, c.Message...); err != nil {
 		return fmt.Errorf("Message: %w", err)
 	}
 
@@ -71,15 +74,15 @@ func (c GRPCComparer) Compare(snapshot, received *GRPCDump) error {
 		return fmt.Errorf("Status: %w", err)
 	}
 
-	if err := internal.ANSIDiff(x.Metadata, y.Metadata, c.opt.Metadata...); err != nil {
+	if err := internal.ANSIDiff(x.Metadata, y.Metadata, c.Metadata...); err != nil {
 		return fmt.Errorf("Metadata: %w", err)
 	}
 
-	if err := internal.ANSIDiff(x.Header, y.Header, c.opt.Metadata...); err != nil {
+	if err := internal.ANSIDiff(x.Header, y.Header, c.Metadata...); err != nil {
 		return fmt.Errorf("Header: %w", err)
 	}
 
-	if err := internal.ANSIDiff(x.Trailer, y.Trailer, c.opt.Metadata...); err != nil {
+	if err := internal.ANSIDiff(x.Trailer, y.Trailer, c.Metadata...); err != nil {
 		return fmt.Errorf("Trailer: %w", err)
 	}
 

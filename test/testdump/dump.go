@@ -2,29 +2,26 @@ package testdump
 
 import (
 	"bytes"
-	"errors"
 	"os"
 
 	"github.com/alextanhongpin/core/internal"
 )
 
-type DiffError = internal.DiffError
-
-func AsDiffError(err error) (*DiffError, bool) {
-	var diffErr *DiffError
-	return diffErr, errors.As(err, &diffErr)
-}
-
 type Hook[T any] func(S[T]) S[T]
 
-func Snapshot[T any](rw readerWriter, t T, s S[T], hooks ...Hook[T]) error {
-	// Run middleware in reverse order, so that the first
-	// will execute first.
+type Hooks[T any] []Hook[T]
+
+func (hooks Hooks[T]) Apply(s S[T]) S[T] {
+	// Reverse the hooks so that it applies from left to right.
 	for i := 0; i < len(hooks); i++ {
-		mw := hooks[len(hooks)-i-1]
-		s = mw(s)
+		h := hooks[len(hooks)-i-1]
+		s = h(s)
 	}
 
+	return s
+}
+
+func Snapshot[T any](rw readerWriter, t T, s S[T]) error {
 	b, err := s.Marshal(t)
 	if err != nil {
 		return err
