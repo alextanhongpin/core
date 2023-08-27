@@ -1,14 +1,39 @@
 package retry
 
 import (
+	"context"
 	"math/rand"
 	"time"
+
+	"golang.org/x/exp/event"
 )
 
+var retryTotalDistribution = event.NewIntDistribution("retry_total", &event.MetricOptions{
+	Description: "The distribution of retry by number of times",
+})
+
 var (
-	Linear      = apply(WithJitter, linear())
-	Exponential = apply(WithJitter, exponential())
+	Linear      = Backoffs(linear())
+	Exponential = Backoffs(exponential())
 )
+
+type Backoffs []time.Duration
+
+func (b Backoffs) Jitter() Backoffs {
+	return WithJitter(b)
+}
+
+func (b Backoffs) SoftLimit(limit time.Duration) Backoffs {
+	return WithSoftLimit(b, limit)
+}
+
+func (b Backoffs) HardLimit(limit time.Duration) Backoffs {
+	return WithHardLimit(b, limit)
+}
+
+func (b Backoffs) Exec(ctx context.Context, fn func() error) error {
+	return Exec(ctx, fn, b)
+}
 
 // WithSoftLimit applies soft limit to the total duration. The total duration
 // will be at least the soft limit amount.
@@ -59,10 +84,10 @@ func WithJitter(ts []time.Duration) []time.Duration {
 }
 
 // Exec executes the retry and returns an error.
-func Exec(fn func() error, ts []time.Duration) (err error) {
+func Exec(ctx context.Context, fn func() error, ts []time.Duration) (err error) {
 	timeouts := append([]time.Duration{0}, ts...)
 
-	for _, t := range timeouts {
+	for i, t := range timeouts {
 		if t != 0 {
 			time.Sleep(t)
 		}
@@ -71,16 +96,18 @@ func Exec(fn func() error, ts []time.Duration) (err error) {
 		if err == nil {
 			return
 		}
+
+		retryTotalDistribution.Record(ctx, 1, event.Int64("attempt", int64(i+1)))
 	}
 
 	return
 }
 
 // Query is similar to exec, but returns both value and error.
-func Query[T any](fn func() (T, error), ts []time.Duration) (v T, err error) {
+func Query[T any](ctx context.Context, fn func() (T, error), ts []time.Duration) (v T, err error) {
 	timeouts := append([]time.Duration{0}, ts...)
 
-	for _, t := range timeouts {
+	for i, t := range timeouts {
 		if t != 0 {
 			time.Sleep(t)
 		}
@@ -89,6 +116,8 @@ func Query[T any](fn func() (T, error), ts []time.Duration) (v T, err error) {
 		if err == nil {
 			return
 		}
+
+		retryTotalDistribution.Record(ctx, 1, event.Int64("attempt", int64(i+1)))
 	}
 
 	return
@@ -119,10 +148,4 @@ func exponential() []time.Duration {
 
 func jitter(d time.Duration) time.Duration {
 	return time.Duration(rand.Intn(int(d / 2))).Round(5 * time.Millisecond)
-}
-
-func apply(fn func([]time.Duration) []time.Duration, ts []time.Duration) func() []time.Duration {
-	return func() []time.Duration {
-		return fn(ts)
-	}
 }
