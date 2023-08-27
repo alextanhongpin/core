@@ -6,11 +6,23 @@
 package circuitbreaker
 
 import (
+	"context"
 	"errors"
 	"sync/atomic"
 	"time"
 
+	"golang.org/x/exp/event"
 	"golang.org/x/time/rate"
+)
+
+var (
+	requestsTotal = event.NewCounter("requests_total", &event.MetricOptions{
+		Description: "The number of executions",
+	})
+
+	failuresTotal = event.NewCounter("failures_total", &event.MetricOptions{
+		Description: "The number of failures",
+	})
 )
 
 const (
@@ -49,12 +61,15 @@ func New() *Group {
 }
 
 // Do updates the circuit breaker status based on the returned error.
-func (g *Group) Do(fn func() error) error {
-	if !g.allow() {
+func (g *Group) Exec(ctx context.Context, fn func(ctx context.Context) error) error {
+	requestsTotal.Record(ctx, 1)
+
+	if !g.allow(ctx) {
+		failuresTotal.Record(ctx, 1)
 		return Unavailable
 	}
 
-	err := fn()
+	err := fn(ctx)
 	g.do(err == nil)
 
 	return err
@@ -98,7 +113,7 @@ func (g *Group) SetSampling(sample *rate.Sometimes) {
 	g.sampling = sample
 }
 
-func (g *Group) allow() bool {
+func (g *Group) allow(ctx context.Context) bool {
 	if g.Status().IsOpen() {
 		g.do(true)
 	}
@@ -173,4 +188,17 @@ func (g *Group) incr() int64 {
 
 func (g *Group) transition(from, to Status) {
 	atomic.CompareAndSwapInt64(&g.status, from.Int64(), to.Int64())
+}
+
+type circuit interface {
+	Exec(ctx context.Context, fn func(ctx context.Context) error) error
+}
+
+func Query[T any](ctx context.Context, cb circuit, fn func(ctx context.Context) (T, error)) (v T, err error) {
+	err = cb.Exec(ctx, func(ctx context.Context) error {
+		v, err = fn(ctx)
+		return err
+	})
+
+	return
 }
