@@ -92,7 +92,7 @@ func (w *Worker[T]) exec(ctx context.Context, v T) {
 	}()
 }
 
-func ExecBatchN[T any](ctx context.Context, h internal.RequestHandler[T], n int, vs ...T) error {
+func BatchExecN[T any](ctx context.Context, h internal.RequestHandler[T], n int, vs ...T) error {
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(n)
 
