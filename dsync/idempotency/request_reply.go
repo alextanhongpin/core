@@ -5,32 +5,30 @@ import (
 	"encoding/json"
 	"errors"
 	"time"
+
+	"github.com/alextanhongpin/core/internal"
 )
 
-type query[T, U any] interface {
-	Query(ctx context.Context, req T) (res U, err error)
+type RequestReplyHandler[T, U any] internal.RequestReplyHandlerFunc[T, U]
+
+func (h RequestReplyHandler[T, U]) Exec(ctx context.Context, v T) (U, error) {
+	return h(ctx, v)
 }
 
-type QueryHandler[T, U any] func(ctx context.Context, req T) (res U, err error)
-
-func (h QueryHandler[T, U]) Query(ctx context.Context, req T) (U, error) {
-	return h(ctx, req)
-}
-
-type QueryOption[T comparable, U any] struct {
+type RequestReplyOption[T comparable, U any] struct {
 	LockTimeout     time.Duration
 	RetentionPeriod time.Duration
-	Handler         query[T, U]
+	Handler         internal.RequestReplyHandler[T, U]
 }
 
-type Query[T comparable, U any] struct {
+type RequestReply[T comparable, U any] struct {
 	store     store[U]
 	lock      time.Duration
 	retention time.Duration
-	handler   query[T, U]
+	handler   internal.RequestReplyHandler[T, U]
 }
 
-func NewQuery[T comparable, U any](store store[U], opt QueryOption[T, U]) *Query[T, U] {
+func NewRequestReply[T comparable, U any](store store[U], opt RequestReplyOption[T, U]) *RequestReply[T, U] {
 	if opt.LockTimeout <= 0 {
 		opt.LockTimeout = 1 * time.Minute
 	}
@@ -39,7 +37,7 @@ func NewQuery[T comparable, U any](store store[U], opt QueryOption[T, U]) *Query
 		opt.RetentionPeriod = 24 * time.Hour
 	}
 
-	return &Query[T, U]{
+	return &RequestReply[T, U]{
 		store:     store,
 		lock:      opt.LockTimeout,
 		retention: opt.RetentionPeriod,
@@ -47,7 +45,7 @@ func NewQuery[T comparable, U any](store store[U], opt QueryOption[T, U]) *Query
 	}
 }
 
-func (r *Query[T, U]) Query(ctx context.Context, key string, req T) (U, error) {
+func (r *RequestReply[T, U]) Exec(ctx context.Context, key string, req T) (U, error) {
 	// Sets the idempotency operation status to "started".
 	// Can only be executed by one client.
 	var v U
@@ -58,7 +56,7 @@ func (r *Query[T, U]) Query(ctx context.Context, key string, req T) (U, error) {
 
 	// Started. Runs the idempotent operation and save the result.
 	if ok {
-		v, err = r.handler.Query(ctx, req)
+		v, err = r.handler.Exec(ctx, req)
 		if err != nil {
 			// Delete the lock on fail.
 			return v, errors.Join(err, r.store.Unlock(ctx, key))
@@ -72,7 +70,7 @@ func (r *Query[T, U]) Query(ctx context.Context, key string, req T) (U, error) {
 	return r.load(ctx, key, req)
 }
 
-func (r *Query[T, U]) save(ctx context.Context, key string, req T, res U, timeout time.Duration) error {
+func (r *RequestReply[T, U]) save(ctx context.Context, key string, req T, res U, timeout time.Duration) error {
 	b, err := json.Marshal(req)
 	if err != nil {
 		return err
@@ -87,7 +85,7 @@ func (r *Query[T, U]) save(ctx context.Context, key string, req T, res U, timeou
 	return r.store.Save(ctx, key, d, timeout)
 }
 
-func (r *Query[T, U]) load(ctx context.Context, key string, req T) (U, error) {
+func (r *RequestReply[T, U]) load(ctx context.Context, key string, req T) (U, error) {
 	var v U
 	d, err := r.store.Load(ctx, key)
 	if err != nil {

@@ -5,32 +5,30 @@ import (
 	"encoding/json"
 	"errors"
 	"time"
+
+	"github.com/alextanhongpin/core/internal"
 )
 
-type command[T any] interface {
-	Exec(ctx context.Context, req T) error
+type RequestHandler[T any] internal.RequestHandlerFunc[T]
+
+func (r RequestHandler[T]) Exec(ctx context.Context, v T) error {
+	return r(ctx, v)
 }
 
-type CommandHandler[T any] func(ctx context.Context, req T) error
-
-func (h CommandHandler[T]) Exec(ctx context.Context, req T) error {
-	return h(ctx, req)
-}
-
-type CmdOption[T any] struct {
+type RequestOption[T any] struct {
 	LockTimeout     time.Duration
 	RetentionPeriod time.Duration
-	Handler         command[T]
+	Handler         internal.RequestHandler[T]
 }
 
-type Cmd[T any] struct {
+type Request[T any] struct {
 	store     store[any]
 	lock      time.Duration
 	retention time.Duration
-	handler   command[T]
+	handler   internal.RequestHandler[T]
 }
 
-func NewCmd[T any](store store[any], opt CmdOption[T]) *Cmd[T] {
+func NewRequest[T any](store store[any], opt RequestOption[T]) *Request[T] {
 	if opt.LockTimeout <= 0 {
 		opt.LockTimeout = 1 * time.Minute
 	}
@@ -39,7 +37,7 @@ func NewCmd[T any](store store[any], opt CmdOption[T]) *Cmd[T] {
 		opt.RetentionPeriod = 24 * time.Hour
 	}
 
-	return &Cmd[T]{
+	return &Request[T]{
 		store:     store,
 		lock:      opt.LockTimeout,
 		retention: opt.RetentionPeriod,
@@ -47,7 +45,7 @@ func NewCmd[T any](store store[any], opt CmdOption[T]) *Cmd[T] {
 	}
 }
 
-func (r *Cmd[T]) Exec(ctx context.Context, key string, req T) error {
+func (r *Request[T]) Exec(ctx context.Context, key string, req T) error {
 	ok, err := r.store.Lock(ctx, key, r.lock)
 	if err != nil {
 		return err
@@ -64,7 +62,7 @@ func (r *Cmd[T]) Exec(ctx context.Context, key string, req T) error {
 	return r.load(ctx, key, req)
 }
 
-func (r *Cmd[T]) save(ctx context.Context, key string, req T, timeout time.Duration) error {
+func (r *Request[T]) save(ctx context.Context, key string, req T, timeout time.Duration) error {
 	b, err := json.Marshal(req)
 	if err != nil {
 		return err
@@ -78,7 +76,7 @@ func (r *Cmd[T]) save(ctx context.Context, key string, req T, timeout time.Durat
 	return r.store.Save(ctx, key, d, timeout)
 }
 
-func (r *Cmd[T]) load(ctx context.Context, key string, req T) error {
+func (r *Request[T]) load(ctx context.Context, key string, req T) error {
 	d, err := r.store.Load(ctx, key)
 	if err != nil {
 		return err

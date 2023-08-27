@@ -36,10 +36,10 @@ func TestQuery(t *testing.T) {
 
 	do := func() {
 		store := idempotency.NewRedisStore[*Response](client)
-		handler := idempotency.NewQuery(store, idempotency.QueryOption[Request, *Response]{
+		handler := idempotency.NewRequestReply(store, idempotency.RequestReplyOption[Request, *Response]{
 			LockTimeout:     5 * time.Second, // Default is 1 minute.
 			RetentionPeriod: 1 * time.Minute, // Default is 24 hour.
-			Handler: idempotency.QueryHandler[Request, *Response](func(ctx context.Context, req Request) (*Response, error) {
+			Handler: idempotency.RequestReplyHandler[Request, *Response](func(ctx context.Context, req Request) (*Response, error) {
 				// Simulate critical section.
 				time.Sleep(100 * time.Millisecond)
 
@@ -49,7 +49,7 @@ func TestQuery(t *testing.T) {
 			}),
 		})
 
-		res, err := handler.Query(ctx, SomeOperationKey.Format("xyz"), Request{
+		res, err := handler.Exec(ctx, SomeOperationKey.Format("xyz"), Request{
 			ID:   "payout-123",
 			Name: "foo",
 		})
@@ -89,7 +89,7 @@ func TestQuery(t *testing.T) {
 	s.CheckGet(t, "i9y:some-operation:xyz", `{"status":"success","request":"w93v/T90sFbhkHDcVqEfX1HWwArDAIFdNnppRNwjuKg=","response":{"name":"replied:foo"}}`)
 }
 
-func TestCommand(t *testing.T) {
+func TestRequest(t *testing.T) {
 	assert := assert.New(t)
 	ctx := context.Background()
 
@@ -102,10 +102,10 @@ func TestCommand(t *testing.T) {
 
 	do := func() {
 		store := idempotency.NewRedisStore[any](client)
-		handler := idempotency.NewCmd(store, idempotency.CmdOption[Request]{
+		handler := idempotency.NewRequest(store, idempotency.RequestOption[Request]{
 			LockTimeout:     5 * time.Second, // Default is 1 minute.
 			RetentionPeriod: 1 * time.Minute, // Default is 24 hour.
-			Handler: idempotency.CommandHandler[Request](func(ctx context.Context, req Request) error {
+			Handler: idempotency.RequestHandler[Request](func(ctx context.Context, req Request) error {
 				// Simulate critical section.
 				time.Sleep(100 * time.Millisecond)
 

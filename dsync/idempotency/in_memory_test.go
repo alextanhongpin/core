@@ -10,17 +10,17 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestQueryInMemory(t *testing.T) {
+func TestRequestReplyInMemory(t *testing.T) {
 	assert := assert.New(t)
 	ctx := context.Background()
 
 	store := idempotency.NewInMemoryStore[*Response]()
 
 	do := func() {
-		handler := idempotency.NewQuery(store, idempotency.QueryOption[Request, *Response]{
+		handler := idempotency.NewRequestReply(store, idempotency.RequestReplyOption[Request, *Response]{
 			LockTimeout:     5 * time.Second, // Default is 1 minute.
 			RetentionPeriod: 1 * time.Minute, // Default is 24 hour.
-			Handler: idempotency.QueryHandler[Request, *Response](func(ctx context.Context, req Request) (*Response, error) {
+			Handler: idempotency.RequestReplyHandler[Request, *Response](func(ctx context.Context, req Request) (*Response, error) {
 				// Simulate critical section.
 				time.Sleep(100 * time.Millisecond)
 
@@ -30,7 +30,7 @@ func TestQueryInMemory(t *testing.T) {
 			}),
 		})
 
-		res, err := handler.Query(ctx, SomeOperationKey.Format("xyz"), Request{
+		res, err := handler.Exec(ctx, SomeOperationKey.Format("xyz"), Request{
 			ID:   "payout-123",
 			Name: "foo",
 		})
@@ -75,17 +75,17 @@ func TestQueryInMemory(t *testing.T) {
 	assert.Equal("replied:foo", res.Response.Name)
 }
 
-func TestCommandInMemory(t *testing.T) {
+func TestRequestInMemory(t *testing.T) {
 	assert := assert.New(t)
 	ctx := context.Background()
 
 	store := idempotency.NewInMemoryStore[any]()
 
 	do := func() {
-		handler := idempotency.NewCmd(store, idempotency.CmdOption[Request]{
+		handler := idempotency.NewRequest(store, idempotency.RequestOption[Request]{
 			LockTimeout:     5 * time.Second, // Default is 1 minute.
 			RetentionPeriod: 1 * time.Minute, // Default is 24 hour.
-			Handler: idempotency.CommandHandler[Request](func(ctx context.Context, req Request) error {
+			Handler: idempotency.RequestHandler[Request](func(ctx context.Context, req Request) error {
 				// Simulate critical section.
 				time.Sleep(100 * time.Millisecond)
 
