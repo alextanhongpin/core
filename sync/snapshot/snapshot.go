@@ -22,12 +22,6 @@ func (p Policy) IntervalSeconds() int64 {
 	return p.Interval.Nanoseconds() / 1e9
 }
 
-type Handler func(ctx context.Context)
-
-func (h Handler) Exec(ctx context.Context) {
-	h(ctx)
-}
-
 type Manager struct {
 	unix     atomic.Int64
 	every    atomic.Int64
@@ -60,7 +54,7 @@ func (m *Manager) Inc(n int64) int64 {
 }
 
 // Exec allows lazy execution.
-func (m *Manager) Exec(ctx context.Context, h Handler) {
+func (m *Manager) Exec(ctx context.Context, h internal.SilentHandler) {
 	if !m.allow() {
 		return
 	}
@@ -72,7 +66,7 @@ func (m *Manager) Exec(ctx context.Context, h Handler) {
 // Run executes whenever the condition is fulfilled. Returning an error will
 // cause the every and timer not to reset.
 // The client should be responsible for logging and handling the error.
-func (m *Manager) Run(ctx context.Context, h Handler) func() {
+func (m *Manager) Run(ctx context.Context, h internal.SilentHandler) func() {
 	var wg sync.WaitGroup
 	ctx, cancel := context.WithCancel(ctx)
 	wg.Add(1)
@@ -93,7 +87,7 @@ func (m *Manager) Run(ctx context.Context, h Handler) func() {
 	return stop
 }
 
-func (m *Manager) start(ctx context.Context, h Handler) {
+func (m *Manager) start(ctx context.Context, h internal.SilentHandler) {
 	t := time.NewTicker(m.tick())
 	defer t.Stop()
 

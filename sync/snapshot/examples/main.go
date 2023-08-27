@@ -11,6 +11,12 @@ import (
 	"github.com/alextanhongpin/core/sync/snapshot"
 )
 
+type handler struct{}
+
+func (h handler) Exec(ctx context.Context) {
+	fmt.Println("run")
+}
+
 func main() {
 	snap := snapshot.New([]snapshot.Policy{
 		{Every: 10_000, Interval: 5 * time.Second},
@@ -26,9 +32,7 @@ func main() {
 
 	snap.Inc(10_000)
 
-	stop := snap.Run(ctx, func(ctx context.Context) {
-		fmt.Println("run")
-	})
+	stop := snap.Run(ctx, &handler{})
 
 	defer stop()
 
