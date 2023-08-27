@@ -10,7 +10,11 @@ import (
 var maxWorkers = runtime.GOMAXPROCS(0)
 
 func Join[T any](ctx context.Context, futures ...Func[T]) []result[T] {
-	sem := semaphore.NewWeighted(int64(maxWorkers))
+	return JoinN(ctx, int64(maxWorkers), futures...)
+}
+
+func JoinN[T any](ctx context.Context, n int64, futures ...Func[T]) []result[T] {
+	sem := semaphore.NewWeighted(n)
 
 	res := make([]result[T], len(futures))
 	for i := 0; i < len(futures); i++ {
