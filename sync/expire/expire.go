@@ -12,16 +12,12 @@ import (
 )
 
 var (
-	addCounter = event.NewCounter("expire.add", &event.MetricOptions{
+	keysTotal = event.NewCounter("keys_total", &event.MetricOptions{
 		Description: "the number of keys added",
 	})
 
-	execCounter = event.NewCounter("expire.exec", &event.MetricOptions{
+	processedTotal = event.NewCounter("processed_total", &event.MetricOptions{
 		Description: "the number times the handler executes",
-	})
-
-	goroutineCounter = event.NewCounter("expire.goroutine", &event.MetricOptions{
-		Description: "the number of goroutines spawn by the workers",
 	})
 )
 
@@ -77,7 +73,7 @@ func (w *Worker) Add(ctx context.Context, n int) {
 	}
 
 	w.count += n
-	addCounter.Record(ctx, int64(n))
+	keysTotal.Record(ctx, int64(n))
 
 	if w.isCheckpoint() {
 		w.count = 0
@@ -169,7 +165,7 @@ func (w *Worker) loop(ctx context.Context, h Handler) {
 		<-time.After(sleep)
 
 		// Execute the handler.
-		execCounter.Record(ctx, 1)
+		processedTotal.Record(ctx, 1)
 		if err := h.Exec(ctx); err != nil {
 			event.Error(ctx, "failed to execute handler", err)
 		}
