@@ -6,6 +6,7 @@ import (
 	"math/rand"
 	"time"
 
+	"github.com/alextanhongpin/core/internal"
 	"golang.org/x/exp/event"
 )
 
@@ -84,8 +85,8 @@ func WithJitter(ts []time.Duration) []time.Duration {
 	return res
 }
 
-// Exec executes the retry and returns an error.
-func Exec(ctx context.Context, fn func() error, ts []time.Duration) (err error) {
+// Command executes the retry and returns an error.
+func Command(ctx context.Context, h internal.CommandHandler, ts []time.Duration) (err error) {
 	timeouts := append([]time.Duration{0}, ts...)
 
 	for i, t := range timeouts {
@@ -93,19 +94,19 @@ func Exec(ctx context.Context, fn func() error, ts []time.Duration) (err error) 
 			time.Sleep(t)
 		}
 
-		err = fn()
+		err = h.Exec(ctx)
 		if err == nil {
 			return
 		}
 
-		retryTotalDistribution.Record(ctx, 1, event.Int64("attempt", int64(i+1)))
+		retryTotalDistribution.Record(ctx, 1, event.String("type", "command"), event.Int64("attempt", int64(i+1)))
 	}
 
 	return
 }
 
 // Query is similar to exec, but returns both value and error.
-func Query[T any](ctx context.Context, fn func() (T, error), ts []time.Duration) (v T, err error) {
+func Query[T any](ctx context.Context, h internal.QueryHandler[T], ts []time.Duration) (v T, err error) {
 	timeouts := append([]time.Duration{0}, ts...)
 
 	for i, t := range timeouts {
@@ -113,12 +114,50 @@ func Query[T any](ctx context.Context, fn func() (T, error), ts []time.Duration)
 			time.Sleep(t)
 		}
 
-		v, err = fn()
+		v, err = h.Exec(ctx)
 		if err == nil {
 			return
 		}
 
-		retryTotalDistribution.Record(ctx, 1, event.Int64("attempt", int64(i+1)))
+		retryTotalDistribution.Record(ctx, 1, event.String("type", "query"), event.Int64("attempt", int64(i+1)))
+	}
+
+	return
+}
+
+func RequestReply[T, U any](ctx context.Context, h internal.RequestReplyHandler[T, U], v T, ts []time.Duration) (u U, err error) {
+	timeouts := append([]time.Duration{0}, ts...)
+
+	for i, t := range timeouts {
+		if t != 0 {
+			time.Sleep(t)
+		}
+
+		u, err = h.Exec(ctx, v)
+		if err == nil {
+			return
+		}
+
+		retryTotalDistribution.Record(ctx, 1, event.String("type", "request_reply"), event.Int64("attempt", int64(i+1)))
+	}
+
+	return
+}
+
+func Request[T, U any](ctx context.Context, h internal.RequestHandler[T], v T, ts []time.Duration) (err error) {
+	timeouts := append([]time.Duration{0}, ts...)
+
+	for i, t := range timeouts {
+		if t != 0 {
+			time.Sleep(t)
+		}
+
+		err = h.Exec(ctx, v)
+		if err == nil {
+			return
+		}
+
+		retryTotalDistribution.Record(ctx, 1, event.String("type", "request"), event.Int64("attempt", int64(i+1)))
 	}
 
 	return
