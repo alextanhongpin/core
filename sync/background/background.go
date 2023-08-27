@@ -10,11 +10,11 @@ import (
 )
 
 var (
-	sendCounter = event.NewCounter("background.send", &event.MetricOptions{
+	processedTotal = event.NewCounter("processed_total", &event.MetricOptions{
 		Description: "the number of processed async message",
 	})
 
-	goroutineCounter = event.NewCounter("background.goroutine", &event.MetricOptions{
+	workersCount = event.NewCounter("workers_count", &event.MetricOptions{
 		Description: "the number of goroutines spawn by the workers",
 	})
 )
@@ -54,9 +54,9 @@ func New[T any](opt Option[T]) (*Worker[T], func()) {
 	return w, w.stop
 }
 
-// Send sends a new message to the channel.
-func (w *Worker[T]) Send(ctx context.Context, vs ...T) {
-	sendCounter.Record(ctx, int64(len(vs)))
+// Exec sends a new message to the channel.
+func (w *Worker[T]) Exec(ctx context.Context, vs ...T) {
+	processedTotal.Record(ctx, int64(len(vs)))
 
 	for _, v := range vs {
 		v := v
@@ -65,8 +65,8 @@ func (w *Worker[T]) Send(ctx context.Context, vs ...T) {
 	}
 }
 
-func (w *Worker[T]) SendWait(ctx context.Context, vs ...T) {
-	sendCounter.Record(ctx, int64(len(vs)))
+func (w *Worker[T]) ExecWait(ctx context.Context, vs ...T) {
+	processedTotal.Record(ctx, int64(len(vs)))
 
 	var wg sync.WaitGroup
 	wg.Add(len(vs))
@@ -84,14 +84,14 @@ func (w *Worker[T]) SendWait(ctx context.Context, vs ...T) {
 	wg.Wait()
 }
 
-// SendWaitN is similar to SendWait, excepts it limits the running goroutine to
+// ExecWaitN is similar to ExecWait, excepts it limits the running goroutine to
 // size n. Executes everything concurrently if the number of messages is less
 // than n.
-func (w *Worker[T]) SendWaitN(ctx context.Context, n int, vs ...T) {
-	sendCounter.Record(ctx, int64(len(vs)))
+func (w *Worker[T]) ExecWaitN(ctx context.Context, n int, vs ...T) {
+	processedTotal.Record(ctx, int64(len(vs)))
 
 	if len(vs) < n {
-		w.SendWait(ctx, vs...)
+		w.ExecWait(ctx, vs...)
 
 		return
 	}
@@ -144,8 +144,8 @@ func (w *Worker[T]) exec(ctx context.Context, v T) {
 		defer w.wg.Done()
 		defer w.sem.Release(1)
 
-		goroutineCounter.Record(ctx, 1)
-		defer goroutineCounter.Record(ctx, -1)
+		workersCount.Record(ctx, 1)
+		defer workersCount.Record(ctx, -1)
 
 		w.handler.Exec(ctx, v)
 	}()

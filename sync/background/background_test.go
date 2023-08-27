@@ -23,7 +23,7 @@ func TestBackground(t *testing.T) {
 		defer stop()
 
 		assert := assert.New(t)
-		bg.Send(ctx, 1)
+		bg.Exec(ctx, 1)
 
 		stop()
 
@@ -39,12 +39,12 @@ func TestBackground(t *testing.T) {
 		bg, stop := background.New(opt)
 
 		assert := assert.New(t)
-		bg.Send(ctx, 1)
+		bg.Exec(ctx, 1)
 		stop()
 
 		assert.Equal([]int{1}, task.Numbers())
 
-		bg.Send(ctx, 2)
+		bg.Exec(ctx, 2)
 		stop()
 
 		assert.Equal([]int{1, 2}, task.Numbers())
@@ -60,7 +60,7 @@ func TestBackground(t *testing.T) {
 		bg, stop := background.New(opt)
 		defer stop()
 		assert := assert.New(t)
-		bg.SendWait(ctx, 1, 2, 3)
+		bg.ExecWait(ctx, 1, 2, 3)
 
 		assert.ElementsMatch([]int{1, 2, 3}, task.Numbers())
 	})
