@@ -1,3 +1,4 @@
+// Package retry implements functions for retry mechanism.
 package retry
 
 import (
