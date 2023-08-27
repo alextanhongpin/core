@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/alextanhongpin/core/internal"
 	"github.com/alextanhongpin/core/types/sliceutil"
 	"golang.org/x/exp/event"
 )
@@ -16,16 +17,14 @@ var (
 		Description: "the number of keys added",
 	})
 
-	processedTotal = event.NewCounter("processed_total", &event.MetricOptions{
+	requestsTotal = event.NewCounter("requests_total", &event.MetricOptions{
 		Description: "the number times the handler executes",
 	})
+
+	failuresTotal = event.NewCounter("failures_total", &event.MetricOptions{
+		Description: "the number times the handler fails",
+	})
 )
-
-type Handler func(ctx context.Context) error
-
-func (h Handler) Exec(ctx context.Context) error {
-	return h(ctx)
-}
 
 type Worker struct {
 	count     int           // The current count.
@@ -87,7 +86,7 @@ func (w *Worker) Add(ctx context.Context, n int) {
 
 // Run executes a background job that handles the execution of the handler when
 // the deadline is exceeded.
-func (w *Worker) Run(ctx context.Context, h Handler) func() {
+func (w *Worker) Run(ctx context.Context, h internal.CommandHandler) func() {
 	var wg sync.WaitGroup
 	wg.Add(1)
 
@@ -109,7 +108,7 @@ func (w *Worker) Run(ctx context.Context, h Handler) func() {
 	}
 }
 
-func (w *Worker) loop(ctx context.Context, h Handler) {
+func (w *Worker) loop(ctx context.Context, h internal.CommandHandler) {
 	for {
 		c := w.cond
 		c.L.Lock()
@@ -165,8 +164,9 @@ func (w *Worker) loop(ctx context.Context, h Handler) {
 		<-time.After(sleep)
 
 		// Execute the handler.
-		processedTotal.Record(ctx, 1)
+		requestsTotal.Record(ctx, 1)
 		if err := h.Exec(ctx); err != nil {
+			failuresTotal.Record(ctx, 1)
 			event.Error(ctx, "failed to execute handler", err)
 		}
 	}

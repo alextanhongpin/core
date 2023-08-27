@@ -12,6 +12,13 @@ import (
 	"github.com/alextanhongpin/core/sync/expire"
 )
 
+type handler struct{}
+
+func (h *handler) Exec(ctx context.Context) error {
+	fmt.Println("executing ...", time.Now())
+	return nil
+}
+
 func main() {
 	worker := expire.New(expire.Option{
 		Threshold: 10,
@@ -23,10 +30,7 @@ func main() {
 	ctx, cancel := signal.NotifyContext(ctx, syscall.SIGTERM, os.Interrupt)
 	defer cancel()
 
-	stop := worker.Run(ctx, func(ctx context.Context) error {
-		fmt.Println("executing ...", time.Now())
-		return nil
-	})
+	stop := worker.Run(ctx, &handler{})
 	defer stop()
 
 	go func() {
