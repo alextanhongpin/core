@@ -1,4 +1,4 @@
-// package circuitbreaker is an in-memory implementation of circuit breaker.
+// Package circuitbreaker is an in-memory implementation of circuit breaker.
 // The idea is that each local node (server) should maintain it's own knowledge
 // of the service availability, instead of depending on external infrastructure
 // like distributed cache.
@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/alextanhongpin/core/internal"
 	"golang.org/x/exp/event"
 	"golang.org/x/time/rate"
 )
@@ -34,14 +35,15 @@ const (
 // Unavailable returns the error when the circuit breaker is not available.
 var Unavailable = errors.New("circuit-breaker: unavailable")
 
-// Group represents the circuit breaker.
-type Group struct {
+// CircuitBreaker represents the circuit breaker.
+type CircuitBreaker struct {
 	// State.
 	status   int64
 	counter  int64
 	deadline time.Time
 
 	// Options.
+	handler  internal.CommandHandler
 	success  int64
 	failure  int64
 	timeout  time.Duration
@@ -49,36 +51,82 @@ type Group struct {
 	sampling *rate.Sometimes
 }
 
-// New returns a pointer to Group.
-func New() *Group {
-	return &Group{
-		timeout:  timeout,
-		success:  success,
-		failure:  failure,
-		now:      time.Now,
-		sampling: nil,
+type Option struct {
+	Handler  internal.CommandHandler
+	Success  int64
+	Failure  int64
+	Timeout  time.Duration
+	Now      func() time.Time
+	Sampling *rate.Sometimes
+}
+
+func NewOption() *Option {
+	return &Option{
+		Timeout:  timeout,
+		Success:  success,
+		Failure:  failure,
+		Now:      time.Now,
+		Sampling: nil,
 	}
 }
 
-// Do updates the circuit breaker status based on the returned error.
-func (g *Group) Exec(ctx context.Context, fn func(ctx context.Context) error) error {
+// New returns a pointer to CircuitBreaker.
+func New(opt *Option) *CircuitBreaker {
+	if opt == nil {
+		opt = NewOption()
+	}
+
+	if opt.Now == nil {
+		opt.Now = time.Now
+	}
+
+	if opt.Handler == nil {
+		panic("circuitbreaker: missing handler in New")
+	}
+
+	return &CircuitBreaker{
+		timeout:  opt.Timeout,
+		success:  opt.Success,
+		failure:  opt.Failure,
+		now:      opt.Now,
+		sampling: opt.Sampling,
+		handler:  opt.Handler,
+	}
+}
+
+// Exec updates the circuit breaker status based on the returned error.
+func (cb *CircuitBreaker) Exec(ctx context.Context) error {
 	requestsTotal.Record(ctx, 1)
 
-	if !g.allow(ctx) {
+	if !cb.allow(ctx) {
 		failuresTotal.Record(ctx, 1)
 		return Unavailable
 	}
 
-	err := fn(ctx)
-	g.do(err == nil)
+	err := cb.handler.Exec(ctx)
+	cb.do(err == nil)
+
+	return err
+}
+
+func (cb *CircuitBreaker) ExecFunc(ctx context.Context, h internal.CommandHandler) error {
+	requestsTotal.Record(ctx, 1)
+
+	if !cb.allow(ctx) {
+		failuresTotal.Record(ctx, 1)
+		return Unavailable
+	}
+
+	err := h.Exec(ctx)
+	cb.do(err == nil)
 
 	return err
 }
 
 // ResetIn returns the wait time before the service can be called again.
-func (g *Group) ResetIn() time.Duration {
-	if g.Status().IsOpen() {
-		delta := g.deadline.Sub(g.now())
+func (cb *CircuitBreaker) ResetIn() time.Duration {
+	if cb.Status().IsOpen() {
+		delta := cb.deadline.Sub(cb.now())
 		if delta < 0 {
 			return 0
 		}
@@ -89,71 +137,51 @@ func (g *Group) ResetIn() time.Duration {
 	return 0
 }
 
-func (g *Group) Status() Status {
-	return Status(atomic.LoadInt64(&g.status))
+func (cb *CircuitBreaker) Status() Status {
+	return Status(atomic.LoadInt64(&cb.status))
 }
 
-func (g *Group) SetSuccessThreshold(n int64) {
-	g.success = n
-}
-
-func (g *Group) SetFailureThreshold(n int64) {
-	g.failure = n
-}
-
-func (g *Group) SetTimeout(timeout time.Duration) {
-	g.timeout = timeout
-}
-
-func (g *Group) SetNow(now func() time.Time) {
-	g.now = now
-}
-
-func (g *Group) SetSampling(sample *rate.Sometimes) {
-	g.sampling = sample
-}
-
-func (g *Group) allow(ctx context.Context) bool {
-	if g.Status().IsOpen() {
-		g.do(true)
+func (cb *CircuitBreaker) allow(ctx context.Context) bool {
+	if cb.Status().IsOpen() {
+		cb.do(true)
 	}
 
-	return !g.Status().IsOpen()
+	return !cb.Status().IsOpen()
 }
 
-func (g *Group) do(ok bool) {
-	if g.sampling == nil {
-		g.update(ok)
+func (cb *CircuitBreaker) do(ok bool) {
+	if cb.sampling == nil {
+		cb.update(ok)
 		return
 	}
 
-	g.sampling.Do(func() {
-		g.update(ok)
+	cb.sampling.Do(func() {
+		cb.update(ok)
 	})
 }
 
-func (g *Group) update(ok bool) {
-	switch g.Status() {
+func (cb *CircuitBreaker) update(ok bool) {
+	switch cb.Status() {
 	case Open:
-		if g.timerExpires() {
-			g.reset()
-			g.transition(Open, HalfOpen)
+		if cb.timerExpires() {
+			cb.reset()
+			cb.transition(Open, HalfOpen)
 		}
 	case HalfOpen:
 		// The service is still unhealthy
 		// Reset the counter and revert to Open.
 		if !ok {
-			g.reset()
-			g.transition(HalfOpen, Open)
+			cb.reset()
+			cb.transition(HalfOpen, Open)
 
 			return
 		}
 
 		// The service is healthy.
 		// After a certain threshold, circuit breaker becomes Closed.
-		if g.incr() > g.success {
-			g.reset()
-			g.transition(HalfOpen, Closed)
+		if cb.incr() > cb.success {
+			cb.reset()
+			cb.transition(HalfOpen, Closed)
 		}
 	case Closed:
 		// The service is healthy.
@@ -163,42 +191,42 @@ func (g *Group) update(ok bool) {
 
 		// The service is unhealthy.
 		// After a certain threshold, circuit breaker becomes Open.
-		if g.incr() > g.failure {
-			g.startTimer()
-			g.transition(Closed, Open)
+		if cb.incr() > cb.failure {
+			cb.startTimer()
+			cb.transition(Closed, Open)
 		}
 	}
 }
 
-func (g *Group) reset() {
-	atomic.StoreInt64(&g.counter, 0)
+func (cb *CircuitBreaker) reset() {
+	atomic.StoreInt64(&cb.counter, 0)
 }
 
-func (g *Group) timerExpires() bool {
-	return g.now().After(g.deadline)
+func (cb *CircuitBreaker) timerExpires() bool {
+	return cb.now().After(cb.deadline)
 }
 
-func (g *Group) startTimer() {
-	g.deadline = g.now().Add(g.timeout)
+func (cb *CircuitBreaker) startTimer() {
+	cb.deadline = cb.now().Add(cb.timeout)
 }
 
-func (g *Group) incr() int64 {
-	return atomic.AddInt64(&g.counter, 1)
+func (cb *CircuitBreaker) incr() int64 {
+	return atomic.AddInt64(&cb.counter, 1)
 }
 
-func (g *Group) transition(from, to Status) {
-	atomic.CompareAndSwapInt64(&g.status, from.Int64(), to.Int64())
+func (cb *CircuitBreaker) transition(from, to Status) {
+	atomic.CompareAndSwapInt64(&cb.status, from.Int64(), to.Int64())
 }
 
 type circuit interface {
-	Exec(ctx context.Context, fn func(ctx context.Context) error) error
+	ExecFunc(ctx context.Context, h internal.CommandHandler) error
 }
 
-func Query[T any](ctx context.Context, cb circuit, fn func(ctx context.Context) (T, error)) (v T, err error) {
-	err = cb.Exec(ctx, func(ctx context.Context) error {
-		v, err = fn(ctx)
+func Exec[T any](ctx context.Context, cb circuit, handler internal.QueryHandler[T]) (v T, err error) {
+	err = cb.ExecFunc(ctx, internal.CommandHandlerFunc(func(ctx context.Context) error {
+		v, err = handler.Exec(ctx)
 		return err
-	})
+	}))
 
 	return
 }

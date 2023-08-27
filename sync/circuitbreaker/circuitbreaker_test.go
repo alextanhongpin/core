@@ -11,14 +11,31 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+var svc = &service{}
+
+type service struct {
+	err error
+}
+
+func (s *service) SetError(err error) {
+	s.err = err
+}
+
+func (s *service) Exec(ctx context.Context) error {
+	return s.err
+}
+
 func TestCircuitBreaker(t *testing.T) {
+
 	var wantErr = errors.New("want error")
 	ctx := context.Background()
 
 	assert := assert.New(t)
 
-	cb := circuitbreaker.New()
-	cb.SetTimeout(100 * time.Millisecond)
+	opt := circuitbreaker.NewOption()
+	opt.Timeout = 100 * time.Millisecond
+	opt.Handler = svc
+	cb := circuitbreaker.New(opt)
 
 	assert.Equal(circuitbreaker.Closed, cb.Status())
 
@@ -49,25 +66,22 @@ func TestCircuitBreaker(t *testing.T) {
 }
 
 type circuit interface {
-	Exec(ctx context.Context, fn func(context.Context) error) error
+	Exec(ctx context.Context) error
 }
 
 func fire(ctx context.Context, cb circuit, n int, err error) error {
 	var wg sync.WaitGroup
 	wg.Add(n - 1)
+	svc.SetError(err)
 
 	for i := 0; i < n-1; i++ {
 		go func() {
 			defer wg.Done()
 
-			_ = cb.Exec(ctx, func(context.Context) error {
-				return err
-			})
+			_ = cb.Exec(ctx)
 		}()
 	}
 	wg.Wait()
 
-	return cb.Exec(ctx, func(context.Context) error {
-		return err
-	})
+	return cb.Exec(ctx)
 }
