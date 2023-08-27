@@ -2,28 +2,37 @@ package internal
 
 import "context"
 
-type SilentHandler interface {
-	Exec(ctx context.Context)
-}
-
-type SilentRequestHandler[T any] interface {
-	Exec(ctx context.Context, t T)
-}
-
+// CommandHandler returns an error.
 type CommandHandler interface {
 	Exec(ctx context.Context) error
 }
 
+// QueryHandler returns a value and an error.
 type QueryHandler[T any] interface {
 	Exec(ctx context.Context) (T, error)
 }
 
+// RequestReplyHandler accepts a request, and returns a
+// value and an error.
 type RequestReplyHandler[T, U any] interface {
 	Exec(ctx context.Context, t T) (U, error)
 }
 
+// RequestHandler accepts a request, and returns an error.
 type RequestHandler[T any] interface {
 	Exec(ctx context.Context, t T) error
+}
+
+// SilentHandler is similar like CommandHandler, but
+// returns no error.
+type SilentHandler interface {
+	Exec(ctx context.Context)
+}
+
+// SilentRequestHandler is similar like RequestHandler,
+// but returns no error.
+type SilentRequestHandler[T any] interface {
+	Exec(ctx context.Context, t T)
 }
 
 type CommandHandlerFunc func(ctx context.Context) error
