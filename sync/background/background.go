@@ -1,3 +1,5 @@
+// Package background implements functions to execute tasks in a separate
+// goroutine.
 package background
 
 import (
@@ -5,7 +7,9 @@ import (
 	"runtime"
 	"sync"
 
+	"github.com/alextanhongpin/core/internal"
 	"golang.org/x/exp/event"
+	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
 )
 
@@ -19,24 +23,16 @@ var (
 	})
 )
 
-type handler[T any] interface {
-	Exec(context.Context, T)
-}
-
-type Task[T any] func(context.Context, T)
-
-func (h Task[T]) Exec(ctx context.Context, t T) {
-	h(ctx, t)
-}
+type Task[T any] internal.RequestHandlerFunc[T]
 
 type Worker[T any] struct {
 	sem     *semaphore.Weighted
 	wg      sync.WaitGroup
-	handler handler[T]
+	handler internal.SilentRequestHandler[T]
 }
 
 type Option[T any] struct {
-	Handler    handler[T]
+	Handler    internal.SilentRequestHandler[T]
 	MaxWorkers int
 }
 
@@ -55,70 +51,17 @@ func New[T any](opt Option[T]) (*Worker[T], func()) {
 }
 
 // Exec sends a new message to the channel.
-func (w *Worker[T]) Exec(ctx context.Context, vs ...T) {
+func (w *Worker[T]) Exec(ctx context.Context, v T) {
+	processedTotal.Record(ctx, 1)
+	w.exec(ctx, v)
+}
+
+func (w *Worker[T]) BatchExec(ctx context.Context, vs ...T) {
 	processedTotal.Record(ctx, int64(len(vs)))
 
 	for _, v := range vs {
-		v := v
-
 		w.exec(ctx, v)
 	}
-}
-
-func (w *Worker[T]) ExecWait(ctx context.Context, vs ...T) {
-	processedTotal.Record(ctx, int64(len(vs)))
-
-	var wg sync.WaitGroup
-	wg.Add(len(vs))
-
-	for _, v := range vs {
-		v := v
-
-		go func(v T) {
-			defer wg.Done()
-
-			w.handler.Exec(ctx, v)
-		}(v)
-	}
-
-	wg.Wait()
-}
-
-// ExecWaitN is similar to ExecWait, excepts it limits the running goroutine to
-// size n. Executes everything concurrently if the number of messages is less
-// than n.
-func (w *Worker[T]) ExecWaitN(ctx context.Context, n int, vs ...T) {
-	processedTotal.Record(ctx, int64(len(vs)))
-
-	if len(vs) < n {
-		w.ExecWait(ctx, vs...)
-
-		return
-	}
-
-	sem := semaphore.NewWeighted(int64(n))
-
-	var wg sync.WaitGroup
-	wg.Add(len(vs))
-
-	for _, v := range vs {
-		v := v
-
-		// If we fail to acquire a semaphore, just run it synchronously.
-		if err := sem.Acquire(ctx, 1); err != nil {
-			w.handler.Exec(ctx, v)
-			continue
-		}
-
-		go func(v T) {
-			defer wg.Done()
-			defer sem.Release(1)
-
-			w.handler.Exec(ctx, v)
-		}(v)
-	}
-
-	wg.Wait()
 }
 
 // stop stops the channel and waits for the channel messages to be flushed.
@@ -130,8 +73,6 @@ func (w *Worker[T]) exec(ctx context.Context, v T) {
 	ctx = context.WithoutCancel(ctx)
 
 	if err := w.sem.Acquire(context.Background(), 1); err != nil {
-		event.Error(ctx, "failed to acquire semaphore", err)
-
 		// Execute the handler immediately if we fail to acquire semaphore.
 		w.handler.Exec(ctx, v)
 
@@ -149,4 +90,18 @@ func (w *Worker[T]) exec(ctx context.Context, v T) {
 
 		w.handler.Exec(ctx, v)
 	}()
+}
+
+func ExecBatchN[T any](ctx context.Context, h internal.RequestHandler[T], n int, vs ...T) error {
+	g, ctx := errgroup.WithContext(ctx)
+	g.SetLimit(n)
+
+	for _, v := range vs {
+		v := v
+		g.Go(func() error {
+			return h.Exec(ctx, v)
+		})
+	}
+
+	return g.Wait()
 }

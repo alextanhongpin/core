@@ -58,9 +58,9 @@ func TestBackground(t *testing.T) {
 		}
 
 		bg, stop := background.New(opt)
-		defer stop()
 		assert := assert.New(t)
-		bg.ExecWait(ctx, 1, 2, 3)
+		bg.BatchExec(ctx, 1, 2, 3)
+		stop()
 
 		assert.ElementsMatch([]int{1, 2, 3}, task.Numbers())
 	})
