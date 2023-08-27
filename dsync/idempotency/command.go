@@ -7,17 +7,27 @@ import (
 	"time"
 )
 
+type command[T any] interface {
+	Exec(ctx context.Context, req T) error
+}
+
+type CommandHandler[T any] func(ctx context.Context, req T) error
+
+func (h CommandHandler[T]) Exec(ctx context.Context, req T) error {
+	return h(ctx, req)
+}
+
 type CmdOption[T any] struct {
 	LockTimeout     time.Duration
 	RetentionPeriod time.Duration
-	Handler         func(ctx context.Context, req T) error
+	Handler         command[T]
 }
 
 type Cmd[T any] struct {
 	store     store[any]
 	lock      time.Duration
 	retention time.Duration
-	handler   func(ctx context.Context, req T) error
+	handler   command[T]
 }
 
 func NewCmd[T any](store store[any], opt CmdOption[T]) *Cmd[T] {
@@ -44,7 +54,7 @@ func (r *Cmd[T]) Exec(ctx context.Context, key string, req T) error {
 	}
 
 	if ok {
-		if err = r.handler(ctx, req); err != nil {
+		if err = r.handler.Exec(ctx, req); err != nil {
 			return errors.Join(err, r.store.Unlock(ctx, key))
 		}
 
