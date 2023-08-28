@@ -20,14 +20,14 @@ func TestRequestReplyInMemory(t *testing.T) {
 		handler := idempotency.NewRequestReply(store, idempotency.RequestReplyOption[Request, *Response]{
 			LockTimeout:     5 * time.Second, // Default is 1 minute.
 			RetentionPeriod: 1 * time.Minute, // Default is 24 hour.
-			Handler: idempotency.RequestReplyHandler[Request, *Response](func(ctx context.Context, req Request) (*Response, error) {
+			Handler: func(ctx context.Context, req Request) (*Response, error) {
 				// Simulate critical section.
 				time.Sleep(100 * time.Millisecond)
 
 				return &Response{
 					Name: "replied:" + req.Name,
 				}, nil
-			}),
+			},
 		})
 
 		res, err := handler.Exec(ctx, SomeOperationKey.Format("xyz"), Request{
@@ -85,12 +85,12 @@ func TestRequestInMemory(t *testing.T) {
 		handler := idempotency.NewRequest(store, idempotency.RequestOption[Request]{
 			LockTimeout:     5 * time.Second, // Default is 1 minute.
 			RetentionPeriod: 1 * time.Minute, // Default is 24 hour.
-			Handler: idempotency.RequestHandler[Request](func(ctx context.Context, req Request) error {
+			Handler: func(ctx context.Context, req Request) error {
 				// Simulate critical section.
 				time.Sleep(100 * time.Millisecond)
 
 				return nil
-			}),
+			},
 		})
 
 		err := handler.Exec(ctx, SomeOperationKey.Format("xyz"), Request{

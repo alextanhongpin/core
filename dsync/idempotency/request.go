@@ -5,27 +5,19 @@ import (
 	"encoding/json"
 	"errors"
 	"time"
-
-	"github.com/alextanhongpin/core/internal"
 )
-
-type RequestHandler[T any] internal.RequestHandlerFunc[T]
-
-func (r RequestHandler[T]) Exec(ctx context.Context, v T) error {
-	return r(ctx, v)
-}
 
 type RequestOption[T any] struct {
 	LockTimeout     time.Duration
 	RetentionPeriod time.Duration
-	Handler         internal.RequestHandler[T]
+	Handler         func(ctx context.Context, v T) error
 }
 
 type Request[T any] struct {
 	store     store[any]
 	lock      time.Duration
 	retention time.Duration
-	handler   internal.RequestHandler[T]
+	handler   func(ctx context.Context, v T) error
 }
 
 func NewRequest[T any](store store[any], opt RequestOption[T]) *Request[T] {
@@ -52,7 +44,7 @@ func (r *Request[T]) Exec(ctx context.Context, key string, req T) error {
 	}
 
 	if ok {
-		if err = r.handler.Exec(ctx, req); err != nil {
+		if err = r.handler(ctx, req); err != nil {
 			return errors.Join(err, r.store.Unlock(ctx, key))
 		}
 

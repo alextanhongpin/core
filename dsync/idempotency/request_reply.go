@@ -5,27 +5,19 @@ import (
 	"encoding/json"
 	"errors"
 	"time"
-
-	"github.com/alextanhongpin/core/internal"
 )
-
-type RequestReplyHandler[T, U any] internal.RequestReplyHandlerFunc[T, U]
-
-func (h RequestReplyHandler[T, U]) Exec(ctx context.Context, v T) (U, error) {
-	return h(ctx, v)
-}
 
 type RequestReplyOption[T comparable, U any] struct {
 	LockTimeout     time.Duration
 	RetentionPeriod time.Duration
-	Handler         internal.RequestReplyHandler[T, U]
+	Handler         func(ctx context.Context, v T) (U, error)
 }
 
 type RequestReply[T comparable, U any] struct {
 	store     store[U]
 	lock      time.Duration
 	retention time.Duration
-	handler   internal.RequestReplyHandler[T, U]
+	handler   func(ctx context.Context, v T) (U, error)
 }
 
 func NewRequestReply[T comparable, U any](store store[U], opt RequestReplyOption[T, U]) *RequestReply[T, U] {
@@ -56,7 +48,7 @@ func (r *RequestReply[T, U]) Exec(ctx context.Context, key string, req T) (U, er
 
 	// Started. Runs the idempotent operation and save the result.
 	if ok {
-		v, err = r.handler.Exec(ctx, req)
+		v, err = r.handler(ctx, req)
 		if err != nil {
 			// Delete the lock on fail.
 			return v, errors.Join(err, r.store.Unlock(ctx, key))
