@@ -11,7 +11,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/alextanhongpin/core/internal"
 	"golang.org/x/exp/event"
 	"golang.org/x/time/rate"
 )
@@ -43,7 +42,6 @@ type CircuitBreaker struct {
 	deadline time.Time
 
 	// Options.
-	handler  internal.CommandHandler
 	success  int64
 	failure  int64
 	timeout  time.Duration
@@ -52,7 +50,6 @@ type CircuitBreaker struct {
 }
 
 type Option struct {
-	Handler  internal.CommandHandler
 	Success  int64
 	Failure  int64
 	Timeout  time.Duration
@@ -80,22 +77,17 @@ func New(opt *Option) *CircuitBreaker {
 		opt.Now = time.Now
 	}
 
-	if opt.Handler == nil {
-		panic("circuitbreaker: missing handler in New")
-	}
-
 	return &CircuitBreaker{
 		timeout:  opt.Timeout,
 		success:  opt.Success,
 		failure:  opt.Failure,
 		now:      opt.Now,
 		sampling: opt.Sampling,
-		handler:  opt.Handler,
 	}
 }
 
 // Exec updates the circuit breaker status based on the returned error.
-func (cb *CircuitBreaker) Exec(ctx context.Context) error {
+func (cb *CircuitBreaker) Exec(ctx context.Context, h func(ctx context.Context) error) error {
 	requestsTotal.Record(ctx, 1)
 
 	if !cb.allow(ctx) {
@@ -103,21 +95,7 @@ func (cb *CircuitBreaker) Exec(ctx context.Context) error {
 		return Unavailable
 	}
 
-	err := cb.handler.Exec(ctx)
-	cb.do(err == nil)
-
-	return err
-}
-
-func (cb *CircuitBreaker) ExecFunc(ctx context.Context, h internal.CommandHandler) error {
-	requestsTotal.Record(ctx, 1)
-
-	if !cb.allow(ctx) {
-		failuresTotal.Record(ctx, 1)
-		return Unavailable
-	}
-
-	err := h.Exec(ctx)
+	err := h(ctx)
 	cb.do(err == nil)
 
 	return err
@@ -216,17 +194,4 @@ func (cb *CircuitBreaker) incr() int64 {
 
 func (cb *CircuitBreaker) transition(from, to Status) {
 	atomic.CompareAndSwapInt64(&cb.status, from.Int64(), to.Int64())
-}
-
-type circuit interface {
-	ExecFunc(ctx context.Context, h internal.CommandHandler) error
-}
-
-func Exec[T any](ctx context.Context, cb circuit, handler internal.QueryHandler[T]) (v T, err error) {
-	err = cb.ExecFunc(ctx, internal.CommandHandlerFunc(func(ctx context.Context) error {
-		v, err = handler.Exec(ctx)
-		return err
-	}))
-
-	return
 }

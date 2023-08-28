@@ -54,19 +54,19 @@ func (m *Manager) Inc(n int64) int64 {
 }
 
 // Exec allows lazy execution.
-func (m *Manager) Exec(ctx context.Context, h internal.SilentHandler) {
+func (m *Manager) Exec(ctx context.Context, h func(ctx context.Context)) {
 	if !m.allow() {
 		return
 	}
 
-	h.Exec(ctx)
+	h(ctx)
 	m.reset()
 }
 
 // Run executes whenever the condition is fulfilled. Returning an error will
 // cause the every and timer not to reset.
 // The client should be responsible for logging and handling the error.
-func (m *Manager) Run(ctx context.Context, h internal.SilentHandler) func() {
+func (m *Manager) Run(ctx context.Context, h func(ctx context.Context)) func() {
 	var wg sync.WaitGroup
 	ctx, cancel := context.WithCancel(ctx)
 	wg.Add(1)
@@ -87,7 +87,7 @@ func (m *Manager) Run(ctx context.Context, h internal.SilentHandler) func() {
 	return stop
 }
 
-func (m *Manager) start(ctx context.Context, h internal.SilentHandler) {
+func (m *Manager) start(ctx context.Context, h func(ctx context.Context)) {
 	t := time.NewTicker(m.tick())
 	defer t.Stop()
 

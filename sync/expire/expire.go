@@ -7,7 +7,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/alextanhongpin/core/internal"
 	"github.com/alextanhongpin/core/types/sliceutil"
 	"golang.org/x/exp/event"
 )
@@ -84,9 +83,9 @@ func (w *Worker) Add(ctx context.Context, n int) {
 	c.L.Unlock()
 }
 
-// Run executes a background job that handles the execution of the handler when
+// HandleFunc executes a background job that handles the execution of the handler when
 // the deadline is exceeded.
-func (w *Worker) Run(ctx context.Context, h internal.CommandHandler) func() {
+func (w *Worker) HandleFunc(ctx context.Context, h func(ctx context.Context) error) func() {
 	var wg sync.WaitGroup
 	wg.Add(1)
 
@@ -108,7 +107,7 @@ func (w *Worker) Run(ctx context.Context, h internal.CommandHandler) func() {
 	}
 }
 
-func (w *Worker) loop(ctx context.Context, h internal.CommandHandler) {
+func (w *Worker) loop(ctx context.Context, h func(ctx context.Context) error) {
 	for {
 		c := w.cond
 		c.L.Lock()
@@ -165,7 +164,7 @@ func (w *Worker) loop(ctx context.Context, h internal.CommandHandler) {
 
 		// Execute the handler.
 		requestsTotal.Record(ctx, 1)
-		if err := h.Exec(ctx); err != nil {
+		if err := h(ctx); err != nil {
 			failuresTotal.Record(ctx, 1)
 			event.Error(ctx, "failed to execute handler", err)
 		}

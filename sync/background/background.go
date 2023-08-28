@@ -23,16 +23,14 @@ var (
 	})
 )
 
-type Task[T any] internal.RequestHandlerFunc[T]
-
 type Worker[T any] struct {
 	sem     *semaphore.Weighted
 	wg      sync.WaitGroup
-	handler internal.SilentRequestHandler[T]
+	handler func(ctx context.Context, v T)
 }
 
 type Option[T any] struct {
-	Handler    internal.SilentRequestHandler[T]
+	Handler    func(ctx context.Context, v T)
 	MaxWorkers int
 }
 
@@ -74,7 +72,7 @@ func (w *Worker[T]) exec(ctx context.Context, v T) {
 
 	if err := w.sem.Acquire(context.Background(), 1); err != nil {
 		// Execute the handler immediately if we fail to acquire semaphore.
-		w.handler.Exec(ctx, v)
+		w.handler(ctx, v)
 
 		return
 	}
@@ -88,7 +86,7 @@ func (w *Worker[T]) exec(ctx context.Context, v T) {
 		workersCount.Record(ctx, 1)
 		defer workersCount.Record(ctx, -1)
 
-		w.handler.Exec(ctx, v)
+		w.handler(ctx, v)
 	}()
 }
 

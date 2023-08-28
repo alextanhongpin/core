@@ -17,7 +17,7 @@ func TestBackground(t *testing.T) {
 		task := &numberTask{}
 
 		opt := background.Option[int]{
-			Handler: task,
+			Handler: task.Exec,
 		}
 		bg, stop := background.New(opt)
 		defer stop()
@@ -34,7 +34,7 @@ func TestBackground(t *testing.T) {
 		task := &numberTask{}
 
 		opt := background.Option[int]{
-			Handler: task,
+			Handler: task.Exec,
 		}
 		bg, stop := background.New(opt)
 
@@ -54,7 +54,7 @@ func TestBackground(t *testing.T) {
 		task := &numberTask{sleep: 50 * time.Millisecond}
 
 		opt := background.Option[int]{
-			Handler: task,
+			Handler: task.Exec,
 		}
 
 		bg, stop := background.New(opt)

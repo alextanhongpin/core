@@ -34,7 +34,6 @@ func TestCircuitBreaker(t *testing.T) {
 
 	opt := circuitbreaker.NewOption()
 	opt.Timeout = 100 * time.Millisecond
-	opt.Handler = svc
 	cb := circuitbreaker.New(opt)
 
 	assert.Equal(circuitbreaker.Closed, cb.Status())
@@ -66,7 +65,7 @@ func TestCircuitBreaker(t *testing.T) {
 }
 
 type circuit interface {
-	Exec(ctx context.Context) error
+	Exec(ctx context.Context, h func(ctx context.Context) error) error
 }
 
 func fire(ctx context.Context, cb circuit, n int, err error) error {
@@ -78,10 +77,14 @@ func fire(ctx context.Context, cb circuit, n int, err error) error {
 		go func() {
 			defer wg.Done()
 
-			_ = cb.Exec(ctx)
+			_ = cb.Exec(ctx, func(ctx context.Context) error {
+				return err
+			})
 		}()
 	}
 	wg.Wait()
 
-	return cb.Exec(ctx)
+	return cb.Exec(ctx, func(ctx context.Context) error {
+		return err
+	})
 }
