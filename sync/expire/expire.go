@@ -57,10 +57,9 @@ func (w *Worker) Add(ctx context.Context, n int) {
 
 	c := w.cond
 	c.L.Lock()
+	defer c.L.Unlock()
 
 	if w.isPast(next) {
-		c.L.Unlock()
-
 		return
 	}
 
@@ -73,14 +72,14 @@ func (w *Worker) Add(ctx context.Context, n int) {
 	w.count += n
 	keysTotal.Record(ctx, int64(n))
 
-	if w.isCheckpoint() {
-		w.count = 0
-		w.times = append(w.times, next)
-		w.times = sliceutil.Dedup(w.times)
-		c.Broadcast()
+	if !w.isCheckpoint() {
+		return
 	}
 
-	c.L.Unlock()
+	w.count = 0
+	w.times = append(w.times, next)
+	w.times = sliceutil.Dedup(w.times)
+	c.Broadcast()
 }
 
 // HandleFunc executes a background job that handles the execution of the handler when
