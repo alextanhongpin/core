@@ -7,7 +7,6 @@ import (
 	"runtime"
 	"sync"
 
-	"github.com/alextanhongpin/core/internal"
 	"golang.org/x/exp/event"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
@@ -90,14 +89,14 @@ func (w *Worker[T]) exec(ctx context.Context, v T) {
 	}()
 }
 
-func BatchExecN[T any](ctx context.Context, h internal.RequestHandler[T], n int, vs ...T) error {
+func BatchExecN[T any](ctx context.Context, h func(ctx context.Context, v T) error, n int, vs ...T) error {
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(n)
 
 	for _, v := range vs {
 		v := v
 		g.Go(func() error {
-			return h.Exec(ctx, v)
+			return h(ctx, v)
 		})
 	}
 
