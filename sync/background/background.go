@@ -17,8 +17,8 @@ var (
 		Description: "the number of processed async message",
 	})
 
-	workersCount = event.NewCounter("workers_count", &event.MetricOptions{
-		Description: "the number of goroutines spawn by the workers",
+	workersCount = event.NewFloatGauge("workers_count", &event.MetricOptions{
+		Description: "the number of background workers running",
 	})
 )
 
