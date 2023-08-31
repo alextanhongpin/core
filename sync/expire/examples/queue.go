@@ -31,7 +31,7 @@ func main() {
 			case <-ctx.Done():
 				return
 			default:
-				time.Sleep(1 * time.Second)
+				time.Sleep(1000 * time.Millisecond)
 
 				sleep := time.Duration(rand.Intn(10)) * time.Second
 				fmt.Println("task:adding", sleep)

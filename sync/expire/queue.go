@@ -78,8 +78,8 @@ func (q *Queue) start(deadline time.Time) func() {
 	q.next = &deadline
 
 	var wg sync.WaitGroup
-
 	wg.Add(1)
+
 	ctx, cancel := context.WithCancel(context.Background())
 
 	// Calculate how long to sleep before the next task.
@@ -93,6 +93,7 @@ func (q *Queue) start(deadline time.Time) func() {
 			case <-time.After(sleep):
 				// Execute and enqueue a new pending task.
 				q.handler()
+				q.next = nil
 				q.enqueue()
 			case <-ctx.Done():
 				return
