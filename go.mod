@@ -2,7 +2,7 @@ module github.com/alextanhongpin/core
 
 go 1.21
 
-require golang.org/x/exp v0.0.0-20230522175609-2e198f4a06a1
+require golang.org/x/exp v0.0.0-20230817173708-d852ddb80c63
 
 require (
 	github.com/DATA-DOG/go-sqlmock v1.5.0
@@ -25,9 +25,10 @@ require (
 	github.com/uptrace/bun/driver/pgdriver v1.1.14
 	github.com/uptrace/bun/extra/bundebug v1.1.14
 	github.com/wk8/go-ordered-map/v2 v2.1.8
-	go.opentelemetry.io/otel v1.15.1
-	go.opentelemetry.io/otel/trace v1.15.1
-	golang.org/x/exp/event v0.0.0-20230811145659-89c5cff77bcb
+	go.opentelemetry.io/otel v1.17.0
+	go.opentelemetry.io/otel/metric v1.17.0
+	go.opentelemetry.io/otel/trace v1.17.0
+	golang.org/x/exp/event v0.0.0-20230817173708-d852ddb80c63
 	golang.org/x/oauth2 v0.8.0
 	golang.org/x/sync v0.3.0
 	golang.org/x/time v0.3.0
@@ -69,6 +70,8 @@ require (
 	github.com/fatih/color v1.15.0 // indirect
 	github.com/fsnotify/fsnotify v1.6.0 // indirect
 	github.com/gabriel-vasile/mimetype v1.4.2 // indirect
+	github.com/go-logr/logr v1.2.4 // indirect
+	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-playground/locales v0.14.1 // indirect
 	github.com/go-playground/universal-translator v0.18.1 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
@@ -125,7 +128,6 @@ require (
 	github.com/xeipuuv/gojsonreference v0.0.0-20180127040603-bd5ef7bd5415 // indirect
 	github.com/xeipuuv/gojsonschema v1.2.0 // indirect
 	github.com/yuin/gopher-lua v1.1.0 // indirect
-	go.opentelemetry.io/otel/metric v0.27.0 // indirect
 	go.uber.org/atomic v1.11.0 // indirect
 	go4.org/intern v0.0.0-20230525184215-6c62f75575cb // indirect
 	go4.org/unsafe/assume-no-moving-gc v0.0.0-20230525183740-e7c30c78aeb2 // indirect
@@ -134,7 +136,7 @@ require (
 	golang.org/x/net v0.14.0 // indirect
 	golang.org/x/sys v0.11.0 // indirect
 	golang.org/x/text v0.12.0 // indirect
-	golang.org/x/tools v0.12.0 // indirect
+	golang.org/x/tools v0.12.1-0.20230815132531-74c255bcf846 // indirect
 	golang.org/x/xerrors v0.0.0-20220907171357-04be3eba64a2 // indirect
 	google.golang.org/appengine v1.6.7 // indirect
 	gopkg.in/DataDog/dd-trace-go.v1 v1.49.1 // indirect

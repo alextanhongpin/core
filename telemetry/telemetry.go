@@ -10,15 +10,14 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/exp/event"
 	"golang.org/x/exp/event/adapter/logfmt"
-	"golang.org/x/exp/event/otel"
 	"golang.org/x/exp/slog"
 )
 
 type MultiHandler struct {
-	Metric *otel.MetricHandler
-	Trace  *otel.TraceHandler
-	Slog   *SlogHandler
-	Log    *logfmt.Handler
+	Metric *MetricHandler
+	//Trace  *otel.TraceHandler
+	Slog *SlogHandler
+	Log  *logfmt.Handler
 }
 
 func (h *MultiHandler) Event(ctx context.Context, ev *event.Event) context.Context {
@@ -34,9 +33,9 @@ func (h *MultiHandler) Event(ctx context.Context, ev *event.Event) context.Conte
 		ctx = h.Metric.Event(ctx, ev)
 	}
 
-	if h.Trace != nil {
-		ctx = h.Trace.Event(ctx, ev)
-	}
+	//if h.Trace != nil {
+	//ctx = h.Trace.Event(ctx, ev)
+	//}
 
 	return ctx
 }

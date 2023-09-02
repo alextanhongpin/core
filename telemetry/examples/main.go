@@ -7,17 +7,21 @@ import (
 	"os"
 
 	"github.com/alextanhongpin/core/telemetry"
-	"go.opentelemetry.io/otel/metric/metrictest"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/metric"
 	"golang.org/x/exp/event"
 	"golang.org/x/exp/event/adapter/logfmt"
 	"golang.org/x/exp/event/eventtest"
-	"golang.org/x/exp/event/otel"
 	"golang.org/x/exp/slog"
 )
 
 func main() {
-	mp := metrictest.NewMeterProvider()
-	mh := otel.NewMetricHandler(mp.Meter("test"))
+	meter := otel.GetMeterProvider().Meter(
+		"instrumentation/package/name",             // This will appear as `otel_scope_name`.
+		metric.WithInstrumentationVersion("0.0.1"), // This will appear as `otel_scope_version`.
+	)
+	mh := telemetry.NewMetricHandler(meter)
+	//ctx = event.WithExporter(ctx, event.NewExporter(NewMetricHandler(meter), &event.ExporterOptions{}))
 
 	log := logfmt.NewHandler(os.Stdout)
 
@@ -41,6 +45,5 @@ func main() {
 	c := event.NewCounter("hits", &event.MetricOptions{Description: "Earth meteorite hits"})
 	c.Record(ctx, 1023)
 
-	got := metrictest.AsStructs(mp.MeasurementBatches)
-	fmt.Printf("%#v", got)
+	fmt.Printf("%#v", meter)
 }
