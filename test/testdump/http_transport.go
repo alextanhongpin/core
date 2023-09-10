@@ -1,24 +1,36 @@
 package testdump
 
 import (
+	"fmt"
 	"net/http"
+	"path/filepath"
 
 	"github.com/alextanhongpin/core/http/httputil"
 )
+
+type readerWriterFunc func(w *http.Response, r *http.Request) readerWriter
+
+// HTTPFile returns a filename based on the http request method and response
+// status code.
+func HTTPFile(w *http.Response, r *http.Request) readerWriter {
+	file := fmt.Sprintf("%d.http", w.StatusCode)
+	name := filepath.Join(r.Method, r.URL.Path, file)
+	return NewFile(name)
+}
 
 type RoundTripper struct {
 	RoundTripper http.RoundTripper
 	opt          *HTTPOption
 	hooks        []HTTPHook
-	rw           readerWriter
+	rwFunc       readerWriterFunc
 }
 
-func NewRoundTripper(rw readerWriter, opt *HTTPOption, hooks ...HTTPHook) *RoundTripper {
+func NewRoundTripper(rwFunc readerWriterFunc, opt *HTTPOption, hooks ...HTTPHook) *RoundTripper {
 	return &RoundTripper{
 		RoundTripper: http.DefaultTransport,
 		opt:          opt,
 		hooks:        hooks,
-		rw:           rw,
+		rwFunc:       rwFunc,
 	}
 }
 
@@ -30,7 +42,7 @@ func (t *RoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 
 	w, err := t.RoundTrip(req)
 
-	if err := HTTP(t.rw, &HTTPDump{W: w, R: r}, t.opt, t.hooks...); err != nil {
+	if err := HTTP(t.rwFunc(w, r), &HTTPDump{W: w, R: r}, t.opt, t.hooks...); err != nil {
 		return w, err
 	}
 
