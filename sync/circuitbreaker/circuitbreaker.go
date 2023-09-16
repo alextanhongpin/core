@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"golang.org/x/exp/event"
-	"golang.org/x/time/rate"
 )
 
 var (
@@ -40,30 +39,36 @@ type CircuitBreaker struct {
 	status   int64
 	counter  int64
 	deadline time.Time
+	total    int64
 
 	// Options.
-	success  int64
-	failure  int64
-	timeout  time.Duration
-	now      func() time.Time
-	sampling *rate.Sometimes
+	success    int64
+	failure    int64
+	timeout    time.Duration
+	now        func() time.Time
+	errHandler func(error) bool
+	errRate    float64
 }
 
 type Option struct {
-	Success  int64
-	Failure  int64
-	Timeout  time.Duration
-	Now      func() time.Time
-	Sampling *rate.Sometimes
+	Success      int64
+	Failure      int64
+	Timeout      time.Duration
+	Now          func() time.Time
+	ErrorHandler func(err error) bool
+	ErrorRate    float64
 }
 
 func NewOption() *Option {
 	return &Option{
-		Timeout:  timeout,
-		Success:  success,
-		Failure:  failure,
-		Now:      time.Now,
-		Sampling: nil,
+		Timeout: timeout,
+		Success: success,
+		Failure: failure,
+		Now:     time.Now,
+		ErrorHandler: func(err error) bool {
+			return err != nil
+		},
+		ErrorRate: 0.90,
 	}
 }
 
@@ -78,11 +83,12 @@ func New(opt *Option) *CircuitBreaker {
 	}
 
 	return &CircuitBreaker{
-		timeout:  opt.Timeout,
-		success:  opt.Success,
-		failure:  opt.Failure,
-		now:      opt.Now,
-		sampling: opt.Sampling,
+		timeout:    opt.Timeout,
+		success:    opt.Success,
+		failure:    opt.Failure,
+		now:        opt.Now,
+		errHandler: opt.ErrorHandler,
+		errRate:    opt.ErrorRate,
 	}
 }
 
@@ -96,7 +102,8 @@ func (cb *CircuitBreaker) Exec(ctx context.Context, h func(ctx context.Context) 
 	}
 
 	err := h(ctx)
-	cb.do(err == nil)
+	isErr := cb.errHandler(err)
+	cb.update(!isErr)
 
 	return err
 }
@@ -121,21 +128,10 @@ func (cb *CircuitBreaker) Status() Status {
 
 func (cb *CircuitBreaker) allow(ctx context.Context) bool {
 	if cb.Status().IsOpen() {
-		cb.do(true)
+		cb.update(true)
 	}
 
 	return !cb.Status().IsOpen()
-}
-
-func (cb *CircuitBreaker) do(ok bool) {
-	if cb.sampling == nil {
-		cb.update(ok)
-		return
-	}
-
-	cb.sampling.Do(func() {
-		cb.update(ok)
-	})
 }
 
 func (cb *CircuitBreaker) update(ok bool) {
@@ -162,21 +158,46 @@ func (cb *CircuitBreaker) update(ok bool) {
 			cb.transition(HalfOpen, Closed)
 		}
 	case Closed:
+		total := cb.incrTotal()
+
+		// If the failure threshold is not meet during the
+		// time window, it expires.
+		// We check if the total > 1, to prevent the first
+		// call from being skipped.
+		// This means this condition will only be reached when there is an error first.
+		if total > 1 && cb.timerExpires() {
+			cb.reset()
+			return
+		}
+
+		cb.startTimer()
+
 		// The service is healthy.
 		if ok {
 			return
 		}
 
 		// The service is unhealthy.
-		// After a certain threshold, circuit breaker becomes Open.
-		if cb.incr() > cb.failure {
-			cb.startTimer()
+		// After a certain threshold, circuit breaker becomes
+		// Open.
+		failed := cb.incr()
+
+		// Checking the error threshold is insufficient.
+		// Additionally, we also check the min error rate.
+		// An error rate of 90% means at least 9 out of 10
+		// requests must be failing.
+		// This prevents scenario where we have 100_000
+		// success requests, but because the error threshold
+		// is set to 5, the circuitbreaker trips.
+
+		if isMinPercent(failed, total, cb.errRate) && failed > cb.failure {
 			cb.transition(Closed, Open)
 		}
 	}
 }
 
 func (cb *CircuitBreaker) reset() {
+	atomic.StoreInt64(&cb.total, 0)
 	atomic.StoreInt64(&cb.counter, 0)
 }
 
@@ -188,10 +209,18 @@ func (cb *CircuitBreaker) startTimer() {
 	cb.deadline = cb.now().Add(cb.timeout)
 }
 
+func (cb *CircuitBreaker) incrTotal() int64 {
+	return atomic.AddInt64(&cb.total, 1)
+}
+
 func (cb *CircuitBreaker) incr() int64 {
 	return atomic.AddInt64(&cb.counter, 1)
 }
 
 func (cb *CircuitBreaker) transition(from, to Status) {
 	atomic.CompareAndSwapInt64(&cb.status, from.Int64(), to.Int64())
+}
+
+func isMinPercent(count, total int64, threshold float64) bool {
+	return float64(count)/float64(total) >= threshold
 }

@@ -26,7 +26,6 @@ func (s *service) Exec(ctx context.Context) error {
 }
 
 func TestCircuitBreaker(t *testing.T) {
-
 	var wantErr = errors.New("want error")
 	ctx := context.Background()
 
@@ -62,6 +61,53 @@ func TestCircuitBreaker(t *testing.T) {
 	// After success threshold, it becomes closed again.
 	assert.Nil(fire(ctx, cb, 1, nil))
 	assert.Equal(circuitbreaker.Closed, cb.Status())
+}
+
+func TestCircuitBreakerResetBeforeOpen(t *testing.T) {
+	var wantErr = errors.New("want error")
+	ctx := context.Background()
+
+	assert := assert.New(t)
+
+	opt := circuitbreaker.NewOption()
+	opt.Timeout = 100 * time.Millisecond
+	cb := circuitbreaker.New(opt)
+
+	assert.Equal(circuitbreaker.Closed, cb.Status())
+
+	// Hit the failure threshold first.
+	assert.ErrorIs(fire(ctx, cb, 10, wantErr), wantErr)
+	assert.Equal(circuitbreaker.Closed, cb.Status())
+
+	// Sleep until resets.
+	time.Sleep(105 * time.Millisecond)
+	assert.ErrorIs(fire(ctx, cb, 1, wantErr), wantErr)
+	assert.Equal(circuitbreaker.Closed, cb.Status())
+	assert.Equal(time.Duration(0), cb.ResetIn())
+}
+
+func TestCircuitBreakerInsufficientErrorRate(t *testing.T) {
+	var wantErr = errors.New("want error")
+	ctx := context.Background()
+
+	assert := assert.New(t)
+
+	opt := circuitbreaker.NewOption()
+	opt.Timeout = 100 * time.Millisecond
+	cb := circuitbreaker.New(opt)
+
+	assert.Equal(circuitbreaker.Closed, cb.Status())
+
+	// Hit the failure threshold first.
+	assert.Nil(fire(ctx, cb, 5, nil))
+	assert.ErrorIs(fire(ctx, cb, 10, wantErr), wantErr)
+	assert.Equal(circuitbreaker.Closed, cb.Status())
+
+	// Above failure threshold, but below error rate, so circuitbreaker remains
+	// closed.
+	assert.ErrorIs(fire(ctx, cb, 1, wantErr), wantErr)
+	assert.Equal(circuitbreaker.Closed, cb.Status())
+	assert.Equal(time.Duration(0), cb.ResetIn())
 }
 
 type circuit interface {
