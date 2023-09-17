@@ -31,9 +31,7 @@ func TestCircuitBreaker(t *testing.T) {
 
 	assert := assert.New(t)
 
-	opt := circuitbreaker.NewOption()
-	opt.Timeout = 100 * time.Millisecond
-	cb := circuitbreaker.New(opt)
+	cb := newCircuitBreaker()
 
 	assert.Equal(circuitbreaker.Closed, cb.Status())
 
@@ -69,9 +67,7 @@ func TestCircuitBreakerResetBeforeOpen(t *testing.T) {
 
 	assert := assert.New(t)
 
-	opt := circuitbreaker.NewOption()
-	opt.Timeout = 100 * time.Millisecond
-	cb := circuitbreaker.New(opt)
+	cb := newCircuitBreaker()
 
 	assert.Equal(circuitbreaker.Closed, cb.Status())
 
@@ -92,9 +88,7 @@ func TestCircuitBreakerInsufficientErrorRate(t *testing.T) {
 
 	assert := assert.New(t)
 
-	opt := circuitbreaker.NewOption()
-	opt.Timeout = 100 * time.Millisecond
-	cb := circuitbreaker.New(opt)
+	cb := newCircuitBreaker()
 
 	assert.Equal(circuitbreaker.Closed, cb.Status())
 
@@ -112,6 +106,13 @@ func TestCircuitBreakerInsufficientErrorRate(t *testing.T) {
 
 type circuit interface {
 	Exec(ctx context.Context, h func(ctx context.Context) error) error
+}
+
+func newCircuitBreaker() *circuitbreaker.CircuitBreaker {
+	opt := circuitbreaker.NewOption()
+	opt.Timeout = 100 * time.Millisecond
+	opt.ErrorPeriod = 100 * time.Millisecond
+	return circuitbreaker.New(opt)
 }
 
 func fire(ctx context.Context, cb circuit, n int, err error) error {
