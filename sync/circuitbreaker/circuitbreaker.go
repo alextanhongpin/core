@@ -6,9 +6,8 @@
 package circuitbreaker
 
 import (
-	"context"
 	"errors"
-	"sync/atomic"
+	"sync"
 	"time"
 )
 
@@ -17,7 +16,7 @@ const (
 	success   = 5                // min 5 success before the circuit breaker becomes closed.
 	failure   = 10               // min 10 failures before the circuit breaker becomes open.
 	errRate   = 0.9              // at least 90% of the requests fails.
-	errPeriod = 10 * time.Second // time window to measure the error rate.
+	errWindow = 10 * time.Second // time window to measure the error rate.
 )
 
 // errHandler checks if the error will cause the circuitbreaker to trip.
@@ -28,237 +27,246 @@ var errHandler = func(err error) bool {
 // Unavailable returns the error when the circuit breaker is not available.
 var Unavailable = errors.New("circuit-breaker: unavailable")
 
-// CircuitBreaker represents the circuit breaker.
-type CircuitBreaker struct {
-	// State.
-	status      int64
-	counter     int64
-	total       int64
-	deadline    int64 // deadline in nanosecond
-	errDeadline int64 // deadline in nanosecond
+type Option struct {
+	// States.
+	total        int64
+	count        int64
+	errTimer     time.Time
+	timeoutTimer time.Time
 
 	// Options.
-	success    int64
-	failure    int64
-	timeout    time.Duration
-	now        func() time.Time
-	errHandler func(error) bool
-	errRate    float64
-	errPeriod  time.Duration
-}
-
-type Option struct {
-	Success      int64
-	Failure      int64
-	Timeout      time.Duration
-	Now          func() time.Time
-	ErrorHandler func(err error) bool
-	ErrorRate    float64
-	ErrorPeriod  time.Duration
+	Success    int64
+	Failure    int64
+	Timeout    time.Duration
+	Now        func() time.Time
+	ErrHandler func(error) bool
+	ErrRate    float64
+	ErrWindow  time.Duration
 }
 
 func NewOption() *Option {
 	return &Option{
-		Timeout:      timeout,
-		Success:      success,
-		Failure:      failure,
-		Now:          time.Now,
-		ErrorHandler: errHandler,
-		ErrorRate:    errRate,
-		ErrorPeriod:  errPeriod,
+		Success:    success,
+		Failure:    failure,
+		Timeout:    timeout,
+		Now:        time.Now,
+		ErrHandler: errHandler,
+		ErrRate:    errRate,
+		ErrWindow:  errWindow,
 	}
 }
 
-// New returns a pointer to CircuitBreaker.
+// CircuitBreaker represents the circuit breaker.
+type CircuitBreaker struct {
+	mu     sync.RWMutex
+	opt    *Option
+	states [3]state
+	state  Status
+}
+
 func New(opt *Option) *CircuitBreaker {
 	if opt == nil {
 		opt = NewOption()
 	}
 
-	if opt.Now == nil {
-		opt.Now = time.Now
-	}
-
 	return &CircuitBreaker{
-		timeout:    opt.Timeout,
-		success:    opt.Success,
-		failure:    opt.Failure,
-		now:        opt.Now,
-		errHandler: opt.ErrorHandler,
-		errRate:    opt.ErrorRate,
-		errPeriod:  opt.ErrorPeriod,
+		opt: opt,
+		states: [3]state{
+			NewClosedState(opt),
+			NewOpenState(opt),
+			NewHalfOpenState(opt),
+		},
 	}
 }
 
-// Exec updates the circuit breaker status based on the returned error.
-func (cb *CircuitBreaker) Exec(ctx context.Context, h func(ctx context.Context) error) error {
-	if !cb.allow(ctx) {
-		return Unavailable
+func (cb *CircuitBreaker) ResetIn() time.Duration {
+	cb.mu.RLock()
+	status := cb.state
+	cb.mu.RUnlock()
+	if status.IsOpen() {
+		delta := cb.opt.timeoutTimer.Sub(cb.opt.Now())
+		if delta > 0 {
+			return delta
+		}
+
+		return 0
 	}
 
-	err := h(ctx)
-	isErr := cb.errHandler(err)
-	cb.update(!isErr)
+	return 0
+
+}
+
+func (cb *CircuitBreaker) Status() Status {
+	cb.mu.RLock()
+	status := cb.state
+	cb.mu.RUnlock()
+
+	return status
+}
+
+func (cb *CircuitBreaker) Do(fn func() error) error {
+	cb.mu.Lock()
+	defer cb.mu.Unlock()
+
+	state, ok := cb.states[cb.state].Next()
+	if ok {
+		cb.state = state
+		cb.states[cb.state].Entry()
+	}
+
+	return cb.states[cb.state].Do(fn)
+}
+
+type state interface {
+	Next() (Status, bool)
+	Entry()
+	Do(func() error) error
+}
+
+type ClosedState struct {
+	opt *Option
+}
+
+func NewClosedState(opt *Option) *ClosedState {
+	return &ClosedState{opt}
+}
+
+func (c *ClosedState) Entry() {
+	c.resetFailureCounter()
+}
+
+func (c *ClosedState) Next() (Status, bool) {
+	return Open, c.isFailureThresholdReached()
+}
+
+func (c *ClosedState) Do(fn func() error) error {
+	// Success.
+	err := fn()
+	c.incrementFailureCounter(err)
 
 	return err
 }
 
-// ResetIn returns the wait time before the service can be called again.
-func (cb *CircuitBreaker) ResetIn() time.Duration {
-	if !cb.Status().IsOpen() {
-		return 0
+func (c *ClosedState) incrementFailureCounter(err error) {
+	o := c.opt
+
+	// If expired, reset the counter.
+	if o.Now().After(o.errTimer) {
+		o.total = 0
+		o.count = 0
 	}
 
-	t := fromUnixNano(cb.deadline)
-	delta := t.Sub(cb.now())
-	if delta < 0 {
-		return 0
-	}
-
-	return delta
-}
-
-func (cb *CircuitBreaker) Status() Status {
-	return Status(atomic.LoadInt64(&cb.status))
-}
-
-func (cb *CircuitBreaker) allow(ctx context.Context) bool {
-	if cb.Status().IsOpen() {
-		cb.update(true)
-	}
-
-	return !cb.Status().IsOpen()
-}
-
-func (cb *CircuitBreaker) update(ok bool) {
-	switch cb.Status() {
-	case Open:
-		if cb.isTimerExpired() {
-			cb.reset()
-			cb.transition(Open, HalfOpen)
-		}
-	case HalfOpen:
-		// The service is still unhealthy
-		// Reset the counter and revert to Open.
-		if !ok {
-			cb.reset()
-			cb.transition(HalfOpen, Open)
-
-			return
-		}
-
-		// The service is healthy.
-		// After a certain threshold, circuit breaker becomes Closed.
-		if cb.incr(&cb.counter) > cb.success {
-			cb.reset()
-			cb.transition(HalfOpen, Closed)
-		}
-	case Closed:
-		// Increment total requests.
-		total := cb.incr(&cb.total)
-
-		// The service is healthy. Do nothing.
-		if ok {
-			return
-		}
-
-		// Increment failed requests.
-		// This is necessary to measure error rate.
-		failed := cb.incr(&cb.counter)
-		if failed == 1 {
-			// Start recording at the first failure.
-			cb.startWindow()
-			return
-		}
-
-		if cb.isWindowExpired() {
-			cb.reset()
-			cb.update(ok)
-			return
-		}
-
-		// The service is unhealthy. After a certain threshold, circuit breaker
-		// becomes Open.
-		if cb.isTripped(failed, total) {
-			cb.startTimer()
-			cb.transition(Closed, Open)
+	o.total++
+	if o.ErrHandler(err) {
+		o.count++
+		if o.count == 1 {
+			o.errTimer = o.Now().Add(o.ErrWindow)
 		}
 	}
 }
 
-func (cb *CircuitBreaker) reset() {
-	atomic.StoreInt64(&cb.total, 0)
-	atomic.StoreInt64(&cb.counter, 0)
-	atomic.StoreInt64(&cb.deadline, 0)
-	atomic.StoreInt64(&cb.errDeadline, 0)
+func (c *ClosedState) resetFailureCounter() {
+	o := c.opt
+	o.count = 0
 }
 
-func (cb *CircuitBreaker) isTripped(failed, total int64) bool {
-	if failed <= cb.failure {
+func (c *ClosedState) isFailureThresholdReached() bool {
+	o := c.opt
+
+	// The state transition is only valid if the failures
+	// count and error rate exceeds the threshold within the
+	// error time window.
+	if o.Now().After(o.errTimer) {
 		return false
 	}
 
-	// Just checking the threshold above is insufficient, because we can have
-	// more successful requests than failed one.
-	// For example, if our error threshold is 10 errors, but we have 90
-	// successful requests but just 10 failed requests, the circuitbreaker should
-	// not trip.
-	// Instead, we calculate the error rate given this formula:
-	//
-	// error rate = failed requests / total requests
-	//
-	// Given the example below, and when we set the error rate threshold to 0.9,
-	//
-	// error rate = 10 / (10 + 90) = 0.1
-	//
-	// The circuitbreaker should not trip because we did not hit the error rate
-	// threshold.
-	if rate(failed, total) < cb.errRate {
-		return false
+	return o.count > o.Failure && rate(o.count, o.total) >= o.ErrRate
+}
+
+type OpenState struct {
+	opt *Option
+}
+
+func NewOpenState(opt *Option) *OpenState {
+	return &OpenState{opt}
+}
+
+func (s *OpenState) Entry() {
+	s.startTimeoutTimer()
+}
+
+func (s *OpenState) Next() (Status, bool) {
+	return HalfOpen, s.isTimeoutTimerExpired()
+}
+
+func (s *OpenState) Do(fn func() error) error {
+	return Unavailable
+}
+
+func (s *OpenState) startTimeoutTimer() {
+	o := s.opt
+	o.timeoutTimer = o.Now().Add(o.Timeout)
+}
+
+func (s *OpenState) isTimeoutTimerExpired() bool {
+	o := s.opt
+
+	return o.Now().After(o.timeoutTimer)
+}
+
+type HalfOpenState struct {
+	opt    *Option
+	failed bool
+}
+
+func NewHalfOpenState(opt *Option) *HalfOpenState {
+	return &HalfOpenState{opt: opt}
+}
+
+func (s *HalfOpenState) Entry() {
+	s.resetSuccessCounter()
+}
+
+func (s *HalfOpenState) resetSuccessCounter() {
+	o := s.opt
+	o.count = 0
+}
+
+func (s *HalfOpenState) Next() (Status, bool) {
+	if s.isOperationFailed() {
+		return Open, true
 	}
 
-	return true
+	return Closed, s.isSuccessCountThresholdExceeded()
 }
 
-// startTimer sets the deadline when the circuit breaker allows requests to go through again.
-func (cb *CircuitBreaker) startTimer() {
-	atomic.StoreInt64(&cb.deadline, toUnixNano(cb.now().Add(cb.timeout)))
+func (s *HalfOpenState) Do(fn func() error) error {
+	err := fn()
+	failed := s.opt.ErrHandler(err)
+	s.failed = failed
+
+	if !failed {
+		s.incrementSuccessCounter()
+	}
+
+	return err
 }
 
-// startWindow sets a new error window to calculate the error rate.
-func (cb *CircuitBreaker) startWindow() {
-	atomic.StoreInt64(&cb.errDeadline, toUnixNano(cb.now().Add(cb.errPeriod)))
+func (s *HalfOpenState) isOperationFailed() bool {
+	return s.failed
 }
 
-func (cb *CircuitBreaker) isTimerExpired() bool {
-	return cb.isExpired(&cb.deadline)
+func (s *HalfOpenState) incrementSuccessCounter() {
+	o := s.opt
+	o.count++
 }
 
-func (cb *CircuitBreaker) isWindowExpired() bool {
-	return cb.isExpired(&cb.errDeadline)
+func (s *HalfOpenState) isSuccessCountThresholdExceeded() bool {
+	o := s.opt
+
+	return o.count > o.Success
 }
 
-func (cb *CircuitBreaker) incr(n *int64) int64 {
-	return atomic.AddInt64(n, 1)
-}
-
-func (cb *CircuitBreaker) isExpired(ns *int64) bool {
-	t := fromUnixNano(atomic.LoadInt64(ns))
-	return !t.IsZero() && cb.now().After(t)
-}
-
-func (cb *CircuitBreaker) transition(from, to Status) {
-	atomic.CompareAndSwapInt64(&cb.status, from.Int64(), to.Int64())
-}
-
-func rate(count, total int64) float64 {
-	return float64(count) / float64(total)
-}
-
-func toUnixNano(t time.Time) int64 {
-	return t.UnixNano()
-}
-
-func fromUnixNano(ns int64) time.Time {
-	return time.Unix(ns/1e9, ns%1e9)
+func rate(n, total int64) float64 {
+	return float64(n) / float64(total)
 }
