@@ -147,6 +147,23 @@ func (c *ClosedState) Do(fn func() error) error {
 	return err
 }
 
+func (c *ClosedState) resetFailureCounter() {
+	c.opt.count = 0
+}
+
+func (c *ClosedState) isFailureThresholdReached() bool {
+	o := c.opt
+
+	// The state transition is only valid if the failures
+	// count and error rate exceeds the threshold within the
+	// error time window.
+	if o.Now().After(o.errTimer) {
+		return false
+	}
+
+	return o.count > o.Failure && rate(o.count, o.total) >= o.ErrRate
+}
+
 func (c *ClosedState) incrementFailureCounter(err error) {
 	o := c.opt
 
@@ -163,24 +180,6 @@ func (c *ClosedState) incrementFailureCounter(err error) {
 			o.errTimer = o.Now().Add(o.ErrWindow)
 		}
 	}
-}
-
-func (c *ClosedState) resetFailureCounter() {
-	o := c.opt
-	o.count = 0
-}
-
-func (c *ClosedState) isFailureThresholdReached() bool {
-	o := c.opt
-
-	// The state transition is only valid if the failures
-	// count and error rate exceeds the threshold within the
-	// error time window.
-	if o.Now().After(o.errTimer) {
-		return false
-	}
-
-	return o.count > o.Failure && rate(o.count, o.total) >= o.ErrRate
 }
 
 type OpenState struct {
@@ -204,14 +203,11 @@ func (s *OpenState) Do(fn func() error) error {
 }
 
 func (s *OpenState) startTimeoutTimer() {
-	o := s.opt
-	o.timeoutTimer = o.Now().Add(o.Timeout)
+	s.opt.timeoutTimer = s.opt.Now().Add(s.opt.Timeout)
 }
 
 func (s *OpenState) isTimeoutTimerExpired() bool {
-	o := s.opt
-
-	return o.Now().After(o.timeoutTimer)
+	return s.opt.Now().After(s.opt.timeoutTimer)
 }
 
 type HalfOpenState struct {
@@ -225,11 +221,6 @@ func NewHalfOpenState(opt *Option) *HalfOpenState {
 
 func (s *HalfOpenState) Entry() {
 	s.resetSuccessCounter()
-}
-
-func (s *HalfOpenState) resetSuccessCounter() {
-	o := s.opt
-	o.count = 0
 }
 
 func (s *HalfOpenState) Next() (Status, bool) {
@@ -252,19 +243,20 @@ func (s *HalfOpenState) Do(fn func() error) error {
 	return err
 }
 
+func (s *HalfOpenState) resetSuccessCounter() {
+	s.opt.count = 0
+}
+
 func (s *HalfOpenState) isOperationFailed() bool {
 	return s.failed
 }
 
-func (s *HalfOpenState) incrementSuccessCounter() {
-	o := s.opt
-	o.count++
+func (s *HalfOpenState) isSuccessCountThresholdExceeded() bool {
+	return s.opt.count > s.opt.Success
 }
 
-func (s *HalfOpenState) isSuccessCountThresholdExceeded() bool {
-	o := s.opt
-
-	return o.count > o.Success
+func (s *HalfOpenState) incrementSuccessCounter() {
+	s.opt.count++
 }
 
 func rate(n, total int64) float64 {
