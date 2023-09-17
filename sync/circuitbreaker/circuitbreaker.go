@@ -149,6 +149,7 @@ func (c *ClosedState) Do(fn func() error) error {
 
 func (c *ClosedState) resetFailureCounter() {
 	c.opt.count = 0
+	c.opt.total = 0
 }
 
 func (c *ClosedState) isFailureThresholdReached() bool {
@@ -169,13 +170,13 @@ func (c *ClosedState) incrementFailureCounter(err error) {
 
 	// If expired, reset the counter.
 	if o.Now().After(o.errTimer) {
-		o.total = 0
-		o.count = 0
+		c.resetFailureCounter()
 	}
 
 	o.total++
 	if o.ErrHandler(err) {
 		o.count++
+		// Only start the timer once there is an error.
 		if o.count == 1 {
 			o.errTimer = o.Now().Add(o.ErrWindow)
 		}
