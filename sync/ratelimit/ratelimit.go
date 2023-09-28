@@ -29,7 +29,7 @@ func (l *Limiter) Limit() int {
 	return l.limit
 }
 
-func (l *Limiter) Allow() bool {
+func (l *Limiter) AllowN(n int) bool {
 	now := l.now()
 
 	end := l.last.Add(l.interval)
@@ -39,9 +39,13 @@ func (l *Limiter) Allow() bool {
 		l.count = 0
 	}
 
-	l.count++
+	l.count += n
 
 	return l.count <= l.limit
+}
+
+func (l *Limiter) Allow() bool {
+	return l.AllowN(1)
 }
 
 func (l *Limiter) SetNow(now func() time.Time) {
