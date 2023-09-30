@@ -1,29 +1,28 @@
 package ratelimit
 
 import (
-	"context"
 	"time"
 )
 
 // FixedWindow acts as a counter for a given time period.
 type FixedWindow struct {
 	limit   int64
-	every   time.Duration
+	period  time.Duration
 	resetAt int64
 	count   int64
 	Now     func() time.Time
 }
 
-func NewFixedWindow(limit int64, every time.Duration) *FixedWindow {
+func NewFixedWindow(limit int64, period time.Duration) *FixedWindow {
 	return &FixedWindow{
-		limit: limit,
-		every: every,
-		Now:   time.Now,
+		limit:  limit,
+		period: period,
+		Now:    time.Now,
 	}
 }
 
-func (rl *FixedWindow) AllowN(ctx context.Context, key string, n int64) *Result {
-	period := rl.every.Nanoseconds()
+func (rl *FixedWindow) AllowN(n int64) *Result {
+	period := rl.period.Nanoseconds()
 	now := rl.Now().UnixNano()
 	if rl.resetAt < now {
 		rl.resetAt = now - (now % period) + period
@@ -49,8 +48,8 @@ func (rl *FixedWindow) AllowN(ctx context.Context, key string, n int64) *Result 
 	}
 }
 
-func (rl *FixedWindow) Allow(ctx context.Context, key string) *Result {
-	return rl.AllowN(ctx, key, 1)
+func (rl *FixedWindow) Allow() *Result {
+	return rl.AllowN(1)
 }
 
 func toNanosecond(n int64) time.Duration {

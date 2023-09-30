@@ -1,34 +1,34 @@
 package ratelimit
 
 import (
-	"context"
 	"math"
 	"time"
 )
 
 type FixedRateWindow struct {
 	limit   int64
-	every   time.Duration
+	period  time.Duration
+	burst   int64
 	resetAt int64
 	count   int64
-	burst   int64
 	Now     func() time.Time
 }
 
-func NewFixedRateWindow(limit int64, every time.Duration) *FixedRateWindow {
+func NewFixedRateWindow(limit int64, period time.Duration, burst int64) *FixedRateWindow {
 	return &FixedRateWindow{
-		limit: limit,
-		every: every,
-		Now:   time.Now,
+		limit:  limit,
+		period: period,
+		burst:  burst,
+		Now:    time.Now,
 	}
 }
 
 func (rl *FixedRateWindow) inverse() int64 {
-	return rl.every.Nanoseconds() / rl.limit
+	return rl.period.Nanoseconds() / rl.limit
 }
 
-func (rl *FixedRateWindow) AllowN(ctx context.Context, key string, n int64) *Result {
-	period := rl.every.Nanoseconds()
+func (rl *FixedRateWindow) AllowN(n int64) *Result {
+	period := rl.period.Nanoseconds()
 	now := rl.Now().UnixNano()
 
 	windowStart := now - (now % period)
@@ -51,22 +51,23 @@ func (rl *FixedRateWindow) AllowN(ctx context.Context, key string, n int64) *Res
 			retryIn = 0
 		}
 
+		rl.count = max(rl.count, batch/rl.inverse())
 		rl.count += n
 
 		return &Result{
 			Allow:     true,
-			Remaining: quota + rl.burst - rl.count,
+			Remaining: max(quota+rl.burst-rl.count, 0),
 			RetryIn:   retryIn,
 			ResetIn:   resetIn,
 		}
 	}
 
 	return &Result{
-		RetryIn: retryIn,
+		RetryIn: resetIn,
 		ResetIn: resetIn,
 	}
 }
 
-func (rl *FixedRateWindow) Allow(ctx context.Context, key string) *Result {
-	return rl.AllowN(ctx, key, 1)
+func (rl *FixedRateWindow) Allow() *Result {
+	return rl.AllowN(1)
 }
