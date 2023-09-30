@@ -23,16 +23,20 @@ func NewFixedRateWindow(limit int64, period time.Duration, burst int64) *FixedRa
 	}
 }
 
-func (rl *FixedRateWindow) inverse() int64 {
+func (rl *FixedRateWindow) interval() int64 {
 	return rl.period.Nanoseconds() / rl.limit
 }
 
 func (rl *FixedRateWindow) AllowN(n int64) *Result {
-	period := rl.period.Nanoseconds()
 	now := rl.Now().UnixNano()
+	period := rl.period.Nanoseconds()
 
 	windowStart := now - (now % period)
 	windowEnd := windowStart + period
+
+	batch := now % period
+	batchStart := batch - (batch % rl.interval())
+	batchEnd := batchStart + rl.interval()
 
 	if rl.resetAt < now {
 		rl.resetAt = windowEnd
@@ -40,9 +44,6 @@ func (rl *FixedRateWindow) AllowN(n int64) *Result {
 	}
 
 	quota := int64(math.Ceil(float64(now%period) / float64(period) * float64(rl.limit)))
-	batch := now % period
-	batchStart := batch - (batch % rl.inverse())
-	batchEnd := batchStart + rl.inverse()
 	retryIn := toNanosecond(batchEnd - batch)
 	resetIn := toNanosecond(windowEnd - now)
 
@@ -51,7 +52,7 @@ func (rl *FixedRateWindow) AllowN(n int64) *Result {
 			retryIn = 0
 		}
 
-		rl.count = max(rl.count, batch/rl.inverse())
+		rl.count = max(rl.count, batch/rl.interval())
 		rl.count += n
 
 		return &Result{
