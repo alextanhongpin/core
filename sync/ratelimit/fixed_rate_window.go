@@ -47,6 +47,10 @@ func (rl *FixedRateWindow) AllowN(ctx context.Context, key string, n int64) *Res
 	resetIn := toNanosecond(windowEnd - now)
 
 	if rl.count+n <= quota+rl.burst {
+		if rl.count+n <= rl.burst {
+			retryIn = 0
+		}
+
 		rl.count += n
 
 		return &Result{
