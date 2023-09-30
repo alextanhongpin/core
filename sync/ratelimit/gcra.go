@@ -54,6 +54,10 @@ func (g *GCRA) AllowN(n int64) *Result {
 		retryIn = 0
 	}
 
+	if remaining == 0 {
+		retryIn = resetIn
+	}
+
 	return &Result{
 		Allow:     allow,
 		Remaining: remaining,
