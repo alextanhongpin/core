@@ -9,50 +9,64 @@ import (
 	"errors"
 	"sync"
 	"time"
+
+	"golang.org/x/time/rate"
 )
 
 const (
-	timeout   = 5 * time.Second
-	success   = 5                // min 5 success before the circuit breaker becomes closed.
-	failure   = 10               // min 10 failures before the circuit breaker becomes open.
-	errRate   = 0.9              // at least 90% of the requests fails.
-	errWindow = 10 * time.Second // time window to measure the error rate.
+	halfOpenTimeout    = 5 * time.Second
+	successThreshold   = 5                // min 5 successThreshold before the circuit breaker becomes closed.
+	failureThreshold   = 10               // min 10 failures before the circuit breaker becomes open.
+	errorRateThreshold = 0.9              // at least 90% of the requests fails.
+	period             = 10 * time.Second // time window to measure the error rate.
 )
 
-// errHandler checks if the error will cause the circuitbreaker to trip.
-var errHandler = func(err error) bool {
-	return err != nil
+// errorHandler returns a unit usage.
+var errorHandler = func(err error) int64 {
+	if err != nil {
+		return 1
+	}
+
+	return 0
 }
 
 // Unavailable returns the error when the circuit breaker is not available.
 var Unavailable = errors.New("circuit-breaker: unavailable")
 
+// store implements a remote store to save the circuitbreaker state.
+type store interface {
+	Get() (Status, bool)
+	Set(status Status)
+}
+
 type Option struct {
 	// States.
-	total        int64
-	count        int64
-	errTimer     time.Time
-	timeoutTimer time.Time
+	total    int64
+	count    int64
+	openedAt time.Time
 
 	// Options.
-	Success    int64
-	Failure    int64
-	Timeout    time.Duration
-	Now        func() time.Time
-	ErrHandler func(error) bool
-	ErrRate    float64
-	ErrWindow  time.Duration
+	SuccessThreshold   int64
+	FailureThreshold   int64
+	HalfOpenTimeout    time.Duration
+	Now                func() time.Time
+	ErrorHandler       func(error) int64
+	ErrorRateThreshold float64
+	Sometimes          rate.Sometimes
+	Store              store
 }
 
 func NewOption() *Option {
 	return &Option{
-		Success:    success,
-		Failure:    failure,
-		Timeout:    timeout,
-		Now:        time.Now,
-		ErrHandler: errHandler,
-		ErrRate:    errRate,
-		ErrWindow:  errWindow,
+		SuccessThreshold:   successThreshold,
+		FailureThreshold:   failureThreshold,
+		HalfOpenTimeout:    halfOpenTimeout,
+		Now:                time.Now,
+		ErrorHandler:       errorHandler,
+		ErrorRateThreshold: errorRateThreshold,
+		Sometimes: rate.Sometimes{
+			Interval: period,
+		},
 	}
 }
 
@@ -82,9 +96,11 @@ func New(opt *Option) *CircuitBreaker {
 func (cb *CircuitBreaker) ResetIn() time.Duration {
 	cb.mu.RLock()
 	status := cb.state
+	openedAt := cb.opt.openedAt
 	cb.mu.RUnlock()
+
 	if status.IsOpen() {
-		delta := cb.opt.timeoutTimer.Sub(cb.opt.Now())
+		delta := openedAt.Sub(cb.opt.Now())
 		if delta > 0 {
 			return delta
 		}
@@ -105,16 +121,46 @@ func (cb *CircuitBreaker) Status() Status {
 }
 
 func (cb *CircuitBreaker) Do(fn func() error) error {
+	// Checks the remote store for the distributed state.
+	// Failure in getting the remote state should not stop the circuitbreaker.
+	storeState, ok := cb.storeState()
+
 	cb.mu.Lock()
 	defer cb.mu.Unlock()
 
+	// If the local state is different from the remote state, sync them.
+	if ok && storeState != cb.state {
+		cb.state = storeState
+		cb.states[cb.state].Entry()
+
+		return cb.states[cb.state].Do(fn)
+	}
+
 	state, ok := cb.states[cb.state].Next()
 	if ok {
+		// If the local state has changed, update the remote state.
+		// Failure in updating the state should not stop the circuitbreaker.
+		cb.setStoreState(state)
+
 		cb.state = state
 		cb.states[cb.state].Entry()
 	}
 
 	return cb.states[cb.state].Do(fn)
+}
+
+func (cb *CircuitBreaker) storeState() (Status, bool) {
+	if cb.opt.Store != nil {
+		return cb.opt.Store.Get()
+	}
+
+	return 0, false
+}
+
+func (cb *CircuitBreaker) setStoreState(status Status) {
+	if cb.opt.Store != nil {
+		cb.opt.Store.Set(status)
+	}
 }
 
 type state interface {
@@ -132,6 +178,8 @@ func NewClosedState(opt *Option) *ClosedState {
 }
 
 func (c *ClosedState) Entry() {
+	c.opt.Sometimes.Do(func() {})
+
 	c.resetFailureCounter()
 }
 
@@ -140,7 +188,6 @@ func (c *ClosedState) Next() (Status, bool) {
 }
 
 func (c *ClosedState) Do(fn func() error) error {
-	// Success.
 	err := fn()
 	c.incrementFailureCounter(err)
 
@@ -158,28 +205,19 @@ func (c *ClosedState) isFailureThresholdReached() bool {
 	// The state transition is only valid if the failures
 	// count and error rate exceeds the threshold within the
 	// error time window.
-	if o.Now().After(o.errTimer) {
-		return false
-	}
+	o.Sometimes.Do(c.resetFailureCounter)
 
-	return o.count > o.Failure && rate(o.count, o.total) >= o.ErrRate
+	return o.count > o.FailureThreshold && Rate(o.count, o.total) >= o.ErrorRateThreshold
 }
 
 func (c *ClosedState) incrementFailureCounter(err error) {
 	o := c.opt
 
-	// If expired, reset the counter.
-	if o.Now().After(o.errTimer) {
-		c.resetFailureCounter()
-	}
+	o.Sometimes.Do(c.resetFailureCounter)
 
 	o.total++
-	if o.ErrHandler(err) {
-		o.count++
-		// Only start the timer once there is an error.
-		if o.count == 1 {
-			o.errTimer = o.Now().Add(o.ErrWindow)
-		}
+	if n := o.ErrorHandler(err); n > 0 {
+		o.count += n
 	}
 }
 
@@ -204,11 +242,11 @@ func (s *OpenState) Do(fn func() error) error {
 }
 
 func (s *OpenState) startTimeoutTimer() {
-	s.opt.timeoutTimer = s.opt.Now().Add(s.opt.Timeout)
+	s.opt.openedAt = s.opt.Now().Add(s.opt.HalfOpenTimeout)
 }
 
 func (s *OpenState) isTimeoutTimerExpired() bool {
-	return s.opt.Now().After(s.opt.timeoutTimer)
+	return s.opt.Now().After(s.opt.openedAt)
 }
 
 type HalfOpenState struct {
@@ -234,10 +272,9 @@ func (s *HalfOpenState) Next() (Status, bool) {
 
 func (s *HalfOpenState) Do(fn func() error) error {
 	err := fn()
-	failed := s.opt.ErrHandler(err)
-	s.failed = failed
 
-	if !failed {
+	s.failed = s.opt.ErrorHandler(err) > 0
+	if !s.failed {
 		s.incrementSuccessCounter()
 	}
 
@@ -253,13 +290,13 @@ func (s *HalfOpenState) isOperationFailed() bool {
 }
 
 func (s *HalfOpenState) isSuccessCountThresholdExceeded() bool {
-	return s.opt.count > s.opt.Success
+	return s.opt.count > s.opt.SuccessThreshold
 }
 
 func (s *HalfOpenState) incrementSuccessCounter() {
 	s.opt.count++
 }
 
-func rate(n, total int64) float64 {
+func Rate(n, total int64) float64 {
 	return float64(n) / float64(total)
 }

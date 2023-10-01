@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"golang.org/x/time/rate"
 )
 
 func TestCircuitBreaker(t *testing.T) {
@@ -89,6 +90,20 @@ func TestCircuitBreakerInsufficientErrorRate(t *testing.T) {
 	assert.Equal(time.Duration(0), cb.ResetIn())
 }
 
+func TestStore(t *testing.T) {
+	assert := assert.New(t)
+
+	cb := newCircuitBreaker()
+	assert.Equal(Closed, cb.Status())
+
+	cb.opt.Store = &mockStore{status: Open}
+	err := cb.Do(func() error {
+		return nil
+	})
+	assert.ErrorIs(err, Unavailable)
+	assert.Equal(Open, cb.Status())
+}
+
 func TestClosedState(t *testing.T) {
 	t.Run("resets counter on entry", func(t *testing.T) {
 		opt := NewOption()
@@ -98,7 +113,7 @@ func TestClosedState(t *testing.T) {
 		assert.Equal(t, int64(0), state.opt.count)
 	})
 
-	t.Run("cannot transition to Open", func(t *testing.T) {
+	t.Run("cannot transition to Open when success", func(t *testing.T) {
 		opt := NewOption()
 		opt.count = 10
 		state := NewClosedState(opt)
@@ -108,13 +123,15 @@ func TestClosedState(t *testing.T) {
 		assert.Equal(Open, status)
 	})
 
-	t.Run("can transition to Open when above error rate", func(t *testing.T) {
+	t.Run("transitions to Open when above error rate", func(t *testing.T) {
 		opt := NewOption()
-		opt.count = opt.Failure + 1
-		opt.total = opt.Failure + 1
-		opt.errTimer = time.Now().Add(1 * time.Second)
 
 		state := NewClosedState(opt)
+		state.Entry()
+
+		opt.count = opt.FailureThreshold + 1
+		opt.total = opt.FailureThreshold + 1
+
 		status, ok := state.Next()
 
 		assert := assert.New(t)
@@ -124,8 +141,8 @@ func TestClosedState(t *testing.T) {
 
 	t.Run("cannot transition to Open when below error rate", func(t *testing.T) {
 		opt := NewOption()
-		opt.count = (opt.Failure + 1)
-		opt.total = (opt.Failure + 1) * 2
+		opt.count = (opt.FailureThreshold + 1)
+		opt.total = (opt.FailureThreshold + 1) * 2
 
 		state := NewClosedState(opt)
 		status, ok := state.Next()
@@ -135,30 +152,31 @@ func TestClosedState(t *testing.T) {
 		assert.Equal(Open, status)
 	})
 
-	t.Run("resets on error timer expired", func(t *testing.T) {
+	t.Run("resets counter after interval ends", func(t *testing.T) {
 		assert := assert.New(t)
 
 		wantErr := errors.New("want error")
-		now := time.Now()
 		opt := NewOption()
-		opt.Now = func() time.Time {
-			return now
+		opt.Sometimes = rate.Sometimes{
+			Interval: 100 * time.Millisecond,
 		}
+
 		state := NewClosedState(opt)
+		state.Entry()
 		err := state.Do(func() error {
 			return wantErr
 		})
 
 		assert.ErrorIs(err, wantErr)
-		assert.Equal(now.Add(opt.ErrWindow), state.opt.errTimer)
 		assert.Equal(int64(1), state.opt.count)
 		assert.Equal(int64(1), state.opt.total)
 
-		opt.Now = func() time.Time {
-			return state.opt.errTimer.Add(1 * time.Nanosecond)
-		}
-		state.opt.count += opt.Failure
+		state.opt.count += opt.FailureThreshold
 		state.opt.total = state.opt.count
+
+		// To reset the timer.
+		time.Sleep(105 * time.Millisecond)
+
 		assert.False(state.isFailureThresholdReached())
 
 		err = state.Do(func() error {
@@ -173,7 +191,7 @@ func TestClosedState(t *testing.T) {
 }
 
 func TestOpenState(t *testing.T) {
-	t.Run("starts timeout timer on entry", func(t *testing.T) {
+	t.Run("starts half-open timeout timer on entry", func(t *testing.T) {
 		now := time.Now()
 		opt := NewOption()
 		opt.Now = func() time.Time {
@@ -182,10 +200,10 @@ func TestOpenState(t *testing.T) {
 
 		state := NewOpenState(opt)
 		state.Entry()
-		assert.Equal(t, now.Add(opt.Timeout), state.opt.timeoutTimer)
+		assert.Equal(t, now.Add(opt.HalfOpenTimeout), state.opt.openedAt)
 	})
 
-	t.Run("cannot transition to HalfOpen", func(t *testing.T) {
+	t.Run("cannot transition to HalfOpen timeout timer is running", func(t *testing.T) {
 		now := time.Now()
 		opt := NewOption()
 		opt.Now = func() time.Time {
@@ -200,7 +218,7 @@ func TestOpenState(t *testing.T) {
 		assert.Equal(HalfOpen, status)
 	})
 
-	t.Run("can transition to HalfOpen", func(t *testing.T) {
+	t.Run("transitions to HalfOpen on timer expired", func(t *testing.T) {
 		now := time.Now()
 		opt := NewOption()
 		opt.Now = func() time.Time {
@@ -211,7 +229,7 @@ func TestOpenState(t *testing.T) {
 		state.Entry()
 
 		opt.Now = func() time.Time {
-			return now.Add(opt.Timeout).Add(1 * time.Nanosecond)
+			return now.Add(opt.HalfOpenTimeout).Add(1 * time.Nanosecond)
 		}
 
 		status, ok := state.Next()
@@ -229,7 +247,7 @@ func TestHalfOpenState(t *testing.T) {
 		assert.Equal(t, int64(0), state.opt.count)
 	})
 
-	t.Run("can transition to Open", func(t *testing.T) {
+	t.Run("transitions to Open on error", func(t *testing.T) {
 		wantErr := errors.New("want error")
 		opt := NewOption()
 		state := NewHalfOpenState(opt)
@@ -246,7 +264,7 @@ func TestHalfOpenState(t *testing.T) {
 		assert.Equal(Open, status)
 	})
 
-	t.Run("cannot transition to Closed", func(t *testing.T) {
+	t.Run("cannot transition to Closed until success", func(t *testing.T) {
 		opt := NewOption()
 		state := NewHalfOpenState(opt)
 
@@ -262,9 +280,9 @@ func TestHalfOpenState(t *testing.T) {
 		assert.Equal(Closed, status)
 	})
 
-	t.Run("can transition to Closed", func(t *testing.T) {
+	t.Run("transitions to Closed on success", func(t *testing.T) {
 		opt := NewOption()
-		opt.count = opt.Success
+		opt.count = opt.SuccessThreshold
 		state := NewHalfOpenState(opt)
 
 		err := state.Do(func() error {
@@ -286,8 +304,10 @@ type circuit interface {
 
 func newCircuitBreaker() *CircuitBreaker {
 	opt := NewOption()
-	opt.Timeout = 100 * time.Millisecond
-	opt.ErrWindow = 100 * time.Millisecond
+	opt.HalfOpenTimeout = 100 * time.Millisecond
+	opt.Sometimes = rate.Sometimes{
+		Interval: 100 * time.Millisecond,
+	}
 	return New(opt)
 }
 
@@ -309,4 +329,16 @@ func fire(ctx context.Context, cb circuit, n int, err error) error {
 	return cb.Do(func() error {
 		return err
 	})
+}
+
+type mockStore struct {
+	status Status
+}
+
+func (s *mockStore) Get() (Status, bool) {
+	return s.status, true
+}
+
+func (s *mockStore) Set(status Status) {
+	s.status = status
 }
