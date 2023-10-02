@@ -11,83 +11,120 @@ local function now_ms()
 	return time[1] * 1e3 + time[2] / 1e3
 end
 
+
+-- KEYS[1]: The key to rate limit
+-- ARGS[1]: The request limit
+-- ARGS[2]: The period of the request (in milliseconds)
+-- ARGS[3]: The number of token consumed
+local function fixed_window(KEYS, ARGS)
+	local key = KEYS[1]
+	local limit = tonumber(ARGS[1])
+	local period = tonumber(ARGS[2])
+	local count = tonumber(ARGS[3])
+
+	local now = now_ms()
+	local start = now - (now % period)
+
+	local used = tonumber(redis.call('INCRBY', key, count))
+	if used == count then
+		redis.call('PEXPIRE', key, period)
+	end
+
+	-- Not allowed.
+	local allow = 0
+	local remaining = 0
+	local retry_in = period - now%period
+	local reset_in = period - now%period
+
+	-- Allowed.
+	if used <= limit then
+		allow = 1
+		remaining = limit - used
+		retry_in = 0
+	end
+
+	return { allow, remaining, retry_in, reset_in }
+end
+
 -- KEYS[1]: ratelimit key
 -- ARGV[1]: limit
 -- ARGV[2]: period in milliseconds
--- ARGV[3]: burst
-local function gcra(KEYS, ARGS)
-	local key = KEYS[1]
-	local limit = tonumber(ARGS[1])
-	local period = tonumber(ARGS[2]) -- in ms
-	local burst = tonumber(ARGS[3])
-
-	local interval = period / limit
-	local delay_tolerance = interval * burst
-
-	-- Theoretical now time.
-	local tat = redis.call('GET', key)
-	if not tat then
-		tat = 0
-	else
-		tat = tonumber(tat)
-	end
-
-
-	local now = now_ms()
-
-	tat = math.max(tat, now)
-
-	local allow_at = tat - delay_tolerance
-	local allow = now >= allow_at and 1 or 0
-
-	if allow == 1 then
-		tat = tat + interval
-		redis.call('SET', key, tat, 'PX', period*2)
-	end
-
-	local remaining = (period - (tat - now))/interval
-	local reset_in = tat - now
-	local retry_in = math.max(allow_at - now, 0)
-	-- This will be treated as redis.Nil
-	-- https://cndoc.github.io/redis-doc-cn/cn/commands/eval.html
-	--return false
-	--return redis.error_reply("")
-	return {allow, remaining, retry_in, reset_in}
-end
-
 local function sliding_window(KEYS, ARGS)
 	local key = KEYS[1]
 	local limit = tonumber(ARGS[1])
 	local period = tonumber(ARGS[2]) -- in ms
 
-	local curr_ms = now_ms()
-	local curr_window = curr_ms - (curr_ms % period)
-	local prev_window = curr_window - period
+	local now = now_ms()
+	redis.call('ZREMRANGEBYSCORE', key, 0, now - period)
 
-	local prev_count = tonumber(redis.call('GET', string.format('%s:%s', key, prev_window)) or tostring(limit))
-	local curr_count = tonumber(redis.call('GET', string.format('%s:%s', key, curr_window)) or '0')
+	local count = tonumber(redis.call('ZCARD', key))
+	if count <= limit then
+		redis.call('ZADD', key, now, now)
+		redis.call('PEXPIRE', key, period)
 
-	local prev_ms = period - (curr_ms % period)
-	local ratio = prev_ms / period
-	local total = curr_count + math.floor(ratio * prev_count + 1)
-
-	local allow = 1
-	local remaining = limit - total
-	local reset_in = period
-	local retry_in = reset_in
-	if total > limit then
-		allow = 0
-		remaining = 0
+		return 1
 	end
 
-	if allow == 1 then
-		redis.call('SET', string.format('%s:%s', key, curr_window), curr_count+1, 'PX', period*2)
+	return 0
+end
+
+-- KEYS[1]: ratelimit key
+-- ARGV[1]: limit
+-- ARGV[2]: period in milliseconds
+-- ARGV[3]: burst
+-- ARGV[4]: token consumed
+local function gcra(KEYS, ARGS)
+	local key = KEYS[1]
+
+	local limit = tonumber(ARGS[1])
+	local period = tonumber(ARGS[2])
+	local burst = tonumber(ARGS[3])
+	local token = tonumber(ARGS[4]) or 1
+	local interval = period / limit
+
+
+	local now = now_ms()
+
+	local window_start = now - (now % period)
+	local window_end = window_start + period
+
+	local batch = now - window_start
+	local batch_start = batch - (batch % interval)
+	local batch_end = batch_start + interval
+
+	local tat = tonumber(redis.call('GET', key)) or 0
+	if tat < now then
+		tat = window_start + batch_start
+	end
+
+	local allow_at = tat - interval * burst
+	local allow = now >= allow_at
+	if allow then
+		tat = tat + interval * token
+		redis.call('SET', key, tat, 'PX', period)
+	end
+
+	local retry_in = batch_end - batch
+	local reset_in = window_end - now
+  local remaining = math.max(limit - (tat - window_start)/interval + burst, 0)
+
+	if burst > 0 and remaining > burst then
 		retry_in = 0
 	end
 
-	return {allow, remaining, retry_in, reset_in}
+	if remaining == 0 then
+		retry_in = reset_in
+	end
+
+	return {
+		allow and 1 or 0,
+		remaining,
+		retry_in,
+		reset_in
+	}
 end
 
 
 redis.register_function('gcra', gcra)
 redis.register_function('sliding_window', sliding_window)
+redis.register_function('fixed_window', fixed_window)
