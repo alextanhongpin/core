@@ -1,11 +1,13 @@
 package ratelimit
 
 import (
+	"sync"
 	"time"
 )
 
 // FixedWindow acts as a counter for a given time period.
 type FixedWindow struct {
+	mu      sync.Mutex
 	limit   int64
 	period  time.Duration
 	resetAt int64
@@ -22,6 +24,9 @@ func NewFixedWindow(limit int64, period time.Duration) *FixedWindow {
 }
 
 func (rl *FixedWindow) AllowN(n int64) *Result {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+
 	period := rl.period.Nanoseconds()
 	now := rl.Now().UnixNano()
 	if rl.resetAt < now {

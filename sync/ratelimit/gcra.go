@@ -1,23 +1,29 @@
 package ratelimit
 
-import "time"
+import (
+	"sync"
+	"time"
+)
 
 // GCRA implements the Genetic-Cell-Rate-Algorithm.
 type GCRA struct {
-	limit   int64
-	period  time.Duration
-	burst   int64
-	resetAt int64
+	mu       sync.Mutex
+	limit    int64
+	period   time.Duration
+	burst    int64
+	resetAt  int64
+	interval int64
 
 	Now func() time.Time
 }
 
 func NewGCRA(limit int64, period time.Duration, burst int64) *GCRA {
 	return &GCRA{
-		limit:  limit,
-		period: period,
-		burst:  burst,
-		Now:    time.Now,
+		limit:    limit,
+		period:   period,
+		burst:    burst,
+		interval: period.Nanoseconds() / limit,
+		Now:      time.Now,
 	}
 }
 
@@ -26,6 +32,9 @@ func (g *GCRA) Allow() *Result {
 }
 
 func (g *GCRA) AllowN(n int64) *Result {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
 	now := g.Now().UnixNano()
 	period := g.period.Nanoseconds()
 
@@ -33,23 +42,23 @@ func (g *GCRA) AllowN(n int64) *Result {
 	windowEnd := windowStart + period
 
 	batch := now - windowStart
-	batchStart := batch - (batch % g.interval())
-	batchEnd := batchStart + g.interval()
+	batchStart := batch - (batch % g.interval)
+	batchEnd := batchStart + g.interval
 
 	if g.resetAt < now {
 		g.resetAt = windowStart + batchStart
 	}
 
-	allowAt := g.resetAt - g.interval()*(g.burst)
+	allowAt := g.resetAt - g.interval*g.burst
 	allow := now >= allowAt
 	if allow {
-		g.resetAt += g.interval() * n
+		g.resetAt += g.interval * n
 	}
 
 	retryIn := toNanosecond(batchEnd - batch)
 	resetIn := toNanosecond(windowEnd - now)
 
-	remaining := max(g.limit-(g.resetAt-windowStart)/g.interval()+g.burst, 0)
+	remaining := max(g.limit-(g.resetAt-windowStart)/g.interval+g.burst, 0)
 	if g.burst > 0 && remaining > g.burst {
 		retryIn = 0
 	}
@@ -64,8 +73,4 @@ func (g *GCRA) AllowN(n int64) *Result {
 		RetryIn:   retryIn,
 		ResetIn:   resetIn,
 	}
-}
-
-func (g *GCRA) interval() int64 {
-	return g.period.Nanoseconds() / g.limit
 }

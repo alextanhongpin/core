@@ -2,32 +2,35 @@ package ratelimit
 
 import (
 	"math"
+	"sync"
 	"time"
 )
 
 type FixedRateWindow struct {
-	limit   int64
-	period  time.Duration
-	burst   int64
-	resetAt int64
-	count   int64
-	Now     func() time.Time
+	mu       sync.Mutex
+	limit    int64
+	period   time.Duration
+	burst    int64
+	resetAt  int64
+	count    int64
+	interval int64
+	Now      func() time.Time
 }
 
 func NewFixedRateWindow(limit int64, period time.Duration, burst int64) *FixedRateWindow {
 	return &FixedRateWindow{
-		limit:  limit,
-		period: period,
-		burst:  burst,
-		Now:    time.Now,
+		limit:    limit,
+		period:   period,
+		burst:    burst,
+		Now:      time.Now,
+		interval: period.Nanoseconds() / limit,
 	}
 }
 
-func (rl *FixedRateWindow) interval() int64 {
-	return rl.period.Nanoseconds() / rl.limit
-}
-
 func (rl *FixedRateWindow) AllowN(n int64) *Result {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+
 	now := rl.Now().UnixNano()
 	period := rl.period.Nanoseconds()
 
@@ -35,8 +38,8 @@ func (rl *FixedRateWindow) AllowN(n int64) *Result {
 	windowEnd := windowStart + period
 
 	batch := now % period
-	batchStart := batch - (batch % rl.interval())
-	batchEnd := batchStart + rl.interval()
+	batchStart := batch - (batch % rl.interval)
+	batchEnd := batchStart + rl.interval
 
 	if rl.resetAt < now {
 		rl.resetAt = windowEnd
@@ -52,7 +55,7 @@ func (rl *FixedRateWindow) AllowN(n int64) *Result {
 			retryIn = 0
 		}
 
-		rl.count = max(rl.count, batch/rl.interval())
+		rl.count = max(rl.count, batch/rl.interval)
 		rl.count += n
 
 		return &Result{
