@@ -15,17 +15,45 @@ var ratelimit string
 type Result struct {
 	Allow     bool
 	Remaining int64
-	RetryIn   time.Duration
-	ResetIn   time.Duration
+	RetryAt   time.Time
+	ResetAt   time.Time
 }
 
 func newResult(res []int64) *Result {
 	return &Result{
 		Allow:     res[0] == 1,
 		Remaining: res[1],
-		RetryIn:   time.Duration(res[2]) * time.Millisecond,
-		ResetIn:   time.Duration(res[3]) * time.Millisecond,
+		RetryAt:   unixMillisecondToTime(res[2]),
+		ResetAt:   unixMillisecondToTime(res[3]),
 	}
+}
+
+func (r *Result) RetryIn() time.Duration {
+	retryIn := r.RetryAt.Sub(time.Now())
+	if retryIn < 0 {
+		return 0
+	}
+
+	return retryIn
+}
+
+func (r *Result) ResetIn() time.Duration {
+	resetIn := r.ResetAt.Sub(time.Now())
+	if resetIn < 0 {
+		return 0
+	}
+
+	return resetIn
+}
+
+func (r *Result) Wait() {
+	time.Sleep(r.RetryIn())
+}
+
+func unixMillisecondToTime(unixMs int64) time.Time {
+	sec := unixMs / 1e3
+	ns := unixMs % 1e3 * 1e6
+	return time.Unix(sec, ns)
 }
 
 func registerFunction(client *redis.Client) {

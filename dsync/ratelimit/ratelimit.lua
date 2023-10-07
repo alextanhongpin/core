@@ -12,60 +12,49 @@ local function now_ms()
 end
 
 
--- KEYS[1]: The key to rate limit
+-- KEYS[1]: The key to rate limit. The namespace is to avoid collision between different algorithm.
 -- ARGS[1]: The request limit
 -- ARGS[2]: The period of the request (in milliseconds)
 -- ARGS[3]: The number of token consumed
 local function fixed_window(KEYS, ARGS)
-	local key = KEYS[1]
+	local key = string.format("ratelimit:fixed_window:%s", KEYS[1])
 	local limit = tonumber(ARGS[1])
 	local period = tonumber(ARGS[2])
 	local count = tonumber(ARGS[3])
 
 	local now = now_ms()
-	local start = now - (now % period)
+	local data = redis.call('GET', key) or '0:0'
 
-	local used = tonumber(redis.call('INCRBY', key, count))
-	if used == count then
+	local t = {}
+	for d in string.gmatch(data, "(%d+)") do
+		table.insert(t, tonumber(d)) -- Push to array.
+	end
+
+	local reset_at = t[1]
+	local total = t[2]
+
+	if reset_at < now then
+		reset_at = now + period
+		total = 0
+	end
+
+	local allow = total + count <= limit
+	if allow then
+		total = total + count
+
+		redis.call('SET', key, string.format('%d:%d', reset_at, total))
 		redis.call('PEXPIRE', key, period)
 	end
 
-	-- Not allowed.
-	local allow = 0
-	local remaining = 0
-	local retry_in = period - now%period
-	local reset_in = period - now%period
+	local remaining = limit - total
+	local retry_at = remaining > 0 and now or reset_at
 
-	-- Allowed.
-	if used <= limit then
-		allow = 1
-		remaining = limit - used
-		retry_in = 0
-	end
-
-	return { allow, remaining, retry_in, reset_in }
-end
-
--- KEYS[1]: ratelimit key
--- ARGV[1]: limit
--- ARGV[2]: period in milliseconds
-local function sliding_window(KEYS, ARGS)
-	local key = KEYS[1]
-	local limit = tonumber(ARGS[1])
-	local period = tonumber(ARGS[2]) -- in ms
-
-	local now = now_ms()
-	redis.call('ZREMRANGEBYSCORE', key, 0, now - period)
-
-	local count = tonumber(redis.call('ZCARD', key))
-	if count <= limit then
-		redis.call('ZADD', key, now, now)
-		redis.call('PEXPIRE', key, period)
-
-		return 1
-	end
-
-	return 0
+	return {
+		allow and 1 or 0,
+		remaining,
+		retry_at,
+		reset_at
+	}
 end
 
 -- KEYS[1]: ratelimit key
@@ -73,58 +62,75 @@ end
 -- ARGV[2]: period in milliseconds
 -- ARGV[3]: burst
 -- ARGV[4]: token consumed
-local function gcra(KEYS, ARGS)
-	local key = KEYS[1]
+local function leaky_bucket(KEYS, ARGS)
+	local key = string.format('ratelimit:leaky_bucket:%s', KEYS[1])
 
 	local limit = tonumber(ARGS[1])
 	local period = tonumber(ARGS[2])
 	local burst = tonumber(ARGS[3])
-	local token = tonumber(ARGS[4]) or 1
+	local count = tonumber(ARGS[4]) or 1
 	local interval = period / limit
 
-
 	local now = now_ms()
+	local data = redis.call('GET', key) or '0:0:0'
 
-	local window_start = now - (now % period)
-	local window_end = window_start + period
+	local t = {}
+	for d in string.gmatch(data, "(%d+)") do
+		table.insert(t, tonumber(d)) -- Push to array.
+	end
 
-	local batch = now - window_start
-	local batch_start = batch - (batch % interval)
+	local reset_at = t[1]
+	local total = t[2]
+	local prev_batch = t[3]
+
+	if reset_at < now then
+		reset_at = now + period
+		total = 0
+	end
+
+	local start = reset_at - period
+	local batch_period = now - start
+	local batch = math.floor(batch_period / interval)
+	local batch_start = start + batch * interval
 	local batch_end = batch_start + interval
 
-	local tat = tonumber(redis.call('GET', key)) or 0
-	if tat < now then
-		tat = window_start + batch_start
+	if total + count <= burst then
+		total = total + count
+
+		redis.call('SET', key, string.format('%d:%d:%d', reset_at, total, prev_batch))
+		redis.call('PEXPIRE', key, period)
+
+		return {
+			1,
+			limit - total,
+			now,
+			reset_at
+		}
 	end
 
-	local allow_at = tat - interval * burst
-	local allow = now >= allow_at
-	if allow then
-		tat = tat + interval * token
-		redis.call('SET', key, tat, 'PX', period)
+
+	local allow = false
+	if batch + 1 > prev_batch and total + count <= limit then
+		total = math.max(total, batch)
+		total = total + count
+		prev_batch = batch + 1
+		allow = true
+
+		redis.call('SET', key, string.format('%d:%d:%d', reset_at, total, prev_batch))
+		redis.call('PEXPIRE', key, period)
 	end
 
-	local retry_in = batch_end - batch
-	local reset_in = window_end - now
-  local remaining = math.max(limit - (tat - window_start)/interval + burst, 0)
-
-	if burst > 0 and remaining > burst then
-		retry_in = 0
-	end
-
-	if remaining == 0 then
-		retry_in = reset_in
-	end
+	local remaining = math.max(limit - total, 0)
+	local retry_at = remaining > 0 and batch_end or reset_at
 
 	return {
 		allow and 1 or 0,
 		remaining,
-		retry_in,
-		reset_in
+		retry_at,
+		reset_at
 	}
 end
 
 
-redis.register_function('gcra', gcra)
-redis.register_function('sliding_window', sliding_window)
+redis.register_function('leaky_bucket', leaky_bucket)
 redis.register_function('fixed_window', fixed_window)

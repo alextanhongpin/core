@@ -7,22 +7,22 @@ import (
 	redis "github.com/redis/go-redis/v9"
 )
 
-type GCRAOption struct {
+type LeakyBucketOption struct {
 	Limit  int64
 	Period time.Duration
 	Burst  int64
 }
 
-// GCRA implements the Genetic Cell Rate algorithm.
-type GCRA struct {
+// LeakyBucket implements the Genetic Cell Rate algorithm.
+type LeakyBucket struct {
 	client *redis.Client
 	limit  int64
 	period int64
 	burst  int64
 }
 
-func NewGCRA(client *redis.Client, opt *GCRAOption) *GCRA {
-	gcra := &GCRA{
+func NewLeakyBucket(client *redis.Client, opt *LeakyBucketOption) *LeakyBucket {
+	lb := &LeakyBucket{
 		client: client,
 		limit:  opt.Limit,
 		period: opt.Period.Milliseconds(),
@@ -31,13 +31,13 @@ func NewGCRA(client *redis.Client, opt *GCRAOption) *GCRA {
 
 	registerFunction(client)
 
-	return gcra
+	return lb
 }
 
-func (r *GCRA) AllowN(ctx context.Context, key string, n int64) (*Result, error) {
+func (r *LeakyBucket) AllowN(ctx context.Context, key string, n int64) (*Result, error) {
 	keys := []string{key}
 	args := []any{r.limit, r.period, r.burst, n}
-	resp, err := r.client.FCall(ctx, "gcra", keys, args...).Int64Slice()
+	resp, err := r.client.FCall(ctx, "leaky_bucket", keys, args...).Int64Slice()
 	if err != nil {
 		return nil, err
 	}
@@ -45,6 +45,6 @@ func (r *GCRA) AllowN(ctx context.Context, key string, n int64) (*Result, error)
 	return newResult(resp), nil
 }
 
-func (r *GCRA) Allow(ctx context.Context, key string) (*Result, error) {
+func (r *LeakyBucket) Allow(ctx context.Context, key string) (*Result, error) {
 	return r.AllowN(ctx, key, 1)
 }

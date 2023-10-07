@@ -23,14 +23,9 @@ func main() {
 	defer rdb.Close()
 
 	key := "user:1"
-	rl := newFixedWindow(rdb)
+	//rl := newFixedWindow(rdb)
+	rl := newLeakyBucket(rdb)
 	if err := simulate(ctx, rl, key, 30); err != nil {
-		panic(err)
-	}
-
-	sw := newSlidingWindow(rdb)
-	key = "random:2"
-	if err := simulateSlidingWindow(ctx, sw, key, 30); err != nil {
 		panic(err)
 	}
 
@@ -45,31 +40,29 @@ func simulate(ctx context.Context, rl ratelimiter, key string, n int) error {
 	now := time.Now()
 	fmt.Println("start", now)
 	limit := 0
-	for i := 0; i < n; i++ {
+
+	for time.Since(now) < 1*time.Second {
 		res, err := rl.Allow(ctx, key)
 		if err != nil {
-			return err
+			return fmt.Errorf("allow error: %w", err)
 		}
 
 		if res.Allow {
 			limit++
 		}
 
-		fmt.Printf("elapsed: %s, %#v\n", time.Since(now), res)
+		fmt.Printf("elapsed: %s, allow=%t remaining=%d retryIn=%s resetIn=%s\n",
+			time.Since(now),
+			res.Allow,
+			res.Remaining,
+			res.RetryIn(),
+			res.ResetIn())
 		sleep := time.Duration(rand.Intn(100))
 		time.Sleep(sleep * time.Millisecond)
 	}
 
 	fmt.Println("total", limit, "took", time.Since(now))
 	return nil
-}
-
-func newGCRA(client *redis.Client) *ratelimit.GCRA {
-	return ratelimit.NewGCRA(client, &ratelimit.GCRAOption{
-		Limit:  5,
-		Period: 1 * time.Second,
-		Burst:  0,
-	})
 }
 
 func newFixedWindow(client *redis.Client) *ratelimit.FixedWindow {
@@ -79,36 +72,10 @@ func newFixedWindow(client *redis.Client) *ratelimit.FixedWindow {
 	})
 }
 
-func newSlidingWindow(client *redis.Client) *ratelimit.SlidingWindow {
-	return ratelimit.NewSlidingWindow(client, &ratelimit.SlidingWindowOption{
+func newLeakyBucket(client *redis.Client) *ratelimit.LeakyBucket {
+	return ratelimit.NewLeakyBucket(client, &ratelimit.LeakyBucketOption{
 		Limit:  5,
 		Period: 1 * time.Second,
+		Burst:  0,
 	})
-}
-
-type slidingWindowRateLimiter interface {
-	Allow(ctx context.Context, key string) (bool, error)
-}
-
-func simulateSlidingWindow(ctx context.Context, rl slidingWindowRateLimiter, key string, n int) error {
-	now := time.Now()
-	fmt.Println("start", now)
-	limit := 0
-	for i := 0; i < n; i++ {
-		allow, err := rl.Allow(ctx, key)
-		if err != nil {
-			return err
-		}
-
-		if allow {
-			limit++
-		}
-
-		fmt.Printf("elapsed: %s, %#v\n", time.Since(now), allow)
-		sleep := time.Duration(rand.Intn(100))
-		time.Sleep(sleep * time.Millisecond)
-	}
-
-	fmt.Println("total", limit, "took", time.Since(now))
-	return nil
 }
