@@ -9,8 +9,8 @@ import (
 type FixedWindow struct {
 	mu      sync.Mutex
 	limit   int64
-	period  int64
-	resetAt int64
+	period  time.Duration
+	resetAt time.Time
 	count   int64
 	Now     func() time.Time
 }
@@ -18,7 +18,7 @@ type FixedWindow struct {
 func NewFixedWindow(limit int64, period time.Duration) *FixedWindow {
 	return &FixedWindow{
 		limit:  limit,
-		period: period.Nanoseconds(),
+		period: period,
 		Now:    time.Now,
 	}
 }
@@ -27,46 +27,34 @@ func (rl *FixedWindow) AllowN(n int64) *Result {
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
 
-	now := rl.Now().UnixNano()
-	if rl.resetAt < now {
-		rl.resetAt = now + rl.period
+	now := rl.Now()
+	if rl.resetAt.Before(now) {
+		rl.resetAt = now.Add(rl.period)
 		rl.count = 0
 	}
 
-	resetIn := toNanosecond(rl.resetAt - now)
-
-	var allow bool
-	var remaining int64
-	if rl.count+n <= rl.limit {
+	allow := rl.count+n <= rl.limit
+	if allow {
 		rl.count += n
-		allow = true
-		remaining = rl.limit - rl.count
 	}
 
-	retryIn := resetIn
+	remaining := max(rl.limit-rl.count, 0)
+	resetAt := rl.resetAt
+	retryAt := resetAt
+
 	if remaining > 0 {
-		retryIn = 0
+		retryAt = now
 	}
 
 	return &Result{
 		Allow:     allow,
+		Limit:     rl.limit,
 		Remaining: remaining,
-		RetryIn:   retryIn,
-		ResetIn:   resetIn,
+		RetryAt:   retryAt,
+		ResetAt:   resetAt,
 	}
 }
 
 func (rl *FixedWindow) Allow() *Result {
 	return rl.AllowN(1)
-}
-
-func toNanosecond(n int64) time.Duration {
-	return time.Duration(n) * time.Nanosecond
-}
-
-type Result struct {
-	Allow     bool
-	Remaining int64
-	RetryIn   time.Duration
-	ResetIn   time.Duration
 }
