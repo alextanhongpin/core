@@ -9,7 +9,7 @@ import (
 type FixedWindow struct {
 	mu      sync.Mutex
 	limit   int64
-	period  time.Duration
+	period  int64
 	resetAt int64
 	count   int64
 	Now     func() time.Time
@@ -18,7 +18,7 @@ type FixedWindow struct {
 func NewFixedWindow(limit int64, period time.Duration) *FixedWindow {
 	return &FixedWindow{
 		limit:  limit,
-		period: period,
+		period: period.Nanoseconds(),
 		Now:    time.Now,
 	}
 }
@@ -27,29 +27,32 @@ func (rl *FixedWindow) AllowN(n int64) *Result {
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
 
-	period := rl.period.Nanoseconds()
 	now := rl.Now().UnixNano()
 	if rl.resetAt < now {
-		rl.resetAt = now - (now % period) + period
+		rl.resetAt = now + rl.period
 		rl.count = 0
 	}
 
-	t := toNanosecond(period - now%period)
+	resetIn := toNanosecond(rl.resetAt - now)
 
+	var allow bool
+	var remaining int64
 	if rl.count+n <= rl.limit {
 		rl.count += n
+		allow = true
+		remaining = rl.limit - rl.count
+	}
 
-		return &Result{
-			Allow:     true,
-			Remaining: rl.limit - rl.count,
-			RetryIn:   0,
-			ResetIn:   t,
-		}
+	retryIn := resetIn
+	if remaining > 0 {
+		retryIn = 0
 	}
 
 	return &Result{
-		RetryIn: t,
-		ResetIn: t,
+		Allow:     allow,
+		Remaining: remaining,
+		RetryIn:   retryIn,
+		ResetIn:   resetIn,
 	}
 }
 
