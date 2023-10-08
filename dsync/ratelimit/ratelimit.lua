@@ -12,12 +12,12 @@ local function now_ms()
 end
 
 
--- KEYS[1]: The key to rate limit. The namespace is to avoid collision between different algorithm.
+-- KEYS[1]: The key to rate limit
 -- ARGS[1]: The request limit
 -- ARGS[2]: The period of the request (in milliseconds)
 -- ARGS[3]: The number of token consumed
 local function fixed_window(KEYS, ARGS)
-	local key = string.format("ratelimit:fixed_window:%s", KEYS[1])
+	local key = KEYS[1]
 	local limit = tonumber(ARGS[1])
 	local period = tonumber(ARGS[2])
 	local count = tonumber(ARGS[3])
@@ -63,7 +63,7 @@ end
 -- ARGV[3]: burst
 -- ARGV[4]: token consumed
 local function leaky_bucket(KEYS, ARGS)
-	local key = string.format('ratelimit:leaky_bucket:%s', KEYS[1])
+	local key = KEYS[1]
 
 	local limit = tonumber(ARGS[1])
 	local period = tonumber(ARGS[2])
@@ -109,12 +109,12 @@ local function leaky_bucket(KEYS, ARGS)
 	end
 
 
-	local allow = false
-	if batch + 1 > prev_batch and total + count <= limit then
+	local allow = batch + 1 > prev_batch and total + count <= limit
+	if allow then
+		-- Expire unused tokens.
 		total = math.max(total, batch)
 		total = total + count
 		prev_batch = batch + 1
-		allow = true
 
 		redis.call('SET', key, string.format('%d:%d:%d', reset_at, total, prev_batch))
 		redis.call('PEXPIRE', key, period)

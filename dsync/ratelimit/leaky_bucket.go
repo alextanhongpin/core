@@ -2,10 +2,13 @@ package ratelimit
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	redis "github.com/redis/go-redis/v9"
 )
+
+const leakyBucket = "leaky_bucket"
 
 type LeakyBucketOption struct {
 	Limit  int64
@@ -35,9 +38,9 @@ func NewLeakyBucket(client *redis.Client, opt *LeakyBucketOption) *LeakyBucket {
 }
 
 func (r *LeakyBucket) AllowN(ctx context.Context, key string, n int64) (*Result, error) {
-	keys := []string{key}
+	keys := []string{fmt.Sprintf("ratelimit:%s:%s", leakyBucket, key)}
 	args := []any{r.limit, r.period, r.burst, n}
-	resp, err := r.client.FCall(ctx, "leaky_bucket", keys, args...).Int64Slice()
+	resp, err := r.client.FCall(ctx, leakyBucket, keys, args...).Int64Slice()
 	if err != nil {
 		return nil, err
 	}

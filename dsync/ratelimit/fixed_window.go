@@ -2,10 +2,13 @@ package ratelimit
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	redis "github.com/redis/go-redis/v9"
 )
+
+const fixedWindow = "fixed_window"
 
 // FixedWindow implements the Fixed Window algorithm.
 type FixedWindow struct {
@@ -32,9 +35,9 @@ func NewFixedWindow(client *redis.Client, opt *FixedWindowOption) *FixedWindow {
 }
 
 func (r *FixedWindow) AllowN(ctx context.Context, key string, n int64) (*Result, error) {
-	keys := []string{key}
+	keys := []string{fmt.Sprintf("ratelimit:%s:%s", fixedWindow, key)}
 	args := []any{r.limit, r.period, n}
-	resp, err := r.client.FCall(ctx, "fixed_window", keys, args...).Int64Slice()
+	resp, err := r.client.FCall(ctx, fixedWindow, keys, args...).Int64Slice()
 	if err != nil {
 		return nil, err
 	}
