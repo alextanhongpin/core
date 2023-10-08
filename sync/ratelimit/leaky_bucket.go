@@ -3,25 +3,7 @@ package ratelimit
 import (
 	"sync"
 	"time"
-
-	"golang.org/x/time/rate"
 )
-
-type SomeBucket struct {
-	limiter *rate.Limiter
-}
-
-func NewSomeBucket(limit int64, period time.Duration, burst int64) *SomeBucket {
-
-	lim := rate.Every(period / time.Duration(limit))
-	return &SomeBucket{
-		limiter: rate.NewLimiter(lim, int(burst)),
-	}
-}
-
-func (s *SomeBucket) AllowN(n int64) bool {
-	return s.limiter.AllowN(time.Now(), int(n))
-}
 
 type LeakyBucket struct {
 	mu sync.Mutex
