@@ -22,6 +22,7 @@ type LeakyBucket struct {
 	limit  int64
 	period int64
 	burst  int64
+	Now    time.Time
 }
 
 func NewLeakyBucket(client *redis.Client, opt *LeakyBucketOption) *LeakyBucket {
@@ -39,7 +40,7 @@ func NewLeakyBucket(client *redis.Client, opt *LeakyBucketOption) *LeakyBucket {
 
 func (r *LeakyBucket) AllowN(ctx context.Context, key string, n int64) (*Result, error) {
 	keys := []string{fmt.Sprintf("ratelimit:%s:%s", leakyBucket, key)}
-	args := []any{r.limit, r.period, r.burst, n}
+	args := []any{r.limit, r.period, r.burst, n, r.mockTime()}
 	resp, err := r.client.FCall(ctx, leakyBucket, keys, args...).Int64Slice()
 	if err != nil {
 		return nil, err
@@ -50,4 +51,12 @@ func (r *LeakyBucket) AllowN(ctx context.Context, key string, n int64) (*Result,
 
 func (r *LeakyBucket) Allow(ctx context.Context, key string) (*Result, error) {
 	return r.AllowN(ctx, key, 1)
+}
+
+func (r *LeakyBucket) mockTime() int64 {
+	if r.Now.IsZero() {
+		return 0
+	}
+
+	return r.Now.UnixMilli()
 }

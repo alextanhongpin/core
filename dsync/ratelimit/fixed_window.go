@@ -15,6 +15,7 @@ type FixedWindow struct {
 	client *redis.Client
 	limit  int64
 	period int64
+	Now    time.Time // Immutable time for testing.
 }
 
 type FixedWindowOption struct {
@@ -36,7 +37,7 @@ func NewFixedWindow(client *redis.Client, opt *FixedWindowOption) *FixedWindow {
 
 func (r *FixedWindow) AllowN(ctx context.Context, key string, n int64) (*Result, error) {
 	keys := []string{fmt.Sprintf("ratelimit:%s:%s", fixedWindow, key)}
-	args := []any{r.limit, r.period, n}
+	args := []any{r.limit, r.period, n, r.mockTime()}
 	resp, err := r.client.FCall(ctx, fixedWindow, keys, args...).Int64Slice()
 	if err != nil {
 		return nil, err
@@ -47,4 +48,12 @@ func (r *FixedWindow) AllowN(ctx context.Context, key string, n int64) (*Result,
 
 func (r *FixedWindow) Allow(ctx context.Context, key string) (*Result, error) {
 	return r.AllowN(ctx, key, 1)
+}
+
+func (r *FixedWindow) mockTime() int64 {
+	if r.Now.IsZero() {
+		return 0
+	}
+
+	return r.Now.UnixMilli()
 }

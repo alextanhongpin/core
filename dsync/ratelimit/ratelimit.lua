@@ -16,13 +16,15 @@ end
 -- ARGS[1]: The request limit
 -- ARGS[2]: The period of the request (in milliseconds)
 -- ARGS[3]: The number of token consumed
+-- ARGS[4]: Frozen timestamp for testing
 local function fixed_window(KEYS, ARGS)
 	local key = KEYS[1]
 	local limit = tonumber(ARGS[1])
 	local period = tonumber(ARGS[2])
 	local count = tonumber(ARGS[3])
+	local mock_now = tonumber(ARGS[4])
 
-	local now = now_ms()
+	local now = mock_now or now_ms()
 	local data = redis.call('GET', key) or '0:0'
 
 	local t = {}
@@ -69,9 +71,10 @@ local function leaky_bucket(KEYS, ARGS)
 	local period = tonumber(ARGS[2])
 	local burst = tonumber(ARGS[3])
 	local count = tonumber(ARGS[4]) or 1
+	local mock_now = tonumber(ARGS[5])
 	local interval = period / limit
 
-	local now = now_ms()
+	local now = mock_now or now_ms()
 	local data = redis.call('GET', key) or '0:0:0'
 
 	local t = {}
