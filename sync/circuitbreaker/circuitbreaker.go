@@ -54,6 +54,7 @@ type Option struct {
 	ErrorRateThreshold float64
 	Sometimes          rate.Sometimes
 	Store              store
+	OnStateChanged     func(from, to Status)
 }
 
 func NewOption() *Option {
@@ -67,15 +68,17 @@ func NewOption() *Option {
 		Sometimes: rate.Sometimes{
 			Interval: period,
 		},
+		OnStateChanged: func(from, to Status) {},
 	}
 }
 
 // CircuitBreaker represents the circuit breaker.
 type CircuitBreaker struct {
-	mu     sync.RWMutex
-	opt    *Option
-	states [3]state
-	state  Status
+	mu                 sync.RWMutex
+	opt                *Option
+	states             [3]state
+	state              Status
+	onStateChangedFunc func(from, to Status)
 }
 
 func New(opt *Option) *CircuitBreaker {
@@ -90,6 +93,7 @@ func New(opt *Option) *CircuitBreaker {
 			NewOpenState(opt),
 			NewHalfOpenState(opt),
 		},
+		onStateChangedFunc: opt.OnStateChanged,
 	}
 }
 
@@ -130,6 +134,7 @@ func (cb *CircuitBreaker) Do(fn func() error) error {
 
 	// If the local state is different from the remote state, sync them.
 	if ok && storeState != cb.state {
+		cb.onStateChangedFunc(cb.state, storeState)
 		cb.state = storeState
 		cb.states[cb.state].Entry()
 
@@ -140,8 +145,11 @@ func (cb *CircuitBreaker) Do(fn func() error) error {
 	if ok {
 		// If the local state has changed, update the remote state.
 		// Failure in updating the state should not stop the circuitbreaker.
-		cb.setStoreState(state)
-
+		// Skip half-open, because it is just an intermediary state.
+		if !state.IsHalfOpen() {
+			cb.setStoreState(state)
+		}
+		cb.onStateChangedFunc(cb.state, state)
 		cb.state = state
 		cb.states[cb.state].Entry()
 	}
