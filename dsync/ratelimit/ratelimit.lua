@@ -33,7 +33,7 @@ local function fixed_window(KEYS, ARGS)
 	local reset_at = t[1]
 	local total = t[2]
 
-	if reset_at < now then
+	if reset_at <= now then
 		reset_at = now + period
 		total = 0
 	end
@@ -83,9 +83,10 @@ local function leaky_bucket(KEYS, ARGS)
 	local total = t[2]
 	local prev_batch = t[3]
 
-	if reset_at < now then
+	if reset_at <= now then
 		reset_at = now + period
 		total = 0
+		prev_batch = 0
 	end
 
 	local start = reset_at - period
