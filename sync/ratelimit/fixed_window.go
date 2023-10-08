@@ -28,7 +28,8 @@ func (rl *FixedWindow) AllowN(n int64) *Result {
 	defer rl.mu.Unlock()
 
 	now := rl.Now()
-	if rl.resetAt.Before(now) {
+	// resetAt <= now
+	if !rl.resetAt.After(now) {
 		rl.resetAt = now.Add(rl.period)
 		rl.count = 0
 	}
