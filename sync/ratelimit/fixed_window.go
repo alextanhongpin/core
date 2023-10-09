@@ -23,6 +23,8 @@ func NewFixedWindow(limit int64, period time.Duration) *FixedWindow {
 	}
 }
 
+// AllowAt allows performing a dry-run to check if the ratelimiter is allowed
+// at the given time without consuming a token.
 func (rl *FixedWindow) AllowAt(t time.Time, n int64) bool {
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
@@ -37,6 +39,8 @@ func (rl *FixedWindow) AllowAt(t time.Time, n int64) bool {
 	return count+n <= limit
 }
 
+// AllowN checks if a request is allowed. Consumes n token
+// if allowed.
 func (rl *FixedWindow) AllowN(n int64) *Result {
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
@@ -70,6 +74,8 @@ func (rl *FixedWindow) AllowN(n int64) *Result {
 	}
 }
 
+// Allow checks if a request is allowed. Special case of AllowN that consumes
+// only 1 token.
 func (rl *FixedWindow) Allow() *Result {
 	return rl.AllowN(1)
 }

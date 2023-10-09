@@ -32,9 +32,9 @@ func ExampleFixedWindow() {
 		}
 		allow := p.Milliseconds() == 0 || p >= 1000*time.Millisecond
 
-		checkAllow := rl.AllowAt(now.Add(p), 1)
+		dryRun := rl.AllowAt(now.Add(p), 1)
 		result := rl.Allow()
-		if result.Allow != allow || result.Allow != checkAllow {
+		if result.Allow != allow || result.Allow != dryRun {
 			panic("doesn't allow")
 		}
 
