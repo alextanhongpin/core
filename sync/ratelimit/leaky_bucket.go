@@ -33,6 +33,32 @@ func NewLeakyBucket(limit int64, period time.Duration, burst int64) *LeakyBucket
 	}
 }
 
+func (rl *LeakyBucket) AllowAt(t time.Time, n int64) bool {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+
+	resetAt := rl.resetAt
+	count := rl.count
+	batch := rl.batch
+
+	if !rl.resetAt.After(t) {
+		resetAt = t.Add(rl.period)
+		count = 0
+		batch = 0
+	}
+
+	windowStart := resetAt.Add(-rl.period)
+
+	batchPeriod := t.Sub(windowStart)
+	newBatch := int64(batchPeriod / rl.interval)
+
+	if rl.count+n <= rl.burst {
+		return true
+	}
+
+	return newBatch+1 > batch && count+n <= rl.limit
+}
+
 func (rl *LeakyBucket) AllowN(n int64) *Result {
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
@@ -67,15 +93,12 @@ func (rl *LeakyBucket) AllowN(n int64) *Result {
 	}
 
 	retryAt := resetAt
-	var allow bool
-
-	if batch+1 > rl.batch && rl.count+n <= rl.limit {
+	allow := batch+1 > rl.batch && rl.count+n <= rl.limit
+	if allow {
 		// Expires count that is not used.
 		rl.count = max(rl.count, batch)
 		rl.count += n
 		rl.batch = batch + 1
-
-		allow = true
 	}
 
 	remaining := max(rl.limit-rl.count, 0)

@@ -23,6 +23,20 @@ func NewFixedWindow(limit int64, period time.Duration) *FixedWindow {
 	}
 }
 
+func (rl *FixedWindow) AllowAt(t time.Time, n int64) bool {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+
+	limit := rl.limit
+	count := rl.count
+
+	if !rl.resetAt.After(t) {
+		count = 0
+	}
+
+	return count+n <= limit
+}
+
 func (rl *FixedWindow) AllowN(n int64) *Result {
 	rl.mu.Lock()
 	defer rl.mu.Unlock()

@@ -40,8 +40,9 @@ func ExampleLeakyBucket() {
 		}
 		allow := p.Milliseconds()%2 == 0
 
+		checkAllow := rl.AllowAt(now.Add(p), 1)
 		result := rl.Allow()
-		if result.Allow != allow {
+		if result.Allow != allow || result.Allow != checkAllow {
 			panic("doesn't allow")
 		}
 
