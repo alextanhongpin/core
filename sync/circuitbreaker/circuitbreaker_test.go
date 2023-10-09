@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
-	"golang.org/x/time/rate"
 )
 
 func TestCircuitBreaker(t *testing.T) {
@@ -157,9 +156,7 @@ func TestClosedState(t *testing.T) {
 
 		wantErr := errors.New("want error")
 		opt := NewOption()
-		opt.Sometimes = rate.Sometimes{
-			Interval: 100 * time.Millisecond,
-		}
+		opt.SamplingDuration = 100 * time.Millisecond
 
 		state := NewClosedState(opt)
 		state.Entry()
@@ -200,7 +197,7 @@ func TestOpenState(t *testing.T) {
 
 		state := NewOpenState(opt)
 		state.Entry()
-		assert.Equal(t, now.Add(opt.HalfOpenTimeout), state.opt.openedAt)
+		assert.Equal(t, now.Add(opt.BreakDuration), state.opt.closeAt)
 	})
 
 	t.Run("cannot transition to HalfOpen timeout timer is running", func(t *testing.T) {
@@ -229,7 +226,7 @@ func TestOpenState(t *testing.T) {
 		state.Entry()
 
 		opt.Now = func() time.Time {
-			return now.Add(opt.HalfOpenTimeout).Add(1 * time.Nanosecond)
+			return now.Add(opt.BreakDuration).Add(1 * time.Nanosecond)
 		}
 
 		status, ok := state.Next()
@@ -304,10 +301,8 @@ type circuit interface {
 
 func newCircuitBreaker() *CircuitBreaker {
 	opt := NewOption()
-	opt.HalfOpenTimeout = 100 * time.Millisecond
-	opt.Sometimes = rate.Sometimes{
-		Interval: 100 * time.Millisecond,
-	}
+	opt.BreakDuration = 100 * time.Millisecond
+	opt.SamplingDuration = 100 * time.Millisecond
 	return New(opt)
 }
 
