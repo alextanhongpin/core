@@ -3,15 +3,10 @@ package retry
 
 import (
 	"context"
+	"errors"
 	"math/rand"
 	"time"
-
-	"golang.org/x/exp/event"
 )
-
-var retryTotalDistribution = event.NewIntDistribution("retry_total", &event.MetricOptions{
-	Description: "The distribution of retry by number of times",
-})
 
 var (
 	Linear      = Backoffs(linear())
@@ -34,6 +29,10 @@ func (b Backoffs) HardLimit(limit time.Duration) Backoffs {
 
 func (b Backoffs) Exec(ctx context.Context, fn func(ctx context.Context) error) (err error) {
 	return Exec(ctx, fn, b)
+}
+
+func (b Backoffs) ExecResult(ctx context.Context, fn func(ctx context.Context) error) (res Result, err error) {
+	return ExecResult(ctx, fn, b)
 }
 
 // WithSoftLimit applies soft limit to the total duration. The total duration
@@ -88,6 +87,30 @@ func WithJitter(ts []time.Duration) []time.Duration {
 func Exec(ctx context.Context, fn func(ctx context.Context) error, ts []time.Duration) (err error) {
 	timeouts := append([]time.Duration{0}, ts...)
 
+	for _, t := range timeouts {
+		if t != 0 {
+			time.Sleep(t)
+		}
+
+		err = fn(ctx)
+		if err == nil {
+			return
+		}
+
+	}
+
+	return
+}
+
+type Result struct {
+	Skip  bool
+	Retry int
+}
+
+// ExecResult executes the retry and returns an error and result.
+func ExecResult(ctx context.Context, fn func(ctx context.Context) error, ts []time.Duration) (res Result, err error) {
+	timeouts := append([]time.Duration{0}, ts...)
+
 	for i, t := range timeouts {
 		if t != 0 {
 			time.Sleep(t)
@@ -98,7 +121,43 @@ func Exec(ctx context.Context, fn func(ctx context.Context) error, ts []time.Dur
 			return
 		}
 
-		retryTotalDistribution.Record(ctx, 1, event.Int64("attempt", int64(i+1)))
+		res.Retry = i
+
+		var skipErr *SkipError
+		if errors.As(err, &skipErr) {
+			res.Skip = true
+			err = skipErr.Unwrap()
+
+			return
+		}
+	}
+
+	return
+}
+
+// Do executes the retry and returns an error and result.
+func Do[T any](ctx context.Context, fn func(ctx context.Context) (T, error), ts []time.Duration) (v T, err error, res Result) {
+	timeouts := append([]time.Duration{0}, ts...)
+
+	for i, t := range timeouts {
+		if t != 0 {
+			time.Sleep(t)
+		}
+
+		v, err = fn(ctx)
+		if err == nil {
+			return
+		}
+
+		res.Retry = i
+
+		var skipErr *SkipError
+		if errors.As(err, &skipErr) {
+			res.Skip = true
+			err = skipErr.Unwrap()
+
+			return
+		}
 	}
 
 	return
