@@ -26,7 +26,7 @@ func TestCircuitBreaker(t *testing.T) {
 
 	// Above failure threshold, circuitbreaker becomes open.
 	assert.ErrorIs(fire(ctx, cb, 1, wantErr), wantErr)
-	assert.ErrorIs(fire(ctx, cb, 1, wantErr), Unavailable)
+	assert.ErrorIs(fire(ctx, cb, 1, wantErr), ErrBrokenCircuit)
 	assert.Equal(Open, cb.Status())
 	assert.True(cb.ResetIn() > 0)
 
@@ -99,8 +99,22 @@ func TestStore(t *testing.T) {
 	err := cb.Do(func() error {
 		return nil
 	})
-	assert.ErrorIs(err, Unavailable)
+	assert.ErrorIs(err, ErrBrokenCircuit)
 	assert.Equal(Open, cb.Status())
+}
+
+func TestIsolated(t *testing.T) {
+	assert := assert.New(t)
+
+	cb := newCircuitBreaker()
+	assert.Equal(Closed, cb.Status())
+
+	cb.opt.Store = &mockStore{status: Isolated}
+	err := cb.Do(func() error {
+		return nil
+	})
+	assert.ErrorIs(err, ErrIsolatedCircuit)
+	assert.Equal(Isolated, cb.Status())
 }
 
 func TestClosedState(t *testing.T) {

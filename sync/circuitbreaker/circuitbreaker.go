@@ -29,7 +29,10 @@ var errorHandler = func(err error) int64 {
 }
 
 // Unavailable returns the error when the circuit breaker is not available.
-var Unavailable = errors.New("circuit-breaker: unavailable")
+var (
+	ErrBrokenCircuit   = errors.New("circuit-breaker: broken")
+	ErrIsolatedCircuit = errors.New("circuit-breaker: isolated")
+)
 
 // store implements a remote store to save the circuitbreaker state.
 type store interface {
@@ -72,7 +75,7 @@ func NewOption() *Option {
 type CircuitBreaker struct {
 	mu             sync.RWMutex
 	opt            *Option
-	states         [3]state
+	states         [4]state
 	state          Status
 	onStateChanged func(from, to Status)
 }
@@ -84,10 +87,11 @@ func New(opt *Option) *CircuitBreaker {
 
 	return &CircuitBreaker{
 		opt: opt,
-		states: [3]state{
+		states: [4]state{
 			NewClosedState(opt),
 			NewOpenState(opt),
 			NewHalfOpenState(opt),
+			NewIsolatedState(opt),
 		},
 		onStateChanged: opt.OnStateChanged,
 	}
@@ -251,7 +255,7 @@ func (s *OpenState) Next() (Status, bool) {
 }
 
 func (s *OpenState) Do(fn func() error) error {
-	return Unavailable
+	return ErrBrokenCircuit
 }
 
 func (s *OpenState) startTimeoutTimer() {
@@ -308,6 +312,25 @@ func (s *HalfOpenState) isSuccessCountThresholdExceeded() bool {
 
 func (s *HalfOpenState) incrementSuccessCounter() {
 	s.opt.count++
+}
+
+type IsolatedState struct {
+	opt *Option
+}
+
+func NewIsolatedState(opt *Option) *IsolatedState {
+	return &IsolatedState{opt}
+}
+
+func (s *IsolatedState) Entry() {
+}
+
+func (s *IsolatedState) Next() (Status, bool) {
+	return Isolated, false
+}
+
+func (s *IsolatedState) Do(fn func() error) error {
+	return ErrIsolatedCircuit
 }
 
 func Ratio(n, total int64) float64 {
