@@ -34,16 +34,13 @@ func ExampleRoundTripper() {
 	re := regexp.MustCompile(`\d{5}`)
 	// Opens after failure ratio exceeded.
 	for i := 0; i <= int(opt.FailureThreshold+1); i++ {
-		resp, err := client.Get(ts.URL)
+		_, err := client.Get(ts.URL)
 		if err != nil {
 			// Replace port since it changes dynamically and breaks the test.
 			msg := re.ReplaceAllString(err.Error(), "8080")
 			fmt.Println(msg)
-		}
-		if resp == nil {
 			continue
 		}
-		defer resp.Body.Close()
 	}
 
 	// Output:
