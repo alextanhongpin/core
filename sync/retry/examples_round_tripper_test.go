@@ -10,8 +10,6 @@ import (
 )
 
 func ExampleRoundTripper() {
-	backoffs := retry.Backoffs{0, 0, 0, 0, 0}
-
 	i := 0
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		i++
@@ -20,10 +18,23 @@ func ExampleRoundTripper() {
 	}))
 	defer ts.Close()
 
+	opt := retry.NewOption()
+	opt.Delay = 0
+
+	r := retry.New[*http.Response](opt)
+	r.ShouldHandle = func(w *http.Response, err error) bool {
+		// Retry when status code is 5XX.
+		if w != nil && w.StatusCode >= http.StatusInternalServerError {
+			return true
+		}
+
+		return err != nil
+	}
+
 	client := ts.Client()
 	client.Transport = &retry.RoundTripper{
 		Transport: client.Transport,
-		Backoffs:  backoffs,
+		Retrier:   r,
 	}
 
 	_, err := client.Get(ts.URL)
@@ -41,5 +52,10 @@ func ExampleRoundTripper() {
 	// run 4
 	// run 5
 	// run 6
-	// Get "http://127.0.0.1:8080": 500 Internal Server Error
+	// run 7
+	// run 8
+	// run 9
+	// run 10
+	// run 11
+	// Get "http://127.0.0.1:8080": retry: max attempts reached - retry 10 times, took 0s
 }

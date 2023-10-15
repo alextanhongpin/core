@@ -1,8 +1,6 @@
 package retry
 
 import (
-	"context"
-	"errors"
 	"net/http"
 )
 
@@ -16,23 +14,33 @@ type breaker interface {
 
 type RoundTripper struct {
 	Transport transporter
-	Backoffs  Backoffs
+	Retrier   *Retry[*http.Response]
 }
 
-func (t *RoundTripper) RoundTrip(r *http.Request) (resp *http.Response, err error) {
-	err = t.Backoffs.Exec(r.Context(), func(ctx context.Context) error {
-		resp, err = t.Transport.RoundTrip(r)
-		if err != nil {
-			return err
+func NewRoundTripper(t transporter) *RoundTripper {
+	r := New[*http.Response](NewOption())
+	r.ShouldHandle = func(w *http.Response, err error) bool {
+		// Retry when status code is 5XX.
+		if w != nil && w.StatusCode >= http.StatusInternalServerError {
+			return true
 		}
 
-		// NOTE: Create your own implementation here.
-		if resp.StatusCode >= http.StatusInternalServerError {
-			return errors.New(resp.Status)
-		}
+		return err != nil
+	}
 
-		return nil
+	return &RoundTripper{
+		Transport: t,
+		Retrier:   r,
+	}
+}
+
+func (t *RoundTripper) RoundTrip(r *http.Request) (*http.Response, error) {
+	resp, _, err := t.Retrier.Do(func() (*http.Response, error) {
+		return t.Transport.RoundTrip(r)
 	})
+	if err != nil {
+		return nil, err
+	}
 
-	return
+	return resp, nil
 }

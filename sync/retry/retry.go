@@ -2,60 +2,139 @@
 package retry
 
 import (
-	"context"
 	"errors"
+	"fmt"
+	"math"
 	"math/rand"
 	"time"
 )
 
-var (
-	Linear      = Backoffs(linear())
-	Exponential = Backoffs(exponential())
+var ErrMaxAttempts = errors.New("retry: max attempts reached")
+
+type BackoffType int
+
+const (
+	BackoffTypeExponential BackoffType = iota
+	BackoffTypeLinear
+	BackoffTypeConstant
 )
 
-type Backoffs []time.Duration
-
-func (b Backoffs) Jitter() Backoffs {
-	return WithJitter(b)
+type Option struct {
+	BackoffType      BackoffType
+	Delay            time.Duration
+	MaxDelay         time.Duration
+	MaxRetryAttempts int
+	UseJitter        bool
 }
 
-func (b Backoffs) SoftLimit(limit time.Duration) Backoffs {
-	return WithSoftLimit(b, limit)
+func NewOption() *Option {
+	return &Option{
+		BackoffType:      BackoffTypeExponential,
+		Delay:            100 * time.Millisecond,
+		MaxDelay:         time.Minute,
+		MaxRetryAttempts: 10,
+		UseJitter:        true,
+	}
 }
 
-func (b Backoffs) HardLimit(limit time.Duration) Backoffs {
-	return WithHardLimit(b, limit)
+type Retry[T any] struct {
+	ShouldHandle func(T, error) bool
+	backoff      Backoff
 }
 
-func (b Backoffs) Exec(ctx context.Context, fn func(ctx context.Context) error) (err error) {
-	return Exec(ctx, fn, b)
+func New[T any](opt *Option) *Retry[T] {
+	if opt == nil {
+		opt = NewOption()
+	}
+
+	backoff := NewBackoff(opt.BackoffType, opt.MaxRetryAttempts, opt.Delay).
+		WithMaxDelay(opt.MaxDelay).
+		WithMaxRetryAttempts(opt.MaxRetryAttempts).
+		WithJitter()
+
+	return &Retry[T]{
+		ShouldHandle: func(v T, err error) bool {
+			return err != nil
+		},
+		backoff: backoff,
+	}
 }
 
-func (b Backoffs) ExecResult(ctx context.Context, fn func(ctx context.Context) error) (res Result, err error) {
-	return ExecResult(ctx, fn, b)
+func (r *Retry[T]) Do(fn func() (T, error)) (v T, res Result, err error) {
+	// The first execution does not count as retry.
+	backoff := append([]time.Duration{0}, r.backoff...)
+	for i, t := range backoff {
+		if t != 0 {
+			time.Sleep(t)
+		}
+		v, err = fn()
+		// We may not have an error, but the result is not what we want.
+		// E.g. a HTTP request may SUCCEED with status code 5XX.
+		shouldHandle := r.ShouldHandle(v, err)
+		if !shouldHandle {
+			return
+		}
+
+		res.Attempts = i
+		res.Duration += t
+	}
+
+	if r.ShouldHandle(v, err) {
+		errMaxAttempts := fmt.Errorf("%w - %s", ErrMaxAttempts, res.String())
+		if err == nil {
+			err = errMaxAttempts
+		} else {
+			err = fmt.Errorf("%w: %w", errMaxAttempts, err)
+		}
+	}
+
+	return
 }
 
-// WithSoftLimit applies soft limit to the total duration. The total duration
-// will be at least the soft limit amount.
-func WithSoftLimit(ts []time.Duration, limit time.Duration) []time.Duration {
-	res := make([]time.Duration, 0, len(ts))
+type Backoff []time.Duration
 
-	var total time.Duration
-	for i := range ts {
-		total += ts[i]
-		res = append(res, ts[i])
-
-		if total > limit {
-			break
+// NewBackoff generates a list of backoff durations based on the backoff type.
+func NewBackoff(t BackoffType, n int, delay time.Duration) Backoff {
+	res := make([]time.Duration, n)
+	for i := 0; i < n; i++ {
+		switch t {
+		case BackoffTypeLinear:
+			res[i] = time.Duration(i) * delay
+		case BackoffTypeExponential:
+			res[i] = time.Duration(math.Pow(2, float64(i))) * delay
+		default:
+			// Defaults to constant.
+			res[i] = delay
 		}
 	}
 
 	return res
 }
 
-// WithHardLimit applies hard limit to the total duration. The total duration
+func (b Backoff) WithJitter() Backoff {
+	return WithJitter(b)
+}
+
+func (b Backoff) WithMaxRetryAttempts(n int) Backoff {
+	return WithMaxRetryAttempts(b, n)
+}
+
+func (b Backoff) WithMaxDelay(d time.Duration) Backoff {
+	return WithMaxDelay(b, d)
+}
+
+// WithMaxRetryAttempts limits the number of attempts.
+func WithMaxRetryAttempts(ts []time.Duration, n int) []time.Duration {
+	if len(ts) <= n {
+		return ts
+	}
+
+	return ts[:n]
+}
+
+// WithMaxDelay applies hard limit to the total duration. The total duration
 // must be at most the hard limit amount.
-func WithHardLimit(ts []time.Duration, limit time.Duration) []time.Duration {
+func WithMaxDelay(ts []time.Duration, limit time.Duration) []time.Duration {
 	res := make([]time.Duration, 0, len(ts))
 
 	var total time.Duration
@@ -83,109 +162,19 @@ func WithJitter(ts []time.Duration) []time.Duration {
 	return res
 }
 
-// Exec executes the retry and returns an error.
-func Exec(ctx context.Context, fn func(ctx context.Context) error, ts []time.Duration) (err error) {
-	timeouts := append([]time.Duration{0}, ts...)
-
-	for _, t := range timeouts {
-		if t != 0 {
-			time.Sleep(t)
-		}
-
-		err = fn(ctx)
-		if err == nil {
-			return
-		}
-
-	}
-
-	return
-}
-
 type Result struct {
-	Skip  bool
-	Retry int
+	Attempts int
+	Duration time.Duration
 }
 
-// ExecResult executes the retry and returns an error and result.
-func ExecResult(ctx context.Context, fn func(ctx context.Context) error, ts []time.Duration) (res Result, err error) {
-	timeouts := append([]time.Duration{0}, ts...)
-
-	for i, t := range timeouts {
-		if t != 0 {
-			time.Sleep(t)
-		}
-
-		err = fn(ctx)
-		if err == nil {
-			return
-		}
-
-		res.Retry = i
-
-		var skipErr *SkipError
-		if errors.As(err, &skipErr) {
-			res.Skip = true
-			err = skipErr.Unwrap()
-
-			return
-		}
-	}
-
-	return
-}
-
-// Do executes the retry and returns an error and result.
-func Do[T any](ctx context.Context, fn func(ctx context.Context) (T, error), ts []time.Duration) (v T, err error, res Result) {
-	timeouts := append([]time.Duration{0}, ts...)
-
-	for i, t := range timeouts {
-		if t != 0 {
-			time.Sleep(t)
-		}
-
-		v, err = fn(ctx)
-		if err == nil {
-			return
-		}
-
-		res.Retry = i
-
-		var skipErr *SkipError
-		if errors.As(err, &skipErr) {
-			res.Skip = true
-			err = skipErr.Unwrap()
-
-			return
-		}
-	}
-
-	return
-}
-
-func linear() []time.Duration {
-	n := 10
-
-	res := make([]time.Duration, n)
-	for i := 0; i < n; i++ {
-		res[i] = 1 * time.Second
-	}
-
-	return res
-}
-
-func exponential() []time.Duration {
-	n := 10
-
-	res := make([]time.Duration, n)
-	res[0] = 50 * time.Millisecond
-	for i := 1; i < n; i++ {
-		res[i] = res[i-1] * 2
-	}
-
-	return res
+func (r *Result) String() string {
+	return fmt.Sprintf("retry %d times, took %s", r.Attempts, r.Duration)
 }
 
 func jitter(d time.Duration) time.Duration {
+	if d == 0 {
+		return 0
+	}
+
 	return time.Duration(rand.Intn(int(d / 2))).Round(5 * time.Millisecond)
 }

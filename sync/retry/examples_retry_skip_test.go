@@ -1,7 +1,6 @@
 package retry_test
 
 import (
-	"context"
 	"errors"
 	"fmt"
 
@@ -9,26 +8,32 @@ import (
 )
 
 func ExampleRetrySkip() {
-	ctx := context.Background()
+	var skipErr = errors.New("skipable")
 
 	var i int
 	errs := []error{
 		errors.New("random"),
 		errors.New("random"),
-		retry.Skip(errors.New("random")),
+		skipErr,
 	}
 
-	backoffs := retry.Backoffs{0, 0, 0, 0, 0}
-	res, err := backoffs.ExecResult(ctx, func(ctx context.Context) error {
+	opt := retry.NewOption()
+	r := retry.New[any](opt)
+	r.ShouldHandle = func(v any, err error) bool {
+		if errors.Is(err, skipErr) {
+			return false
+		}
+
+		return err != nil
+	}
+	_, res, err := r.Do(func() (any, error) {
 		err := errs[i]
 		i++
-		return err
+		return nil, err
 	})
 	fmt.Println(err)
-	fmt.Println(res.Retry)
-	fmt.Println(res.Skip)
+	fmt.Println(res.Attempts)
 	// Output:
-	// random
-	// 2
-	// true
+	// skipable
+	// 1
 }
