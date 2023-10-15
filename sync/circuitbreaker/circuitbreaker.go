@@ -135,7 +135,7 @@ func (cb *CircuitBreaker[T]) Do(fn func() (T, error)) (v T, err error) {
 				return fmt.Errorf("%w: %w", ErrFailing, cbErr)
 			}
 
-			return cbErr
+			return ErrFailing
 		}
 
 		return err
