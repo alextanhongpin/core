@@ -96,8 +96,8 @@ func TestStore(t *testing.T) {
 	assert.Equal(Closed, cb.Status())
 
 	cb.opt.Store = &mockStore{status: Open}
-	err := cb.Do(func() error {
-		return nil
+	_, err := cb.Do(func() (any, error) {
+		return nil, nil
 	})
 	assert.ErrorIs(err, ErrBrokenCircuit)
 	assert.Equal(Open, cb.Status())
@@ -110,8 +110,8 @@ func TestIsolated(t *testing.T) {
 	assert.Equal(Closed, cb.Status())
 
 	cb.opt.Store = &mockStore{status: Isolated}
-	err := cb.Do(func() error {
-		return nil
+	_, err := cb.Do(func() (any, error) {
+		return nil, nil
 	})
 	assert.ErrorIs(err, ErrIsolatedCircuit)
 	assert.Equal(Isolated, cb.Status())
@@ -310,14 +310,14 @@ func TestHalfOpenState(t *testing.T) {
 }
 
 type circuit interface {
-	Do(func() error) error
+	Do(func() (any, error)) (any, error)
 }
 
-func newCircuitBreaker() *CircuitBreaker {
+func newCircuitBreaker() *CircuitBreaker[any] {
 	opt := NewOption()
 	opt.BreakDuration = 100 * time.Millisecond
 	opt.SamplingDuration = 100 * time.Millisecond
-	return New(opt)
+	return New[any](opt)
 }
 
 func fire(ctx context.Context, cb circuit, n int, err error) error {
@@ -328,16 +328,17 @@ func fire(ctx context.Context, cb circuit, n int, err error) error {
 		go func() {
 			defer wg.Done()
 
-			_ = cb.Do(func() error {
-				return err
+			_, _ = cb.Do(func() (any, error) {
+				return nil, err
 			})
 		}()
 	}
 	wg.Wait()
 
-	return cb.Do(func() error {
-		return err
+	_, err = cb.Do(func() (any, error) {
+		return nil, err
 	})
+	return err
 }
 
 type mockStore struct {

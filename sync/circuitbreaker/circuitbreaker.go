@@ -7,6 +7,7 @@ package circuitbreaker
 
 import (
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 )
@@ -19,17 +20,9 @@ const (
 	samplingDuration = 10 * time.Second // time window to measure the error rate.
 )
 
-// errorHandler returns a unit usage.
-var errorHandler = func(err error) int64 {
-	if err != nil {
-		return 1
-	}
-
-	return 0
-}
-
 // Unavailable returns the error when the circuit breaker is not available.
 var (
+	ErrFailing         = errors.New("circuit-breaker: failing")
 	ErrBrokenCircuit   = errors.New("circuit-breaker: broken")
 	ErrIsolatedCircuit = errors.New("circuit-breaker: isolated")
 )
@@ -51,11 +44,9 @@ type Option struct {
 	FailureThreshold int64
 	BreakDuration    time.Duration
 	Now              func() time.Time
-	ErrorHandler     func(error) int64
 	FailureRatio     float64
 	SamplingDuration time.Duration
 	Store            store
-	OnStateChanged   func(from, to Status)
 }
 
 func NewOption() *Option {
@@ -64,28 +55,27 @@ func NewOption() *Option {
 		FailureThreshold: failureThreshold,
 		BreakDuration:    breakDuration,
 		Now:              time.Now,
-		ErrorHandler:     errorHandler,
 		FailureRatio:     failureRatio,
 		SamplingDuration: samplingDuration,
-		OnStateChanged:   func(from, to Status) {},
 	}
 }
 
 // CircuitBreaker represents the circuit breaker.
-type CircuitBreaker struct {
+type CircuitBreaker[T any] struct {
 	mu             sync.RWMutex
 	opt            *Option
 	states         [4]state
 	state          Status
-	onStateChanged func(from, to Status)
+	OnStateChanged func(from, to Status)
+	ShouldHandle   func(T, error) (bool, error)
 }
 
-func New(opt *Option) *CircuitBreaker {
+func New[T any](opt *Option) *CircuitBreaker[T] {
 	if opt == nil {
 		opt = NewOption()
 	}
 
-	return &CircuitBreaker{
+	return &CircuitBreaker[T]{
 		opt: opt,
 		states: [4]state{
 			NewClosedState(opt),
@@ -93,11 +83,14 @@ func New(opt *Option) *CircuitBreaker {
 			NewHalfOpenState(opt),
 			NewIsolatedState(opt),
 		},
-		onStateChanged: opt.OnStateChanged,
+		OnStateChanged: func(from, to Status) {},
+		ShouldHandle: func(v T, err error) (bool, error) {
+			return err != nil, err
+		},
 	}
 }
 
-func (cb *CircuitBreaker) ResetIn() time.Duration {
+func (cb *CircuitBreaker[T]) ResetIn() time.Duration {
 	cb.mu.RLock()
 	status := cb.state
 	closeAt := cb.opt.closeAt
@@ -116,7 +109,7 @@ func (cb *CircuitBreaker) ResetIn() time.Duration {
 
 }
 
-func (cb *CircuitBreaker) Status() Status {
+func (cb *CircuitBreaker[T]) Status() Status {
 	cb.mu.RLock()
 	status := cb.state
 	cb.mu.RUnlock()
@@ -124,21 +117,35 @@ func (cb *CircuitBreaker) Status() Status {
 	return status
 }
 
-func (cb *CircuitBreaker) Do(fn func() error) error {
+func (cb *CircuitBreaker[T]) Do(fn func() (T, error)) (v T, err error) {
 	// Checks the remote store for the distributed state.
 	// Failure in getting the remote state should not stop the circuitbreaker.
 	storeState, ok := cb.storeState()
+
+	handler := func() error {
+		v, err = fn()
+		if ok, cbErr := cb.ShouldHandle(v, err); ok {
+			if cbErr != nil {
+				return fmt.Errorf("%w: %w", ErrFailing, cbErr)
+			}
+
+			return cbErr
+		}
+
+		return err
+	}
 
 	cb.mu.Lock()
 	defer cb.mu.Unlock()
 
 	// If the local state is different from the remote state, sync them.
 	if ok && storeState != cb.state {
-		cb.onStateChanged(cb.state, storeState)
+		cb.OnStateChanged(cb.state, storeState)
 		cb.state = storeState
 		cb.states[cb.state].Entry()
 
-		return cb.states[cb.state].Do(fn)
+		err = cb.states[cb.state].Do(handler)
+		return
 	}
 
 	state, ok := cb.states[cb.state].Next()
@@ -149,15 +156,16 @@ func (cb *CircuitBreaker) Do(fn func() error) error {
 		if !state.IsHalfOpen() {
 			cb.setStoreState(state)
 		}
-		cb.onStateChanged(cb.state, state)
+		cb.OnStateChanged(cb.state, state)
 		cb.state = state
 		cb.states[cb.state].Entry()
 	}
 
-	return cb.states[cb.state].Do(fn)
+	err = cb.states[cb.state].Do(handler)
+	return
 }
 
-func (cb *CircuitBreaker) storeState() (Status, bool) {
+func (cb *CircuitBreaker[T]) storeState() (Status, bool) {
 	if cb.opt.Store != nil {
 		return cb.opt.Store.Get()
 	}
@@ -165,7 +173,7 @@ func (cb *CircuitBreaker) storeState() (Status, bool) {
 	return 0, false
 }
 
-func (cb *CircuitBreaker) setStoreState(status Status) {
+func (cb *CircuitBreaker[T]) setStoreState(status Status) {
 	if cb.opt.Store != nil {
 		cb.opt.Store.Set(status)
 	}
@@ -235,7 +243,9 @@ func (c *ClosedState) incrementFailureCounter(err error) {
 	}
 
 	o.total++
-	o.count += o.ErrorHandler(err)
+	if err != nil {
+		o.count++
+	}
 }
 
 type OpenState struct {
@@ -290,7 +300,7 @@ func (s *HalfOpenState) Next() (Status, bool) {
 func (s *HalfOpenState) Do(fn func() error) error {
 	err := fn()
 
-	s.failed = s.opt.ErrorHandler(err) > 0
+	s.failed = err != nil
 	if !s.failed {
 		s.incrementSuccessCounter()
 	}

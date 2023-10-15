@@ -12,17 +12,17 @@ func ExampleCircuitBreaker() {
 	opt := circuitbreaker.NewOption()
 	opt.BreakDuration = 100 * time.Millisecond
 	opt.SamplingDuration = 1 * time.Second
-	opt.OnStateChanged = func(from, to circuitbreaker.Status) {
+
+	cb := circuitbreaker.New[any](opt)
+	cb.OnStateChanged = func(from, to circuitbreaker.Status) {
 		fmt.Printf("status changed from %s to %s\n", from, to)
 	}
-
-	cb := circuitbreaker.New(opt)
 	fmt.Println("initial status:", cb.Status())
 
 	// Opens after failure ratio exceeded.
 	for i := 0; i <= int(opt.FailureThreshold+1); i++ {
-		_ = cb.Do(func() error {
-			return errors.New("foo")
+		_, _ = cb.Do(func() (any, error) {
+			return nil, errors.New("foo")
 		})
 	}
 
@@ -31,8 +31,8 @@ func ExampleCircuitBreaker() {
 
 	// Recover.
 	for i := 0; i <= int(opt.SuccessThreshold+1); i++ {
-		_ = cb.Do(func() error {
-			return nil
+		_, _ = cb.Do(func() (any, error) {
+			return nil, nil
 		})
 	}
 	// Output:

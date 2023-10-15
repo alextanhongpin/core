@@ -14,10 +14,10 @@ func ExampleRoundTripper() {
 	opt := circuitbreaker.NewOption()
 	opt.BreakDuration = 100 * time.Millisecond
 	opt.SamplingDuration = 1 * time.Second
-	opt.OnStateChanged = func(from, to circuitbreaker.Status) {
+	cb := circuitbreaker.New[any](opt)
+	cb.OnStateChanged = func(from, to circuitbreaker.Status) {
 		fmt.Printf("status changed from %s to %s\n", from, to)
 	}
-	cb := circuitbreaker.New(opt)
 	fmt.Println("initial status:", cb.Status())
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -26,10 +26,7 @@ func ExampleRoundTripper() {
 	defer ts.Close()
 
 	client := ts.Client()
-	client.Transport = &circuitbreaker.RoundTripper{
-		Transport:      client.Transport,
-		CircuitBreaker: cb,
-	}
+	client.Transport = circuitbreaker.NewRoundTripper(client.Transport)
 
 	re := regexp.MustCompile(`\d{5}`)
 	// Opens after failure ratio exceeded.
@@ -45,17 +42,16 @@ func ExampleRoundTripper() {
 
 	// Output:
 	// initial status: closed
-	// Get "http://127.0.0.1:8080": 500 Internal Server Error
-	// Get "http://127.0.0.1:8080": 500 Internal Server Error
-	// Get "http://127.0.0.1:8080": 500 Internal Server Error
-	// Get "http://127.0.0.1:8080": 500 Internal Server Error
-	// Get "http://127.0.0.1:8080": 500 Internal Server Error
-	// Get "http://127.0.0.1:8080": 500 Internal Server Error
-	// Get "http://127.0.0.1:8080": 500 Internal Server Error
-	// Get "http://127.0.0.1:8080": 500 Internal Server Error
-	// Get "http://127.0.0.1:8080": 500 Internal Server Error
-	// Get "http://127.0.0.1:8080": 500 Internal Server Error
-	// Get "http://127.0.0.1:8080": 500 Internal Server Error
-	// status changed from closed to open
+	// Get "http://127.0.0.1:8080": circuit-breaker: failing: 500 Internal Server Error
+	// Get "http://127.0.0.1:8080": circuit-breaker: failing: 500 Internal Server Error
+	// Get "http://127.0.0.1:8080": circuit-breaker: failing: 500 Internal Server Error
+	// Get "http://127.0.0.1:8080": circuit-breaker: failing: 500 Internal Server Error
+	// Get "http://127.0.0.1:8080": circuit-breaker: failing: 500 Internal Server Error
+	// Get "http://127.0.0.1:8080": circuit-breaker: failing: 500 Internal Server Error
+	// Get "http://127.0.0.1:8080": circuit-breaker: failing: 500 Internal Server Error
+	// Get "http://127.0.0.1:8080": circuit-breaker: failing: 500 Internal Server Error
+	// Get "http://127.0.0.1:8080": circuit-breaker: failing: 500 Internal Server Error
+	// Get "http://127.0.0.1:8080": circuit-breaker: failing: 500 Internal Server Error
+	// Get "http://127.0.0.1:8080": circuit-breaker: failing: 500 Internal Server Error
 	// Get "http://127.0.0.1:8080": circuit-breaker: broken
 }
