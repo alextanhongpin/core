@@ -2,6 +2,7 @@
 package retry
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"math"
@@ -56,6 +57,11 @@ func New[T any](opt *Option) *Retry[T] {
 
 	return &Retry[T]{
 		ShouldHandle: func(v T, err error) (bool, error) {
+			// Skip if cancelled by caller.
+			if errors.Is(err, context.Canceled) {
+				return false, err
+			}
+
 			return err != nil, err
 		},
 		backoff: backoff,
