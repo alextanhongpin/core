@@ -12,10 +12,10 @@ func ExampleRetryDo() {
 		return 42, nil
 	})
 	fmt.Println(v)
+	fmt.Printf("retry.Result: %+v\n", res)
 	fmt.Println(err)
-	fmt.Println(res.Attempts)
 	// Output:
 	// 42
+	// retry.Result: {Attempts:0 Duration:0s}
 	// <nil>
-	// 0
 }

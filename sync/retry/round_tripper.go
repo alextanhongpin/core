@@ -10,13 +10,13 @@ type transporter interface {
 	RoundTrip(r *http.Request) (*http.Response, error)
 }
 
-type breaker interface {
-	Do(func() error) error
+type retrier interface {
+	Do(func() (*http.Response, error)) (*http.Response, Result, error)
 }
 
 type RoundTripper struct {
 	Transport transporter
-	Retrier   *Retry[*http.Response]
+	Retrier   retrier
 }
 
 func NewRoundTripper(t transporter) *RoundTripper {

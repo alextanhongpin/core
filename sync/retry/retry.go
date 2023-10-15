@@ -10,6 +10,8 @@ import (
 	"time"
 )
 
+var Rand = rand.New(rand.NewSource(time.Now().UnixNano()))
+
 var ErrMaxAttempts = errors.New("retry: max attempts reached")
 
 type BackoffType int
@@ -25,6 +27,7 @@ type Option struct {
 	Delay            time.Duration
 	MaxDelay         time.Duration
 	MaxRetryAttempts int
+	MaxDuration      time.Duration
 	UseJitter        bool
 }
 
@@ -35,6 +38,7 @@ func NewOption() *Option {
 		MaxDelay:         time.Minute,
 		MaxRetryAttempts: 10,
 		UseJitter:        true,
+		MaxDuration:      5 * time.Minute,
 	}
 }
 
@@ -42,8 +46,15 @@ type Retry[T any] struct {
 	// Returns a bool to indicate if a retry should be made,
 	// and also the error for the decision.
 	ShouldHandle func(T, error) (bool, error)
+	OnRetry      func(Event)
 	backoff      Backoff
 	useJitter    bool
+}
+
+type Event struct {
+	Attempt int
+	Delay   time.Duration
+	Err     error
 }
 
 func New[T any](opt *Option) *Retry[T] {
@@ -53,9 +64,12 @@ func New[T any](opt *Option) *Retry[T] {
 
 	backoff := NewBackoff(opt.BackoffType, opt.MaxRetryAttempts, opt.Delay).
 		WithMaxDelay(opt.MaxDelay).
+		WithMaxDuration(opt.MaxDuration).
 		WithMaxRetryAttempts(opt.MaxRetryAttempts)
 
 	return &Retry[T]{
+		backoff:   backoff,
+		useJitter: opt.UseJitter,
 		ShouldHandle: func(v T, err error) (bool, error) {
 			// Skip if cancelled by caller.
 			if errors.Is(err, context.Canceled) {
@@ -64,24 +78,35 @@ func New[T any](opt *Option) *Retry[T] {
 
 			return err != nil, err
 		},
-		backoff:   backoff,
-		useJitter: opt.UseJitter,
+		OnRetry: func(Event) {},
 	}
 }
 
 func (r *Retry[T]) Do(fn func() (T, error)) (v T, res Result, err error) {
 	var shouldRetry bool
 
-	// The first execution does not count as retry.
 	backoff := r.backoff
 	if r.useJitter {
 		backoff = backoff.WithJitter()
 	}
+
+	// The first execution does not count as retry.
 	backoff = append([]time.Duration{0}, backoff...)
 	for i, t := range backoff {
+		if i != 0 {
+			res.Attempts = i
+			res.Duration += t
+
+			r.OnRetry(Event{
+				Attempt: res.Attempts,
+				Delay:   t,
+				Err:     err,
+			})
+		}
 		if t != 0 {
 			time.Sleep(t)
 		}
+
 		v, err = fn()
 		// We may not have an error, but the result is not what we want.
 		// E.g. a HTTP request may SUCCEED with status code 5XX.
@@ -89,9 +114,6 @@ func (r *Retry[T]) Do(fn func() (T, error)) (v T, res Result, err error) {
 		if !shouldRetry {
 			return
 		}
-
-		res.Attempts = i
-		res.Duration += t
 	}
 
 	if shouldRetry {
@@ -138,6 +160,10 @@ func (b Backoff) WithMaxDelay(d time.Duration) Backoff {
 	return WithMaxDelay(b, d)
 }
 
+func (b Backoff) WithMaxDuration(d time.Duration) Backoff {
+	return WithMaxDuration(b, d)
+}
+
 // WithMaxRetryAttempts limits the number of attempts.
 func WithMaxRetryAttempts(ts []time.Duration, n int) []time.Duration {
 	if len(ts) <= n {
@@ -147,21 +173,30 @@ func WithMaxRetryAttempts(ts []time.Duration, n int) []time.Duration {
 	return ts[:n]
 }
 
-// WithMaxDelay applies hard limit to the total duration. The total duration
-// must be at most the hard limit amount.
-func WithMaxDelay(ts []time.Duration, limit time.Duration) []time.Duration {
+// WithMaxDelay caps the delay to the max value.
+func WithMaxDelay(ts []time.Duration, maxDelay time.Duration) []time.Duration {
+	res := make([]time.Duration, len(ts))
+
+	for i := range ts {
+		res[i] = min(ts[i], maxDelay)
+	}
+
+	return res
+}
+
+// WithMaxDuration caps the total duration of the retry.
+func WithMaxDuration(ts []time.Duration, maxDuration time.Duration) []time.Duration {
 	res := make([]time.Duration, 0, len(ts))
 
 	var total time.Duration
 	for i := range ts {
-		total += ts[i]
-		if total > limit {
-			allowed := ts[i] - (total - limit)
-			res = append(res, allowed)
-			break
+		d := ts[i]
+		total += d
+		if total > maxDuration {
+			return res
 		}
 
-		res = append(res, ts[i])
+		res = append(res, d)
 	}
 
 	return res
@@ -191,5 +226,5 @@ func jitter(d time.Duration) time.Duration {
 		return 0
 	}
 
-	return time.Duration(rand.Intn(int(d / 2))).Round(5 * time.Millisecond)
+	return time.Duration(Rand.Intn(int(d / 2))).Round(5 * time.Millisecond)
 }

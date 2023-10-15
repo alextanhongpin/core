@@ -12,14 +12,14 @@ func ExampleRetry() {
 	opt.Delay = 0
 	r := retry.New[any](opt)
 
-	_, res, err := r.Do(func() (any, error) {
+	v, res, err := r.Do(func() (any, error) {
 		return nil, errors.New("random")
 	})
+	fmt.Println(v)
+	fmt.Printf("retry.Result: %+v\n", res)
 	fmt.Println(err)
-	fmt.Println(res.Attempts)
-	fmt.Println(res.Duration)
 	// Output:
+	// <nil>
+	// retry.Result: {Attempts:10 Duration:0s}
 	// retry: max attempts reached - retry 10 times, took 0s: random
-	// 10
-	// 0s
 }

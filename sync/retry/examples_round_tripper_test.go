@@ -12,10 +12,7 @@ import (
 )
 
 func ExampleRoundTripper() {
-	i := 0
 	ts := httptest.NewServer(http.HandlerFunc(func(resp http.ResponseWriter, r *http.Request) {
-		i++
-		fmt.Println("run", i)
 		resp.WriteHeader(http.StatusInternalServerError)
 	}))
 	defer ts.Close()
@@ -37,6 +34,9 @@ func ExampleRoundTripper() {
 
 		return err != nil, err
 	}
+	r.OnRetry = func(e retry.Event) {
+		fmt.Printf("retry.Event: %+v\n", e)
+	}
 
 	client := ts.Client()
 	client.Transport = &retry.RoundTripper{
@@ -53,16 +53,15 @@ func ExampleRoundTripper() {
 	}
 
 	// Output:
-	// run 1
-	// run 2
-	// run 3
-	// run 4
-	// run 5
-	// run 6
-	// run 7
-	// run 8
-	// run 9
-	// run 10
-	// run 11
+	// retry.Event: {Attempt:1 Delay:0s Err:500 Internal Server Error}
+	// retry.Event: {Attempt:2 Delay:0s Err:500 Internal Server Error}
+	// retry.Event: {Attempt:3 Delay:0s Err:500 Internal Server Error}
+	// retry.Event: {Attempt:4 Delay:0s Err:500 Internal Server Error}
+	// retry.Event: {Attempt:5 Delay:0s Err:500 Internal Server Error}
+	// retry.Event: {Attempt:6 Delay:0s Err:500 Internal Server Error}
+	// retry.Event: {Attempt:7 Delay:0s Err:500 Internal Server Error}
+	// retry.Event: {Attempt:8 Delay:0s Err:500 Internal Server Error}
+	// retry.Event: {Attempt:9 Delay:0s Err:500 Internal Server Error}
+	// retry.Event: {Attempt:10 Delay:0s Err:500 Internal Server Error}
 	// Get "http://127.0.0.1:8080": retry: max attempts reached - retry 10 times, took 0s: 500 Internal Server Error
 }
