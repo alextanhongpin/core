@@ -1,6 +1,7 @@
 package circuitbreaker
 
 import (
+	"context"
 	"errors"
 	"net/http"
 )
@@ -22,6 +23,11 @@ func NewRoundTripper(t transporter) *RoundTripper {
 	opt := NewOption()
 	cb := New[*http.Response](opt)
 	cb.ShouldHandle = func(resp *http.Response, err error) (bool, error) {
+		// Skip if cancelled by caller.
+		if errors.Is(err, context.Canceled) {
+			return false, err
+		}
+
 		if resp != nil && resp.StatusCode >= http.StatusInternalServerError {
 			return true, errors.New(resp.Status)
 		}

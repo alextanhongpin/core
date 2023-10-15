@@ -6,6 +6,7 @@
 package circuitbreaker
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"sync"
@@ -85,6 +86,11 @@ func New[T any](opt *Option) *CircuitBreaker[T] {
 		},
 		OnStateChanged: func(from, to Status) {},
 		ShouldHandle: func(v T, err error) (bool, error) {
+			// Skip if cancelled by caller.
+			if errors.Is(err, context.Canceled) {
+				return false, err
+			}
+
 			return err != nil, err
 		},
 	}
