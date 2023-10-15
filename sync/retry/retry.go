@@ -43,6 +43,7 @@ type Retry[T any] struct {
 	// and also the error for the decision.
 	ShouldHandle func(T, error) (bool, error)
 	backoff      Backoff
+	useJitter    bool
 }
 
 func New[T any](opt *Option) *Retry[T] {
@@ -52,8 +53,7 @@ func New[T any](opt *Option) *Retry[T] {
 
 	backoff := NewBackoff(opt.BackoffType, opt.MaxRetryAttempts, opt.Delay).
 		WithMaxDelay(opt.MaxDelay).
-		WithMaxRetryAttempts(opt.MaxRetryAttempts).
-		WithJitter()
+		WithMaxRetryAttempts(opt.MaxRetryAttempts)
 
 	return &Retry[T]{
 		ShouldHandle: func(v T, err error) (bool, error) {
@@ -64,7 +64,8 @@ func New[T any](opt *Option) *Retry[T] {
 
 			return err != nil, err
 		},
-		backoff: backoff,
+		backoff:   backoff,
+		useJitter: opt.UseJitter,
 	}
 }
 
@@ -72,7 +73,11 @@ func (r *Retry[T]) Do(fn func() (T, error)) (v T, res Result, err error) {
 	var shouldRetry bool
 
 	// The first execution does not count as retry.
-	backoff := append([]time.Duration{0}, r.backoff...)
+	backoff := r.backoff
+	if r.useJitter {
+		backoff = backoff.WithJitter()
+	}
+	backoff = append([]time.Duration{0}, backoff...)
 	for i, t := range backoff {
 		if t != 0 {
 			time.Sleep(t)
@@ -109,7 +114,7 @@ func NewBackoff(t BackoffType, n int, delay time.Duration) Backoff {
 	for i := 0; i < n; i++ {
 		switch t {
 		case BackoffTypeLinear:
-			res[i] = time.Duration(i) * delay
+			res[i] = time.Duration(i+1) * delay
 		case BackoffTypeExponential:
 			res[i] = time.Duration(math.Pow(2, float64(i))) * delay
 		default:
