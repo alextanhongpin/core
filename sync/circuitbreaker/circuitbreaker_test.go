@@ -25,7 +25,6 @@ func TestCircuitBreaker(t *testing.T) {
 	assert.Equal(Closed, cb.Status())
 
 	// Above failure threshold, circuitbreaker becomes open.
-	assert.ErrorIs(fire(ctx, cb, 1, wantErr), wantErr)
 	assert.ErrorIs(fire(ctx, cb, 1, wantErr), ErrBrokenCircuit)
 	assert.Equal(Open, cb.Status())
 	assert.True(cb.ResetIn() > 0)
@@ -38,7 +37,7 @@ func TestCircuitBreaker(t *testing.T) {
 	assert.Equal(time.Duration(0), cb.ResetIn())
 
 	// Hit the success threshold first.
-	assert.Nil(fire(ctx, cb, 5, nil))
+	assert.Nil(fire(ctx, cb, 4, nil))
 	assert.Equal(HalfOpen, cb.Status())
 
 	// After success threshold, it becomes closed again.
@@ -142,8 +141,8 @@ func TestClosedState(t *testing.T) {
 		state := NewClosedState(opt)
 		state.Entry()
 
-		opt.count = opt.FailureThreshold + 1
-		opt.total = opt.FailureThreshold + 1
+		opt.count = opt.FailureThreshold
+		opt.total = opt.FailureThreshold
 
 		status, ok := state.Next()
 
@@ -154,8 +153,8 @@ func TestClosedState(t *testing.T) {
 
 	t.Run("cannot transition to Open when below error rate", func(t *testing.T) {
 		opt := NewOption()
-		opt.count = (opt.FailureThreshold + 1)
-		opt.total = (opt.FailureThreshold + 1) * 2
+		opt.count = opt.FailureThreshold
+		opt.total = opt.FailureThreshold * 2
 
 		state := NewClosedState(opt)
 		status, ok := state.Next()

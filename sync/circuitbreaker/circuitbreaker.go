@@ -236,7 +236,7 @@ func (c *ClosedState) isFailureThresholdReached() bool {
 		c.resetFailureCounter()
 	}
 
-	return o.count > o.FailureThreshold && Ratio(o.count, o.total) >= o.FailureRatio
+	return o.count >= o.FailureThreshold && Ratio(o.count, o.total) >= o.FailureRatio
 }
 
 func (c *ClosedState) incrementFailureCounter(err error) {
@@ -323,7 +323,7 @@ func (s *HalfOpenState) isOperationFailed() bool {
 }
 
 func (s *HalfOpenState) isSuccessCountThresholdExceeded() bool {
-	return s.opt.count > s.opt.SuccessThreshold
+	return s.opt.count >= s.opt.SuccessThreshold
 }
 
 func (s *HalfOpenState) incrementSuccessCounter() {
