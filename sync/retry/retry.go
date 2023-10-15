@@ -38,7 +38,9 @@ func NewOption() *Option {
 }
 
 type Retry[T any] struct {
-	ShouldHandle func(T, error) bool
+	// Returns a bool to indicate if a retry should be made,
+	// and also the error for the decision.
+	ShouldHandle func(T, error) (bool, error)
 	backoff      Backoff
 }
 
@@ -53,14 +55,16 @@ func New[T any](opt *Option) *Retry[T] {
 		WithJitter()
 
 	return &Retry[T]{
-		ShouldHandle: func(v T, err error) bool {
-			return err != nil
+		ShouldHandle: func(v T, err error) (bool, error) {
+			return err != nil, err
 		},
 		backoff: backoff,
 	}
 }
 
 func (r *Retry[T]) Do(fn func() (T, error)) (v T, res Result, err error) {
+	var shouldRetry bool
+
 	// The first execution does not count as retry.
 	backoff := append([]time.Duration{0}, r.backoff...)
 	for i, t := range backoff {
@@ -70,8 +74,8 @@ func (r *Retry[T]) Do(fn func() (T, error)) (v T, res Result, err error) {
 		v, err = fn()
 		// We may not have an error, but the result is not what we want.
 		// E.g. a HTTP request may SUCCEED with status code 5XX.
-		shouldHandle := r.ShouldHandle(v, err)
-		if !shouldHandle {
+		shouldRetry, err = r.ShouldHandle(v, err)
+		if !shouldRetry {
 			return
 		}
 
@@ -79,12 +83,12 @@ func (r *Retry[T]) Do(fn func() (T, error)) (v T, res Result, err error) {
 		res.Duration += t
 	}
 
-	if r.ShouldHandle(v, err) {
+	if shouldRetry {
 		errMaxAttempts := fmt.Errorf("%w - %s", ErrMaxAttempts, res.String())
-		if err == nil {
-			err = errMaxAttempts
-		} else {
+		if err != nil {
 			err = fmt.Errorf("%w: %w", errMaxAttempts, err)
+		} else {
+			err = errMaxAttempts
 		}
 	}
 

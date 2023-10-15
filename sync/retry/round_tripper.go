@@ -1,6 +1,7 @@
 package retry
 
 import (
+	"errors"
 	"net/http"
 )
 
@@ -19,13 +20,13 @@ type RoundTripper struct {
 
 func NewRoundTripper(t transporter) *RoundTripper {
 	r := New[*http.Response](NewOption())
-	r.ShouldHandle = func(w *http.Response, err error) bool {
+	r.ShouldHandle = func(resp *http.Response, err error) (bool, error) {
 		// Retry when status code is 5XX.
-		if w != nil && w.StatusCode >= http.StatusInternalServerError {
-			return true
+		if resp != nil && resp.StatusCode >= http.StatusInternalServerError {
+			return true, errors.New(resp.Status)
 		}
 
-		return err != nil
+		return err != nil, err
 	}
 
 	return &RoundTripper{

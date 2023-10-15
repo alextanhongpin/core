@@ -1,6 +1,7 @@
 package retry_test
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -11,10 +12,10 @@ import (
 
 func ExampleRoundTripper() {
 	i := 0
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	ts := httptest.NewServer(http.HandlerFunc(func(resp http.ResponseWriter, r *http.Request) {
 		i++
 		fmt.Println("run", i)
-		w.WriteHeader(http.StatusInternalServerError)
+		resp.WriteHeader(http.StatusInternalServerError)
 	}))
 	defer ts.Close()
 
@@ -22,13 +23,13 @@ func ExampleRoundTripper() {
 	opt.Delay = 0
 
 	r := retry.New[*http.Response](opt)
-	r.ShouldHandle = func(w *http.Response, err error) bool {
+	r.ShouldHandle = func(resp *http.Response, err error) (bool, error) {
 		// Retry when status code is 5XX.
-		if w != nil && w.StatusCode >= http.StatusInternalServerError {
-			return true
+		if resp != nil && resp.StatusCode >= http.StatusInternalServerError {
+			return true, errors.New(resp.Status)
 		}
 
-		return err != nil
+		return err != nil, err
 	}
 
 	client := ts.Client()
@@ -57,5 +58,5 @@ func ExampleRoundTripper() {
 	// run 9
 	// run 10
 	// run 11
-	// Get "http://127.0.0.1:8080": retry: max attempts reached - retry 10 times, took 0s
+	// Get "http://127.0.0.1:8080": retry: max attempts reached - retry 10 times, took 0s: 500 Internal Server Error
 }

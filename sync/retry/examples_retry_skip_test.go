@@ -19,12 +19,8 @@ func ExampleRetrySkip() {
 
 	opt := retry.NewOption()
 	r := retry.New[any](opt)
-	r.ShouldHandle = func(v any, err error) bool {
-		if errors.Is(err, skipErr) {
-			return false
-		}
-
-		return err != nil
+	r.ShouldHandle = func(v any, err error) (bool, error) {
+		return !errors.Is(err, skipErr), err
 	}
 	_, res, err := r.Do(func() (any, error) {
 		err := errs[i]
