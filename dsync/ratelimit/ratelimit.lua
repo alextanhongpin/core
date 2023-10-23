@@ -44,8 +44,7 @@ local function fixed_window(KEYS, ARGS)
 	if allow then
 		total = total + count
 
-		redis.call('SET', key, string.format('%d:%d', reset_at, total))
-		redis.call('PEXPIRE', key, period)
+		redis.call('SET', key, string.format('%d:%d', reset_at, total), 'PX', period)
 	end
 
 	local remaining = limit - total
@@ -101,8 +100,7 @@ local function leaky_bucket(KEYS, ARGS)
 	if total + count <= burst then
 		total = total + count
 
-		redis.call('SET', key, string.format('%d:%d:%d', reset_at, total, prev_batch))
-		redis.call('PEXPIRE', key, period)
+		redis.call('SET', key, string.format('%d:%d:%d', reset_at, total, prev_batch), 'PX', period)
 
 		return {
 			1,
@@ -120,8 +118,7 @@ local function leaky_bucket(KEYS, ARGS)
 		total = total + count
 		prev_batch = batch + 1
 
-		redis.call('SET', key, string.format('%d:%d:%d', reset_at, total, prev_batch))
-		redis.call('PEXPIRE', key, period)
+		redis.call('SET', key, string.format('%d:%d:%d', reset_at, total, prev_batch), 'PX', period)
 	end
 
 	local remaining = math.max(limit - total, 0)
