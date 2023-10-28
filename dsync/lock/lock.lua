@@ -26,7 +26,7 @@ end
 -- KEYS[1]: key
 -- ARGV[1]: value
 -- ARGV[2]: lock duration in seconds
-local function refresh(KEYS, ARGS)
+local function extend(KEYS, ARGS)
 	local key = KEYS[1]
 	local val = ARGS[1]
 	local lock_duration_in_seconds = tonumber(ARGS[2]) or 60
@@ -41,4 +41,4 @@ end
 
 redis.register_function('lock', lock)
 redis.register_function('unlock', unlock)
-redis.register_function('refresh', refresh)
+redis.register_function('extend', extend)

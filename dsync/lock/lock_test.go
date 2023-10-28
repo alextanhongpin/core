@@ -27,7 +27,7 @@ func TestLock(t *testing.T) {
 		Addr: redistest.Addr(),
 	})
 
-	locker := lock.New(client)
+	locker := lock.New(client, "prefix")
 
 	a := assert.New(t)
 
@@ -37,8 +37,9 @@ func TestLock(t *testing.T) {
 	go func() {
 		defer wg.Done()
 
+		// Simulate concurrent operations. This request starts at a later time.
 		time.Sleep(100 * time.Millisecond)
-		err := locker.Lock(ctx, "hello", func(ctx context.Context) error {
+		err := locker.LockFunc(ctx, "key", func(ctx context.Context) error {
 			return nil
 		})
 		a.ErrorIs(err, lock.ErrLocked)
@@ -47,7 +48,7 @@ func TestLock(t *testing.T) {
 	go func() {
 		defer wg.Done()
 
-		err := locker.Lock(ctx, "hello", func(ctx context.Context) error {
+		err := locker.LockFunc(ctx, "key", func(ctx context.Context) error {
 			time.Sleep(200 * time.Millisecond)
 			return nil
 		})
