@@ -18,8 +18,8 @@ func TestRequestReplyInMemory(t *testing.T) {
 
 	do := func() {
 		handler := idempotency.NewRequestReply(store, idempotency.RequestReplyOption[Request, *Response]{
-			LockTimeout:     5 * time.Second, // Default is 1 minute.
-			RetentionPeriod: 1 * time.Minute, // Default is 24 hour.
+			Lock: 5 * time.Second, // Default is 1 minute.
+			TTL:  1 * time.Minute, // Default is 24 hour.
 			Handler: func(ctx context.Context, req Request) (*Response, error) {
 				// Simulate critical section.
 				time.Sleep(100 * time.Millisecond)
@@ -67,7 +67,7 @@ func TestRequestReplyInMemory(t *testing.T) {
 
 	wg.Wait()
 
-	res, err := store.Load(ctx, "some-operation:xyz")
+	res, err := store.Load(ctx, "i9y:some-operation:xyz")
 	assert.Nil(err)
 
 	assert.Equal("success", string(res.Status))
@@ -83,8 +83,8 @@ func TestRequestInMemory(t *testing.T) {
 
 	do := func() {
 		handler := idempotency.NewRequest(store, idempotency.RequestOption[Request]{
-			LockTimeout:     5 * time.Second, // Default is 1 minute.
-			RetentionPeriod: 1 * time.Minute, // Default is 24 hour.
+			Lock: 5 * time.Second, // Default is 1 minute.
+			TTL:  1 * time.Minute, // Default is 24 hour.
 			Handler: func(ctx context.Context, req Request) error {
 				// Simulate critical section.
 				time.Sleep(100 * time.Millisecond)
@@ -128,7 +128,7 @@ func TestRequestInMemory(t *testing.T) {
 
 	wg.Wait()
 
-	res, err := store.Load(ctx, "some-operation:xyz")
+	res, err := store.Load(ctx, "i9y:some-operation:xyz")
 	assert.Nil(err)
 
 	assert.Equal("success", string(res.Status))

@@ -8,32 +8,32 @@ import (
 )
 
 type RequestOption[T any] struct {
-	LockTimeout     time.Duration
-	RetentionPeriod time.Duration
-	Handler         func(ctx context.Context, v T) error
+	Lock    time.Duration
+	TTL     time.Duration
+	Handler func(ctx context.Context, v T) error
 }
 
 type Request[T any] struct {
-	store     store[any]
-	lock      time.Duration
-	retention time.Duration
-	handler   func(ctx context.Context, v T) error
+	store   store[any]
+	lock    time.Duration
+	ttl     time.Duration
+	handler func(ctx context.Context, v T) error
 }
 
 func NewRequest[T any](store store[any], opt RequestOption[T]) *Request[T] {
-	if opt.LockTimeout <= 0 {
-		opt.LockTimeout = 1 * time.Minute
+	if opt.Lock <= 0 {
+		opt.Lock = 1 * time.Minute
 	}
 
-	if opt.RetentionPeriod <= 0 {
-		opt.RetentionPeriod = 24 * time.Hour
+	if opt.TTL <= 0 {
+		opt.TTL = 24 * time.Hour
 	}
 
 	return &Request[T]{
-		store:     store,
-		lock:      opt.LockTimeout,
-		retention: opt.RetentionPeriod,
-		handler:   opt.Handler,
+		store:   store,
+		lock:    opt.Lock,
+		ttl:     opt.TTL,
+		handler: opt.Handler,
 	}
 }
 
@@ -48,7 +48,7 @@ func (r *Request[T]) Exec(ctx context.Context, key string, req T) error {
 			return errors.Join(err, r.store.Unlock(ctx, key))
 		}
 
-		return r.save(ctx, key, req, r.retention)
+		return r.save(ctx, key, req, r.ttl)
 	}
 
 	return r.load(ctx, key, req)

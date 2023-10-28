@@ -8,32 +8,32 @@ import (
 )
 
 type RequestReplyOption[T comparable, U any] struct {
-	LockTimeout     time.Duration
-	RetentionPeriod time.Duration
-	Handler         func(ctx context.Context, v T) (U, error)
+	Lock    time.Duration
+	TTL     time.Duration
+	Handler func(ctx context.Context, v T) (U, error)
 }
 
 type RequestReply[T comparable, U any] struct {
-	store     store[U]
-	lock      time.Duration
-	retention time.Duration
-	handler   func(ctx context.Context, v T) (U, error)
+	store   store[U]
+	lock    time.Duration
+	ttl     time.Duration
+	handler func(ctx context.Context, v T) (U, error)
 }
 
 func NewRequestReply[T comparable, U any](store store[U], opt RequestReplyOption[T, U]) *RequestReply[T, U] {
-	if opt.LockTimeout <= 0 {
-		opt.LockTimeout = 1 * time.Minute
+	if opt.Lock <= 0 {
+		opt.Lock = 1 * time.Minute
 	}
 
-	if opt.RetentionPeriod <= 0 {
-		opt.RetentionPeriod = 24 * time.Hour
+	if opt.TTL <= 0 {
+		opt.TTL = 24 * time.Hour
 	}
 
 	return &RequestReply[T, U]{
-		store:     store,
-		lock:      opt.LockTimeout,
-		retention: opt.RetentionPeriod,
-		handler:   opt.Handler,
+		store:   store,
+		lock:    opt.Lock,
+		ttl:     opt.TTL,
+		handler: opt.Handler,
 	}
 }
 
@@ -55,7 +55,7 @@ func (r *RequestReply[T, U]) Exec(ctx context.Context, key string, req T) (U, er
 		}
 
 		// Save the request/response pair on success.
-		return v, r.save(ctx, key, req, v, r.retention)
+		return v, r.save(ctx, key, req, v, r.ttl)
 	}
 
 	// The lock is acquired. The request may be in flight, or already completed.

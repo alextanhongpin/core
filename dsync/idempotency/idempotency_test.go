@@ -21,7 +21,7 @@ type Response struct {
 	Name string `json:"name"`
 }
 
-var SomeOperationKey = idempotency.Key("some-operation:%s")
+var SomeOperationKey = idempotency.Key("i9y:some-operation:%s")
 
 func TestRequestReply(t *testing.T) {
 	assert := assert.New(t)
@@ -37,8 +37,8 @@ func TestRequestReply(t *testing.T) {
 	do := func() {
 		store := idempotency.NewRedisStore[*Response](client)
 		handler := idempotency.NewRequestReply(store, idempotency.RequestReplyOption[Request, *Response]{
-			LockTimeout:     5 * time.Second, // Default is 1 minute.
-			RetentionPeriod: 1 * time.Minute, // Default is 24 hour.
+			Lock:      5 * time.Second, // Default is 1 minute.
+			TTL: 1 * time.Minute, // Default is 24 hour.
 			Handler: func(ctx context.Context, req Request) (*Response, error) {
 				// Simulate critical section.
 				time.Sleep(100 * time.Millisecond)
@@ -103,8 +103,8 @@ func TestRequest(t *testing.T) {
 	do := func() {
 		store := idempotency.NewRedisStore[any](client)
 		handler := idempotency.NewRequest(store, idempotency.RequestOption[Request]{
-			LockTimeout:     5 * time.Second, // Default is 1 minute.
-			RetentionPeriod: 1 * time.Minute, // Default is 24 hour.
+			Lock:      5 * time.Second, // Default is 1 minute.
+			TTL: 1 * time.Minute, // Default is 24 hour.
 			Handler: func(ctx context.Context, req Request) error {
 				// Simulate critical section.
 				time.Sleep(100 * time.Millisecond)

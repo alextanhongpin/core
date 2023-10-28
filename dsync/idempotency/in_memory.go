@@ -28,9 +28,7 @@ func NewInMemoryStore[T any]() store[T] {
 	}
 }
 
-func (s *inMemoryStore[T]) Lock(ctx context.Context, idempotencyKey string, lockTimeout time.Duration) (bool, error) {
-	key := keyTemplate.Format(idempotencyKey)
-
+func (s *inMemoryStore[T]) Lock(ctx context.Context, key string, lockTimeout time.Duration) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -49,9 +47,7 @@ func (s *inMemoryStore[T]) Lock(ctx context.Context, idempotencyKey string, lock
 	return true, nil
 }
 
-func (s *inMemoryStore[T]) Unlock(ctx context.Context, idempotencyKey string) error {
-	key := keyTemplate.Format(idempotencyKey)
-
+func (s *inMemoryStore[T]) Unlock(ctx context.Context, key string) error {
 	s.mu.Lock()
 	delete(s.values, key)
 	s.mu.Unlock()
@@ -59,9 +55,7 @@ func (s *inMemoryStore[T]) Unlock(ctx context.Context, idempotencyKey string) er
 	return nil
 }
 
-func (s *inMemoryStore[T]) Load(ctx context.Context, idempotencyKey string) (*data[T], error) {
-	key := keyTemplate.Format(idempotencyKey)
-
+func (s *inMemoryStore[T]) Load(ctx context.Context, key string) (*data[T], error) {
 	s.mu.RLock()
 	v := s.values[key]
 	s.mu.RUnlock()
@@ -69,9 +63,7 @@ func (s *inMemoryStore[T]) Load(ctx context.Context, idempotencyKey string) (*da
 	return &v.data, nil
 }
 
-func (s *inMemoryStore[T]) Save(ctx context.Context, idempotencyKey string, d data[T], duration time.Duration) error {
-	key := keyTemplate.Format(idempotencyKey)
-
+func (s *inMemoryStore[T]) Save(ctx context.Context, key string, d data[T], duration time.Duration) error {
 	s.mu.Lock()
 	s.values[key] = result[T]{
 		data:     d,
