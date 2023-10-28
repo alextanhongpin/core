@@ -81,7 +81,7 @@ require (
 	github.com/grpc-ecosystem/go-grpc-middleware v1.4.0 // indirect
 	github.com/grpc-ecosystem/go-grpc-prometheus v1.2.0 // indirect
 	github.com/hashicorp/hcl v1.0.1-vault-5 // indirect
-	github.com/imdario/mergo v0.3.16 // indirect
+	github.com/imdario/mergo v1.0.0 // indirect
 	github.com/jinzhu/inflection v1.0.0 // indirect
 	github.com/klauspost/compress v1.17.1 // indirect
 	github.com/leodido/go-urn v1.2.4 // indirect
@@ -144,3 +144,5 @@ require (
 	inet.af/netaddr v0.0.0-20230525184311-b8eac61e914a // indirect
 	mellium.im/sasl v0.3.1 // indirect
 )
+
+replace github.com/imdario/mergo => github.com/imdario/mergo v0.3.16
