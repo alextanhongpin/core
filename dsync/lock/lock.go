@@ -45,7 +45,7 @@ func (r *Locker) Extend(ctx context.Context, key, val string, ttl time.Duration)
 	return r.extend(ctx, key, val, ttl)
 }
 
-func (r *Locker) LockFunc(ctx context.Context, key string, fn func(ctx context.Context) error) error {
+func (r *Locker) Do(ctx context.Context, key string, fn func(ctx context.Context) error) error {
 	val := uuid.New().String()
 	ttl := 60 * time.Second
 	if err := r.lock(ctx, key, val, ttl); err != nil {

@@ -39,7 +39,7 @@ func TestLock(t *testing.T) {
 
 		// Simulate concurrent operations. This request starts at a later time.
 		time.Sleep(100 * time.Millisecond)
-		err := locker.LockFunc(ctx, "key", func(ctx context.Context) error {
+		err := locker.Do(ctx, "key", func(ctx context.Context) error {
 			return nil
 		})
 		a.ErrorIs(err, lock.ErrLocked)
@@ -48,7 +48,7 @@ func TestLock(t *testing.T) {
 	go func() {
 		defer wg.Done()
 
-		err := locker.LockFunc(ctx, "key", func(ctx context.Context) error {
+		err := locker.Do(ctx, "key", func(ctx context.Context) error {
 			time.Sleep(200 * time.Millisecond)
 			return nil
 		})
