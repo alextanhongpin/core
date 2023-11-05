@@ -1,0 +1,206 @@
+package idempotent
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"testing"
+	"time"
+
+	"github.com/google/uuid"
+	redis "github.com/redis/go-redis/v9"
+	"github.com/stretchr/testify/assert"
+
+	"github.com/alextanhongpin/core/storage/redis/redistest"
+)
+
+var ctx = context.Background()
+
+func TestMain(m *testing.M) {
+	stop := redistest.Init()
+	code := m.Run()
+	stop()
+	os.Exit(code)
+}
+
+func TestPrivateLoad(t *testing.T) {
+	client := redis.NewClient(&redis.Options{
+		Addr: redistest.Addr(),
+	})
+
+	cleanup := func(t *testing.T) {
+		t.Helper()
+		t.Cleanup(func() {
+			client.FlushAll(ctx).Err()
+		})
+	}
+
+	t.Cleanup(func() {
+		// Clean redis
+		client.FlushAll(ctx).Err()
+		client.Close()
+	})
+
+	idem := New[string, int](client, &Option{
+		LockTTL: 100 * time.Millisecond,
+		KeepTTL: 200 * time.Millisecond,
+	})
+
+	t.Run("when key does not exist", func(t *testing.T) {
+		cleanup(t)
+
+		_, err := idem.load(ctx, "hello", "world")
+		assert.ErrorIs(t, err, redis.Nil)
+	})
+
+	t.Run("when key is uuid", func(t *testing.T) {
+		cleanup(t)
+
+		a := assert.New(t)
+		a.Nil(client.Set(ctx, "hello", uuid.New().String(), 0).Err())
+		_, err := idem.load(ctx, "hello", "world")
+		a.ErrorIs(err, ErrRequestInFlight)
+	})
+
+	t.Run("when key is data", func(t *testing.T) {
+		cleanup(t)
+
+		a := assert.New(t)
+
+		reqHash := hash([]byte(`"world"`))
+		a.Nil(client.Set(ctx, "hello", fmt.Sprintf(`{"request": %q, "response": 42}`, reqHash), 0).Err())
+		v, err := idem.load(ctx, "hello", "world")
+		a.Nil(err)
+		a.Equal(42, v)
+	})
+
+	t.Run("when request does not match", func(t *testing.T) {
+		cleanup(t)
+
+		a := assert.New(t)
+		a.Nil(client.Set(ctx, "hello", `{"request": "world", "response": 42}`, 0).Err())
+		_, err := idem.load(ctx, "hello", "not-world")
+		a.ErrorIs(err, ErrRequestMismatch)
+	})
+}
+
+func TestPrivateLockUnlock(t *testing.T) {
+	client := redis.NewClient(&redis.Options{
+		Addr: redistest.Addr(),
+	})
+
+	cleanup := func(t *testing.T) {
+		t.Helper()
+		t.Cleanup(func() {
+			client.FlushAll(ctx).Err()
+		})
+	}
+
+	t.Cleanup(func() {
+		// Clean redis
+		client.FlushAll(ctx).Err()
+		client.Close()
+	})
+
+	idem := New[string, int](client, &Option{
+		LockTTL: 100 * time.Millisecond,
+		KeepTTL: 200 * time.Millisecond,
+	})
+
+	t.Run("when lock success", func(t *testing.T) {
+		cleanup(t)
+
+		ok, err := idem.lock(ctx, "hello", []byte("world"))
+		a := assert.New(t)
+		a.Nil(err)
+		a.True(ok)
+
+		t.Run("when unlock failed", func(t *testing.T) {
+			err := idem.unlock(ctx, "hello", []byte("wrong-key"))
+			a.Nil(err)
+
+			val, err := client.Get(ctx, "hello").Result()
+			a.Nil(err)
+			a.Equal("world", val)
+		})
+
+		t.Run("when unlock success", func(t *testing.T) {
+			err := idem.unlock(ctx, "hello", []byte("world"))
+			a.Nil(err)
+
+			_, err = client.Get(ctx, "hello").Result()
+			a.ErrorIs(err, redis.Nil)
+		})
+	})
+
+	t.Run("when lock failed", func(t *testing.T) {
+		cleanup(t)
+
+		ok, err := idem.lock(ctx, "hello", []byte("world"))
+		a := assert.New(t)
+		a.Nil(err)
+		a.True(ok)
+
+		ok, err = idem.lock(ctx, "hello", []byte("world"))
+		a.Nil(err)
+		a.False(ok)
+	})
+}
+
+func TestPrivateReplace(t *testing.T) {
+	client := redis.NewClient(&redis.Options{
+		Addr: redistest.Addr(),
+	})
+
+	cleanup := func(t *testing.T) {
+		t.Helper()
+		t.Cleanup(func() {
+			client.FlushAll(ctx).Err()
+		})
+	}
+
+	t.Cleanup(func() {
+		// Clean redis
+		client.FlushAll(ctx).Err()
+		client.Close()
+	})
+
+	idem := New[string, int](client, &Option{
+		LockTTL: 1 * time.Second,
+		KeepTTL: 2 * time.Second,
+	})
+
+	t.Run("when replace failed", func(t *testing.T) {
+		cleanup(t)
+
+		// Set a value to be replaced.
+		if err := client.Set(ctx, "hello", "world", 0).Err(); err != nil {
+			t.Fatal(err)
+		}
+
+		err := idem.replace(ctx, "hello", []byte("invalid-old-value"), "new-value")
+		a := assert.New(t)
+		a.Nil(err)
+
+		v, err := client.Get(ctx, "hello").Result()
+		a.Nil(err)
+		a.Equal("world", v)
+	})
+
+	t.Run("when replace success", func(t *testing.T) {
+		cleanup(t)
+
+		// Set a value to be replaced.
+		if err := client.Set(ctx, "hello", "world", 0).Err(); err != nil {
+			t.Fatal(err)
+		}
+
+		err := idem.replace(ctx, "hello", []byte("world"), "new-value")
+		a := assert.New(t)
+		a.Nil(err)
+
+		v, err := client.Get(ctx, "hello").Result()
+		a.Nil(err)
+		a.Equal(`"new-value"`, v)
+	})
+}
