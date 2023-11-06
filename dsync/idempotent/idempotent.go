@@ -37,7 +37,7 @@ var replace = redis.NewScript(`
 	local ttl = ARGV[3]
 
 	if redis.call('GET', key) == old then
-		return redis.call('SET', key, new, 'EX', ttl)
+		return redis.call('SET', key, new, 'PX', ttl)
 	end
 
 	return 0
@@ -131,7 +131,7 @@ func (i *Idempotent[K, V]) replace(ctx context.Context, key string, oldVal []byt
 	}
 
 	keys := []string{key}
-	argv := []any{oldVal, newVal, i.keepTTL.Seconds()}
+	argv := []any{oldVal, newVal, formatMs(i.keepTTL)}
 	return replace.Run(ctx, i.client, keys, argv...).Err()
 }
 
@@ -193,4 +193,13 @@ func hash(data []byte) string {
 func isUUID(b []byte) bool {
 	_, err := uuid.ParseBytes(b)
 	return err == nil
+}
+
+// copied from redis source code
+func formatMs(dur time.Duration) int64 {
+	if dur > 0 && dur < time.Millisecond {
+		return 1
+	}
+
+	return int64(dur / time.Millisecond)
 }

@@ -98,6 +98,7 @@ func TestPrivateLockUnlock(t *testing.T) {
 		a := assert.New(t)
 		a.Nil(err)
 		a.True(ok)
+		a.True(100*time.Millisecond-client.PTTL(ctx, "hello").Val() < 10*time.Millisecond)
 
 		t.Run("when lock second time", func(t *testing.T) {
 			ok, err = idem.lock(ctx, "hello", []byte("world"))
@@ -165,6 +166,7 @@ func TestPrivateReplace(t *testing.T) {
 		v, err := client.Get(ctx, "hello").Result()
 		a.Nil(err)
 		a.Equal(`"new-value"`, v, "then the value will be replaced")
+		a.True(200*time.Millisecond-client.PTTL(ctx, "hello").Val() < 10*time.Millisecond)
 	})
 }
 
