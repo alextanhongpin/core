@@ -24,9 +24,7 @@ func TestMain(m *testing.M) {
 }
 
 func TestPrivateLoad(t *testing.T) {
-	client := redis.NewClient(&redis.Options{
-		Addr: redistest.Addr(),
-	})
+	client := setupRedis(t)
 
 	cleanup := func(t *testing.T) {
 		t.Helper()
@@ -34,12 +32,6 @@ func TestPrivateLoad(t *testing.T) {
 			client.FlushAll(ctx).Err()
 		})
 	}
-
-	t.Cleanup(func() {
-		// Clean redis
-		client.FlushAll(ctx).Err()
-		client.Close()
-	})
 
 	idem := New[string, int](client, &Option{
 		LockTTL: 100 * time.Millisecond,
@@ -85,9 +77,7 @@ func TestPrivateLoad(t *testing.T) {
 }
 
 func TestPrivateLockUnlock(t *testing.T) {
-	client := redis.NewClient(&redis.Options{
-		Addr: redistest.Addr(),
-	})
+	client := setupRedis(t)
 
 	cleanup := func(t *testing.T) {
 		t.Helper()
@@ -95,12 +85,6 @@ func TestPrivateLockUnlock(t *testing.T) {
 			client.FlushAll(ctx).Err()
 		})
 	}
-
-	t.Cleanup(func() {
-		// Clean redis
-		client.FlushAll(ctx).Err()
-		client.Close()
-	})
 
 	idem := New[string, int](client, &Option{
 		LockTTL: 100 * time.Millisecond,
@@ -114,6 +98,12 @@ func TestPrivateLockUnlock(t *testing.T) {
 		a := assert.New(t)
 		a.Nil(err)
 		a.True(ok)
+
+		t.Run("when lock second time", func(t *testing.T) {
+			ok, err = idem.lock(ctx, "hello", []byte("world"))
+			a.Nil(err)
+			a.False(ok, "then it will fail to lock")
+		})
 
 		t.Run("when unlock failed", func(t *testing.T) {
 			err := idem.unlock(ctx, "hello", []byte("wrong-key"))
@@ -132,25 +122,10 @@ func TestPrivateLockUnlock(t *testing.T) {
 			a.ErrorIs(err, redis.Nil)
 		})
 	})
-
-	t.Run("when lock failed", func(t *testing.T) {
-		cleanup(t)
-
-		ok, err := idem.lock(ctx, "hello", []byte("world"))
-		a := assert.New(t)
-		a.Nil(err)
-		a.True(ok)
-
-		ok, err = idem.lock(ctx, "hello", []byte("world"))
-		a.Nil(err)
-		a.False(ok)
-	})
 }
 
 func TestPrivateReplace(t *testing.T) {
-	client := redis.NewClient(&redis.Options{
-		Addr: redistest.Addr(),
-	})
+	client := setupRedis(t)
 
 	cleanup := func(t *testing.T) {
 		t.Helper()
@@ -158,12 +133,6 @@ func TestPrivateReplace(t *testing.T) {
 			client.FlushAll(ctx).Err()
 		})
 	}
-
-	t.Cleanup(func() {
-		// Clean redis
-		client.FlushAll(ctx).Err()
-		client.Close()
-	})
 
 	idem := New[string, int](client, &Option{
 		LockTTL: 1 * time.Second,
@@ -173,34 +142,42 @@ func TestPrivateReplace(t *testing.T) {
 	t.Run("when replace failed", func(t *testing.T) {
 		cleanup(t)
 
-		// Set a value to be replaced.
-		if err := client.Set(ctx, "hello", "world", 0).Err(); err != nil {
-			t.Fatal(err)
-		}
-
-		err := idem.replace(ctx, "hello", []byte("invalid-old-value"), "new-value")
 		a := assert.New(t)
-		a.Nil(err)
+
+		// Set a value to be replaced.
+		a.Nil(client.Set(ctx, "hello", "world", 0).Err())
+		a.Nil(idem.replace(ctx, "hello", []byte("invalid-old-value"), "new-value"))
 
 		v, err := client.Get(ctx, "hello").Result()
 		a.Nil(err)
-		a.Equal("world", v)
+		a.Equal("world", v, "then the value stays the same")
 	})
 
 	t.Run("when replace success", func(t *testing.T) {
 		cleanup(t)
 
-		// Set a value to be replaced.
-		if err := client.Set(ctx, "hello", "world", 0).Err(); err != nil {
-			t.Fatal(err)
-		}
-
-		err := idem.replace(ctx, "hello", []byte("world"), "new-value")
 		a := assert.New(t)
-		a.Nil(err)
+
+		// Set a value to be replaced.
+		a.Nil(client.Set(ctx, "hello", "world", 0).Err())
+		a.Nil(idem.replace(ctx, "hello", []byte("world"), "new-value"))
 
 		v, err := client.Get(ctx, "hello").Result()
 		a.Nil(err)
-		a.Equal(`"new-value"`, v)
+		a.Equal(`"new-value"`, v, "then the value will be replaced")
 	})
+}
+
+func setupRedis(t *testing.T) *redis.Client {
+	client := redis.NewClient(&redis.Options{
+		Addr: redistest.Addr(),
+	})
+
+	t.Helper()
+	t.Cleanup(func() {
+		client.FlushAll(ctx).Err()
+		client.Close()
+	})
+
+	return client
 }
