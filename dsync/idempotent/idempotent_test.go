@@ -108,7 +108,7 @@ func TestPrivateLockUnlock(t *testing.T) {
 
 		t.Run("when unlock failed", func(t *testing.T) {
 			err := idem.unlock(ctx, "hello", []byte("wrong-key"))
-			a.Nil(err)
+			a.ErrorIs(err, ErrKeyNotFound)
 
 			val, err := client.Get(ctx, "hello").Result()
 			a.Nil(err)
@@ -147,7 +147,7 @@ func TestPrivateReplace(t *testing.T) {
 
 		// Set a value to be replaced.
 		a.Nil(client.Set(ctx, "hello", "world", 0).Err())
-		a.Nil(idem.replace(ctx, "hello", []byte("invalid-old-value"), "new-value"))
+		a.ErrorIs(idem.replace(ctx, "hello", []byte("invalid-old-value"), "new-value"), ErrKeyNotFound)
 
 		v, err := client.Get(ctx, "hello").Result()
 		a.Nil(err)
