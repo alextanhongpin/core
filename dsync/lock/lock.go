@@ -20,11 +20,13 @@ type locker interface {
 	Unlock(ctx context.Context) error
 }
 
+// Locker ...
 type Locker struct {
 	client *redis.Client
 	prefix string
 }
 
+// New returns a pointer to Locker.
 func New(client *redis.Client, prefix string) *Locker {
 	fw := &Locker{
 		client: client,
@@ -34,6 +36,8 @@ func New(client *redis.Client, prefix string) *Locker {
 	return fw
 }
 
+// Lock locks the key for the given TTL.
+// Returns an interface that allows unlocking the key or extending it.
 func (l *Locker) Lock(ctx context.Context, key string, ttl time.Duration) (locker, error) {
 	// Generate a random uuid as the lock value.
 	val := uuid.New().String()
@@ -49,6 +53,9 @@ func (l *Locker) Lock(ctx context.Context, key string, ttl time.Duration) (locke
 	}, nil
 }
 
+// Do locks the key until the operation is completed. Do will periodically
+// extend the lock duration until the task is completed.
+// If the lock is not extended, it will expire after the given TTL.
 func (l *Locker) Do(ctx context.Context, key string, ttl time.Duration, fn func(ctx context.Context) error) error {
 	locker, err := l.Lock(ctx, key, ttl)
 	if err != nil {
