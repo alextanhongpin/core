@@ -39,3 +39,26 @@ var extend = redis.NewScript(`
 
 	return 0
 `)
+
+func parseScriptResult(unk any) error {
+	if unk == nil {
+		return nil
+	}
+
+	switch v := unk.(type) {
+	case string:
+		if v != "OK" {
+			return ErrKeyNotFound
+		}
+
+		return nil
+	case int64:
+		if v == 0 {
+			return ErrKeyNotFound
+		}
+
+		return nil
+	default:
+		return ErrKeyNotFound
+	}
+}

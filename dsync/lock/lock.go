@@ -94,41 +94,34 @@ func (l *Locker) Do(ctx context.Context, key string, ttl time.Duration, fn func(
 func (l *Locker) lock(ctx context.Context, key, val string, ttl time.Duration) error {
 	keys := []string{l.buildKey(key)}
 	argv := []any{val, formatMs(ttl)}
-	err := lock.Run(ctx, l.client, keys, argv...).Err()
+	unk, err := lock.Run(ctx, l.client, keys, argv...).Result()
 	if errors.Is(err, redis.Nil) {
 		return ErrLocked
 	}
 
-	return err
+	return parseScriptResult(unk)
 }
 
 func (l *Locker) unlock(ctx context.Context, key, val string) error {
 	keys := []string{l.buildKey(key)}
 	argv := []any{val}
-	i, err := unlock.Run(ctx, l.client, keys, argv...).Result()
+	unk, err := unlock.Run(ctx, l.client, keys, argv...).Result()
 	if err != nil {
 		return err
 	}
-	if i64 := i.(int64); i64 == 0 {
-		return ErrKeyNotFound
-	}
 
-	return nil
+	return parseScriptResult(unk)
 }
 
 func (l *Locker) extend(ctx context.Context, key, val string, ttl time.Duration) error {
 	keys := []string{l.buildKey(key)}
 	argv := []any{val, formatMs(ttl)}
-	i, err := extend.Run(ctx, l.client, keys, argv...).Result()
+	unk, err := extend.Run(ctx, l.client, keys, argv...).Result()
 	if err != nil {
 		return err
 	}
 
-	if i64 := i.(int64); i64 == 0 {
-		return ErrKeyNotFound
-	}
-
-	return nil
+	return parseScriptResult(unk)
 }
 
 func (l *Locker) buildKey(key string) string {
