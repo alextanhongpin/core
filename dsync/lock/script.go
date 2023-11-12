@@ -47,18 +47,14 @@ func parseScriptResult(unk any) error {
 
 	switch v := unk.(type) {
 	case string:
-		if v != "OK" {
-			return ErrKeyNotFound
+		if v == "OK" {
+			return nil
 		}
-
-		return nil
 	case int64:
-		if v == 0 {
-			return ErrKeyNotFound
+		if v == 1 {
+			return nil
 		}
-
-		return nil
-	default:
-		return ErrKeyNotFound
 	}
+
+	return ErrKeyNotFound
 }
