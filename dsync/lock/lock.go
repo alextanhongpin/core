@@ -6,16 +6,19 @@ import (
 	"fmt"
 	"time"
 
-	_ "embed"
-
 	"github.com/google/uuid"
 	redis "github.com/redis/go-redis/v9"
 )
 
-//go:embed lock.lua
-var lock string
+var (
+	ErrLocked      = errors.New("lock: already locked")
+	ErrKeyNotFound = errors.New("lock: key not found")
+)
 
-var ErrLocked = errors.New("lock: already locked")
+type locker interface {
+	Extend(ctx context.Context, ttl time.Duration) error
+	Unlock(ctx context.Context) error
+}
 
 type Locker struct {
 	client *redis.Client
@@ -28,30 +31,30 @@ func New(client *redis.Client, prefix string) *Locker {
 		prefix: prefix,
 	}
 
-	registerFunction(client)
-
 	return fw
 }
 
-func (r *Locker) Lock(ctx context.Context, key, val string, ttl time.Duration) error {
-	return r.lock(ctx, key, val, ttl)
-}
-
-func (r *Locker) Unlock(ctx context.Context, key, val string) error {
-	return r.unlock(ctx, key, val)
-}
-
-func (r *Locker) Extend(ctx context.Context, key, val string, ttl time.Duration) error {
-	return r.extend(ctx, key, val, ttl)
-}
-
-func (r *Locker) Do(ctx context.Context, key string, fn func(ctx context.Context) error) error {
+func (l *Locker) Lock(ctx context.Context, key string, ttl time.Duration) (locker, error) {
+	// Generate a random uuid as the lock value.
 	val := uuid.New().String()
-	ttl := 60 * time.Second
-	if err := r.lock(ctx, key, val, ttl); err != nil {
+
+	if err := l.lock(ctx, key, val, ttl); err != nil {
+		return nil, err
+	}
+
+	return &lockable{
+		key:    key,
+		val:    val,
+		Locker: l,
+	}, nil
+}
+
+func (l *Locker) Do(ctx context.Context, key string, ttl time.Duration, fn func(ctx context.Context) error) error {
+	locker, err := l.Lock(ctx, key, ttl)
+	if err != nil {
 		return err
 	}
-	defer r.unlock(ctx, key, val)
+	defer locker.Unlock(ctx)
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -74,7 +77,7 @@ func (r *Locker) Do(ctx context.Context, key string, fn func(ctx context.Context
 		for {
 			select {
 			case <-t.C:
-				if err := r.extend(ctx, key, val, ttl); err != nil {
+				if err := locker.Extend(ctx, ttl); err != nil {
 					errCh <- err
 					return
 				}
@@ -88,10 +91,10 @@ func (r *Locker) Do(ctx context.Context, key string, fn func(ctx context.Context
 	return <-errCh
 }
 
-func (r *Locker) lock(ctx context.Context, key, val string, ttl time.Duration) error {
-	keys := []string{r.buildKey(key)}
-	args := []any{val, ttl.Seconds()}
-	err := r.client.FCall(ctx, "lock", keys, args...).Err()
+func (l *Locker) lock(ctx context.Context, key, val string, ttl time.Duration) error {
+	keys := []string{l.buildKey(key)}
+	argv := []any{val, formatMs(ttl)}
+	err := lock.Run(ctx, l.client, keys, argv...).Err()
 	if errors.Is(err, redis.Nil) {
 		return ErrLocked
 	}
@@ -99,38 +102,62 @@ func (r *Locker) lock(ctx context.Context, key, val string, ttl time.Duration) e
 	return err
 }
 
-func (r *Locker) unlock(ctx context.Context, key, val string) error {
-	keys := []string{r.buildKey(key)}
-	args := []any{val}
-	return r.client.FCall(ctx, "unlock", keys, args...).Err()
+func (l *Locker) unlock(ctx context.Context, key, val string) error {
+	keys := []string{l.buildKey(key)}
+	argv := []any{val}
+	i, err := unlock.Run(ctx, l.client, keys, argv...).Result()
+	if err != nil {
+		return err
+	}
+	if i64 := i.(int64); i64 == 0 {
+		return ErrKeyNotFound
+	}
+
+	return nil
 }
 
-func (r *Locker) extend(ctx context.Context, key, val string, ttl time.Duration) error {
-	keys := []string{r.buildKey(key)}
-	args := []any{val, ttl.Seconds()}
-	return r.client.FCall(ctx, "extend", keys, args...).Err()
+func (l *Locker) extend(ctx context.Context, key, val string, ttl time.Duration) error {
+	keys := []string{l.buildKey(key)}
+	argv := []any{val, formatMs(ttl)}
+	i, err := extend.Run(ctx, l.client, keys, argv...).Result()
+	if err != nil {
+		return err
+	}
+
+	if i64 := i.(int64); i64 == 0 {
+		return ErrKeyNotFound
+	}
+
+	return nil
 }
 
-func (r *Locker) buildKey(key string) string {
-	if r.prefix != "" {
-		return fmt.Sprintf("%s:%s", r.prefix, key)
+func (l *Locker) buildKey(key string) string {
+	if l.prefix != "" {
+		return fmt.Sprintf("%s:%s", l.prefix, key)
 	}
 
 	return key
 }
 
-func registerFunction(client *redis.Client) {
-	_, err := client.FunctionLoadReplace(context.Background(), lock).Result()
-	if err != nil {
-		if exists(err) {
-			return
-		}
-
-		panic(err)
-	}
+type lockable struct {
+	key string
+	val string
+	*Locker
 }
 
-func exists(err error) bool {
-	// The ERR part is trimmed from prefix comparison.
-	return redis.HasErrorPrefix(err, "Library 'lock' already exists")
+func (l *lockable) Unlock(ctx context.Context) error {
+	return l.unlock(ctx, l.key, l.val)
+}
+
+func (l *lockable) Extend(ctx context.Context, ttl time.Duration) error {
+	return l.extend(ctx, l.key, l.val, ttl)
+}
+
+// copied from redis source code
+func formatMs(dur time.Duration) int64 {
+	if dur > 0 && dur < time.Millisecond {
+		return 1
+	}
+
+	return int64(dur / time.Millisecond)
 }
