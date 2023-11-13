@@ -12,17 +12,7 @@ var unlock = redis.NewScript(`
 		return redis.call('DEL', key)
 	end
 
-	return 0
-`)
-
-var lock = redis.NewScript(`
-	-- KEYS[1]: The key to lock
-	-- ARGV[1]: The random value
-	-- ARGV[2]: The lock duration in milliseconds.
-	local key = KEYS[1]
-	local val = ARGV[1]
-	local ttl_ms = tonumber(ARGV[2]) or 60000 -- Default 60s
-	return redis.call('SET', key, val, 'NX', 'PX', ttl_ms)
+	return nil
 `)
 
 var extend = redis.NewScript(`
@@ -37,24 +27,5 @@ var extend = redis.NewScript(`
 		return redis.call('PEXPIRE', key, ttl_ms)
 	end
 
-	return 0
+	return nil
 `)
-
-func parseScriptResult(unk any) error {
-	if unk == nil {
-		return nil
-	}
-
-	switch v := unk.(type) {
-	case string:
-		if v == "OK" {
-			return nil
-		}
-	case int64:
-		if v == 1 {
-			return nil
-		}
-	}
-
-	return ErrKeyNotFound
-}

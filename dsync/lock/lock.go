@@ -11,13 +11,20 @@ import (
 )
 
 var (
-	ErrLocked      = errors.New("lock: already locked")
+	// ErrLocked indicates that the key is already locked.
+	ErrLocked = errors.New("lock: already locked")
+
+	// ErrKeyNotFound indicates that the key was not found.
 	ErrKeyNotFound = errors.New("lock: key not found")
 )
 
+// Locker represents the interface for locking and unlocking keys.
 type locker interface {
-	Extend(ctx context.Context, ttl time.Duration) error
+	// Unlock releases the lock on the key.
 	Unlock(ctx context.Context) error
+
+	// Extend extends the TTL of the lock.
+	Extend(ctx context.Context, ttl time.Duration) error
 }
 
 // Locker ...
@@ -99,36 +106,34 @@ func (l *Locker) Do(ctx context.Context, key string, ttl time.Duration, fn func(
 }
 
 func (l *Locker) lock(ctx context.Context, key, val string, ttl time.Duration) error {
-	keys := []string{l.buildKey(key)}
-	argv := []any{val, formatMs(ttl)}
-	unk, err := lock.Run(ctx, l.client, keys, argv...).Result()
-	if errors.Is(err, redis.Nil) {
+	ok, err := l.client.SetNX(ctx, l.buildKey(key), val, ttl).Result()
+	if !ok || errors.Is(err, redis.Nil) {
 		return ErrLocked
 	}
 
-	return parseScriptResult(unk)
+	return nil
 }
 
 func (l *Locker) unlock(ctx context.Context, key, val string) error {
 	keys := []string{l.buildKey(key)}
 	argv := []any{val}
-	unk, err := unlock.Run(ctx, l.client, keys, argv...).Result()
-	if err != nil {
-		return err
+	err := unlock.Run(ctx, l.client, keys, argv...).Err()
+	if errors.Is(err, redis.Nil) {
+		return ErrKeyNotFound
 	}
 
-	return parseScriptResult(unk)
+	return err
 }
 
 func (l *Locker) extend(ctx context.Context, key, val string, ttl time.Duration) error {
 	keys := []string{l.buildKey(key)}
 	argv := []any{val, formatMs(ttl)}
-	unk, err := extend.Run(ctx, l.client, keys, argv...).Result()
-	if err != nil {
-		return err
+	err := extend.Run(ctx, l.client, keys, argv...).Err()
+	if errors.Is(err, redis.Nil) {
+		return ErrKeyNotFound
 	}
 
-	return parseScriptResult(unk)
+	return err
 }
 
 func (l *Locker) buildKey(key string) string {
