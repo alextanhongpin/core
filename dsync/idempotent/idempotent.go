@@ -35,7 +35,7 @@ var unlock = redis.NewScript(`
 		return redis.call('DEL', key)
 	end
 
-	return 0
+	return nil
 `)
 
 // replace sets the value to the key only if the existing lease id matches.
@@ -49,7 +49,7 @@ var replace = redis.NewScript(`
 		return redis.call('SET', key, new, 'PX', ttl) 
 	end
 
-	return 0
+	return nil
 `)
 
 type data[T any] struct {
@@ -147,12 +147,12 @@ func (i *Idempotent[K, V]) replace(ctx context.Context, key string, oldVal []byt
 
 	keys := []string{key}
 	argv := []any{oldVal, newVal, formatMs(i.keepTTL)}
-	unk, err := replace.Run(ctx, i.client, keys, argv...).Result()
-	if err != nil {
-		return err
+	err = replace.Run(ctx, i.client, keys, argv...).Err()
+	if errors.Is(err, redis.Nil) {
+		return ErrKeyNotFound
 	}
 
-	return parseScriptResult(unk)
+	return err
 }
 
 // load retrieves the value of the specified key and returns it as a data
@@ -205,11 +205,11 @@ func (i *Idempotent[K, V]) lock(ctx context.Context, key string, val []byte) (bo
 func (i *Idempotent[K, V]) unlock(ctx context.Context, key string, val []byte) error {
 	keys := []string{key}
 	argv := []any{val}
-	unk, err := unlock.Run(ctx, i.client, keys, argv...).Result()
-	if err != nil {
-		return err
+	err := unlock.Run(ctx, i.client, keys, argv...).Err()
+	if errors.Is(err, redis.Nil) {
+		return ErrKeyNotFound
 	}
-	return parseScriptResult(unk)
+	return err
 }
 
 // hash generates a SHA-256 hash of the provided data.
@@ -233,24 +233,4 @@ func formatMs(dur time.Duration) int64 {
 	}
 
 	return int64(dur / time.Millisecond)
-}
-
-// parseScriptResult interprets the result of a Redis script and returns an error if it indicates a failure.
-func parseScriptResult(unk any) error {
-	if unk == nil {
-		return nil
-	}
-
-	switch v := unk.(type) {
-	case string:
-		if v == "OK" {
-			return nil
-		}
-	case int64:
-		if v == 1 {
-			return nil
-		}
-	}
-
-	return ErrKeyNotFound
 }
