@@ -35,53 +35,65 @@ func ExampleIdempotent() {
 
 	idem := idempotent.New[Request, *Response](client, nil)
 
+	// Create a request object with the required fields.
 	req := Request{
 		Age:  10,
 		Name: "john",
 	}
 
+	// Create a wait group to manage concurrent requests.
 	var wg sync.WaitGroup
 	wg.Add(2)
 
+	// Start the first concurrent request.
 	go func() {
 		defer wg.Done()
 
+		// Define the handler function that simulates the actual task
 		h := func(ctx context.Context, req Request) (*Response, error) {
-			fmt.Println("executing get user #1", req)
+			fmt.Printf("Executing get user #1: %+v\n", req)
 			time.Sleep(50 * time.Millisecond)
 			return &Response{UserID: 10}, nil
 		}
 
+		// Execute the idempotent operation and handle the response
 		v, err := idem.Do(ctx, "get-user", h, req)
 		if err != nil {
 			panic(err)
 		}
 
-		fmt.Printf("success #1: %+v\n", v)
+		fmt.Printf("Success #1: %+v\n", v)
 	}()
 
+	// Start the second concurrent request.
 	go func() {
 		defer wg.Done()
 
+		// Introduce a delay to simulate a second concurrent request.
 		time.Sleep(50 * time.Millisecond)
+
+		// Define the handler function that simulates the actual task.
 		h := func(ctx context.Context, req Request) (*Response, error) {
-			fmt.Println("executing get user #2", req)
+			fmt.Printf("Executing get user #2: %+v\n", req)
 			return &Response{UserID: 10}, nil
 		}
 
+		// Execute the idempotent operation and handle the response.
 		_, err := idem.Do(ctx, "get-user", h, req)
 		if err == nil {
 			fmt.Println(err)
 			panic("want error, got nil")
 		}
-		fmt.Println("failed #2:", err)
+
+		// Check if the error is the expected ErrRequestInFlight.
+		fmt.Println("Failed #2:", err)
 		fmt.Println(errors.Is(err, idempotent.ErrRequestInFlight))
 	}()
 
 	wg.Wait()
 	// Output:
-	// executing get user #1 {10 john}
-	// failed #2: idempotent: request in flight
+	// Executing get user #1: {Age:10 Name:john}
+	// Failed #2: idempotent: request in flight
 	// true
-	// success #1: &{UserID:10}
+	// Success #1: &{UserID:10}
 }
