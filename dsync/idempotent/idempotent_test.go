@@ -42,6 +42,8 @@ func TestPrivateLoad(t *testing.T) {
 		cleanup(t)
 
 		_, err := idem.load(ctx, "hello", "world")
+		// Assert that the error is redis.Nil, indicating that the key does not
+		// exist.
 		assert.ErrorIs(t, err, redis.Nil)
 	})
 
@@ -51,6 +53,8 @@ func TestPrivateLoad(t *testing.T) {
 		a := assert.New(t)
 		a.Nil(client.Set(ctx, "hello", uuid.New().String(), 0).Err())
 		_, err := idem.load(ctx, "hello", "world")
+		// Assert that the error is ErrRequestInFlight, indicating that a request
+		// is already in flight for the key.
 		a.ErrorIs(err, ErrRequestInFlight)
 	})
 
@@ -72,6 +76,8 @@ func TestPrivateLoad(t *testing.T) {
 		a := assert.New(t)
 		a.Nil(client.Set(ctx, "hello", `{"request": "world", "response": 42}`, 0).Err())
 		_, err := idem.load(ctx, "hello", "not-world")
+		// Assert that the error is ErrRequestMismatch, indicating that the request
+		// does not match the stored request for the key.
 		a.ErrorIs(err, ErrRequestMismatch)
 	})
 }
@@ -95,32 +101,38 @@ func TestPrivateLockUnlock(t *testing.T) {
 		cleanup(t)
 
 		ok, err := idem.lock(ctx, "hello", []byte("world"))
-		a := assert.New(t)
-		a.Nil(err)
-		a.True(ok)
-		a.True(100*time.Millisecond-client.PTTL(ctx, "hello").Val() < 10*time.Millisecond)
+		assert.Nil(t, err, "expected error to be nil")
+		assert.True(t, ok, "expected lock to succeed")
+
+		// Check the lock TTL.
+		lockTTL := client.PTTL(ctx, "hello").Val()
+		assert.True(t, 100*time.Millisecond-lockTTL < 10*time.Millisecond, "expected lock TTL to be close to 100ms")
 
 		t.Run("when lock second time", func(t *testing.T) {
 			ok, err = idem.lock(ctx, "hello", []byte("world"))
-			a.Nil(err)
-			a.False(ok, "then it will fail to lock")
+			assert.Nil(t, err, "expected error to be nil")
+			assert.False(t, ok, "then it will fail to lock")
+			// Verify that the lock is still held by the first request
+			lockValue, err := client.Get(ctx, "hello").Bytes()
+			assert.Nil(t, err, "expected error to be nil")
+			assert.Equal(t, []byte("world"), lockValue, "expected lock value to be 'world'")
 		})
 
-		t.Run("when unlock failed", func(t *testing.T) {
+		t.Run("when unlock failed with wrong key", func(t *testing.T) {
 			err := idem.unlock(ctx, "hello", []byte("wrong-key"))
-			a.ErrorIs(err, ErrKeyNotFound)
+			assert.ErrorIs(t, err, ErrKeyNotFound, "expected error to be ErrKeyNotFound")
 
 			val, err := client.Get(ctx, "hello").Result()
-			a.Nil(err)
-			a.Equal("world", val)
+			assert.Nil(t, err, "expected error to be nil")
+			assert.Equal(t, "world", val, "expected lock value to remain unchanged")
 		})
 
 		t.Run("when unlock success", func(t *testing.T) {
 			err := idem.unlock(ctx, "hello", []byte("world"))
-			a.Nil(err)
+			assert.Nil(t, err, "expected error to be nil")
 
 			_, err = client.Get(ctx, "hello").Result()
-			a.ErrorIs(err, redis.Nil)
+			assert.ErrorIs(t, err, redis.Nil, "expected lock to be released")
 		})
 	})
 }
@@ -140,17 +152,19 @@ func TestPrivateReplace(t *testing.T) {
 		KeepTTL: 2 * time.Second,
 	})
 
-	t.Run("when replace failed", func(t *testing.T) {
+	t.Run("when replace failed with invalid old value", func(t *testing.T) {
 		cleanup(t)
 
 		a := assert.New(t)
 
 		// Set a value to be replaced.
 		a.Nil(client.Set(ctx, "hello", "world", 0).Err())
-		a.ErrorIs(idem.replace(ctx, "hello", []byte("invalid-old-value"), "new-value"), ErrKeyNotFound)
+
+		err := idem.replace(ctx, "hello", []byte("invalid-old-value"), "new-value")
+		a.ErrorIs(err, ErrKeyNotFound, "expected error to be ErrKeyNotFound")
 
 		v, err := client.Get(ctx, "hello").Result()
-		a.Nil(err)
+		a.Nil(err, "expected error to be nil")
 		a.Equal("world", v, "then the value stays the same")
 	})
 
@@ -161,12 +175,17 @@ func TestPrivateReplace(t *testing.T) {
 
 		// Set a value to be replaced.
 		a.Nil(client.Set(ctx, "hello", "world", 0).Err())
-		a.Nil(idem.replace(ctx, "hello", []byte("world"), "new-value"))
+
+		err := idem.replace(ctx, "hello", []byte("world"), "new-value")
+		a.Nil(err, "expected error to be nil")
 
 		v, err := client.Get(ctx, "hello").Result()
-		a.Nil(err)
+		a.Nil(err, "expected error to be nil")
 		a.Equal(`"new-value"`, v, "then the value will be replaced")
-		a.True(200*time.Millisecond-client.PTTL(ctx, "hello").Val() < 10*time.Millisecond)
+
+		// Check the updated TTL.
+		updatedTTL := client.PTTL(ctx, "hello").Val()
+		a.True(200*time.Millisecond-updatedTTL < 10*time.Millisecond, "expected updated TTL to be close to 200ms")
 	})
 }
 

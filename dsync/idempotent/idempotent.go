@@ -1,3 +1,4 @@
+// Package idempotent provides a mechanism for executing requests idempotently using Redis.
 package idempotent
 
 import (
@@ -13,9 +14,16 @@ import (
 )
 
 var (
+	// ErrRequestInFlight indicates that a request is already in flight for the
+	// specified key.
 	ErrRequestInFlight = errors.New("idempotent: request in flight")
+
+	// ErrRequestMismatch indicates that the request does not match the stored
+	// request for the specified key.
 	ErrRequestMismatch = errors.New("idempotent: request mismatch")
-	ErrKeyNotFound     = errors.New("idempotent: key not found")
+
+	// ErrKeyNotFound indicates that the specified key does not exist.
+	ErrKeyNotFound = errors.New("idempotent: key not found")
 )
 
 // unlock deletes the key only if the lease id matches.
@@ -60,6 +68,8 @@ type Option struct {
 	KeepTTL time.Duration
 }
 
+// New creates a new Idempotent instance with the specified Redis client, lock
+// TTL, and keep TTL.
 func New[K comparable, V any](client *redis.Client, opt *Option) *Idempotent[K, V] {
 	if opt == nil {
 		opt = &Option{
@@ -74,8 +84,10 @@ func New[K comparable, V any](client *redis.Client, opt *Option) *Idempotent[K, 
 	}
 }
 
+// Do executes the provided function idempotently, using the specified key and
+// request.
 func (i *Idempotent[K, V]) Do(ctx context.Context, key string, fn func(ctx context.Context, req K) (V, error), req K) (res V, err error) {
-	// Check if value exists in cache.
+	// Check if the value exists in cache.
 	res, err = i.load(ctx, key, req)
 
 	// Return result if exists.
@@ -125,6 +137,8 @@ func (i *Idempotent[K, V]) Do(ctx context.Context, key string, fn func(ctx conte
 	return
 }
 
+// replace sets the value of the specified key to the provided new value, if
+// the existing value matches the old value.
 func (i *Idempotent[K, V]) replace(ctx context.Context, key string, oldVal []byte, newVal any) error {
 	newVal, err := json.Marshal(newVal)
 	if err != nil {
@@ -141,6 +155,8 @@ func (i *Idempotent[K, V]) replace(ctx context.Context, key string, oldVal []byt
 	return parseScriptResult(unk)
 }
 
+// load retrieves the value of the specified key and returns it as a data
+// struct.
 func (i *Idempotent[K, V]) load(ctx context.Context, key string, req K) (v V, err error) {
 	var b []byte
 	b, err = i.client.Get(ctx, key).Bytes()
@@ -166,6 +182,7 @@ func (i *Idempotent[K, V]) load(ctx context.Context, key string, req K) (v V, er
 	return d.Response, nil
 }
 
+// hashRequest generates a hash of the provided request.
 func (i *Idempotent[K, V]) hashRequest(req K) string {
 	// We hash the request for several reasons
 	// - we want to fix the size of the request, regardless of how large it is
@@ -179,10 +196,12 @@ func (i *Idempotent[K, V]) hashRequest(req K) string {
 	return hash(b)
 }
 
+// lock acquires a lock on the specified key using the provided value.
 func (i *Idempotent[K, V]) lock(ctx context.Context, key string, val []byte) (bool, error) {
 	return i.client.SetNX(ctx, key, val, i.lockTTL).Result()
 }
 
+// unlock releases the lock on the specified key using the provided value.
 func (i *Idempotent[K, V]) unlock(ctx context.Context, key string, val []byte) error {
 	keys := []string{key}
 	argv := []any{val}
@@ -193,6 +212,7 @@ func (i *Idempotent[K, V]) unlock(ctx context.Context, key string, val []byte) e
 	return parseScriptResult(unk)
 }
 
+// hash generates a SHA-256 hash of the provided data.
 func hash(data []byte) string {
 	h := sha256.New()
 	h.Write(data)
@@ -200,12 +220,13 @@ func hash(data []byte) string {
 	return base64.StdEncoding.EncodeToString(b)
 }
 
+// isUUID checks if the provided byte slice represents a valid UUID.
 func isUUID(b []byte) bool {
 	_, err := uuid.ParseBytes(b)
 	return err == nil
 }
 
-// copied from redis source code
+// formatMs converts a time duration to milliseconds.
 func formatMs(dur time.Duration) int64 {
 	if dur > 0 && dur < time.Millisecond {
 		return 1
@@ -214,6 +235,7 @@ func formatMs(dur time.Duration) int64 {
 	return int64(dur / time.Millisecond)
 }
 
+// parseScriptResult interprets the result of a Redis script and returns an error if it indicates a failure.
 func parseScriptResult(unk any) error {
 	if unk == nil {
 		return nil
