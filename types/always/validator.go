@@ -1,5 +1,6 @@
 package always
 
+// Validate checks if the given objects are valid.
 func Validate[T any](t T, ts ...Validator[T]) error {
 	for i := 0; i < len(ts); i++ {
 		if err := ts[i].Validate(t); err != nil {
