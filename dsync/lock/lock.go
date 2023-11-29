@@ -27,7 +27,7 @@ type locker interface {
 	Extend(ctx context.Context, ttl time.Duration) error
 }
 
-// Locker ...
+// Locker represents a distributed lock implementation using Redis.
 type Locker struct {
 	client *redis.Client
 	prefix string
