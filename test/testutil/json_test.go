@@ -50,6 +50,26 @@ func TestDumpJSON(t *testing.T) {
 		))
 }
 
+func TestDumpJSONIgnoreTag(t *testing.T) {
+	type Person struct {
+		Name      string    `json:"name"`
+		Age       int64     `json:"age"`
+		IsMarried bool      `json:"isMarried"`
+		BornAt    time.Time `json:"bornAt" cmp:",ignore"`
+	}
+
+	p := Person{
+		Name:      "John Appleseed",
+		Age:       13,
+		IsMarried: true,
+		BornAt:    time.Now(),
+	}
+
+	type T = Person
+
+	testutil.DumpJSON(t, p)
+}
+
 func TestDumpJSONNonStruct(t *testing.T) {
 	nums := []int{1, 2, 3}
 	testutil.DumpJSON(t, nums)

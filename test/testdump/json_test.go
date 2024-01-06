@@ -235,6 +235,25 @@ func TestJSONDiff(t *testing.T) {
 	})
 }
 
+func TestJSONIgnoreTag(t *testing.T) {
+	type User struct {
+		Name      string    `json:"name"`
+		Email     string    `json:"email"`
+		CreatedAt time.Time `json:"createdAt" cmp:",ignore"`
+	}
+
+	fileName := fmt.Sprintf("testdata/%s.json", t.Name())
+	data := User{
+		Name:      "John Appleseed",
+		Email:     "john.appleseed@mail.com",
+		CreatedAt: time.Now(),
+	}
+
+	if err := testdump.JSON(testdump.NewFile(fileName), data, nil); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func parseDiff(diff string) ([]string, []string) {
 	var plus, minus []string
 

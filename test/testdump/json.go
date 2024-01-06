@@ -20,6 +20,11 @@ func JSON[T any](rw readerWriter, t T, opt *JSONOption, hooks ...Hook[T]) error 
 		opt = new(JSONOption)
 	}
 
+	ignoreOpt, ok := internal.IgnoreMapEntriesFromTags(t)
+	if ok {
+		opt.Body = append(opt.Body, ignoreOpt)
+	}
+
 	var s S[T] = &snapshot[T]{
 		marshaler: MarshalFunc[T](MarshalJSON[T]),
 		// This is only used for custom comparison. It does not benefit as much as
