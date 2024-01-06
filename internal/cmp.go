@@ -44,7 +44,7 @@ func ignoreMapEntriesFromTags[T any](v T) map[string]bool {
 			name = f.Name
 		}
 
-		if strings.HasSuffix(f.Tag.Get("cmp"), "ignore") {
+		if strings.HasSuffix(f.Tag.Get("cmp"), ",ignore") {
 			ignore[name] = true
 		}
 	}

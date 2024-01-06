@@ -23,8 +23,6 @@ func TestDumpJSON(t *testing.T) {
 		BornAt:    time.Now(),
 	}
 
-	type T = Person
-
 	testutil.DumpJSON(t, p,
 		testutil.IgnoreFields("bornAt"))
 
@@ -64,8 +62,6 @@ func TestDumpJSONIgnoreTag(t *testing.T) {
 		IsMarried: true,
 		BornAt:    time.Now(),
 	}
-
-	type T = Person
 
 	testutil.DumpJSON(t, p)
 }
