@@ -14,6 +14,8 @@ func YAML[T any](rw readerWriter, t T, opt *YAMLOption, hooks ...Hook[T]) error 
 		opt = new(YAMLOption)
 	}
 
+	opt.Body = append(opt.Body, ignoreFieldsFromTags(t, "yaml")...)
+
 	var s S[T] = &snapshot[T]{
 		marshaler:      MarshalFunc[T](MarshalYAML[T]),
 		unmarshaler:    UnmarshalFunc[T](UnmarshalYAML[T]),
@@ -21,7 +23,7 @@ func YAML[T any](rw readerWriter, t T, opt *YAMLOption, hooks ...Hook[T]) error 
 		anyComparer:    CompareAnyFunc((&YAMLComparer[any]{Body: opt.Body}).Compare),
 	}
 
-	s = Hooks[T](hooks).Apply(s)
+	s = Hooks[T](append(hooks, maskFieldsFromTags(t, "yaml")...)).Apply(s)
 
 	return Snapshot(rw, t, s)
 }

@@ -122,13 +122,13 @@ func TestYAMLMap(t *testing.T) {
 
 func TestYAMLDiff(t *testing.T) {
 	type User struct {
-		ID        int64     `json:"id"`
-		Email     string    `json:"email"`
-		Password  string    `json:"password"`
-		CreatedAt time.Time `json:"createdAt"`
+		ID        int64
+		Email     string
+		Password  string
+		CreatedAt time.Time
 	}
 
-	fileName := fmt.Sprintf("testdata/%s.json", t.Name())
+	fileName := fmt.Sprintf("testdata/%s.yaml", t.Name())
 	u := User{
 		ID:        42,
 		Email:     "John Appleseed",
@@ -140,7 +140,7 @@ func TestYAMLDiff(t *testing.T) {
 	type T = User
 
 	opt := new(testdump.YAMLOption)
-	opt.Body = append(opt.Body, internal.IgnoreMapEntries("createdAt"))
+	opt.Body = append(opt.Body, internal.IgnoreMapEntries("CreatedAt"))
 	hooks := []testdump.Hook[T]{
 		testdump.MarshalHook(func(t T) (T, error) {
 			t.Password = maputil.MaskValue
@@ -155,7 +155,7 @@ func TestYAMLDiff(t *testing.T) {
 	t.Run("add new field", func(t *testing.T) {
 		type NewUser struct {
 			User
-			Hobbies []string `json:"hobbies"`
+			Hobbies []string
 		}
 
 		type T = NewUser
@@ -166,7 +166,7 @@ func TestYAMLDiff(t *testing.T) {
 		}
 
 		opt := new(testdump.YAMLOption)
-		opt.Body = append(opt.Body, internal.IgnoreMapEntries("createdAt"))
+		opt.Body = append(opt.Body, internal.IgnoreMapEntries("CreatedAt"))
 		hooks := []testdump.Hook[T]{
 			testdump.MarshalHook(func(t T) (T, error) {
 				t.Password = maputil.MaskValue
@@ -181,19 +181,14 @@ func TestYAMLDiff(t *testing.T) {
 
 		var diffErr *internal.DiffError
 		assert.True(errors.As(err, &diffErr))
-
-		diffText := diffErr.Text()
-		plus, minus := parseDiff(diffText)
-		assert.Len(plus, 1)
-		assert.Len(minus, 0)
-		assert.Equal(`"hobbies":  []any{string("coding")},`, plus[0])
+		testdump.Text(testdump.NewFile(fmt.Sprintf("testdata/%s.txt", t.Name())), diffErr.Text(), nil)
 	})
 
 	t.Run("remove existing field", func(t *testing.T) {
 		type PartialUser struct {
-			Email     string    `json:"email"`
-			Password  string    `json:"password"`
-			CreatedAt time.Time `json:"createdAt"`
+			Email     string
+			Password  string
+			CreatedAt time.Time
 		}
 
 		type T = PartialUser
@@ -205,7 +200,7 @@ func TestYAMLDiff(t *testing.T) {
 		}
 
 		opt := new(testdump.YAMLOption)
-		opt.Body = append(opt.Body, internal.IgnoreMapEntries("createdAt"))
+		opt.Body = append(opt.Body, internal.IgnoreMapEntries("CreatedAt"))
 		hooks := []testdump.Hook[T]{
 			testdump.MarshalHook(func(t T) (T, error) {
 				t.Password = maputil.MaskValue
@@ -221,11 +216,7 @@ func TestYAMLDiff(t *testing.T) {
 		var diffErr *internal.DiffError
 		assert.True(errors.As(err, &diffErr))
 
-		diffText := diffErr.Text()
-		plus, minus := parseDiff(diffText)
-		assert.Len(plus, 0)
-		assert.Len(minus, 1)
-		assert.Equal(`"id":       float64(42),`, minus[0])
+		testdump.Text(testdump.NewFile(fmt.Sprintf("testdata/%s.txt", t.Name())), diffErr.Text(), nil)
 	})
 
 	t.Run("update existing field", func(t *testing.T) {
@@ -243,11 +234,42 @@ func TestYAMLDiff(t *testing.T) {
 		var diffErr *internal.DiffError
 		assert.True(errors.As(err, &diffErr))
 
-		diffText := diffErr.Text()
-		plus, minus := parseDiff(diffText)
-		assert.Len(plus, 1)
-		assert.Len(minus, 1)
-		assert.Equal(`"email":    string("John Doe"),`, plus[0])
-		assert.Equal(`"email":    string("John Appleseed"),`, minus[0])
+		testdump.Text(testdump.NewFile(fmt.Sprintf("testdata/%s.txt", t.Name())), diffErr.Text(), nil)
 	})
+}
+
+func TestYAMLMaskField(t *testing.T) {
+	type LoginRequest struct {
+		Email    string
+		Password string `cmp:",mask"`
+	}
+
+	fileName := fmt.Sprintf("testdata/%s.yaml", t.Name())
+	data := LoginRequest{
+		Email:    "john.appleseed@mail.com",
+		Password: "super secret",
+	}
+
+	if err := testdump.YAML(testdump.NewFile(fileName), data, nil); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestYAMLIgnoreTag(t *testing.T) {
+	type User struct {
+		Name      string
+		Email     string
+		CreatedAt time.Time `cmp:",ignore"`
+	}
+
+	fileName := fmt.Sprintf("testdata/%s.yaml", t.Name())
+	data := User{
+		Name:      "John Appleseed",
+		Email:     "john.appleseed@mail.com",
+		CreatedAt: time.Now(),
+	}
+
+	if err := testdump.YAML(testdump.NewFile(fileName), data, nil); err != nil {
+		t.Fatal(err)
+	}
 }

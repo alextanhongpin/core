@@ -29,13 +29,7 @@ func TestTextInMemory(t *testing.T) {
 	assert.True(ok)
 	diffErr.SetColor(false)
 
-	diff := diffErr.Error()
-	plus, minus := parseDiff(diff)
-	assert.Len(plus, 1)
-	assert.Len(minus, 1)
-
-	assert.Equal(`"bar",`, plus[0])
-	assert.Equal(`"foo",`, minus[0])
+	testdump.Text(testdump.NewFile(fmt.Sprintf("testdata/%s.txt", t.Name())), diffErr.Text(), nil)
 }
 
 func TestTextHook(t *testing.T) {

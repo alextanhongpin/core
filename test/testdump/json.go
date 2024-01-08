@@ -4,7 +4,10 @@ import (
 	"encoding/json"
 
 	"github.com/alextanhongpin/core/internal"
+	"github.com/alextanhongpin/core/types/maputil"
 	"github.com/google/go-cmp/cmp"
+	"github.com/google/go-cmp/cmp/cmpopts"
+	"golang.org/x/exp/slices"
 )
 
 type JSONOption struct {
@@ -20,10 +23,7 @@ func JSON[T any](rw readerWriter, t T, opt *JSONOption, hooks ...Hook[T]) error 
 		opt = new(JSONOption)
 	}
 
-	ignoreOpt, ok := internal.IgnoreMapEntriesFromTags(t)
-	if ok {
-		opt.Body = append(opt.Body, ignoreOpt)
-	}
+	opt.Body = append(opt.Body, ignoreFieldsFromTags(t, "json")...)
 
 	var s S[T] = &snapshot[T]{
 		marshaler: MarshalFunc[T](MarshalJSON[T]),
@@ -34,7 +34,7 @@ func JSON[T any](rw readerWriter, t T, opt *JSONOption, hooks ...Hook[T]) error 
 		anyComparer:    CompareAnyFunc((&JSONComparer[any]{Body: opt.Body}).Compare),
 	}
 
-	s = Hooks[T](hooks).Apply(s)
+	s = Hooks[T](append(hooks, maskFieldsFromTags(t, "json")...)).Apply(s)
 
 	return Snapshot(rw, t, s)
 }
@@ -59,4 +59,64 @@ type JSONComparer[T any] struct {
 
 func (c *JSONComparer[T]) Compare(snapshot, received T) error {
 	return internal.ANSIDiff(snapshot, received, c.Body...)
+}
+
+func MaskFields[T any](fields ...string) Hook[T] {
+	return MarshalHook(func(t T) (T, error) {
+		b, err := json.Marshal(t)
+		if err != nil {
+			return t, err
+		}
+
+		bb, err := maputil.MaskBytes(b, fields...)
+		if err != nil {
+			return t, err
+		}
+
+		var tt T
+		if err := json.Unmarshal(bb, &tt); err != nil {
+			return tt, err
+		}
+
+		return tt, nil
+	})
+}
+
+func ignoreFieldsFromTags[T any](v T, name string) []cmp.Option {
+	var opts []cmp.Option
+
+	kv := internal.GetStructTags(v, name, "cmp")
+	fields := make(map[string]bool)
+	for k, v := range kv {
+		if slices.Contains(v, "ignore") {
+			fields[k] = true
+		}
+	}
+
+	if len(fields) > 0 {
+		cond := func(k string, v any) bool {
+			return fields[k]
+		}
+
+		opts = append(opts, cmpopts.IgnoreMapEntries(cond))
+	}
+
+	return opts
+}
+
+func maskFieldsFromTags[T any](v T, name string) []Hook[T] {
+	var hooks []Hook[T]
+	kv := internal.GetStructTags(v, name, "cmp")
+	var fields []string
+	for k, v := range kv {
+		if slices.Contains(v, "mask") {
+			fields = append(fields, k)
+		}
+	}
+
+	if len(fields) > 0 {
+		hooks = append(hooks, MaskFields[T](fields...))
+	}
+
+	return hooks
 }

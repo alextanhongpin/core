@@ -1,0 +1,13 @@
+
+
+  Snapshot(-)
+  Received(+)
+
+
+  map[string]any{
+  	... // 1 ignored entry
+  	"email":    string("John Appleseed"),
++ 	"hobbies":  []any{string("coding")},
+  	"id":       float64(42),
+  	"password": string("/* !REDACTED */"),
+  }

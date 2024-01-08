@@ -3,7 +3,6 @@ package testdump_test
 import (
 	"errors"
 	"fmt"
-	"strings"
 	"testing"
 	"time"
 
@@ -165,11 +164,7 @@ func TestJSONDiff(t *testing.T) {
 		var diffErr *internal.DiffError
 		assert.True(errors.As(err, &diffErr))
 
-		diffText := diffErr.Text()
-		plus, minus := parseDiff(diffText)
-		assert.Len(plus, 1)
-		assert.Len(minus, 0)
-		assert.Equal(`"hobbies":  []any{string("coding")},`, plus[0])
+		testdump.Text(testdump.NewFile(fmt.Sprintf("testdata/%s.txt", t.Name())), diffErr.Text(), nil)
 	})
 
 	t.Run("remove existing field", func(t *testing.T) {
@@ -204,11 +199,7 @@ func TestJSONDiff(t *testing.T) {
 		var diffErr *internal.DiffError
 		assert.True(errors.As(err, &diffErr))
 
-		diffText := diffErr.Text()
-		plus, minus := parseDiff(diffText)
-		assert.Len(plus, 0)
-		assert.Len(minus, 1)
-		assert.Equal(`"id":       float64(42),`, minus[0])
+		testdump.Text(testdump.NewFile(fmt.Sprintf("testdata/%s.txt", t.Name())), diffErr.Text(), nil)
 	})
 
 	t.Run("update existing field", func(t *testing.T) {
@@ -226,12 +217,7 @@ func TestJSONDiff(t *testing.T) {
 		var diffErr *internal.DiffError
 		assert.True(errors.As(err, &diffErr))
 
-		diffText := diffErr.Text()
-		plus, minus := parseDiff(diffText)
-		assert.Len(plus, 1)
-		assert.Len(minus, 1)
-		assert.Equal(`"email":    string("John Doe"),`, plus[0])
-		assert.Equal(`"email":    string("John Appleseed"),`, minus[0])
+		testdump.Text(testdump.NewFile(fmt.Sprintf("testdata/%s.txt", t.Name())), diffErr.Text(), nil)
 	})
 }
 
@@ -254,23 +240,36 @@ func TestJSONIgnoreTag(t *testing.T) {
 	}
 }
 
-func parseDiff(diff string) ([]string, []string) {
-	var plus, minus []string
-
-	lines := strings.Split(diff, "\n")
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if len(line) == 0 {
-			continue
-		}
-		switch line[0] {
-		case '+':
-			plus = append(plus, strings.TrimSpace(line[1:]))
-		case '-':
-			minus = append(minus, strings.TrimSpace(line[1:]))
-		}
-
+func TestJSONMaskField(t *testing.T) {
+	type LoginRequest struct {
+		Email    string `json:"email"`
+		Password string `json:"password" cmp:",mask"`
 	}
 
-	return plus, minus
+	fileName := fmt.Sprintf("testdata/%s.json", t.Name())
+	data := LoginRequest{
+		Email:    "john.appleseed@mail.com",
+		Password: "super secret",
+	}
+
+	if err := testdump.JSON(testdump.NewFile(fileName), data, nil); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestJSONTxTar(t *testing.T) {
+	type User struct {
+		Name  string `json:"name"`
+		Email string `json:"email"`
+	}
+
+	fileName := fmt.Sprintf("testdata/%s", t.Name())
+	data := User{
+		Name:  "John Appleseed",
+		Email: "john.appleseed@mail.com",
+	}
+
+	if err := testdump.JSON(testdump.NewTxTar(fileName, "user.json"), data, nil); err != nil {
+		t.Fatal(err)
+	}
 }

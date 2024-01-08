@@ -1,0 +1,10 @@
+
+
+  Snapshot(-)
+  Received(+)
+
+
+  string(
+- 	"foo",
++ 	"bar",
+  )

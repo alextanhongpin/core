@@ -20,14 +20,7 @@ func IgnoreMapEntries(keys ...string) cmp.Option {
 	})
 }
 
-func IgnoreMapEntriesFromTags[T any](v T) (cmp.Option, bool) {
-	ignore := ignoreMapEntriesFromTags(v)
-	return cmpopts.IgnoreMapEntries(func(k string, v any) bool {
-		return ignore[k]
-	}), len(ignore) > 0
-}
-
-func ignoreMapEntriesFromTags[T any](v T) map[string]bool {
+func GetStructTags[T any](v T, name, tag string) map[string][]string {
 	t := reflect.TypeOf(v)
 	if t.Kind() == reflect.Ptr {
 		t = t.Elem()
@@ -36,17 +29,19 @@ func ignoreMapEntriesFromTags[T any](v T) map[string]bool {
 		return nil
 	}
 
-	ignore := make(map[string]bool)
+	kv := make(map[string][]string)
 	for i := 0; i < t.NumField(); i++ {
 		f := t.Field(i)
-		name := f.Tag.Get("json")
+		name := f.Tag.Get(name)
 		if name == "" {
 			name = f.Name
 		}
 
-		if strings.HasSuffix(f.Tag.Get("cmp"), ",ignore") {
-			ignore[name] = true
+		v := f.Tag.Get(tag)
+		if v == "" {
+			continue
 		}
+		kv[name] = strings.Split(v, ",")
 	}
-	return ignore
+	return kv
 }

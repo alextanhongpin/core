@@ -1,13 +1,11 @@
 package testutil
 
 import (
-	"encoding/json"
 	"fmt"
 	"testing"
 
 	"github.com/alextanhongpin/core/internal"
 	"github.com/alextanhongpin/core/test/testdump"
-	"github.com/alextanhongpin/core/types/maputil"
 	"github.com/google/go-cmp/cmp"
 )
 
@@ -65,24 +63,7 @@ func IgnoreFields(fields ...string) JSONCmpOption {
 
 func MaskFields[T any](fields ...string) *jsonHookOption[T] {
 	return &jsonHookOption[T]{
-		hook: testdump.MarshalHook(func(t T) (T, error) {
-			b, err := json.Marshal(t)
-			if err != nil {
-				return t, err
-			}
-
-			bb, err := maputil.MaskBytes(b, fields...)
-			if err != nil {
-				return t, err
-			}
-
-			var tt T
-			if err := json.Unmarshal(bb, &tt); err != nil {
-				return tt, err
-			}
-
-			return tt, nil
-		}),
+		hook: testdump.MaskFields[T](fields...),
 	}
 }
 
