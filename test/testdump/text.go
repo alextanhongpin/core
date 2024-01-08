@@ -2,29 +2,16 @@ package testdump
 
 import "github.com/alextanhongpin/core/internal"
 
-type TextOption struct{}
-
-func Text(rw readerWriter, str string, opt *TextOption, hooks ...Hook[string]) error {
-	type T = string
-	var s S[T] = &snapshot[T]{
-		marshaler:   MarshalFunc[string](MarshalText),
-		unmarshaler: UnmarshalFunc[string](UnmarshalText),
-		comparer:    CompareFunc[string](CompareText),
+func Text(rw readerWriter, received string) error {
+	if err := rw.Write([]byte(received)); err != nil {
+		return err
 	}
 
-	s = Hooks[T](hooks).Apply(s)
+	b, err := rw.Read()
+	if err != nil {
+		return err
+	}
 
-	return Snapshot(rw, str, s)
-}
-
-func MarshalText(str string) ([]byte, error) {
-	return []byte(str), nil
-}
-
-func UnmarshalText(b []byte) (string, error) {
-	return string(b), nil
-}
-
-func CompareText(snapshot, received string) error {
+	snapshot := string(b)
 	return internal.ANSIDiff(snapshot, received)
 }

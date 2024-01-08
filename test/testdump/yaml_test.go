@@ -181,7 +181,7 @@ func TestYAMLDiff(t *testing.T) {
 
 		var diffErr *internal.DiffError
 		assert.True(errors.As(err, &diffErr))
-		testdump.Text(testdump.NewFile(fmt.Sprintf("testdata/%s.txt", t.Name())), diffErr.Text(), nil)
+		testdump.Text(testdump.NewFile(fmt.Sprintf("testdata/%s.txt", t.Name())), diffErr.Text())
 	})
 
 	t.Run("remove existing field", func(t *testing.T) {
@@ -216,7 +216,7 @@ func TestYAMLDiff(t *testing.T) {
 		var diffErr *internal.DiffError
 		assert.True(errors.As(err, &diffErr))
 
-		testdump.Text(testdump.NewFile(fmt.Sprintf("testdata/%s.txt", t.Name())), diffErr.Text(), nil)
+		testdump.Text(testdump.NewFile(fmt.Sprintf("testdata/%s.txt", t.Name())), diffErr.Text())
 	})
 
 	t.Run("update existing field", func(t *testing.T) {
@@ -234,7 +234,7 @@ func TestYAMLDiff(t *testing.T) {
 		var diffErr *internal.DiffError
 		assert.True(errors.As(err, &diffErr))
 
-		testdump.Text(testdump.NewFile(fmt.Sprintf("testdata/%s.txt", t.Name())), diffErr.Text(), nil)
+		testdump.Text(testdump.NewFile(fmt.Sprintf("testdata/%s.txt", t.Name())), diffErr.Text())
 	})
 }
 

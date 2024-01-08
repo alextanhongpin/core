@@ -12,7 +12,7 @@ func TestText(t *testing.T) {
 	fileName := fmt.Sprintf("testdata/%s.txt", t.Name())
 	text := "What a wonderful world"
 
-	if err := testdump.Text(testdump.NewFile(fileName), text, nil); err != nil {
+	if err := testdump.Text(testdump.NewFile(fileName), text); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -21,31 +21,13 @@ func TestTextInMemory(t *testing.T) {
 	im := testdump.NewInMemory()
 
 	assert := assert.New(t)
-	assert.Nil(testdump.Text(im, "foo", nil))
-	assert.NotNil(testdump.Text(im, "bar", nil))
+	assert.Nil(testdump.Text(im, "foo"))
+	assert.NotNil(testdump.Text(im, "bar"))
 
-	err := testdump.Text(im, "bar", nil)
+	err := testdump.Text(im, "bar")
 	diffErr, ok := testdump.AsDiffError(err)
 	assert.True(ok)
 	diffErr.SetColor(false)
 
-	testdump.Text(testdump.NewFile(fmt.Sprintf("testdata/%s.txt", t.Name())), diffErr.Text(), nil)
-}
-
-func TestTextHook(t *testing.T) {
-	fileName := fmt.Sprintf("testdata/%s.txt", t.Name())
-	text := "hello world"
-
-	hooks := []testdump.Hook[string]{
-		testdump.MarshalHook(func(str string) (string, error) {
-			return fmt.Sprintf("%s %s", str, "1..."), nil
-		}),
-		testdump.MarshalHook(func(str string) (string, error) {
-			return fmt.Sprintf("%s %s", str, "2..."), nil
-		}),
-	}
-
-	if err := testdump.Text(testdump.NewFile(fileName), text, nil, hooks...); err != nil {
-		t.Fatal(err)
-	}
+	testdump.Text(testdump.NewFile(fmt.Sprintf("testdata/%s.txt", t.Name())), diffErr.Text())
 }
