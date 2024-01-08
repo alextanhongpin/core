@@ -34,7 +34,7 @@ func DumpText(t *testing.T, s string, opts ...TextOption) {
 		FileExt:  ".txt",
 	}
 
-	if err := testdump.Text(testdump.NewFile(p.String()), s, nil, hooks...); err != nil {
+	if err := testdump.Text(testdump.NewFile(p.String()), s); err != nil {
 		t.Fatal(err)
 	}
 }
