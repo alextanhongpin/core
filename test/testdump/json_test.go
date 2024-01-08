@@ -8,7 +8,6 @@ import (
 
 	"github.com/alextanhongpin/core/internal"
 	"github.com/alextanhongpin/core/test/testdump"
-	"github.com/alextanhongpin/core/types/maputil"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -29,46 +28,6 @@ func TestJSON(t *testing.T) {
 	}
 }
 
-func TestJSONHook(t *testing.T) {
-	type Credentials struct {
-		Email     string    `json:"email"`
-		Password  string    `json:"password"`
-		CreatedAt time.Time `json:"createdAt"`
-	}
-
-	fileName := fmt.Sprintf("testdata/%s.json", t.Name())
-	data := Credentials{
-		Email:     "John Appleseed",
-		Password:  "$up3rS3cr3t", // To be masked.
-		CreatedAt: time.Now(),    // Dynamic.
-	}
-
-	// Alias to shorten the types.
-	type T = Credentials
-
-	opt := new(testdump.JSONOption)
-	opt.Body = append(opt.Body, internal.IgnoreMapEntries("createdAt"))
-	hooks := []testdump.Hook[T]{
-		// Mask the password value.
-		testdump.MarshalHook(func(t T) (T, error) {
-			t.Password = maputil.MaskValue
-			return t, nil
-		}),
-		// Validate that the time is not zero.
-		testdump.CompareHook(func(snap, recv T) error {
-			if snap.CreatedAt.IsZero() || recv.CreatedAt.IsZero() {
-				return errors.New("zero time")
-			}
-
-			return nil
-		}),
-	}
-
-	if err := testdump.JSON(testdump.NewFile(fileName), data, opt, hooks...); err != nil {
-		t.Fatal(err)
-	}
-}
-
 func TestJSONMap(t *testing.T) {
 	fileName := fmt.Sprintf("testdata/%s.json", t.Name())
 	data := map[string]any{
@@ -80,24 +39,10 @@ func TestJSONMap(t *testing.T) {
 	type T = map[string]any
 
 	opt := new(testdump.JSONOption)
-	opt.Body = append(opt.Body, internal.IgnoreMapEntries("createdAt"))
-	hooks := []testdump.Hook[T]{
-		testdump.MarshalHook(func(m T) (T, error) {
-			// WARN: this will only add the field even if it is deleted.
-			m["password"] = maputil.MaskValue
-			return m, nil
-		}),
+	opt.IgnoreFields = []string{"createdAt"}
+	opt.MaskFields = []string{"password"}
 
-		// Validate that the time is not zero.
-		testdump.CompareHook(func(snap, recv T) error {
-			return internal.AnyError(
-				internal.IsNonZeroTime(snap, "createdAt"),
-				internal.IsNonZeroTime(recv, "createdAt"),
-			)
-		}),
-	}
-
-	if err := testdump.JSON(testdump.NewFile(fileName), data, opt, hooks...); err != nil {
+	if err := testdump.JSON(testdump.NewFile(fileName), data, opt); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -122,15 +67,9 @@ func TestJSONDiff(t *testing.T) {
 	type T = User
 
 	opt := new(testdump.JSONOption)
-	opt.Body = append(opt.Body, internal.IgnoreMapEntries("createdAt"))
-	hooks := []testdump.Hook[T]{
-		testdump.MarshalHook(func(t T) (T, error) {
-			t.Password = maputil.MaskValue
-
-			return t, nil
-		}),
-	}
-	if err := testdump.JSON(testdump.NewFile(fileName), u, opt, hooks...); err != nil {
+	opt.IgnoreFields = []string{"createdAt"}
+	opt.MaskFields = []string{"password"}
+	if err := testdump.JSON(testdump.NewFile(fileName), u, opt); err != nil {
 		t.Fatal(err)
 	}
 
@@ -148,17 +87,10 @@ func TestJSONDiff(t *testing.T) {
 		}
 
 		opt := new(testdump.JSONOption)
-		opt.Body = append(opt.Body, internal.IgnoreMapEntries("createdAt"))
-		hooks := []testdump.Hook[T]{
-			testdump.MarshalHook(func(t T) (T, error) {
-				t.Password = maputil.MaskValue
-
-				return t, nil
-			}),
-		}
+		opt.IgnoreFields = []string{"createdAt"}
 
 		assert := assert.New(t)
-		err := testdump.JSON(testdump.NewFile(fileName), u, opt, hooks...)
+		err := testdump.JSON(testdump.NewFile(fileName), u, opt)
 		assert.NotNil(err)
 
 		var diffErr *internal.DiffError
@@ -183,17 +115,10 @@ func TestJSONDiff(t *testing.T) {
 		}
 
 		opt := new(testdump.JSONOption)
-		opt.Body = append(opt.Body, internal.IgnoreMapEntries("createdAt"))
-		hooks := []testdump.Hook[T]{
-			testdump.MarshalHook(func(t T) (T, error) {
-				t.Password = maputil.MaskValue
-
-				return t, nil
-			}),
-		}
-
+		opt.IgnoreFields = []string{"createdAt"}
+		opt.MaskFields = []string{"password"}
 		assert := assert.New(t)
-		err := testdump.JSON(testdump.NewFile(fileName), u, opt, hooks...)
+		err := testdump.JSON(testdump.NewFile(fileName), u, opt)
 		assert.NotNil(err)
 
 		var diffErr *internal.DiffError
@@ -211,7 +136,7 @@ func TestJSONDiff(t *testing.T) {
 		}
 
 		assert := assert.New(t)
-		err := testdump.JSON(testdump.NewFile(fileName), u, opt, hooks...)
+		err := testdump.JSON(testdump.NewFile(fileName), u, opt)
 		assert.NotNil(err)
 
 		var diffErr *internal.DiffError

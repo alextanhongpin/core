@@ -5,7 +5,12 @@
 
 
   map[string]any{
-  	... // 1 ignored entry
+  	"CreatedAt": strings.Join({
+  		"2024-01-09T02:38:23.74",
+- 		"3426",
++ 		"7838",
+  		"+08:00",
+  	}, ""),
 - 	"Email":    string("John Appleseed"),
 + 	"Email":    string("John Doe"),
   	"ID":       float64(42),

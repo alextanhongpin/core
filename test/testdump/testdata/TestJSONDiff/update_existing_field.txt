@@ -4,10 +4,15 @@
   Received(+)
 
 
-  map[string]any{
-  	... // 1 ignored entry
-- 	"email":    string("John Appleseed"),
-+ 	"email":    string("John Doe"),
-  	"id":       float64(42),
-  	"password": string("/* !REDACTED */"),
-  }
+  map[string]any{
+  	"createdAt": strings.Join({
+  		"2024-01-09T02:37:27.2",
+- 		"68252",
++ 		"70625",
+  		"+08:00",
+  	}, ""),
+- 	"email":    string("John Appleseed"),
++ 	"email":    string("John Doe"),
+  	"id":       float64(42),
+  	"password": string("/* !REDACTED */"),
+  }

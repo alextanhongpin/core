@@ -1,7 +1,6 @@
 package testdump
 
 import (
-	"bytes"
 	"os"
 
 	"github.com/alextanhongpin/core/internal"
@@ -31,7 +30,6 @@ func Snapshot[T any](rw readerWriter, t T, s S[T]) error {
 		return err
 	}
 
-	receivedBytes := bytes.Clone(b)
 	// NOTE: We unmarshal back the bytes, since there might
 	// be additional information not present during the
 	// marshalling process.
@@ -45,26 +43,8 @@ func Snapshot[T any](rw readerWriter, t T, s S[T]) error {
 		return err
 	}
 
-	snapshotBytes := bytes.Clone(b)
 	snapshot, err := s.Unmarshal(b)
 	if err != nil {
-		return err
-	}
-
-	// This is required when comparing JSON/YAML type, because
-	// unmarshalling the type to map[any]interface{} will cause
-	// information to be lost (e.g. additional fields).
-	sb, err := s.UnmarshalAny(snapshotBytes)
-	if err != nil {
-		return err
-	}
-
-	rb, err := s.UnmarshalAny(receivedBytes)
-	if err != nil {
-		return err
-	}
-
-	if err := s.CompareAny(sb, rb); err != nil {
 		return err
 	}
 
@@ -146,7 +126,7 @@ func (rw *File) Read() ([]byte, error) {
 }
 
 func (rw *File) Write(b []byte) error {
-	return internal.WriteIfNotExists(rw.Name, b)
+	return internal.WriteFile(rw.Name, b, *update)
 }
 
 type InMemory struct {

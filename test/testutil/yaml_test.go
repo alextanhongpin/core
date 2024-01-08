@@ -27,7 +27,7 @@ We are designed to love and break
 And to rinse and repeat it all again`,
 	}
 
-	testutil.DumpYAML(t, p, testutil.IgnoreKeys("BornAt"))
+	testutil.DumpYAML(t, p, testutil.IgnoreFields("BornAt"))
 }
 
 func TestDumpYAMLNonStruct(t *testing.T) {
@@ -37,8 +37,8 @@ func TestDumpYAMLNonStruct(t *testing.T) {
 
 func TestDumpYAMLMaskField(t *testing.T) {
 	type Credentials struct {
-		Email    string `json:"email"`
-		Password string `json:"password"`
+		Email    string
+		Password string
 	}
 
 	creds := Credentials{
@@ -47,21 +47,12 @@ func TestDumpYAMLMaskField(t *testing.T) {
 	}
 
 	testutil.DumpYAML(t, creds,
-		testutil.MaskKeys[Credentials]("password"),
+		testutil.MaskFields("Password"),
 	)
 }
 
 func TestDumpYAMLIntercept(t *testing.T) {
 	nums := []int{1, 2, 3}
 
-	testutil.DumpYAML(t, nums,
-		testutil.InterceptYAML(func(t []int) ([]int, error) {
-			// Double the value
-			for i, v := range t {
-				t[i] = v * 2
-			}
-
-			return t, nil
-		}),
-	)
+	testutil.DumpYAML(t, nums)
 }

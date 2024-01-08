@@ -11,32 +11,52 @@ import (
 )
 
 type JSONOption struct {
-	Body []cmp.Option
+	Body         []cmp.Option
+	IgnoreFields []string
+	MaskFields   []string
 }
 
 // NOTE: Why using a type is bad - because if we serialize to structs, the keys
 // that are removed won't be compared.
 // Ideally, using map[string]any or just any should work better for snapshot
 // testing.
-func JSON[T any](rw readerWriter, t T, opt *JSONOption, hooks ...Hook[T]) error {
+func JSON[T any](rw readerWriter, t T, opt *JSONOption) error {
 	if opt == nil {
 		opt = new(JSONOption)
 	}
 
-	opt.Body = append(opt.Body, ignoreFieldsFromTags(t, "json")...)
-
-	var s S[T] = &snapshot[T]{
-		marshaler: MarshalFunc[T](MarshalJSON[T]),
-		// This is only used for custom comparison. It does not benefit as much as
-		// using map[string]any for comparison due to loss of information.
-		unmarshaler:    UnmarshalFunc[T](UnmarshalJSON[T]),
-		anyUnmarshaler: UnmarshalAnyFunc(UnmarshalJSON[any]),
-		anyComparer:    CompareAnyFunc((&JSONComparer[any]{Body: opt.Body}).Compare),
+	t, err := maskFieldsFromTags(t, "json", opt.MaskFields...)
+	if err != nil {
+		return err
 	}
 
-	s = Hooks[T](append(hooks, maskFieldsFromTags(t, "json")...)).Apply(s)
+	b, err := MarshalJSON(t)
+	if err != nil {
+		return err
+	}
 
-	return Snapshot(rw, t, s)
+	if err := rw.Write(b); err != nil {
+		return err
+	}
+
+	received, err := UnmarshalJSON[any](b)
+	if err != nil {
+		return err
+	}
+
+	b, err = rw.Read()
+	if err != nil {
+		return err
+	}
+
+	snapshot, err := UnmarshalJSON[any](b)
+	if err != nil {
+		return err
+	}
+
+	opt.Body = append(opt.Body, ignoreFieldsFromTags(t, "json", opt.IgnoreFields...)...)
+	cmp := &JSONComparer[any]{Body: opt.Body}
+	return cmp.Compare(snapshot, received)
 }
 
 func MarshalJSON[T any](t T) ([]byte, error) {
@@ -61,41 +81,48 @@ func (c *JSONComparer[T]) Compare(snapshot, received T) error {
 	return internal.ANSIDiff(snapshot, received, c.Body...)
 }
 
-func MaskFields[T any](fields ...string) Hook[T] {
-	return MarshalHook(func(t T) (T, error) {
-		b, err := json.Marshal(t)
-		if err != nil {
-			return t, err
-		}
+func maskFields[T any](t T, fields ...string) (T, error) {
+	if len(fields) == 0 {
+		return t, nil
+	}
 
-		bb, err := maputil.MaskBytes(b, fields...)
-		if err != nil {
-			return t, err
-		}
+	b, err := json.Marshal(t)
+	if err != nil {
+		return t, err
+	}
 
-		var tt T
-		if err := json.Unmarshal(bb, &tt); err != nil {
-			return tt, err
-		}
+	bb, err := maputil.MaskBytes(b, fields...)
+	if err != nil {
+		return t, err
+	}
 
-		return tt, nil
-	})
+	var tt T
+	if err := json.Unmarshal(bb, &tt); err != nil {
+		return tt, err
+	}
+
+	return tt, nil
 }
 
-func ignoreFieldsFromTags[T any](v T, name string) []cmp.Option {
+func ignoreFieldsFromTags[T any](v T, name string, fields ...string) []cmp.Option {
 	var opts []cmp.Option
 
 	kv := internal.GetStructTags(v, name, "cmp")
-	fields := make(map[string]bool)
 	for k, v := range kv {
 		if slices.Contains(v, "ignore") {
-			fields[k] = true
+			fields = append(fields, k)
 		}
 	}
 
 	if len(fields) > 0 {
 		cond := func(k string, v any) bool {
-			return fields[k]
+			for _, f := range fields {
+				if f == k {
+					return true
+				}
+			}
+
+			return false
 		}
 
 		opts = append(opts, cmpopts.IgnoreMapEntries(cond))
@@ -104,19 +131,13 @@ func ignoreFieldsFromTags[T any](v T, name string) []cmp.Option {
 	return opts
 }
 
-func maskFieldsFromTags[T any](v T, name string) []Hook[T] {
-	var hooks []Hook[T]
+func maskFieldsFromTags[T any](v T, name string, fields ...string) (T, error) {
 	kv := internal.GetStructTags(v, name, "cmp")
-	var fields []string
 	for k, v := range kv {
 		if slices.Contains(v, "mask") {
 			fields = append(fields, k)
 		}
 	}
 
-	if len(fields) > 0 {
-		hooks = append(hooks, MaskFields[T](fields...))
-	}
-
-	return hooks
+	return maskFields(v, fields...)
 }

@@ -8,8 +8,6 @@ import (
 
 	"github.com/alextanhongpin/core/internal"
 	"github.com/alextanhongpin/core/test/testdump"
-	"github.com/alextanhongpin/core/types/maputil"
-	"github.com/google/go-cmp/cmp"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -30,52 +28,6 @@ func TestYAML(t *testing.T) {
 	}
 }
 
-func TestYAMLHook(t *testing.T) {
-	type Credentials struct {
-		Email     string
-		Password  string
-		CreatedAt time.Time
-	}
-
-	fileName := fmt.Sprintf("testdata/%s.yaml", t.Name())
-	data := Credentials{
-		Email:     "John Appleseed",
-		Password:  "$up3rS3cr3t", // To be masked.
-		CreatedAt: time.Now(),    // Dynamic.
-	}
-
-	// Alias to shorten the types.
-	type T = Credentials
-
-	opt := testdump.YAMLOption{
-		Body: []cmp.Option{
-			// Ignore CreatedAt field for comparison.
-			internal.IgnoreMapEntries("CreatedAt"),
-		},
-	}
-
-	hooks := []testdump.Hook[T]{
-		// Mask the password value.
-		testdump.MarshalHook(func(t T) (T, error) {
-			t.Password = maputil.MaskValue
-			return t, nil
-		}),
-
-		// Validate that the time is not zero.
-		testdump.CompareHook(func(snap, recv T) error {
-			// You can access the concrete type.
-			if snap.CreatedAt.IsZero() || recv.CreatedAt.IsZero() {
-				return errors.New("zero time")
-			}
-			return nil
-		}),
-	}
-
-	if err := testdump.YAML(testdump.NewFile(fileName), data, &opt, hooks...); err != nil {
-		t.Fatal(err)
-	}
-}
-
 func TestYAMLMap(t *testing.T) {
 	fileName := fmt.Sprintf("testdata/%s.yaml", t.Name())
 	data := map[string]any{
@@ -86,36 +38,10 @@ func TestYAMLMap(t *testing.T) {
 
 	type T = map[string]any
 
-	opt := testdump.YAMLOption{
-		Body: []cmp.Option{
-			// Ignore CreatedAt field for comparison.
-			internal.IgnoreMapEntries("createdAt"),
-		},
-	}
-	hooks := []testdump.Hook[T]{
-		// Mask the password value.
-		testdump.MarshalHook(func(t T) (T, error) {
-			// WARN: This will set the field even if it doesn't exists.
-			t["password"] = maputil.MaskValue
-			return t, nil
-		}),
-
-		// Validate that the time is not zero.
-		testdump.CompareHook(func(snap, recv T) error {
-			x := snap
-			y := recv
-			if err := internal.IsNonZeroTime(x, "createdAt"); err != nil {
-				return err
-			}
-			if err := internal.IsNonZeroTime(y, "createdAt"); err != nil {
-				return err
-			}
-
-			return nil
-		}),
-	}
-
-	if err := testdump.YAML(testdump.NewFile(fileName), data, &opt, hooks...); err != nil {
+	opt := new(testdump.YAMLOption)
+	opt.IgnoreFields = []string{"createdAt"}
+	opt.MaskFields = []string{"password"}
+	if err := testdump.YAML(testdump.NewFile(fileName), data, opt); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -140,15 +66,9 @@ func TestYAMLDiff(t *testing.T) {
 	type T = User
 
 	opt := new(testdump.YAMLOption)
-	opt.Body = append(opt.Body, internal.IgnoreMapEntries("CreatedAt"))
-	hooks := []testdump.Hook[T]{
-		testdump.MarshalHook(func(t T) (T, error) {
-			t.Password = maputil.MaskValue
-
-			return t, nil
-		}),
-	}
-	if err := testdump.YAML(testdump.NewFile(fileName), u, opt, hooks...); err != nil {
+	opt.IgnoreFields = []string{"CreatedAt"}
+	opt.MaskFields = []string{"Password"}
+	if err := testdump.YAML(testdump.NewFile(fileName), u, opt); err != nil {
 		t.Fatal(err)
 	}
 
@@ -166,17 +86,11 @@ func TestYAMLDiff(t *testing.T) {
 		}
 
 		opt := new(testdump.YAMLOption)
-		opt.Body = append(opt.Body, internal.IgnoreMapEntries("CreatedAt"))
-		hooks := []testdump.Hook[T]{
-			testdump.MarshalHook(func(t T) (T, error) {
-				t.Password = maputil.MaskValue
-
-				return t, nil
-			}),
-		}
+		opt.IgnoreFields = []string{"CreatedAt"}
+		opt.MaskFields = []string{"Password"}
 
 		assert := assert.New(t)
-		err := testdump.YAML(testdump.NewFile(fileName), u, opt, hooks...)
+		err := testdump.YAML(testdump.NewFile(fileName), u, opt)
 		assert.NotNil(err)
 
 		var diffErr *internal.DiffError
@@ -200,17 +114,11 @@ func TestYAMLDiff(t *testing.T) {
 		}
 
 		opt := new(testdump.YAMLOption)
-		opt.Body = append(opt.Body, internal.IgnoreMapEntries("CreatedAt"))
-		hooks := []testdump.Hook[T]{
-			testdump.MarshalHook(func(t T) (T, error) {
-				t.Password = maputil.MaskValue
-
-				return t, nil
-			}),
-		}
+		opt.IgnoreFields = []string{"CreatedAt"}
+		opt.MaskFields = []string{"Password"}
 
 		assert := assert.New(t)
-		err := testdump.YAML(testdump.NewFile(fileName), u, opt, hooks...)
+		err := testdump.YAML(testdump.NewFile(fileName), u, opt)
 		assert.NotNil(err)
 
 		var diffErr *internal.DiffError
@@ -228,7 +136,7 @@ func TestYAMLDiff(t *testing.T) {
 		}
 
 		assert := assert.New(t)
-		err := testdump.YAML(testdump.NewFile(fileName), u, opt, hooks...)
+		err := testdump.YAML(testdump.NewFile(fileName), u, opt)
 		assert.NotNil(err)
 
 		var diffErr *internal.DiffError

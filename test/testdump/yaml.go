@@ -6,26 +6,48 @@ import (
 )
 
 type YAMLOption struct {
-	Body []cmp.Option
+	Body         []cmp.Option
+	IgnoreFields []string
+	MaskFields   []string
 }
 
-func YAML[T any](rw readerWriter, t T, opt *YAMLOption, hooks ...Hook[T]) error {
+func YAML[T any](rw readerWriter, t T, opt *YAMLOption) error {
 	if opt == nil {
 		opt = new(YAMLOption)
 	}
 
-	opt.Body = append(opt.Body, ignoreFieldsFromTags(t, "yaml")...)
-
-	var s S[T] = &snapshot[T]{
-		marshaler:      MarshalFunc[T](MarshalYAML[T]),
-		unmarshaler:    UnmarshalFunc[T](UnmarshalYAML[T]),
-		anyUnmarshaler: UnmarshalAnyFunc(UnmarshalYAML[any]),
-		anyComparer:    CompareAnyFunc((&YAMLComparer[any]{Body: opt.Body}).Compare),
+	t, err := maskFieldsFromTags(t, "yaml", opt.MaskFields...)
+	if err != nil {
+		return err
 	}
 
-	s = Hooks[T](append(hooks, maskFieldsFromTags(t, "yaml")...)).Apply(s)
+	b, err := MarshalYAML(t)
+	if err != nil {
+		return err
+	}
 
-	return Snapshot(rw, t, s)
+	if err := rw.Write(b); err != nil {
+		return err
+	}
+
+	received, err := UnmarshalYAML[any](b)
+	if err != nil {
+		return err
+	}
+
+	b, err = rw.Read()
+	if err != nil {
+		return err
+	}
+
+	snapshot, err := UnmarshalYAML[any](b)
+	if err != nil {
+		return err
+	}
+
+	opt.Body = append(opt.Body, ignoreFieldsFromTags(t, "yaml", opt.IgnoreFields...)...)
+	cmp := &YAMLComparer[any]{Body: opt.Body}
+	return cmp.Compare(snapshot, received)
 }
 
 func MarshalYAML[T any](t T) ([]byte, error) {

@@ -5,9 +5,9 @@
 
 
   map[string]any{
-  	... // 1 ignored entry
-  	"Email":    string("John Appleseed"),
-+ 	"Hobbies":  []any{string("coding")},
-  	"ID":       float64(42),
-  	"Password": string("/* !REDACTED */"),
+  	"CreatedAt": string("2024-01-09T02:38:23.743426+08:00"),
+  	"Email":     string("John Appleseed"),
++ 	"Hobbies":   []any{string("coding")},
+  	"ID":        float64(42),
+  	"Password":  string("/* !REDACTED */"),
   }

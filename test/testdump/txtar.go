@@ -52,6 +52,9 @@ func (rw *TxTar) Write(data []byte) error {
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
+	if arc == nil {
+		arc = new(txtar.Archive)
+	}
 
 	if len(arc.Files) == 1 {
 		if *update {

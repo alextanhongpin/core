@@ -20,3 +20,21 @@ func (x CmpOption) isYAML() {}
 func CmpOpts(opts ...cmp.Option) CmpOption {
 	return CmpOption(opts)
 }
+
+type ignoreFields []string
+
+func (ignoreFields) isJSON() {}
+func (ignoreFields) isYAML() {}
+
+func IgnoreFields(fields ...string) ignoreFields {
+	return ignoreFields(fields)
+}
+
+type maskFields []string
+
+func (maskFields) isJSON() {}
+func (maskFields) isYAML() {}
+
+func MaskFields(fields ...string) maskFields {
+	return maskFields(fields)
+}

@@ -37,16 +37,12 @@ type S[T any] interface {
 	marshaler[T]
 	unmarshaler[T]
 	comparer[T]
-	anyUnmarshaler
-	anyComparer
 }
 
 type snapshot[T any] struct {
 	marshaler[T]
 	unmarshaler[T]
 	comparer[T]
-	anyUnmarshaler
-	anyComparer
 }
 
 var _ S[any] = (*snapshot[any])(nil)
@@ -57,22 +53,6 @@ func (s *snapshot[T]) Compare(a, b T) error {
 	}
 
 	return s.comparer.Compare(a, b)
-}
-
-func (s *snapshot[T]) CompareAny(a, b any) error {
-	if s.anyComparer == nil {
-		return nil
-	}
-
-	return s.anyComparer.CompareAny(a, b)
-}
-
-func (s *snapshot[T]) UnmarshalAny(b []byte) (any, error) {
-	if s.anyUnmarshaler == nil {
-		return nil, nil
-	}
-
-	return s.anyUnmarshaler.UnmarshalAny(b)
 }
 
 type MarshalFunc[T any] (func(T) ([]byte, error))
