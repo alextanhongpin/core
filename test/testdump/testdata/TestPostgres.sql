@@ -1,4 +1,4 @@
--- Query
+-- query --
 SELECT *
   FROM users
   WHERE email = 'john.doe@mail.com'
@@ -13,13 +13,12 @@ SELECT *
     AND name LIKE ANY('{Foo,bar,%oo%}')
     AND id <> ALL(ARRAY[1, 2])
 
+-- args --
+$1: 2024-01-09T21:49:34.801339+08:00
+$2: 2024-01-09T21:49:34.801339+08:00
 
--- Args
-$1: 2024-01-09T02:38:23.547791+08:00
-$2: 2024-01-09T02:38:23.547791+08:00
 
-
--- Normalized
+-- normalized --
 SELECT *
   FROM users
   WHERE email = $3
@@ -34,8 +33,7 @@ SELECT *
     AND name LIKE ANY($9)
     AND id <> ALL(ARRAY[$10, $11])
 
-
--- Vars
+-- vars --
 $1: $1
 $2: $2
 $3: john.doe@mail.com
@@ -49,8 +47,8 @@ $10: "1"
 $11: "2"
 
 
--- Result
-- id: 6098235555378904922
+-- result --
+- id: 1477336475297101788
   name: Alice
-- id: 4100814904942213418
+- id: 7829061172683113698
   name: Bob

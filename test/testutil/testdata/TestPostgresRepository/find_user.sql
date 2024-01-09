@@ -1,18 +1,18 @@
--- Query
+-- query --
 SELECT *
   FROM users
   WHERE id = $1
 
-
--- Args
+-- args --
 $1: "1"
 
 
--- Normalized
+-- normalized --
 SELECT *
   FROM users
   WHERE id = $1
 
-
--- Vars
+-- vars --
 $1: ""
+
+

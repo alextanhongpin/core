@@ -1,23 +1,16 @@
 package sqldump
 
 import (
-	"bufio"
 	"bytes"
-	"errors"
-	"regexp"
-	"strings"
+
+	"golang.org/x/tools/txtar"
 )
 
-var ErrInvalidDumpFormat = errors.New("sqldump: invalid dump format")
-
-// Split when there is 2 or more new lines.
-var patEols = regexp.MustCompile(`[\r\n]{2,}`)
-
-const querySection = "-- Query"
-const argsSection = "-- Args"
-const normalizedSection = "-- Normalized"
-const varsSection = "-- Vars"
-const resultSection = "-- Result"
+const querySection = "query"
+const argsSection = "args"
+const normalizedSection = "normalized"
+const varsSection = "vars"
+const resultSection = "result"
 
 type SQL struct {
 	Query      string
@@ -33,104 +26,84 @@ type SQL struct {
 func Read(b []byte, unmarshalFunc func([]byte) (any, error)) (*SQL, error) {
 	d := new(SQL)
 
-	scanner := bufio.NewScanner(bytes.NewReader(b))
+	arc := txtar.Parse(b)
+	for _, f := range arc.Files {
+		f := f
+		name, data := f.Name, f.Data
+		data = bytes.TrimSpace(data)
 
-	for scanner.Scan() {
-		text := scanner.Text()
-		switch text {
+		switch name {
 		case querySection:
-			d.Query = scanSection(scanner)
+			d.Query = string(data)
 		case normalizedSection:
-			d.Normalized = scanSection(scanner)
+			d.Normalized = string(data)
 		case argsSection:
-			body := scanSection(scanner)
-			a, err := unmarshalFunc([]byte(body))
+			a, err := unmarshalFunc(data)
 			if err != nil {
 				return nil, err
 			}
 			d.ArgMap = a
 		case varsSection:
-			body := scanSection(scanner)
-			a, err := unmarshalFunc([]byte(body))
+			a, err := unmarshalFunc(data)
 			if err != nil {
 				return nil, err
 			}
 			d.VarMap = a
 		case resultSection:
-			body := scanSection(scanner)
-			a, err := unmarshalFunc([]byte(body))
+			a, err := unmarshalFunc(data)
 			if err != nil {
 				return nil, err
 			}
 			d.Result = a
-		default:
-			continue
 		}
 	}
 
 	return d, nil
 }
 
-func scanSection(scanner *bufio.Scanner) string {
-	var res []string
-	for scanner.Scan() {
-		s := scanner.Text()
-		if len(s) == 0 {
-			break
-		}
-		res = append(res, s)
-	}
-
-	return strings.Join(res, "\n")
-}
-
-func dump(q string, args []byte, n string, varMap, result []byte) string {
-	var sb strings.Builder
+func dump(q string, args []byte, n string, varMap, result []byte) []byte {
+	arc := new(txtar.Archive)
 	// Query.
-	sb.WriteString(querySection)
-	sb.WriteRune('\n')
-
-	sb.WriteString(q)
-	sb.WriteRune('\n')
-	sb.WriteRune('\n')
-	sb.WriteRune('\n')
+	arc.Files = append(arc.Files, txtar.File{
+		Name: querySection,
+		Data: appendNewLine([]byte(q)),
+	})
 
 	// Args.
 	if len(args) != 0 {
-		sb.WriteString(argsSection)
-		sb.WriteRune('\n')
-
-		sb.Write(args)
-		sb.WriteRune('\n')
-		sb.WriteRune('\n')
+		arc.Files = append(arc.Files, txtar.File{
+			Name: argsSection,
+			Data: appendNewLine(args),
+		})
 	}
 
 	// Normalized.
-	sb.WriteString(normalizedSection)
-	sb.WriteRune('\n')
-
-	sb.WriteString(n)
-	sb.WriteRune('\n')
-	sb.WriteRune('\n')
-	sb.WriteRune('\n')
+	arc.Files = append(arc.Files, txtar.File{
+		Name: normalizedSection,
+		Data: appendNewLine([]byte(n)),
+	})
 
 	// Vars.
 	if len(varMap) != 0 {
-		sb.WriteString(varsSection)
-		sb.WriteRune('\n')
-
-		sb.Write(varMap)
-		sb.WriteRune('\n')
-		sb.WriteRune('\n')
+		arc.Files = append(arc.Files, txtar.File{
+			Name: varsSection,
+			Data: appendNewLine(varMap),
+		})
 	}
 
 	// Result.
 	if result != nil {
-		sb.WriteString(resultSection)
-		sb.WriteRune('\n')
-
-		sb.Write(result)
+		arc.Files = append(arc.Files, txtar.File{
+			Name: resultSection,
+			Data: result,
+		})
 	}
 
-	return strings.TrimSpace(sb.String())
+	return txtar.Format(arc)
+}
+
+func appendNewLine(b []byte) []byte {
+	b = append(b, '\n')
+	b = append(b, '\n')
+	return b
 }

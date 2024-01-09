@@ -67,7 +67,7 @@ func DumpMySQL(sql *SQL, marshalFunc func(v any) ([]byte, error)) ([]byte, error
 		}
 	}
 
-	return []byte(dump(q, a, n, v, b)), nil
+	return dump(q, a, n, v, b), nil
 }
 
 // MatchMySQLQuery checks if two queries are equal,

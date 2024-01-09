@@ -65,7 +65,7 @@ func DumpPostgres(sql *SQL, marshalFunc func(v any) ([]byte, error)) ([]byte, er
 		}
 	}
 
-	return []byte(dump(q, a, n, v, b)), nil
+	return dump(q, a, n, v, b), nil
 }
 
 // MatchPostgresQuery checks if two queries are equal,

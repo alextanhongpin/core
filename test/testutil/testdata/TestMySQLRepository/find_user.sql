@@ -1,14 +1,14 @@
--- Query
+-- query --
 SELECT *
   FROM users
   WHERE id = :v1
 
-
--- Args
+-- args --
 v1: "1"
 
 
--- Normalized
+-- normalized --
 SELECT *
   FROM `users`
   WHERE `id` = :v1
+

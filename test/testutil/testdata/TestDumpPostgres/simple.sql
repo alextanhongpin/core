@@ -1,25 +1,23 @@
--- Query
+-- query --
 SELECT *
   FROM users
   WHERE id = $1
     AND deleted_at IS NULL
 
+-- args --
+$1: ffc3c5de-203f-435f-bef3-091a00c8612e
 
--- Args
-$1: 9ea5f063-7902-42ae-974e-ad59f39b2936
 
-
--- Normalized
+-- normalized --
 SELECT *
   FROM users
   WHERE id = $1
     AND deleted_at IS NULL
 
-
--- Vars
+-- vars --
 $1: $1
 
 
--- Result
+-- result --
 ID: 1
 Name: Alice

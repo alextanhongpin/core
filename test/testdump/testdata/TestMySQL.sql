@@ -1,4 +1,4 @@
--- Query
+-- query --
 SELECT *
   FROM users
   WHERE email = 'john.doe@mail.com'
@@ -12,13 +12,12 @@ SELECT *
     AND is_active = TRUE
     AND `name` like ANY('{Foo,bar,%oo%}')
 
+-- args --
+v1: 2024-01-09T21:49:34.63552+08:00
+v2: 2024-01-09T21:49:34.63552+08:00
 
--- Args
-v1: 2024-01-09T02:38:23.382451+08:00
-v2: 2024-01-09T02:38:23.382452+08:00
 
-
--- Normalized
+-- normalized --
 SELECT *
   FROM `users`
   WHERE `email` = :email
@@ -31,8 +30,7 @@ SELECT *
     AND `is_active` = TRUE
     AND `name` LIKE ANY(:2)
 
-
--- Vars
+-- vars --
 "1": freemium, premium
 "2": '{Foo,bar,%oo%}'
 age: "13"
@@ -40,8 +38,8 @@ description: foo bar walks in a bar, h'a
 email: john.doe@mail.com
 
 
--- Result
-- id: 7012117209322283376
+-- result --
+- id: 5076004699304890512
   name: Alice
-- id: 4528519728315617392
+- id: 5882694432759763818
   name: Bob

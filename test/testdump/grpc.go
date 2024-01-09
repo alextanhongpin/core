@@ -18,6 +18,7 @@ type GRPCDump = grpcdump.Dump
 type GRPCOption struct {
 	Message  []cmp.Option
 	Metadata []cmp.Option
+	// TODO: Header and trailer
 }
 
 func GRPC(rw readerWriter, dump *GRPCDump, opt *GRPCOption, hooks ...Hook[*GRPCDump]) error {
