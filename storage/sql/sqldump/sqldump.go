@@ -3,6 +3,7 @@ package sqldump
 import (
 	"bytes"
 
+	"github.com/alextanhongpin/core/internal"
 	"golang.org/x/tools/txtar"
 )
 
@@ -23,7 +24,7 @@ type SQL struct {
 	Result any
 }
 
-func Read(b []byte, unmarshalFunc func([]byte) (any, error)) (*SQL, error) {
+func Read(b []byte) (*SQL, error) {
 	d := new(SQL)
 
 	arc := txtar.Parse(b)
@@ -38,19 +39,19 @@ func Read(b []byte, unmarshalFunc func([]byte) (any, error)) (*SQL, error) {
 		case normalizedSection:
 			d.Normalized = string(data)
 		case argsSection:
-			a, err := unmarshalFunc(data)
+			a, err := internal.UnmarshalYAMLPreserveKeysOrder[any](data)
 			if err != nil {
 				return nil, err
 			}
 			d.ArgMap = a
 		case varsSection:
-			a, err := unmarshalFunc(data)
+			a, err := internal.UnmarshalYAMLPreserveKeysOrder[any](data)
 			if err != nil {
 				return nil, err
 			}
 			d.VarMap = a
 		case resultSection:
-			a, err := unmarshalFunc(data)
+			a, err := internal.UnmarshalYAMLPreserveKeysOrder[any](data)
 			if err != nil {
 				return nil, err
 			}

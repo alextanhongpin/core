@@ -37,11 +37,11 @@ func Postgres(rw readerWriter, sql *SQL, opt *PostgresOption, hooks ...Hook[*SQL
 }
 
 func MarshalPostgres(s *SQL) ([]byte, error) {
-	return sqldump.DumpPostgres(s, internal.MarshalYAMLPreserveKeysOrder)
+	return sqldump.DumpPostgres(s)
 }
 
 func UnmarshalPostgres(b []byte) (*SQL, error) {
-	return sqldump.Read(b, internal.UnmarshalYAMLPreserveKeysOrder[any])
+	return sqldump.Read(b)
 }
 
 type PostgresComparer struct {

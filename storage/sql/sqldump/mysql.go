@@ -3,13 +3,14 @@ package sqldump
 import (
 	"fmt"
 
+	"github.com/alextanhongpin/core/internal"
 	"github.com/alextanhongpin/core/storage/sql/sqlformat"
 	querypb "vitess.io/vitess/go/vt/proto/query"
 
 	"vitess.io/vitess/go/vt/sqlparser"
 )
 
-func DumpMySQL(sql *SQL, marshalFunc func(v any) ([]byte, error)) ([]byte, error) {
+func DumpMySQL(sql *SQL) ([]byte, error) {
 	q, err := standardizeMySQL(sql.Query)
 	if err != nil {
 		return nil, err
@@ -30,7 +31,7 @@ func DumpMySQL(sql *SQL, marshalFunc func(v any) ([]byte, error)) ([]byte, error
 			args[k] = v
 		}
 
-		a, err = marshalFunc(args)
+		a, err = internal.MarshalYAMLPreserveKeysOrder(args)
 		if err != nil {
 			return nil, err
 		}
@@ -53,7 +54,7 @@ func DumpMySQL(sql *SQL, marshalFunc func(v any) ([]byte, error)) ([]byte, error
 			kv[fmt.Sprintf("%v", v.Name)] = v.Value
 		}
 
-		v, err = marshalFunc(kv)
+		v, err = internal.MarshalYAMLPreserveKeysOrder(kv)
 		if err != nil {
 			return nil, err
 		}
@@ -61,7 +62,7 @@ func DumpMySQL(sql *SQL, marshalFunc func(v any) ([]byte, error)) ([]byte, error
 
 	var b []byte
 	if sql.Result != nil {
-		b, err = marshalFunc(sql.Result)
+		b, err = internal.MarshalYAMLPreserveKeysOrder(sql.Result)
 		if err != nil {
 			return nil, err
 		}

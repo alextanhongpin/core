@@ -3,11 +3,12 @@ package sqldump
 import (
 	"fmt"
 
+	"github.com/alextanhongpin/core/internal"
 	"github.com/alextanhongpin/core/storage/sql/sqlformat"
 	pg_query "github.com/pganalyze/pg_query_go/v4"
 )
 
-func DumpPostgres(sql *SQL, marshalFunc func(v any) ([]byte, error)) ([]byte, error) {
+func DumpPostgres(sql *SQL) ([]byte, error) {
 	q, err := standardizePostgres(sql.Query)
 	if err != nil {
 		return nil, err
@@ -38,7 +39,7 @@ func DumpPostgres(sql *SQL, marshalFunc func(v any) ([]byte, error)) ([]byte, er
 			args[k] = v
 		}
 
-		a, err = marshalFunc(args)
+		a, err = internal.MarshalYAMLPreserveKeysOrder(args)
 		if err != nil {
 			return nil, err
 		}
@@ -51,7 +52,7 @@ func DumpPostgres(sql *SQL, marshalFunc func(v any) ([]byte, error)) ([]byte, er
 			kv[v.Name] = v.Value
 		}
 
-		v, err = marshalFunc(kv)
+		v, err = internal.MarshalYAMLPreserveKeysOrder(kv)
 		if err != nil {
 			return nil, err
 		}
@@ -59,7 +60,7 @@ func DumpPostgres(sql *SQL, marshalFunc func(v any) ([]byte, error)) ([]byte, er
 
 	var b []byte
 	if sql.Result != nil {
-		b, err = marshalFunc(sql.Result)
+		b, err = internal.MarshalYAMLPreserveKeysOrder(sql.Result)
 		if err != nil {
 			return nil, err
 		}

@@ -40,7 +40,7 @@ func TestDumpMySQL(t *testing.T) {
 		},
 	}
 
-	b, err := sqldump.DumpMySQL(&dump, internal.MarshalYAMLPreserveKeysOrder)
+	b, err := sqldump.DumpMySQL(&dump)
 	if err != nil {
 		t.Fatal(err)
 	}

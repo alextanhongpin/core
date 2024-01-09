@@ -39,11 +39,11 @@ func MySQL(rw readerWriter, sql *SQL, opt *MySQLOption, hooks ...Hook[*SQL]) err
 }
 
 func MarshalMySQL(s *SQL) ([]byte, error) {
-	return sqldump.DumpMySQL(s, internal.MarshalYAMLPreserveKeysOrder)
+	return sqldump.DumpMySQL(s)
 }
 
 func UnmarshalMySQL(b []byte) (*SQL, error) {
-	return sqldump.Read(b, internal.UnmarshalYAMLPreserveKeysOrder[any])
+	return sqldump.Read(b)
 }
 
 type MySQLComparer struct {

@@ -39,7 +39,7 @@ func TestDumpPostgres(t *testing.T) {
 		},
 	}
 
-	b, err := sqldump.DumpPostgres(&dump, internal.MarshalYAMLPreserveKeysOrder)
+	b, err := sqldump.DumpPostgres(&dump)
 	if err != nil {
 		t.Fatal(err)
 	}
