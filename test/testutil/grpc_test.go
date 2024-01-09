@@ -55,6 +55,8 @@ func TestMain(m *testing.M) {
 }
 
 func TestGRPCClientStreaming(t *testing.T) {
+	t.Setenv("GODEBUG", "x509sha1=1")
+
 	ctx := context.Background()
 	conn := grpcDialContext(t, ctx)
 
@@ -87,6 +89,8 @@ func TestGRPCClientStreaming(t *testing.T) {
 }
 
 func TestGRPCBidirectionalStreaming(t *testing.T) {
+	t.Setenv("GODEBUG", "x509sha1=1")
+
 	ctx := context.Background()
 	conn := grpcDialContext(t, ctx)
 
@@ -129,6 +133,8 @@ func TestGRPCBidirectionalStreaming(t *testing.T) {
 }
 
 func TestGRPCServerStreaming(t *testing.T) {
+	t.Setenv("GODEBUG", "x509sha1=1")
+
 	t.Run("success", func(t *testing.T) {
 		assert := assert.New(t)
 		err := testServerStreaming(t, &pb.ListGreetingsRequest{
@@ -187,6 +193,7 @@ func TestGRPCServerStreaming(t *testing.T) {
 }
 
 func TestGRPCUnary(t *testing.T) {
+	t.Setenv("GODEBUG", "x509sha1=1")
 	ctx := context.Background()
 
 	t.Run("success", func(t *testing.T) {
