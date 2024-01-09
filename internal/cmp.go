@@ -2,7 +2,6 @@ package internal
 
 import (
 	"reflect"
-	"strings"
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
@@ -20,28 +19,59 @@ func IgnoreMapEntries(keys ...string) cmp.Option {
 	})
 }
 
-func GetStructTags[T any](v T, name, tag string) map[string][]string {
-	t := reflect.TypeOf(v)
-	if t.Kind() == reflect.Ptr {
-		t = t.Elem()
-	}
-	if t.Kind() != reflect.Struct {
+func GetStructTags(a any, fn func(tag reflect.StructField) error) error {
+	c := make(map[any]bool)
+
+	var get func(a any) error
+	get = func(a any) error {
+		if a == nil {
+			return nil
+		}
+
+		t := reflect.TypeOf(a)
+		if t.Kind() == reflect.Ptr {
+			t = t.Elem()
+		}
+		if t.Kind() == reflect.Slice || t.Kind() == reflect.Array {
+			t = t.Elem()
+		}
+		if t.Kind() == reflect.Ptr {
+			t = t.Elem()
+		}
+
+		if t.Kind() == reflect.Map {
+			iter := reflect.New(t).Elem().MapRange()
+			for iter.Next() {
+				get(iter.Value())
+			}
+
+			return nil
+		}
+
+		if t.Kind() != reflect.Struct {
+			return nil
+		}
+
+		// Prevent recursive type.
+		if c[t] {
+			return nil
+		}
+
+		c[t] = true
+
+		for _, f := range reflect.VisibleFields(t) {
+			if err := fn(f); err != nil {
+				return err
+			}
+
+			nt := reflect.New(f.Type).Elem().Interface()
+			if err := get(nt); err != nil {
+				return err
+			}
+		}
+
 		return nil
 	}
 
-	kv := make(map[string][]string)
-	for i := 0; i < t.NumField(); i++ {
-		f := t.Field(i)
-		name := f.Tag.Get(name)
-		if name == "" {
-			name = f.Name
-		}
-
-		v := f.Tag.Get(tag)
-		if v == "" {
-			continue
-		}
-		kv[name] = strings.Split(v, ",")
-	}
-	return kv
+	return get(a)
 }

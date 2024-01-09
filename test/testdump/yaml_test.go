@@ -149,7 +149,7 @@ func TestYAMLDiff(t *testing.T) {
 func TestYAMLMaskField(t *testing.T) {
 	type LoginRequest struct {
 		Email    string
-		Password string `cmp:",mask"`
+		Password string `mask:"true"`
 	}
 
 	fileName := fmt.Sprintf("testdata/%s.yaml", t.Name())

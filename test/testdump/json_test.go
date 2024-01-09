@@ -168,13 +168,48 @@ func TestJSONIgnoreTag(t *testing.T) {
 func TestJSONMaskField(t *testing.T) {
 	type LoginRequest struct {
 		Email    string `json:"email"`
-		Password string `json:"password" cmp:",mask"`
+		Password string `json:"password" mask:"true"`
 	}
 
 	fileName := fmt.Sprintf("testdata/%s.json", t.Name())
 	data := LoginRequest{
 		Email:    "john.appleseed@mail.com",
 		Password: "super secret",
+	}
+
+	if err := testdump.JSON(testdump.NewFile(fileName), data, nil); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestJSONMaskNestedField(t *testing.T) {
+	type Credential struct {
+		Provider string `json:"provider"`
+		Token    string `json:"token" mask:"true"` // This is masked.
+	}
+
+	type LoginRequest struct {
+		Email       string       `json:"email"`
+		Token       string       `json:"token"` // This is not masked.
+		Password    string       `json:"password" mask:"true"`
+		Credentials []Credential `json:"credentials"`
+	}
+
+	fileName := fmt.Sprintf("testdata/%s.json", t.Name())
+	data := LoginRequest{
+		Email:    "john.appleseed@mail.com",
+		Token:    "1234",
+		Password: "super secret",
+		Credentials: []Credential{
+			{
+				Provider: "google",
+				Token:    "google-token",
+			},
+			{
+				Provider: "facebook",
+				Token:    "facebook-token",
+			},
+		},
 	}
 
 	if err := testdump.JSON(testdump.NewFile(fileName), data, nil); err != nil {

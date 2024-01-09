@@ -2,12 +2,12 @@ package testdump
 
 import (
 	"encoding/json"
+	"reflect"
+	"strings"
 
 	"github.com/alextanhongpin/core/internal"
-	"github.com/alextanhongpin/core/types/maputil"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
-	"golang.org/x/exp/slices"
 )
 
 type JSONOption struct {
@@ -81,38 +81,24 @@ func (c *JSONComparer[T]) Compare(snapshot, received T) error {
 	return internal.ANSIDiff(snapshot, received, c.Body...)
 }
 
-func maskFields[T any](t T, fields ...string) (T, error) {
-	if len(fields) == 0 {
-		return t, nil
-	}
-
-	b, err := json.Marshal(t)
-	if err != nil {
-		return t, err
-	}
-
-	bb, err := maputil.MaskBytes(b, fields...)
-	if err != nil {
-		return t, err
-	}
-
-	var tt T
-	if err := json.Unmarshal(bb, &tt); err != nil {
-		return tt, err
-	}
-
-	return tt, nil
-}
-
 func ignoreFieldsFromTags[T any](v T, name string, fields ...string) []cmp.Option {
 	var opts []cmp.Option
 
-	kv := internal.GetStructTags(v, name, "cmp")
-	for k, v := range kv {
-		if slices.Contains(v, "ignore") {
-			fields = append(fields, k)
+	_ = internal.GetStructTags(v, func(f reflect.StructField) error {
+		fname := f.Tag.Get(name)
+		if fname == "" {
+			fname = f.Name
 		}
-	}
+		tags := strings.Split(f.Tag.Get("cmp"), ",")
+		for _, t := range tags {
+			if t == "ignore" {
+				fields = append(fields, fname)
+				break
+			}
+		}
+
+		return nil
+	})
 
 	if len(fields) > 0 {
 		cond := func(k string, v any) bool {
@@ -131,13 +117,78 @@ func ignoreFieldsFromTags[T any](v T, name string, fields ...string) []cmp.Optio
 	return opts
 }
 
-func maskFieldsFromTags[T any](v T, name string, fields ...string) (T, error) {
-	kv := internal.GetStructTags(v, name, "cmp")
-	for k, v := range kv {
-		if slices.Contains(v, "mask") {
-			fields = append(fields, k)
+// maskFieldsFromTags mask the fields based on the tag name.
+func maskFieldsFromTags[T any](v T, tag string, fields ...string) (T, error) {
+	var mask func(ori, a any) any
+	mask = func(ori any, a any) any {
+		rt := reflect.ValueOf(ori).Type()
+		if rt.Kind() == reflect.Ptr {
+			rt = rt.Elem()
+		}
+
+		switch m := a.(type) {
+		case map[string]any:
+			if rt.Kind() == reflect.Struct {
+				for _, f := range reflect.VisibleFields(rt) {
+					if f.Tag.Get("mask") != "true" {
+						continue
+					}
+
+					name := f.Tag.Get(tag)
+					if _, ok := m[name]; ok {
+						m[name] = "[REDACTED]"
+					}
+
+					name = f.Name
+					if _, ok := m[name]; ok {
+						m[name] = "[REDACTED]"
+					}
+				}
+
+				for k, v := range m {
+					f, ok := rt.FieldByName(k)
+					if !ok {
+						continue
+					}
+					m[k] = mask(reflect.New(f.Type).Elem().Interface(), v)
+				}
+			}
+
+			for _, f := range fields {
+				if _, ok := m[f]; ok {
+					m[f] = "[REDACTED]"
+				}
+			}
+			return m
+		case []any:
+			res := make([]any, len(m))
+
+			// Array or slice.
+			rt = rt.Elem()
+			el := reflect.New(rt).Elem().Interface()
+			for i, v := range m {
+				res[i] = mask(el, v)
+			}
+			return res
+		default:
+			return a
 		}
 	}
 
-	return maskFields(v, fields...)
+	b, err := json.Marshal(v)
+	if err != nil {
+		return v, err
+	}
+	var a any
+	if err := json.Unmarshal(b, &a); err != nil {
+		return v, err
+	}
+
+	b, err = json.Marshal(mask(v, a))
+	if err != nil {
+		return v, err
+	}
+
+	var t T
+	return t, json.Unmarshal(b, &t)
 }

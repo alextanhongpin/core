@@ -1,0 +1,15 @@
+{
+  "email": "john.appleseed@mail.com",
+  "token": "1234",
+  "password": "[REDACTED]",
+  "credentials": [
+    {
+      "provider": "google",
+      "token": "google-token"
+    },
+    {
+      "provider": "facebook",
+      "token": "facebook-token"
+    }
+  ]
+}

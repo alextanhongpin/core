@@ -4,9 +4,9 @@
   Received(+)
 
 
-  map[string]any{
-  	"createdAt": string("2024-01-09T02:37:27.268252+08:00"),
-  	"email":     string("John Appleseed"),
-- 	"id":        float64(42),
-  	"password":  string("/* !REDACTED */"),
-  }
+  map[string]any{
+  	... // 1 ignored entry
+  	"email":    string("John Appleseed"),
+- 	"id":       float64(42),
+  	"password": string("[REDACTED]"),
+  }
