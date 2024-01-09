@@ -128,9 +128,21 @@ func maskFieldsFromTags[T any](v T, tag string, fields ...string) (T, error) {
 
 		switch m := a.(type) {
 		case map[string]any:
+
 			if rt.Kind() == reflect.Struct {
 				for _, f := range reflect.VisibleFields(rt) {
 					if f.Tag.Get("mask") != "true" {
+						el := reflect.New(f.Type).Elem().Interface()
+						name := f.Tag.Get(tag)
+						if v, ok := m[name]; ok {
+							m[name] = mask(el, v)
+						}
+
+						name = f.Name
+						if v, ok := m[name]; ok {
+							m[name] = mask(el, v)
+						}
+
 						continue
 					}
 
@@ -150,7 +162,9 @@ func maskFieldsFromTags[T any](v T, tag string, fields ...string) (T, error) {
 					if !ok {
 						continue
 					}
-					m[k] = mask(reflect.New(f.Type).Elem().Interface(), v)
+
+					el := reflect.New(f.Type).Elem().Interface()
+					m[k] = mask(el, v)
 				}
 			}
 

@@ -5,11 +5,11 @@
   "credentials": [
     {
       "provider": "google",
-      "token": "google-token"
+      "token": "[REDACTED]"
     },
     {
       "provider": "facebook",
-      "token": "facebook-token"
+      "token": "[REDACTED]"
     }
   ]
 }
