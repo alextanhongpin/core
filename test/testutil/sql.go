@@ -75,7 +75,7 @@ func (r *SQLDumper) Calls() int {
 
 // SetCallOptions sets the options for the i-th call.
 func (r *SQLDumper) SetCallOptions(i int, optsByCall ...SQLOption) {
-	r.optsByCall[i] = append(r.optsByCall[i], optsByCall...)
+	r.optsByCall[i] = optsByCall
 }
 
 // Options returns the options for the i-th call.
