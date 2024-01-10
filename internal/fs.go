@@ -6,14 +6,7 @@ import (
 	"path/filepath"
 )
 
-// WriteIfNotExists writes the file to
-// the designated location, only if it
-// does not exists.
-// Creates the folder too.
-func WriteIfNotExists(name string, body []byte) error {
-	return WriteFile(name, body, false)
-}
-
+// WriteFile writes a file to the filesystem.
 func WriteFile(name string, body []byte, overwrite bool) error {
 	f, err := os.OpenFile(name, os.O_RDONLY, 0644)
 	if errors.Is(err, os.ErrNotExist) || overwrite {

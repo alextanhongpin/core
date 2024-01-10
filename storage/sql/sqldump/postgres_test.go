@@ -45,7 +45,7 @@ func TestDumpPostgres(t *testing.T) {
 	}
 
 	fileName := fmt.Sprintf("testdata/%s.sql", t.Name())
-	if err := internal.WriteIfNotExists(fileName, b); err != nil {
+	if err := internal.WriteFile(fileName, b, false); err != nil {
 		t.Fatal(err)
 	}
 }
