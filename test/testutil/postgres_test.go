@@ -64,14 +64,9 @@ func TestDumpPostgres(t *testing.T) {
 func TestPostgresRepository(t *testing.T) {
 	assert := assert.New(t)
 	db := newMockDB(t)
-	dbtx := &postgresDBHook{
-		t:    t,
-		dbtx: db,
-		opts: []testutil.SQLOption{
-			testutil.FileName("find_user"),
-		},
-	}
-	repo := newMockUserRepository(dbtx, "postgres")
+
+	dbi := testutil.DumpSQL(t, db, "postgres", testutil.FileName("find_user"))
+	repo := newMockUserRepository(dbi, "postgres")
 	user, err := repo.FindUser(context.Background(), "1")
 	assert.Nil(err)
 	assert.Equal("1", user.ID)
@@ -136,16 +131,4 @@ type User struct {
 
 type dbtx interface {
 	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
-}
-
-type postgresDBHook struct {
-	dbtx
-	t    *testing.T
-	opts []testutil.SQLOption
-}
-
-func (h *postgresDBHook) QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row {
-	testutil.DumpPostgres(h.t, testutil.NewSQL(query, args, nil), h.opts...)
-
-	return h.dbtx.QueryRowContext(ctx, query, args...)
 }
