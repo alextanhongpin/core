@@ -21,27 +21,37 @@ type db interface {
 
 // DumpSQL ...
 func DumpSQL(t *testing.T, db db, driverName string, opts ...SQLOption) *SQLDumper {
-	return &SQLDumper{
-		t:          t,
-		db:         db,
-		driverName: driverName,
-		optsByCall: make(map[int][]SQLOption),
-		opts:       opts,
-		seen:       make(map[string]int),
+	d := &SQLDumper{
+		t:             t,
+		db:            db,
+		driverName:    driverName,
+		optsByCall:    make(map[int][]SQLOption),
+		resultsByCall: make(map[int]any),
+		opts:          opts,
+		seen:          make(map[string]int),
 	}
+	t.Cleanup(d.dump)
+	return d
 }
 
 var _ db = (*SQLDumper)(nil)
 
 // SQLDumper logs the query and args.
 type SQLDumper struct {
-	t          *testing.T
-	db         db
+	t             *testing.T
+	db            db
+	driverName    string
+	i             int
+	optsByCall    map[int][]SQLOption
+	resultsByCall map[int]any
+	opts          []SQLOption
+	seen          map[string]int
+	calls         []SQLCall
+}
+
+type SQLCall struct {
+	params     *SQL
 	driverName string
-	i          int
-	optsByCall map[int][]SQLOption
-	opts       []SQLOption
-	seen       map[string]int
 }
 
 // SetDB sets the db.
@@ -52,6 +62,10 @@ func (r *SQLDumper) SetDB(db db) {
 // SetDriverName sets the driver name.
 func (r *SQLDumper) SetDriverName(driverName string) {
 	r.driverName = driverName
+}
+
+func (r *SQLDumper) SetResult(v any) {
+	r.resultsByCall[r.i-1] = v
 }
 
 // Calls returns the number of calls made to the db.
@@ -69,7 +83,7 @@ func (r *SQLDumper) Options(i int) []SQLOption {
 	return append(r.opts, r.optsByCall[i]...)
 }
 
-func (r *SQLDumper) dump(method, query string, args ...any) {
+func (r *SQLDumper) log(method, query string, args ...any) {
 	defer func() {
 		r.i++
 	}()
@@ -92,63 +106,72 @@ func (r *SQLDumper) dump(method, query string, args ...any) {
 		fileName = fmt.Sprintf("%s#%d", fileName, n-1)
 	}
 
-	opts = append(opts, FileName(fileName))
-	params := &SQL{Args: args, Query: query}
+	r.optsByCall[r.i] = append(opts, FileName(fileName))
+	r.calls = append(r.calls, SQLCall{
+		params:     &SQL{Args: args, Query: query},
+		driverName: r.driverName,
+	})
+}
 
-	switch r.driverName {
-	case "postgres":
-		DumpPostgres(r.t, params, opts...)
-	case "mysql":
-		DumpMySQL(r.t, params, opts...)
-	default:
-		panic("unsupported driver: " + r.driverName)
+func (r *SQLDumper) dump() {
+	for i, call := range r.calls {
+		call := call
+		call.params.Result = r.resultsByCall[i]
+		switch call.driverName {
+		case "postgres":
+			DumpPostgres(r.t, call.params, r.Options(i)...)
+		case "mysql":
+			DumpMySQL(r.t, call.params, r.Options(i)...)
+		default:
+			panic("unsupported driver: " + r.driverName)
+		}
 	}
 }
 
 func (r *SQLDumper) Exec(query string, args ...any) (sql.Result, error) {
-	r.dump("exec", query, args...)
+	r.log("exec", query, args...)
 
 	return r.db.Exec(query, args...)
 }
 
 func (r *SQLDumper) Prepare(query string) (*sql.Stmt, error) {
-	r.dump("prepare", query)
+	r.log("prepare", query)
 
 	return r.db.Prepare(query)
 }
 
 func (r *SQLDumper) Query(query string, args ...any) (*sql.Rows, error) {
-	r.dump("query", query, args...)
+	r.log("query", query, args...)
 
 	return r.db.Query(query, args...)
 }
 
 func (r *SQLDumper) QueryRow(query string, args ...any) *sql.Row {
-	r.dump("query_row", query, args...)
+	r.log("query_row", query, args...)
 
 	return r.db.QueryRow(query, args...)
 }
 
 func (r *SQLDumper) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
-	r.dump("exec_context", query, args...)
+	r.log("exec_context", query, args...)
 
 	return r.db.ExecContext(ctx, query, args...)
 }
 
 func (r *SQLDumper) PrepareContext(ctx context.Context, query string) (*sql.Stmt, error) {
-	r.dump("prepare_context", query)
+	r.log("prepare_context", query)
 
 	return r.db.PrepareContext(ctx, query)
 }
 
 func (r *SQLDumper) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
-	r.dump("query_context", query, args...)
+	r.log("query_context", query, args...)
 
 	return r.db.QueryContext(ctx, query, args...)
 }
 
 func (r *SQLDumper) QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row {
-	r.dump("query_row_context", query, args...)
+	r.log("query_row_context", query, args...)
 
 	return r.db.QueryRowContext(ctx, query, args...)
 }

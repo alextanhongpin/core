@@ -74,7 +74,7 @@ func TestPostgresRepository(t *testing.T) {
 	testutil.DumpYAML(t, user)
 }
 
-func newMockDB(t *testing.T) *sql.DB {
+func newMockDB(t *testing.T, vals ...string) *sql.DB {
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatal(err)
@@ -82,9 +82,20 @@ func newMockDB(t *testing.T) *sql.DB {
 	t.Cleanup(func() {
 		db.Close()
 	})
-	rows := sqlmock.NewRows([]string{"id", "name"}).
-		AddRow("1", "Alice")
-	mock.ExpectQuery("select(.+)").WillReturnRows(rows)
+
+	if len(vals) == 0 {
+		vals = []string{"1", "Alice"}
+	}
+
+	if len(vals)%2 != 0 {
+		panic("invalid row values")
+	}
+
+	// Allow execution of multiple queries.
+	for i := 0; i < len(vals); i += 2 {
+		rows := sqlmock.NewRows([]string{"id", "name"}).AddRow(vals[i], vals[i+1])
+		mock.ExpectQuery("select(.+)").WillReturnRows(rows)
+	}
 
 	return db
 }
@@ -92,11 +103,11 @@ func newMockDB(t *testing.T) *sql.DB {
 type mockUserRepository struct {
 	// Use this instead of *sql.DB or *sql.Tx to allow
 	// interception etc.
-	db      dbtx
+	db      db
 	dialect string
 }
 
-func newMockUserRepository(db dbtx, dialect string) *mockUserRepository {
+func newMockUserRepository(db db, dialect string) *mockUserRepository {
 	return &mockUserRepository{
 		db:      db,
 		dialect: dialect,
@@ -129,6 +140,6 @@ type User struct {
 	Name string
 }
 
-type dbtx interface {
+type db interface {
 	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
 }
