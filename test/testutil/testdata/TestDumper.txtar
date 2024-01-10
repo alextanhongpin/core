@@ -1,0 +1,11 @@
+TestDumper
+-- testutil_test.data.json --
+{
+  "age": 18,
+  "name": "John Appleseed"
+}
+-- testutil_test.data.yaml --
+age: 20
+name: John Appleseed
+-- 5eb63bbbe01eeed093cb22bb8f5acdc3.txt --
+hello world

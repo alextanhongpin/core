@@ -1,7 +1,6 @@
 package testutil
 
 import (
-	"fmt"
 	"testing"
 
 	"github.com/alextanhongpin/core/internal"
@@ -15,21 +14,13 @@ type YAMLOption interface {
 func DumpYAML[T any](t *testing.T, v T, opts ...YAMLOption) {
 	t.Helper()
 
-	var fileName string
-	yamlOpt := new(testdump.YAMLOption)
+	yamlOpt := newYAMLOption(opts...)
 
+	var fileName string
 	for _, opt := range opts {
 		switch o := opt.(type) {
-		case ignoreFields:
-			yamlOpt.IgnoreFields = append(yamlOpt.IgnoreFields, o...)
-		case maskFields:
-			yamlOpt.MaskFields = append(yamlOpt.MaskFields, o...)
-		case CmpOption:
-			yamlOpt.Body = append(yamlOpt.Body, o...)
 		case FileName:
 			fileName = string(o)
-		default:
-			panic(fmt.Errorf("testutil: unhandled YAML option: %#v", opt))
 		}
 	}
 
@@ -43,4 +34,21 @@ func DumpYAML[T any](t *testing.T, v T, opts ...YAMLOption) {
 	if err := testdump.YAML(testdump.NewFile(p.String()), v, yamlOpt); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func newYAMLOption(opts ...YAMLOption) *testdump.YAMLOption {
+	o := new(testdump.YAMLOption)
+
+	for _, opt := range opts {
+		switch v := opt.(type) {
+		case ignoreFields:
+			o.IgnoreFields = append(o.IgnoreFields, v...)
+		case maskFields:
+			o.MaskFields = append(o.MaskFields, v...)
+		case CmpOption:
+			o.Body = append(o.Body, v...)
+		}
+	}
+
+	return o
 }
