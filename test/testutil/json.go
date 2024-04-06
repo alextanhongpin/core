@@ -4,12 +4,37 @@ import (
 	"fmt"
 	"testing"
 
+	"cuelang.org/go/cue"
 	"github.com/alextanhongpin/core/internal"
 	"github.com/alextanhongpin/core/test/testdump"
 )
 
 type JSONOption interface {
 	isJSON()
+}
+
+type cueOption struct {
+	opt *testdump.CUEOption
+}
+
+func (c *cueOption) isJSON() {}
+
+func CUESchema(schema string, opts ...cue.Option) JSONOption {
+	return &cueOption{
+		opt: &testdump.CUEOption{
+			Schema:  schema,
+			Options: opts,
+		},
+	}
+}
+
+func CUESchemaPath(schemaPath string, opts ...cue.Option) JSONOption {
+	return &cueOption{
+		opt: &testdump.CUEOption{
+			SchemaPath: schemaPath,
+			Options:    opts,
+		},
+	}
 }
 
 func DumpJSON[T any](t *testing.T, v T, opts ...JSONOption) {
@@ -26,6 +51,8 @@ func DumpJSON[T any](t *testing.T, v T, opts ...JSONOption) {
 			jsonOpt.MaskFields = append(jsonOpt.MaskFields, o...)
 		case CmpOption:
 			jsonOpt.Body = append(jsonOpt.Body, o...)
+		case *cueOption:
+			jsonOpt.CUEOption = o.opt
 		case FileName:
 			fileName = string(o)
 		default:

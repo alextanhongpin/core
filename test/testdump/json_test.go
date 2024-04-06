@@ -233,3 +233,48 @@ func TestJSONTxTar(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestJSONCue(t *testing.T) {
+	type User struct {
+		Name string `json:"name"`
+		Age  int    `json:"age"`
+	}
+
+	fileName := fmt.Sprintf("testdata/%s.json", t.Name())
+	data := User{
+		Name: "John Appleseed",
+		Age:  13,
+	}
+
+	if err := testdump.JSON(testdump.NewFile(fileName), data, &testdump.JSONOption{
+		CUEOption: &testdump.CUEOption{
+			Schema: `close({
+				name: string
+				age: >=13
+			})`,
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestJSONCuePath(t *testing.T) {
+	type User struct {
+		Name string `json:"name"`
+		Age  int    `json:"age"`
+	}
+
+	fileName := fmt.Sprintf("testdata/%s.json", t.Name())
+	data := User{
+		Name: "John Appleseed",
+		Age:  13,
+	}
+
+	if err := testdump.JSON(testdump.NewFile(fileName), data, &testdump.JSONOption{
+		CUEOption: &testdump.CUEOption{
+			SchemaPath: "testdata/user.cue",
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+}

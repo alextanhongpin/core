@@ -84,3 +84,22 @@ func TestDumpJSONMaskField(t *testing.T) {
 
 	testutil.DumpJSON(t, creds, testutil.MaskFields("password"))
 }
+
+func TestDumpJSONCue(t *testing.T) {
+	type User struct {
+		Name string `json:"name"`
+		Age  int    `json:"age"`
+	}
+
+	u := User{
+		Name: "John Appleseed",
+		Age:  13,
+	}
+
+	testutil.DumpJSON(t, u, testutil.CUESchema(
+		`close({
+			name: string,
+			age: >=13
+		})`,
+	))
+}

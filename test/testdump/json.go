@@ -2,9 +2,14 @@ package testdump
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 
+	"cuelang.org/go/cue"
+	"cuelang.org/go/cue/cuecontext"
+	"cuelang.org/go/cue/load"
 	"github.com/alextanhongpin/core/internal"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
@@ -14,6 +19,43 @@ type JSONOption struct {
 	Body         []cmp.Option
 	IgnoreFields []string
 	MaskFields   []string
+	CUEOption    *CUEOption
+}
+
+type CUEOption struct {
+	Schema     string       // The raw schema.
+	SchemaPath string       // Path to the cue file.
+	Options    []cue.Option // List of options
+}
+
+func (o *CUEOption) Validate(data []byte) error {
+	bothEmpty := o.Schema == "" && o.SchemaPath == ""
+	if bothEmpty {
+		// Nothing to validate.
+		return nil
+	}
+
+	bothPresent := o.Schema != "" && o.SchemaPath != ""
+	if bothPresent {
+		return errors.New("cannot specify both schema and schema path")
+	}
+
+	if len(o.Options) == 0 {
+		// Concrete allows us to check for required fields.
+		o.Options = append(o.Options, cue.Concrete(true))
+	}
+
+	ctx := cuecontext.New()
+
+	var schema cue.Value
+	if o.Schema != "" {
+		schema = ctx.CompileString(o.Schema)
+	} else if o.SchemaPath != "" {
+		bins := load.Instances([]string{o.SchemaPath}, nil)
+		schema = ctx.BuildInstance(bins[0])
+	}
+	value := ctx.CompileString(string(data))
+	return schema.Unify(value).Validate(o.Options...)
 }
 
 // NOTE: Why using a type is bad - because if we serialize to structs, the keys
@@ -35,6 +77,13 @@ func JSON[T any](rw readerWriter, t T, opt *JSONOption) error {
 		return err
 	}
 
+	// Validate the current data.
+	if opt.CUEOption != nil {
+		if err := opt.CUEOption.Validate(b); err != nil {
+			return fmt.Errorf("cueError: %w", err)
+		}
+	}
+
 	if err := rw.Write(b); err != nil {
 		return err
 	}
@@ -47,6 +96,13 @@ func JSON[T any](rw readerWriter, t T, opt *JSONOption) error {
 	b, err = rw.Read()
 	if err != nil {
 		return err
+	}
+
+	// Validate the snapshot data.
+	if opt.CUEOption != nil {
+		if err := opt.CUEOption.Validate(b); err != nil {
+			return fmt.Errorf("cueError: %w", err)
+		}
 	}
 
 	snapshot, err := UnmarshalJSON[any](b)
