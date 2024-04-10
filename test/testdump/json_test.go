@@ -8,6 +8,7 @@ import (
 
 	"github.com/alextanhongpin/core/internal"
 	"github.com/alextanhongpin/core/test/testdump"
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -236,22 +237,34 @@ func TestJSONTxTar(t *testing.T) {
 
 func TestJSONCue(t *testing.T) {
 	type User struct {
-		Name string `json:"name"`
-		Age  int    `json:"age"`
+		ID       uuid.UUID `json:"id"`
+		Name     string    `json:"name"`
+		Age      int       `json:"age"`
+		Birthday time.Time `json:"birthday"`
 	}
 
 	fileName := fmt.Sprintf("testdata/%s.json", t.Name())
 	data := User{
-		Name: "John Appleseed",
-		Age:  13,
+		ID:       uuid.New(),
+		Name:     "John Appleseed",
+		Age:      13,
+		Birthday: time.Now(),
 	}
 
 	if err := testdump.JSON(testdump.NewFile(fileName), data, &testdump.JSONOption{
+		IgnoreFields: []string{"id", "birthday"},
 		CUEOption: &testdump.CUEOption{
-			Schema: `close({
-				name: string
-				age: >=13
-			})`,
+			Schema: `import (
+	"time",
+	"uuid"
+)
+
+close({
+	id: uuid.Valid()
+	name: string
+	age: >=13
+	birthday: string & time.Format(time.RFC3339)
+})`,
 		},
 	}); err != nil {
 		t.Fatal(err)
