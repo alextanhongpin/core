@@ -46,7 +46,7 @@ func initClient(opts ...Option) (func(), error) {
 		return nil, fmt.Errorf("Could not connect to Docker: %s", err)
 	}
 
-	tag := Tag("7.0.1-alpine3.16")
+	tag := Tag("7.2.4")
 	for _, opt := range opts {
 		switch v := opt.(type) {
 		case Tag:
@@ -65,7 +65,7 @@ func initClient(opts ...Option) (func(), error) {
 	}
 
 	if err = pool.Retry(func() error {
-		addr = fmt.Sprintf("localhost:%s", resource.GetPort("6379/tcp"))
+		addr = resource.GetHostPort("6379/tcp")
 		db := redis.NewClient(&redis.Options{
 			Addr: addr,
 		})
