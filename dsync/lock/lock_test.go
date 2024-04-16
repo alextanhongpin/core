@@ -162,3 +162,98 @@ func TestLock(t *testing.T) {
 		a.ErrorIs(err, lock.ErrKeyNotFound, "expected error to be ErrKeyNotFound indicating that the process no longer holds exclusive rights to the lock")
 	})
 }
+
+func TestLockWait(t *testing.T) {
+	client := redis.NewClient(&redis.Options{
+		Addr: redistest.Addr(),
+	})
+	t.Cleanup(func() {
+		client.Close()
+	})
+
+	ok := make(chan bool)
+	key := "lock_wait"
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	go func() {
+		defer wg.Done()
+
+		locker := lock.New(client, "prefix")
+		l, err := locker.Lock(ctx, key, 1*time.Second)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		// Allow the second goroutine to start.
+		close(ok)
+
+		// Hold for 100 ms.
+		time.Sleep(100 * time.Millisecond)
+		l.Unlock(ctx)
+	}()
+
+	go func() {
+		defer wg.Done()
+
+		// Wait for the first lock to be acquired.
+		<-ok
+
+		locker := lock.New(client, "prefix")
+		l, err := locker.LockWait(ctx, key, 100*time.Millisecond, 200*time.Millisecond)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer l.Unlock(ctx)
+	}()
+	wg.Wait()
+}
+
+func TestDoWait(t *testing.T) {
+	client := redis.NewClient(&redis.Options{
+		Addr: redistest.Addr(),
+	})
+	t.Cleanup(func() {
+		client.Close()
+	})
+
+	ok := make(chan bool)
+	key := "lock_wait"
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	go func() {
+		defer wg.Done()
+
+		locker := lock.New(client, "prefix")
+		l, err := locker.Lock(ctx, key, 1*time.Second)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		// Allow the second goroutine to start.
+		close(ok)
+
+		// Hold for 100 ms.
+		time.Sleep(100 * time.Millisecond)
+		l.Unlock(ctx)
+	}()
+
+	go func() {
+		defer wg.Done()
+
+		// Wait for the first lock to be acquired.
+		<-ok
+
+		locker := lock.New(client, "prefix")
+		err := locker.DoWait(ctx, key, 100*time.Millisecond, 200*time.Millisecond, func(ctx context.Context) error {
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}()
+	wg.Wait()
+}

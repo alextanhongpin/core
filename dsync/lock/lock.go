@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/rand"
 	"time"
 
 	"github.com/google/uuid"
@@ -16,6 +17,8 @@ var (
 
 	// ErrKeyNotFound indicates that the key was not found.
 	ErrKeyNotFound = errors.New("lock: key not found")
+
+	ErrLockWaitTimeout = errors.New("lock: wait timeout exceeded")
 )
 
 // Locker represents the interface for locking and unlocking keys.
@@ -60,11 +63,88 @@ func (l *Locker) Lock(ctx context.Context, key string, ttl time.Duration) (locke
 	}, nil
 }
 
+// LockWait is similar like Lock, but waits until the lock
+// is acquired or the lock wait timeout is exceeded.
+func (l *Locker) LockWait(ctx context.Context, key string, ttl, timeout time.Duration) (locker, error) {
+	var val string
+
+	t := time.NewTimer(timeout)
+	defer t.Stop()
+
+	for {
+		select {
+		case <-t.C:
+			return nil, ErrLockWaitTimeout
+		default:
+			val = uuid.New().String()
+			err := l.lock(ctx, key, val, ttl)
+			if err == nil {
+				return &lockable{
+					key:    key,
+					val:    val,
+					Locker: l,
+				}, nil
+			}
+
+			if errors.Is(err, ErrLocked) {
+				delta := ttl / 10
+				jitter := time.Duration(rand.Int63n(int64(delta)))
+				time.Sleep(delta + jitter)
+				continue
+			}
+
+			return nil, err
+		}
+	}
+}
+
 // Do locks the key until the operation is completed. Do will periodically
 // extend the lock duration until the task is completed.
 // If the lock is not extended, it will expire after the given TTL.
 func (l *Locker) Do(ctx context.Context, key string, ttl time.Duration, fn func(ctx context.Context) error) error {
 	locker, err := l.Lock(ctx, key, ttl)
+	if err != nil {
+		return err
+	}
+	defer locker.Unlock(ctx)
+
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	errCh := make(chan error, 1)
+	go func() {
+		select {
+		case <-ctx.Done():
+			return
+		case errCh <- fn(ctx):
+			return
+		}
+	}()
+
+	go func() {
+		// Periodically extend the lock duration until the operation is completed.
+		t := time.NewTicker(ttl * 9 / 10)
+		defer t.Stop()
+
+		for {
+			select {
+			case <-t.C:
+				if err := locker.Extend(ctx, ttl); err != nil {
+					errCh <- err
+					return
+				}
+
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
+	return <-errCh
+}
+
+func (l *Locker) DoWait(ctx context.Context, key string, ttl, timeout time.Duration, fn func(ctx context.Context) error) error {
+	locker, err := l.LockWait(ctx, key, ttl, timeout)
 	if err != nil {
 		return err
 	}
