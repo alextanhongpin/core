@@ -10,6 +10,8 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
+var ErrConcurrentWrite = errors.New("circuitbreaker: concurrent write")
+
 type RedisStore struct {
 	client *redis.Client
 	ttl    time.Duration
@@ -58,6 +60,7 @@ func (r *RedisStore) Get(ctx context.Context, key string) (*State, error) {
 	}
 
 	return &State{
+		status:  Status(status),
 		Status:  Status(status),
 		Count:   count,
 		ResetAt: time.UnixMilli(resetAt),
@@ -66,12 +69,30 @@ func (r *RedisStore) Get(ctx context.Context, key string) (*State, error) {
 }
 
 func (r *RedisStore) Set(ctx context.Context, key string, res *State) error {
-	hSetErr := r.client.HSet(ctx, key, map[string]interface{}{
-		"status":  strconv.Itoa(int(res.Status)),
-		"count":   strconv.Itoa(res.Count),
-		"resetAt": fmt.Sprint(res.ResetAt.UnixMilli()),
-		"closeAt": fmt.Sprint(res.CloseAt.UnixMilli()),
-	}).Err()
-	expireErr := r.client.PExpire(ctx, key, r.ttl).Err()
-	return errors.Join(hSetErr, expireErr)
+	keys := []string{
+		key,
+		strconv.Itoa(int(res.status)),
+		fmt.Sprint(formatMs(r.ttl)),
+	}
+	argv := []any{
+		"status", strconv.Itoa(int(res.Status)),
+		"count", strconv.Itoa(res.Count),
+		"resetAt", fmt.Sprint(res.ResetAt.UnixMilli()),
+		"closeAt", fmt.Sprint(res.CloseAt.UnixMilli()),
+	}
+	err := script.Run(ctx, r.client, keys, argv...).Err()
+	if errors.Is(err, redis.Nil) {
+		return ErrConcurrentWrite
+	}
+
+	return err
+}
+
+// copied from redis source code
+func formatMs(dur time.Duration) int64 {
+	if dur > 0 && dur < time.Millisecond {
+		return 1
+	}
+
+	return int64(dur / time.Millisecond)
 }

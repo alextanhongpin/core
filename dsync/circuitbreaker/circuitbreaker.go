@@ -105,12 +105,17 @@ func New(opt *Option) *CircuitBreaker {
 }
 
 type State struct {
-	Status  Status
-	Count   int // success or failure count.
+	status  Status // Old status
+	Status  Status // New status
+	Count   int    // success or failure count.
 	Total   int
 	CloseAt time.Time
 	ResetAt time.Time
 }
+
+// Set to isloated.
+//func (c *CircuitBreaker) SetStatus(ctx context.Context, key string, status Status) (error) {
+//}
 
 func (c *CircuitBreaker) Status(ctx context.Context, key string) (Status, error) {
 	res, err := c.opt.Store.Get(ctx, key)
@@ -146,15 +151,19 @@ func (c *CircuitBreaker) Do(ctx context.Context, key string, fn func() error) er
 		return err
 	}
 
-	status, ok := c.states[s.Status].Next(s)
+	prev := s.Status
+	next, ok := c.states[prev].Next(s)
 	if ok {
-		c.opt.OnStateChanged(s.Status, status)
-		s = c.states[status].Entry()
+		c.opt.OnStateChanged(prev, next)
+		s = c.states[next].Entry()
+		s.status = prev
 	}
 
+	// Handle optimistic locking.
 	fnErr := c.states[s.Status].Do(s, fn)
 	if err := c.opt.Store.Set(ctx, key, s); err != nil {
-		return err
+		// If the state mismatch, skip the error.
+		return errors.Join(fnErr, err)
 	}
 
 	return fnErr
