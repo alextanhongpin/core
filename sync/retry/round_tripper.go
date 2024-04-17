@@ -4,14 +4,25 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"slices"
 )
+
+var retryableStatusCodes = []int{
+	http.StatusRequestTimeout,
+	http.StatusTooEarly,
+	http.StatusTooManyRequests,
+	http.StatusInternalServerError,
+	http.StatusBadGateway,
+	http.StatusServiceUnavailable,
+	http.StatusGatewayTimeout,
+}
 
 type transporter interface {
 	RoundTrip(r *http.Request) (*http.Response, error)
 }
 
 type retrier interface {
-	Do(func() (*http.Response, error)) (*http.Response, Result, error)
+	Do(ctx context.Context, fn func(ctx context.Context) error) (*Result, error)
 }
 
 type RoundTripper struct {
@@ -19,34 +30,28 @@ type RoundTripper struct {
 	Retrier   retrier
 }
 
-func NewRoundTripper(t transporter) *RoundTripper {
-	r := New[*http.Response](NewOption())
-	r.ShouldHandle = func(resp *http.Response, err error) (bool, error) {
-		// Skip if cancelled by caller.
-		if errors.Is(err, context.Canceled) {
-			return false, err
-		}
-
-		// Retry when status code is 5XX.
-		if resp != nil && resp.StatusCode >= http.StatusInternalServerError {
-			return true, errors.New(resp.Status)
-		}
-
-		return err != nil, err
-	}
-
+func NewRoundTripper(t transporter, r retrier) *RoundTripper {
 	return &RoundTripper{
 		Transport: t,
 		Retrier:   r,
 	}
 }
 
-func (t *RoundTripper) RoundTrip(r *http.Request) (*http.Response, error) {
-	resp, _, err := t.Retrier.Do(func() (*http.Response, error) {
-		return t.Transport.RoundTrip(r)
+func (t *RoundTripper) RoundTrip(r *http.Request) (resp *http.Response, err error) {
+	_, retryErr := t.Retrier.Do(r.Context(), func(ctx context.Context) error {
+		resp, err = t.Transport.RoundTrip(r)
+		if err != nil {
+			return err
+		}
+
+		if resp != nil && slices.Contains(retryableStatusCodes, resp.StatusCode) {
+			return errors.New(resp.Status)
+		}
+
+		return nil
 	})
-	if err != nil {
-		return nil, err
+	if allErr := errors.Join(retryErr, err); allErr != nil {
+		return nil, allErr
 	}
 
 	return resp, nil

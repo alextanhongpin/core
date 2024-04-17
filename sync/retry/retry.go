@@ -12,7 +12,13 @@ import (
 
 var Rand = rand.New(rand.NewSource(time.Now().UnixNano()))
 
-var ErrMaxAttempts = errors.New("retry: max attempts reached")
+var (
+	// ErrMaxAttempts is returned when the max attempts is reached.
+	ErrMaxAttempts = errors.New("retry: max attempts reached")
+
+	// ErrWaitTimeout is returned when the retry still failed after the wait timeout.
+	ErrWaitTimeout = errors.New("retry: wait timeout exceeded")
+)
 
 type BackoffType int
 
@@ -42,13 +48,13 @@ func NewOption() *Option {
 	}
 }
 
-type Retry[T any] struct {
+type Retry struct {
 	// Returns a bool to indicate if a retry should be made,
 	// and also the error for the decision.
-	ShouldHandle func(T, error) (bool, error)
-	OnRetry      func(Event)
-	backoff      Backoff
-	useJitter    bool
+	OnRetry     func(Event)
+	backoff     Backoff
+	useJitter   bool
+	maxDuration time.Duration
 }
 
 type Event struct {
@@ -57,75 +63,63 @@ type Event struct {
 	Err     error
 }
 
-func New[T any](opt *Option) *Retry[T] {
+func New(opt *Option) *Retry {
 	if opt == nil {
 		opt = NewOption()
 	}
 
 	backoff := NewBackoff(opt.BackoffType, opt.MaxRetryAttempts, opt.Delay).
 		WithMaxDelay(opt.MaxDelay).
-		WithMaxDuration(opt.MaxDuration).
 		WithMaxRetryAttempts(opt.MaxRetryAttempts)
 
-	return &Retry[T]{
-		backoff:   backoff,
-		useJitter: opt.UseJitter,
-		ShouldHandle: func(v T, err error) (bool, error) {
-			// Skip if cancelled by caller.
-			if errors.Is(err, context.Canceled) {
-				return false, err
-			}
-
-			return err != nil, err
-		},
-		OnRetry: func(Event) {},
+	return &Retry{
+		backoff:     backoff,
+		useJitter:   opt.UseJitter,
+		maxDuration: opt.MaxDuration,
+		OnRetry:     func(Event) {},
 	}
 }
 
-func (r *Retry[T]) Do(fn func() (T, error)) (v T, res Result, err error) {
-	var shouldRetry bool
-
+func (r *Retry) Do(ctx context.Context, fn func(ctx context.Context) error) (res *Result, err error) {
 	backoff := r.backoff
 	if r.useJitter {
 		backoff = backoff.WithJitter()
 	}
 
+	ctx, cancel := context.WithTimeoutCause(ctx, r.maxDuration, ErrWaitTimeout)
+	defer cancel()
+
+	res = new(Result)
+
 	// The first execution does not count as retry.
 	backoff = append([]time.Duration{0}, backoff...)
 	for i, t := range backoff {
+		select {
+		case <-ctx.Done():
+			return res, context.Cause(ctx)
+		default:
+			time.Sleep(t)
+		}
+
 		if i != 0 {
 			res.Attempts = i
 			res.Duration += t
 
+			// Useful for recording metrics.
 			r.OnRetry(Event{
 				Attempt: res.Attempts,
 				Delay:   t,
 				Err:     err,
 			})
 		}
-		if t != 0 {
-			time.Sleep(t)
-		}
 
-		v, err = fn()
-		// We may not have an error, but the result is not what we want.
-		// E.g. a HTTP request may SUCCEED with status code 5XX.
-		shouldRetry, err = r.ShouldHandle(v, err)
-		if !shouldRetry {
+		err = fn(ctx)
+		if err == nil {
 			return
 		}
 	}
 
-	if shouldRetry {
-		errMaxAttempts := fmt.Errorf("%w - %s", ErrMaxAttempts, res.String())
-		if err != nil {
-			err = fmt.Errorf("%w: %w", errMaxAttempts, err)
-		} else {
-			err = errMaxAttempts
-		}
-	}
-
-	return
+	return nil, errors.Join(ErrMaxAttempts, err)
 }
 
 type Backoff []time.Duration
@@ -160,10 +154,6 @@ func (b Backoff) WithMaxDelay(d time.Duration) Backoff {
 	return WithMaxDelay(b, d)
 }
 
-func (b Backoff) WithMaxDuration(d time.Duration) Backoff {
-	return WithMaxDuration(b, d)
-}
-
 // WithMaxRetryAttempts limits the number of attempts.
 func WithMaxRetryAttempts(ts []time.Duration, n int) []time.Duration {
 	if len(ts) <= n {
@@ -179,24 +169,6 @@ func WithMaxDelay(ts []time.Duration, maxDelay time.Duration) []time.Duration {
 
 	for i := range ts {
 		res[i] = min(ts[i], maxDelay)
-	}
-
-	return res
-}
-
-// WithMaxDuration caps the total duration of the retry.
-func WithMaxDuration(ts []time.Duration, maxDuration time.Duration) []time.Duration {
-	res := make([]time.Duration, 0, len(ts))
-
-	var total time.Duration
-	for i := range ts {
-		d := ts[i]
-		total += d
-		if total > maxDuration {
-			return res
-		}
-
-		res = append(res, d)
 	}
 
 	return res

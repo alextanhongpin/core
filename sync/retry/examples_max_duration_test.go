@@ -1,6 +1,7 @@
 package retry_test
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -19,18 +20,18 @@ func ExampleMaxDuration() {
 		UseJitter:        false,
 	}
 
-	r := retry.New[any](opt)
+	r := retry.New(opt)
 	r.OnRetry = func(e retry.Event) {
 		fmt.Printf("retry.Event: %+v\n", e)
 	}
 
 	start := time.Now()
-	v, res, err := r.Do(func() (any, error) {
-		return nil, errors.New(http.StatusText(http.StatusInternalServerError))
+	ctx := context.Background()
+	res, err := r.Do(ctx, func(ctx context.Context) error {
+		return errors.New(http.StatusText(http.StatusInternalServerError))
 	})
 	elapsed := time.Since(start)
 
-	fmt.Println(v)
 	fmt.Printf("retry.Result: %+v\n", res)
 	fmt.Println(err)
 	fmt.Println(elapsed > 500*time.Millisecond)
@@ -42,9 +43,8 @@ func ExampleMaxDuration() {
 	// retry.Event: {Attempt:3 Delay:100ms Err:Internal Server Error}
 	// retry.Event: {Attempt:4 Delay:100ms Err:Internal Server Error}
 	// retry.Event: {Attempt:5 Delay:100ms Err:Internal Server Error}
-	// <nil>
-	// retry.Result: {Attempts:5 Duration:500ms}
-	// retry: max attempts reached - retry 5 times, took 500ms: Internal Server Error
+	// retry.Result: retry 5 times, took 500ms
+	// retry: wait timeout exceeded
 	// true
 	// true
 }

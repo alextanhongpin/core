@@ -1,6 +1,7 @@
 package retry_test
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"math/rand"
@@ -12,7 +13,7 @@ func init() {
 	retry.Rand = rand.New(rand.NewSource(42))
 }
 
-func ExampleRetryShouldHandle() {
+func ExampleRetrySkip() {
 	var skipErr = errors.New("skipable")
 
 	var i int
@@ -23,25 +24,24 @@ func ExampleRetryShouldHandle() {
 	}
 
 	opt := retry.NewOption()
-	r := retry.New[any](opt)
-	r.ShouldHandle = func(v any, err error) (bool, error) {
-		return !errors.Is(err, skipErr), err
-	}
+	r := retry.New(opt)
 	r.OnRetry = func(e retry.Event) {
 		fmt.Printf("retry.Event: %+v\n", e)
 	}
-	v, res, err := r.Do(func() (any, error) {
+	ctx := context.Background()
+	res, err := r.Do(ctx, func(ctx context.Context) error {
 		err := errs[i]
 		i++
-		return nil, err
+		if errors.Is(err, skipErr) {
+			return nil
+		}
+		return err
 	})
-	fmt.Println(v)
 	fmt.Printf("retry.Result: %+v\n", res)
 	fmt.Println(err)
 	// Output:
 	// retry.Event: {Attempt:1 Delay:130ms Err:random}
 	// retry.Event: {Attempt:2 Delay:270ms Err:random}
+	// retry.Result: retry 2 times, took 400ms
 	// <nil>
-	// retry.Result: {Attempts:2 Duration:400ms}
-	// skipable
 }
