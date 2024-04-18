@@ -8,7 +8,7 @@ import (
 )
 
 func ExampleRetryDo() {
-	r := retry.New(nil)
+	r := retry.New()
 	ctx := context.Background()
 	res, err := r.Do(ctx, func(ctx context.Context) error {
 		return nil
@@ -16,6 +16,6 @@ func ExampleRetryDo() {
 	fmt.Printf("retry.Result: %+v\n", res)
 	fmt.Println(err)
 	// Output:
-	// retry.Result: retry 0 times, took 0s
+	// retry.Result: &{Retries:[]}
 	// <nil>
 }

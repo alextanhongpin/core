@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"regexp"
+	"time"
 
 	"github.com/alextanhongpin/core/sync/retry"
 )
@@ -16,10 +17,16 @@ func ExampleRoundTripper() {
 	}))
 	defer ts.Close()
 
-	opt := retry.NewOption()
-	opt.Delay = 0
-
-	r := retry.New(opt)
+	r := retry.New(
+		10*time.Millisecond,
+		10*time.Millisecond,
+		10*time.Millisecond,
+		10*time.Millisecond,
+		10*time.Millisecond,
+	)
+	r.Now = func() time.Time {
+		return time.Time{}
+	}
 	r.OnRetry = func(e retry.Event) {
 		fmt.Printf("retry.Event: %+v\n", e)
 	}
@@ -46,16 +53,11 @@ func ExampleRoundTripper() {
 
 	// Output:
 	// 401 Unauthorized
-	// retry.Event: {Attempt:1 Delay:0s Err:500 Internal Server Error}
-	// retry.Event: {Attempt:2 Delay:0s Err:500 Internal Server Error}
-	// retry.Event: {Attempt:3 Delay:0s Err:500 Internal Server Error}
-	// retry.Event: {Attempt:4 Delay:0s Err:500 Internal Server Error}
-	// retry.Event: {Attempt:5 Delay:0s Err:500 Internal Server Error}
-	// retry.Event: {Attempt:6 Delay:0s Err:500 Internal Server Error}
-	// retry.Event: {Attempt:7 Delay:0s Err:500 Internal Server Error}
-	// retry.Event: {Attempt:8 Delay:0s Err:500 Internal Server Error}
-	// retry.Event: {Attempt:9 Delay:0s Err:500 Internal Server Error}
-	// retry.Event: {Attempt:10 Delay:0s Err:500 Internal Server Error}
-	// Get "http://127.0.0.1:8080": retry: max attempts reached
+	// retry.Event: {StartAt:0001-01-01 00:00:00 +0000 UTC RetryAt:0001-01-01 00:00:00 +0000 UTC Attempt:1 Delay:7.281668ms Err:500 Internal Server Error}
+	// retry.Event: {StartAt:0001-01-01 00:00:00 +0000 UTC RetryAt:0001-01-01 00:00:00 +0000 UTC Attempt:2 Delay:8.43475ms Err:500 Internal Server Error}
+	// retry.Event: {StartAt:0001-01-01 00:00:00 +0000 UTC RetryAt:0001-01-01 00:00:00 +0000 UTC Attempt:3 Delay:9.099423ms Err:500 Internal Server Error}
+	// retry.Event: {StartAt:0001-01-01 00:00:00 +0000 UTC RetryAt:0001-01-01 00:00:00 +0000 UTC Attempt:4 Delay:7.901345ms Err:500 Internal Server Error}
+	// retry.Event: {StartAt:0001-01-01 00:00:00 +0000 UTC RetryAt:0001-01-01 00:00:00 +0000 UTC Attempt:5 Delay:5.640357ms Err:500 Internal Server Error}
+	// Get "http://127.0.0.1:8080": retry: too many attempts
 	// 500 Internal Server Error
 }
