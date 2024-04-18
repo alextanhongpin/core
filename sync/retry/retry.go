@@ -4,110 +4,86 @@ package retry
 import (
 	"context"
 	"errors"
-	"fmt"
-	"math"
 	"math/rand"
 	"time"
 )
 
-var Rand = rand.New(rand.NewSource(time.Now().UnixNano()))
-
-var (
-	// ErrMaxAttempts is returned when the max attempts is reached.
-	ErrMaxAttempts = errors.New("retry: max attempts reached")
-
-	// ErrWaitTimeout is returned when the retry still failed after the wait timeout.
-	ErrWaitTimeout = errors.New("retry: wait timeout exceeded")
-)
-
-type BackoffType int
-
-const (
-	BackoffTypeExponential BackoffType = iota
-	BackoffTypeLinear
-	BackoffTypeConstant
-)
-
-type Option struct {
-	BackoffType      BackoffType
-	Delay            time.Duration
-	MaxDelay         time.Duration
-	MaxRetryAttempts int
-	MaxDuration      time.Duration
-	UseJitter        bool
-}
-
-func NewOption() *Option {
-	return &Option{
-		BackoffType:      BackoffTypeExponential,
-		Delay:            100 * time.Millisecond,
-		MaxDelay:         time.Minute,
-		MaxRetryAttempts: 10,
-		UseJitter:        true,
-		MaxDuration:      5 * time.Minute,
-	}
-}
-
-type Retry struct {
-	// Returns a bool to indicate if a retry should be made,
-	// and also the error for the decision.
-	OnRetry     func(Event)
-	backoff     Backoff
-	useJitter   bool
-	maxDuration time.Duration
-}
+var ErrTooManyAttempts = errors.New("retry: too many attempts")
 
 type Event struct {
+	StartAt time.Time
+	RetryAt time.Time
 	Attempt int
 	Delay   time.Duration
 	Err     error
 }
 
-func New(opt *Option) *Retry {
-	if opt == nil {
-		opt = NewOption()
+type Result struct {
+	Retries []time.Time
+}
+
+type Retry struct {
+	backoffs   []time.Duration
+	OnRetry    func(Event)
+	JitterFunc func(time.Duration) time.Duration
+	Now        func() time.Time
+}
+
+func New(backoffs ...time.Duration) *Retry {
+	if len(backoffs) == 0 {
+		backoffs = []time.Duration{
+			100 * time.Millisecond,
+			200 * time.Millisecond,
+			400 * time.Millisecond,
+			800 * time.Millisecond,
+			1600 * time.Millisecond,
+			3200 * time.Millisecond,
+			6400 * time.Millisecond,
+			12800 * time.Millisecond,
+			25600 * time.Millisecond,
+			51200 * time.Millisecond,
+		}
 	}
 
-	backoff := NewBackoff(opt.BackoffType, opt.MaxRetryAttempts, opt.Delay).
-		WithMaxDelay(opt.MaxDelay).
-		WithMaxRetryAttempts(opt.MaxRetryAttempts)
+	// The first execution does not count as retry.
+	backoffs = append([]time.Duration{0}, backoffs...)
 
 	return &Retry{
-		backoff:     backoff,
-		useJitter:   opt.UseJitter,
-		maxDuration: opt.MaxDuration,
-		OnRetry:     func(Event) {},
+		backoffs: backoffs,
+		OnRetry:  func(Event) {},
+		JitterFunc: func(d time.Duration) time.Duration {
+			n := int(d)
+			if n == 0 {
+				return 0
+			}
+
+			return time.Duration(n/2 + rand.Intn(n/2))
+		},
+		Now: time.Now,
 	}
 }
 
 func (r *Retry) Do(ctx context.Context, fn func(ctx context.Context) error) (res *Result, err error) {
-	backoff := r.backoff
-	if r.useJitter {
-		backoff = backoff.WithJitter()
-	}
-
-	ctx, cancel := context.WithTimeoutCause(ctx, r.maxDuration, ErrWaitTimeout)
-	defer cancel()
-
+	start := r.Now()
 	res = new(Result)
 
-	// The first execution does not count as retry.
-	backoff = append([]time.Duration{0}, backoff...)
-	for i, t := range backoff {
-		select {
-		case <-ctx.Done():
-			return res, context.Cause(ctx)
-		default:
-			time.Sleep(t)
-		}
-
+	for i, t := range r.backoffs {
 		if i != 0 {
-			res.Attempts = i
-			res.Duration += t
+			select {
+			case <-ctx.Done():
+				return res, context.Cause(ctx)
+			default:
+				t = r.JitterFunc(t)
+				time.Sleep(t)
+			}
+
+			res.Retries = append(res.Retries, r.Now())
 
 			// Useful for recording metrics.
 			r.OnRetry(Event{
-				Attempt: res.Attempts,
+				StartAt: start,
+				RetryAt: res.Retries[len(res.Retries)-1],
+				Attempt: i,
 				Delay:   t,
 				Err:     err,
 			})
@@ -119,84 +95,5 @@ func (r *Retry) Do(ctx context.Context, fn func(ctx context.Context) error) (res
 		}
 	}
 
-	return nil, errors.Join(ErrMaxAttempts, err)
-}
-
-type Backoff []time.Duration
-
-// NewBackoff generates a list of backoff durations based on the backoff type.
-func NewBackoff(t BackoffType, n int, delay time.Duration) Backoff {
-	res := make([]time.Duration, n)
-	for i := 0; i < n; i++ {
-		switch t {
-		case BackoffTypeLinear:
-			res[i] = time.Duration(i+1) * delay
-		case BackoffTypeExponential:
-			res[i] = time.Duration(math.Pow(2, float64(i))) * delay
-		default:
-			// Defaults to constant.
-			res[i] = delay
-		}
-	}
-
-	return res
-}
-
-func (b Backoff) WithJitter() Backoff {
-	return WithJitter(b)
-}
-
-func (b Backoff) WithMaxRetryAttempts(n int) Backoff {
-	return WithMaxRetryAttempts(b, n)
-}
-
-func (b Backoff) WithMaxDelay(d time.Duration) Backoff {
-	return WithMaxDelay(b, d)
-}
-
-// WithMaxRetryAttempts limits the number of attempts.
-func WithMaxRetryAttempts(ts []time.Duration, n int) []time.Duration {
-	if len(ts) <= n {
-		return ts
-	}
-
-	return ts[:n]
-}
-
-// WithMaxDelay caps the delay to the max value.
-func WithMaxDelay(ts []time.Duration, maxDelay time.Duration) []time.Duration {
-	res := make([]time.Duration, len(ts))
-
-	for i := range ts {
-		res[i] = min(ts[i], maxDelay)
-	}
-
-	return res
-}
-
-// WithJitter includes jitter to each duration.
-func WithJitter(ts []time.Duration) []time.Duration {
-	res := make([]time.Duration, len(ts))
-	for i := range ts {
-		res[i] = jitter(ts[i]) + ts[i]
-	}
-
-	return res
-}
-
-type Result struct {
-	Attempts int
-	Duration time.Duration
-}
-
-func (r *Result) String() string {
-	return fmt.Sprintf("retry %d times, took %s", r.Attempts, r.Duration)
-}
-
-func jitter(d time.Duration) time.Duration {
-	if d == 0 {
-		return 0
-	}
-
-	return time.Duration(Rand.Intn(int(d / 2))).Round(5 * time.Millisecond)
+	return res, errors.Join(ErrTooManyAttempts, err)
 }
