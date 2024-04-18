@@ -20,6 +20,7 @@ func ExampleTimeout() {
 		10*time.Millisecond,
 		10*time.Millisecond,
 		10*time.Millisecond,
+		10*time.Millisecond,
 	)
 	r.JitterFunc = noJitter
 	r.Now = func() time.Time {
@@ -42,8 +43,7 @@ func ExampleTimeout() {
 	// retry.Event: {StartAt:0001-01-01 00:00:00 +0000 UTC RetryAt:0001-01-01 00:00:00 +0000 UTC Attempt:2 Delay:10ms Err:Internal Server Error}
 	// retry.Event: {StartAt:0001-01-01 00:00:00 +0000 UTC RetryAt:0001-01-01 00:00:00 +0000 UTC Attempt:3 Delay:10ms Err:Internal Server Error}
 	// retry.Result: &retry.Result{Retries:[]time.Time{time.Date(1, time.January, 1, 0, 0, 0, 0, time.UTC), time.Date(1, time.January, 1, 0, 0, 0, 0, time.UTC), time.Date(1, time.January, 1, 0, 0, 0, 0, time.UTC)}}
-	// retry: too many attempts
-	// Internal Server Error
+	// wait timeout exceeded
 }
 
 func noJitter(d time.Duration) time.Duration {
