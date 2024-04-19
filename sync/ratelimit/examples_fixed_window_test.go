@@ -13,11 +13,10 @@ func ExampleFixedWindow() {
 	now := time.Now()
 	periods := []time.Duration{
 		0,
-		0,
-		0,
-		0,
-		0,
 		1 * time.Millisecond,
+		2 * time.Millisecond,
+		3 * time.Millisecond,
+		4 * time.Millisecond,
 		99 * time.Millisecond,
 		100 * time.Millisecond,
 		101 * time.Millisecond,
@@ -30,7 +29,7 @@ func ExampleFixedWindow() {
 		rl.Now = func() time.Time {
 			return now.Add(p)
 		}
-		allow := p.Milliseconds() == 0 || p >= 1000*time.Millisecond
+		allow := p.Milliseconds() < 5 || p >= 1000*time.Millisecond
 
 		dryRun := rl.AllowAt(now.Add(p), 1)
 		result := rl.Allow()
@@ -42,11 +41,10 @@ func ExampleFixedWindow() {
 	}
 	// Output:
 	// 0s true 4
-	// 0s true 3
-	// 0s true 2
-	// 0s true 1
-	// 0s true 0
-	// 1ms false 0
+	// 1ms true 3
+	// 2ms true 2
+	// 3ms true 1
+	// 4ms true 0
 	// 99ms false 0
 	// 100ms false 0
 	// 101ms false 0
