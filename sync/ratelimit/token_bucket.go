@@ -60,9 +60,9 @@ func (tb *TokenBucket) allowAtN(s *state, now time.Time, n int) *Result {
 	tb.mu.Lock()
 	defer tb.mu.Unlock()
 
-	tb.reset(s)
+	tb.reset(s, now)
 
-	allow := tb.allowFlow(s, n) || tb.allowBurst(s, n)
+	allow := tb.allowFlow(s, now, n) || tb.allowBurst(s, n)
 
 	start := now.Truncate(tb.period)
 	end := start.Add(tb.period)
@@ -96,8 +96,7 @@ func (tb *TokenBucket) allowBurst(s *state, n int) bool {
 // allowFlow updates the checkpoint of the last request.
 // If the checkpoint is the same as the current time, it returns false.
 // Otherwise, it returns true and updates the checkpoint.
-func (tb *TokenBucket) allowFlow(s *state, n int) bool {
-	now := tb.Now()
+func (tb *TokenBucket) allowFlow(s *state, now time.Time, n int) bool {
 	checkpoint := now.Truncate(tb.interval)
 	if !checkpoint.Before(s.retryAt) {
 		s.retryAt = checkpoint.Add(time.Duration(int(tb.interval) * n))
@@ -107,9 +106,7 @@ func (tb *TokenBucket) allowFlow(s *state, n int) bool {
 	return false
 }
 
-func (tb *TokenBucket) reset(s *state) {
-	now := tb.Now()
-
+func (tb *TokenBucket) reset(s *state, now time.Time) {
 	if now.Before(s.resetAt) {
 		return
 	}
