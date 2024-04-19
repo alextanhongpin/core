@@ -2,29 +2,24 @@
 package ratelimit
 
 import (
-	"context"
-	_ "embed"
 	"time"
-
-	redis "github.com/redis/go-redis/v9"
 )
-
-//go:embed ratelimit.lua
-var ratelimit string
 
 type Result struct {
 	Allow     bool
 	Remaining int64
 	RetryAt   time.Time
 	ResetAt   time.Time
+	Limit     int64
 }
 
-func newResult(res []int64) *Result {
+func newResult(res []int64, limit int64) *Result {
 	return &Result{
 		Allow:     res[0] == 1,
 		Remaining: res[1],
 		RetryAt:   unixMillisecondToTime(res[2]),
 		ResetAt:   unixMillisecondToTime(res[3]),
+		Limit:     limit,
 	}
 }
 
@@ -51,23 +46,6 @@ func (r *Result) Wait() {
 }
 
 func unixMillisecondToTime(unixMs int64) time.Time {
-	sec := unixMs / 1e3
-	ns := unixMs % 1e3 * 1e6
-	return time.Unix(sec, ns)
-}
-
-func registerFunction(client *redis.Client) {
-	_, err := client.FunctionLoadReplace(context.Background(), ratelimit).Result()
-	if err != nil {
-		if exists(err) {
-			return
-		}
-
-		panic(err)
-	}
-}
-
-func exists(err error) bool {
-	// The ERR part is trimmed from prefix comparison.
-	return redis.HasErrorPrefix(err, "Library 'ratelimit' already exists")
+	ns := unixMs * 1e6
+	return time.Unix(0, ns)
 }

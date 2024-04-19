@@ -24,7 +24,7 @@ func main() {
 
 	key := "user:1"
 	//rl := newFixedWindow(rdb)
-	rl := newLeakyBucket(rdb)
+	rl := newTokenBucket(rdb)
 	if err := simulate(ctx, rl, key, 30); err != nil {
 		panic(err)
 	}
@@ -41,6 +41,13 @@ func simulate(ctx context.Context, rl ratelimiter, key string, n int) error {
 	fmt.Println("start", now)
 	limit := 0
 
+	start := now.Truncate(time.Minute).Add(time.Minute)
+	wait := start.Sub(now)
+	fmt.Println("wait for", wait)
+	time.Sleep(wait)
+
+	now = time.Now()
+
 	for time.Since(now) < 1*time.Second {
 		res, err := rl.Allow(ctx, key)
 		if err != nil {
@@ -51,12 +58,14 @@ func simulate(ctx context.Context, rl ratelimiter, key string, n int) error {
 			limit++
 		}
 
-		fmt.Printf("elapsed: %s, allow=%t remaining=%d retryIn=%s resetIn=%s\n",
+		fmt.Printf("elapsed: %s, allow=%t remaining=%d retryIn=%s resetIn=%s now=%s\n",
 			time.Since(now),
 			res.Allow,
 			res.Remaining,
 			res.RetryIn(),
-			res.ResetIn())
+			res.ResetIn(),
+			time.Now().Format(time.DateTime),
+		)
 		sleep := time.Duration(rand.Intn(100))
 		time.Sleep(sleep * time.Millisecond)
 	}
@@ -72,10 +81,10 @@ func newFixedWindow(client *redis.Client) *ratelimit.FixedWindow {
 	})
 }
 
-func newLeakyBucket(client *redis.Client) *ratelimit.LeakyBucket {
-	return ratelimit.NewLeakyBucket(client, &ratelimit.LeakyBucketOption{
+func newTokenBucket(client *redis.Client) *ratelimit.TokenBucket {
+	return ratelimit.NewTokenBucket(client, &ratelimit.TokenBucketOption{
 		Limit:  5,
 		Period: 1 * time.Second,
-		Burst:  0,
+		Burst:  3,
 	})
 }
