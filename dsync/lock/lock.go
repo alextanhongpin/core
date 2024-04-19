@@ -4,11 +4,11 @@ import (
 	"context"
 	"errors"
 	"math/rand"
-	"sync"
 	"time"
 
 	"github.com/google/uuid"
 	redis "github.com/redis/go-redis/v9"
+	"golang.org/x/sync/errgroup"
 )
 
 var (
@@ -56,6 +56,7 @@ func (l *Locker) lockWait(ctx context.Context, key, val string, ttl, timeout tim
 					return context.Cause(ctx)
 					// Retry at most 10 times.
 				case <-time.After(time.Duration(rand.Intn(int(ttl)/10)) + ttl/10):
+					//case <-time.After(10 * time.Millisecond):
 					continue
 				}
 			}
@@ -65,30 +66,20 @@ func (l *Locker) lockWait(ctx context.Context, key, val string, ttl, timeout tim
 	}
 }
 
-func (l *Locker) refresh(ctx context.Context, key, val string, ttl time.Duration) chan error {
-	ch := make(chan error)
+func (l *Locker) refresh(ctx context.Context, key, val string, ttl time.Duration) error {
+	t := time.NewTicker(ttl * 9 / 10)
+	defer t.Stop()
 
-	go func() {
-		defer close(ch)
-
-		t := time.NewTicker(ttl / 9)
-		defer t.Stop()
-
-		for {
-			select {
-			case <-ctx.Done():
-				ch <- context.Cause(ctx)
-				return
-			case <-t.C:
-				if err := l.extend(ctx, key, val, ttl); err != nil {
-					ch <- err
-					return
-				}
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-t.C:
+			if err := l.extend(ctx, key, val, ttl); err != nil {
+				return err
 			}
 		}
-	}()
-
-	return ch
+	}
 }
 
 func (l *Locker) Lock(ctx context.Context, key string, ttl, timeout time.Duration, fn func(ctx context.Context) error) (err error) {
@@ -105,32 +96,17 @@ func (l *Locker) Lock(ctx context.Context, key string, ttl, timeout time.Duratio
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	ch := l.refresh(ctx, key, val, ttl)
-	var wg sync.WaitGroup
-	wg.Add(1)
+	g, ctx := errgroup.WithContext(ctx)
+	g.Go(func() error {
+		return l.refresh(ctx, key, val, ttl)
+	})
 
-	go func() {
+	g.Go(func() error {
 		defer cancel()
-		defer wg.Done()
 
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case refreshErr := <-ch:
-				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-					return
-				}
-
-				err = errors.Join(err, refreshErr)
-				return
-			}
-		}
-	}()
-
-	err = fn(ctx)
-	cancel()
-	wg.Wait()
+		return fn(ctx)
+	})
+	err = g.Wait()
 	return
 }
 

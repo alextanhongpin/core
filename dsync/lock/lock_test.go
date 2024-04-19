@@ -2,6 +2,8 @@ package lock_test
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"os"
 	"sync"
 	"testing"
@@ -44,8 +46,10 @@ func TestLock(t *testing.T) {
 			// Hold for 100 ms.
 			time.Sleep(100 * time.Millisecond)
 
+			t.Log("1. done")
 			return nil
 		})
+		t.Log("1. err", err)
 		if err != nil {
 			errs <- err
 		}
@@ -59,8 +63,10 @@ func TestLock(t *testing.T) {
 
 		locker := lock.New(client)
 		err := locker.Lock(ctx, key, 1*time.Second, 200*time.Millisecond, func(ctx context.Context) error {
+			t.Log("2. done")
 			return nil
 		})
+		t.Log("2. err", err)
 		if err != nil {
 			errs <- err
 		}
@@ -71,6 +77,69 @@ func TestLock(t *testing.T) {
 
 	for err := range errs {
 		if err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestLockTimeout(t *testing.T) {
+	client := newClient(t)
+
+	ok := make(chan bool)
+	key := t.Name()
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	errs := make(chan error, 2)
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+
+	var wantErr = errors.New("want")
+
+	go func() {
+		defer wg.Done()
+
+		locker := lock.New(client)
+		err := locker.Lock(ctx, key, 1*time.Second, 1*time.Second, func(ctx context.Context) error {
+			close(ok)
+			// Hold for 300 ms that will cause timeout.
+			time.Sleep(300 * time.Millisecond)
+
+			t.Log("1. done")
+			return nil
+		})
+		t.Log("1. err", err)
+		if err != nil {
+			errs <- err
+		}
+	}()
+
+	go func(t *testing.T) {
+		defer wg.Done()
+
+		// Wait for the first lock to be acquired.
+		<-ok
+
+		locker := lock.New(client)
+		err := locker.Lock(ctx, key, 1*time.Second, 200*time.Millisecond, func(ctx context.Context) error {
+			t.Log("2. done")
+			return nil
+		})
+		t.Log("2. err", err)
+		if err != nil {
+			errs <- fmt.Errorf("%w: %w", err, wantErr)
+		}
+	}(t)
+
+	wg.Wait()
+	close(errs)
+
+	for err := range errs {
+		if err != nil {
+			if errors.Is(err, wantErr) && errors.Is(err, lock.ErrLockWaitTimeout) {
+				t.Log("expected error", err)
+				continue
+			}
 			t.Fatal(err)
 		}
 	}
