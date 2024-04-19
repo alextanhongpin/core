@@ -62,14 +62,7 @@ func (tb *TokenBucket) allowAtN(s *state, now time.Time, n int) *Result {
 
 	tb.reset(s)
 
-	var allow bool
-	if !tb.allowFlow(s, n) {
-		if tb.allowBurst(s, n) {
-			allow = true
-		}
-	} else {
-		allow = true
-	}
+	allow := tb.allowFlow(s, n) || tb.allowBurst(s, n)
 
 	start := now.Truncate(tb.period)
 	end := start.Add(tb.period)
