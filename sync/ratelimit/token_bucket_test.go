@@ -242,3 +242,24 @@ func TestTokenBucketAllowN(t *testing.T) {
 		t.Log(now.Add(p).Sub(now), result.Allow, result.Remaining, result.RetryAt.Sub(now), result.ResetAt.Sub(now))
 	}
 }
+
+func TestTokenBucketBurstTotal(t *testing.T) {
+	rl := ratelimit.NewTokenBucket(5, time.Second, 1)
+
+	now := time.Now().Truncate(time.Second)
+	var count int
+	for i := 0; i < 1000; i++ {
+		p := time.Duration(i) * time.Millisecond
+		rl.Now = func() time.Time {
+			return now.Add(p)
+		}
+
+		result := rl.Allow()
+		if result.Allow {
+			count++
+		}
+	}
+	if want, got := 6, count; want != got {
+		t.Fatalf("want %d, got %d", want, got)
+	}
+}

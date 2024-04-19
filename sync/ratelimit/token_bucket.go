@@ -85,7 +85,7 @@ func (tb *TokenBucket) allowAtN(s *state, now time.Time, n int) *Result {
 // allowBurst returns true if the burst is allowed.
 // Burst quota is not affected by the interval.
 func (tb *TokenBucket) allowBurst(s *state, n int) bool {
-	if s.count < tb.burst {
+	if s.count+int64(n) <= tb.burst {
 		s.count += int64(n)
 		return true
 	}
