@@ -36,7 +36,7 @@ local start = (now - now%period)
 local finish = start + period
 local left = math.floor((finish - retry_at) / interval)
 local remaining = math.max(0, burst - count) + left
-if count < burst then
+if count + n <= burst then
 	retry_at = now
 end
 
