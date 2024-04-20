@@ -12,7 +12,7 @@ import (
 
 var ctx = context.Background()
 
-func TestCircuitBreaker(t *testing.T) {
+func TestCircuitBreaker_Do_InMemory(t *testing.T) {
 	now := time.Now()
 
 	var statuses []circuitbreaker.Status
@@ -31,7 +31,7 @@ func TestCircuitBreaker(t *testing.T) {
 	// Create a new circuit breaker.
 	cb := circuitbreaker.New(opt)
 
-	key := "key"
+	key := t.Name()
 
 	run := func(t *testing.T, n int, wantErr, gotErr error) {
 		t.Helper()

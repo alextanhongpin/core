@@ -111,6 +111,37 @@ type State struct {
 	Total   int
 	CloseAt time.Time
 	ResetAt time.Time
+	events  []string
+}
+
+func (s *State) ResetTotal() {
+	s.Total = 0
+	s.events = append(s.events, "total:reset")
+}
+
+func (s *State) IncTotal() {
+	s.Total++
+	s.events = append(s.events, "total:inc")
+}
+
+func (s *State) ResetCount() {
+	s.Count = 0
+	s.events = append(s.events, "count:reset")
+}
+
+func (s *State) IncCount() {
+	s.Count++
+	s.events = append(s.events, "count:inc")
+}
+
+func (s *State) DecCount() {
+	s.Count--
+	s.events = append(s.events, "count:dec")
+}
+
+func (s *State) SetResetAt(t time.Time) {
+	s.ResetAt = t
+	s.events = append(s.events, "reset_at:set")
 }
 
 // Set to isloated.
@@ -146,9 +177,31 @@ func (c *CircuitBreaker) ResetIn(ctx context.Context, key string) time.Duration 
 }
 
 func (c *CircuitBreaker) Do(ctx context.Context, key string, fn func() error) error {
+	if _, err := c.hook(ctx, key); err != nil {
+		return err
+	}
+
+	// Blocking
+	fnErr := fn()
+
+	// By the time we reach here, the state in redis would have changed,
+	// especially if fn() takes a long time.
+	// We need to re-fetch the state from redis.
+	s, err := c.hook(ctx, key)
+	if err != nil {
+		return errors.Join(fnErr, err)
+	}
+
+	return errors.Join(
+		c.states[s.Status].Do(s, func() error { return fnErr }),
+		c.opt.Store.Set(ctx, key, s),
+	)
+}
+
+func (c *CircuitBreaker) hook(ctx context.Context, key string) (*State, error) {
 	s, err := c.opt.Store.Get(ctx, key)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	prev := s.Status
@@ -157,16 +210,17 @@ func (c *CircuitBreaker) Do(ctx context.Context, key string, fn func() error) er
 		c.opt.OnStateChanged(prev, next)
 		s = c.states[next].Entry()
 		s.status = prev
+		if err := c.opt.Store.Set(ctx, key, s); err != nil {
+			return nil, err
+		}
 	}
 
-	// Handle optimistic locking.
-	fnErr := c.states[s.Status].Do(s, fn)
-	if err := c.opt.Store.Set(ctx, key, s); err != nil {
-		// If the state mismatch, skip the error.
-		return errors.Join(fnErr, err)
+	// Short-circuit.
+	if _, ok := c.states[next].Next(s); !ok && next == Open {
+		return nil, ErrBrokenCircuit
 	}
 
-	return fnErr
+	return s, nil
 }
 
 type state interface {
@@ -206,9 +260,9 @@ func (c *ClosedState) Do(s *State, fn func() error) error {
 
 	// Increment failure counter.
 	c.resetInterval(s)
-	s.Total++
+	s.IncTotal()
 	if err != nil {
-		s.Count++
+		s.IncCount()
 	}
 
 	return err
@@ -223,10 +277,10 @@ func (c *ClosedState) resetInterval(s *State) {
 	now := c.Now()
 	isResetAtElapsed := !now.Before(s.ResetAt)
 	if isResetAtElapsed {
-		s.ResetAt = now.Add(c.SamplingDuration)
+		s.SetResetAt(now.Add(c.SamplingDuration))
 		// resetFailureCounter
-		s.Count = 0
-		s.Total = 0
+		s.ResetCount()
+		s.ResetTotal()
 	}
 }
 
@@ -249,7 +303,7 @@ func (o *OpenState) Next(s *State) (Status, bool) {
 	return HalfOpen, isTimeoutTimerExpired
 }
 
-func (o *OpenState) Do(s *State, fn func() error) error {
+func (o *OpenState) Do(_ *State, fn func() error) error {
 	return ErrBrokenCircuit
 }
 
@@ -266,7 +320,7 @@ func (h *HalfOpenState) Entry() *State {
 }
 
 func (h *HalfOpenState) Next(s *State) (Status, bool) {
-	isOperationFailed := s.Count == 0
+	isOperationFailed := s.Count < 0
 	if isOperationFailed {
 		return Open, true
 	}
@@ -281,7 +335,9 @@ func (h *HalfOpenState) Do(s *State, fn func() error) error {
 
 	if err == nil {
 		// Increment success counter.
-		s.Count++
+		s.IncCount()
+	} else {
+		s.DecCount()
 	}
 
 	return err
