@@ -247,6 +247,7 @@ func TestTokenBucketBurstTotal(t *testing.T) {
 	rl := ratelimit.NewTokenBucket(5, time.Second, 1)
 
 	now := time.Now().Truncate(time.Second)
+	var delay []time.Duration
 	var count int
 	for i := 0; i < 1000; i++ {
 		p := time.Duration(i) * time.Millisecond
@@ -256,10 +257,12 @@ func TestTokenBucketBurstTotal(t *testing.T) {
 
 		result := rl.Allow()
 		if result.Allow {
+			delay = append(delay, p)
 			count++
 		}
 	}
 	if want, got := 6, count; want != got {
 		t.Fatalf("want %d, got %d", want, got)
 	}
+	t.Log(delay)
 }

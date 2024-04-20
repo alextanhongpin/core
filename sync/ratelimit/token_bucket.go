@@ -71,7 +71,7 @@ func (tb *TokenBucket) allowAtN(s *state, now time.Time, n int) *Result {
 	res := new(Result)
 	res.Limit = tb.burst + tb.n
 	res.Remaining = max(tb.burst-s.count, 0) + count
-	if s.count < tb.burst {
+	if s.count+int64(n) <= tb.burst {
 		res.RetryAt = now
 	} else {
 		res.RetryAt = s.retryAt
