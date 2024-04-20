@@ -14,6 +14,7 @@ import (
 	"log"
 	"math/rand"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/alextanhongpin/core/dsync/idempotent"
@@ -54,9 +55,14 @@ func main() {
 	mux := http.NewServeMux()
 	mux.Handle("/debug/vars", expvar.Handler())
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		mismatch, _ := strconv.ParseBool(r.URL.Query().Get("mismatch"))
 		requestTotal.Add(1)
 		n := rand.Intn(100)
-		res, err := idem.Do(r.Context(), fmt.Sprint(n), fn, n)
+		m := n
+		if mismatch {
+			m = n - 1
+		}
+		res, err := idem.Do(r.Context(), fmt.Sprint(n), fn, m)
 		if err != nil {
 			errorsTotal.Add(1)
 			if errors.Is(err, idempotent.ErrRequestInFlight) {
