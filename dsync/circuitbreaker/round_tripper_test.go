@@ -1,6 +1,7 @@
 package circuitbreaker_test
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -12,7 +13,7 @@ import (
 func ExampleRoundTripper() {
 	opt := circuitbreaker.NewOption()
 	opt.FailureThreshold = 3
-	opt.OnStateChanged = func(from, to circuitbreaker.Status) {
+	opt.OnStateChanged = func(ctx context.Context, from, to circuitbreaker.Status) {
 		fmt.Printf("status changed from %s to %s\n", from, to)
 	}
 

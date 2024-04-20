@@ -55,7 +55,7 @@ type Option struct {
 	FailureRatio     float64
 	SamplingDuration time.Duration
 	Store            store
-	OnStateChanged   func(from, to Status)
+	OnStateChanged   func(ctx context.Context, from, to Status)
 }
 
 func NewOption() *Option {
@@ -67,7 +67,7 @@ func NewOption() *Option {
 		FailureRatio:     FailureRatio,
 		SamplingDuration: SamplingDuration,
 		Store:            NewInMemory(),
-		OnStateChanged:   func(from, to Status) {},
+		OnStateChanged:   func(ctx context.Context, from, to Status) {},
 		// If set to false, the error will still be returned, but it won't be
 		// counted.
 	}
@@ -207,7 +207,7 @@ func (c *CircuitBreaker) hook(ctx context.Context, key string) (*State, error) {
 	prev := s.Status
 	next, ok := c.states[prev].Next(s)
 	if ok {
-		c.opt.OnStateChanged(prev, next)
+		c.opt.OnStateChanged(ctx, prev, next)
 		s = c.states[next].Entry()
 		s.status = prev
 		if err := c.opt.Store.Set(ctx, key, s); err != nil {

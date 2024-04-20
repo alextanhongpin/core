@@ -1,6 +1,7 @@
 package circuitbreaker_test
 
 import (
+	"context"
 	"errors"
 	"os"
 	"sync"
@@ -29,7 +30,7 @@ func TestCircuitBreaker_Do_RedisStore(t *testing.T) {
 	opt.SuccessThreshold = 3
 	opt.FailureThreshold = 3
 	opt.BreakDuration = 5 * time.Second
-	opt.OnStateChanged = func(from, to circuitbreaker.Status) {
+	opt.OnStateChanged = func(ctx context.Context, from, to circuitbreaker.Status) {
 		statuses = append(statuses, from, to)
 	}
 	opt.Store = circuitbreaker.NewRedisStore(setupRedis(t))
@@ -110,7 +111,7 @@ func TestCircuitBreaker_Do_RedisStore_ConcurrentWrite(t *testing.T) {
 	opt.SuccessThreshold = 3
 	opt.FailureThreshold = 5
 	opt.BreakDuration = 5 * time.Second
-	opt.OnStateChanged = func(from, to circuitbreaker.Status) {
+	opt.OnStateChanged = func(ctx context.Context, from, to circuitbreaker.Status) {
 		statuses = append(statuses, from, to)
 	}
 	opt.Store = circuitbreaker.NewRedisStore(setupRedis(t))

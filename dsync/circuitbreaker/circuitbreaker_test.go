@@ -21,7 +21,7 @@ func TestCircuitBreaker_Do_InMemory(t *testing.T) {
 	opt.SuccessThreshold = 3
 	opt.FailureThreshold = 3
 	opt.BreakDuration = 5 * time.Second
-	opt.OnStateChanged = func(from, to circuitbreaker.Status) {
+	opt.OnStateChanged = func(ctx context.Context, from, to circuitbreaker.Status) {
 		statuses = append(statuses, from, to)
 	}
 	opt.Now = func() time.Time {
