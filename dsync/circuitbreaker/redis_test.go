@@ -51,6 +51,11 @@ func TestCircuitBreaker_Do_RedisStore(t *testing.T) {
 			})
 			assert.ErrorIs(t, err, gotErr)
 		}
+		v, err := opt.Store.Get(ctx, key)
+		if err != nil {
+			assert.Nil(t, err)
+		}
+		t.Logf("%+v\n", v)
 	}
 
 	testStatus := func(t *testing.T, want circuitbreaker.Status) {
@@ -147,6 +152,37 @@ func TestCircuitBreaker_Do_RedisStore_ConcurrentWrite(t *testing.T) {
 
 	t.Logf("%+v\n", res)
 	t.Log(statuses)
+}
+
+func TestCircuitBreaker_Do_RedisStore_MultipleInstance(t *testing.T) {
+	opt := circuitbreaker.NewOption()
+	opt.SuccessThreshold = 3
+	opt.FailureThreshold = 5
+	opt.BreakDuration = 5 * time.Second
+	opt.Store = circuitbreaker.NewRedisStore(setupRedis(t))
+
+	key := t.Name()
+	fn := func() error {
+		return errors.New("want err")
+	}
+
+	{
+		cb := circuitbreaker.New(opt)
+		for i := 0; i < opt.FailureThreshold; i++ {
+			err := cb.Do(ctx, key, fn)
+			if err == nil {
+				t.Fatal("want err, got nil")
+			}
+		}
+	}
+
+	{
+		cb := circuitbreaker.New(opt)
+		err := cb.Do(ctx, key, fn)
+		if !errors.Is(err, circuitbreaker.ErrBrokenCircuit) {
+			t.Fatalf("want %v, got %v", circuitbreaker.ErrBrokenCircuit, err)
+		}
+	}
 }
 
 func setupRedis(t *testing.T) *redis.Client {
