@@ -43,7 +43,7 @@ func ExampleIdempotent() {
 
 	// Create a wait group to manage concurrent requests.
 	var wg sync.WaitGroup
-	wg.Add(2)
+	wg.Add(3)
 
 	// Start the first concurrent request.
 	go func() {
@@ -52,7 +52,7 @@ func ExampleIdempotent() {
 		// Define the handler function that simulates the actual task
 		h := func(ctx context.Context, req Request) (*Response, error) {
 			fmt.Printf("Executing get user #1: %+v\n", req)
-			time.Sleep(50 * time.Millisecond)
+			time.Sleep(40 * time.Millisecond)
 			return &Response{UserID: 10}, nil
 		}
 
@@ -70,7 +70,7 @@ func ExampleIdempotent() {
 		defer wg.Done()
 
 		// Introduce a delay to simulate a second concurrent request.
-		time.Sleep(50 * time.Millisecond)
+		time.Sleep(25 * time.Millisecond)
 
 		// Define the handler function that simulates the actual task.
 		h := func(ctx context.Context, req Request) (*Response, error) {
@@ -90,10 +90,34 @@ func ExampleIdempotent() {
 		fmt.Println(errors.Is(err, idempotent.ErrRequestInFlight))
 	}()
 
+	// Start the third concurrent request.
+	go func() {
+		defer wg.Done()
+
+		// Introduce a delay to simulate a third concurrent request.
+		// This request happens after the first request completes.
+		time.Sleep(60 * time.Millisecond)
+
+		// Define the handler function that simulates the actual task.
+		h := func(ctx context.Context, req Request) (*Response, error) {
+			fmt.Printf("Executing get user #3: %+v\n", req)
+			return &Response{UserID: 10}, nil
+		}
+
+		// Execute the idempotent operation and handle the response.
+		v, err := idem.Do(ctx, "get-user", h, req)
+		if err != nil {
+			panic(err)
+		}
+
+		fmt.Printf("Success #3: %+v\n", v)
+	}()
+
 	wg.Wait()
 	// Output:
 	// Executing get user #1: {Age:10 Name:john}
 	// Failed #2: idempotent: request in flight
 	// true
 	// Success #1: &{UserID:10}
+	// Success #3: &{UserID:10}
 }

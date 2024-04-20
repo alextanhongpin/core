@@ -7,10 +7,12 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
 	redis "github.com/redis/go-redis/v9"
+	"golang.org/x/sync/errgroup"
 )
 
 var (
@@ -22,12 +24,15 @@ var (
 	// request for the specified key.
 	ErrRequestMismatch = errors.New("idempotent: request mismatch")
 
-	// ErrKeyNotFound indicates that the specified key does not exist.
-	ErrKeyNotFound = errors.New("idempotent: key not found")
+	// ErrKeyReleased indicates that the key has been
+	// released.
+	ErrKeyReleased = errors.New("idempotent: key released")
 )
 
 // unlock deletes the key only if the lease id matches.
 var unlock = redis.NewScript(`
+	-- KEYS[1]: The idempotency key
+	-- ARGV[1]: The value value for optimistic locking
 	local key = KEYS[1]
 	local val = ARGV[1]
 
@@ -40,13 +45,33 @@ var unlock = redis.NewScript(`
 
 // replace sets the value to the key only if the existing lease id matches.
 var replace = redis.NewScript(`
+	-- KEYS[1]: The idempotency key
+	-- ARGV[1]: The old value for optimisic locking
+	-- ARGV[2]: The new value
+	-- ARGV[3]: How long to keep the idempotency key-value pair
 	local key = KEYS[1]
 	local old = ARGV[1]
 	local new = ARGV[2]
 	local ttl = ARGV[3]
 
 	if redis.call('GET', key) == old then
-		return redis.call('SET', key, new, 'PX', ttl) 
+		return redis.call('SET', key, new, 'XX', 'PX', ttl) 
+	end
+
+	return nil
+`)
+
+// extend extends the lock duration only if the lease id matches.
+var extend = redis.NewScript(`
+	-- KEYS[1]: key
+	-- ARGV[1]: value
+	-- ARGV[2]: lock duration in milliseconds
+	local key = KEYS[1]
+	local val = ARGV[1]
+	local ttl_ms = tonumber(ARGV[2]) or 60000 -- Default 60s
+
+	if redis.call('GET', key) == val then
+		return redis.call('PEXPIRE', key, ttl_ms, 'GT')
 	end
 
 	return nil
@@ -119,10 +144,32 @@ func (i *Idempotent[K, V]) Do(ctx context.Context, key string, fn func(ctx conte
 		return i.load(ctx, key, req)
 	}
 	// Any failure will just unlock the resource.
-	defer i.unlock(ctx, key, val)
+	// context.WithoutCancel ensures that the unlock is always called.
+	defer i.unlock(context.WithoutCancel(ctx), key, val)
 
 	// If the lock is successful, perform the task and save the response.
-	res, err = fn(ctx, req)
+	g, _ := errgroup.WithContext(ctx)
+	refreshCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	g.Go(func() error {
+		defer cancel()
+
+		res, err = fn(ctx, req)
+		if err != nil {
+			return err
+		}
+
+		// extend it one more time to ensure there is sufficient time to save the
+		// payload.
+		return i.extend(ctx, key, val)
+	})
+
+	g.Go(func() error {
+		return i.refresh(refreshCtx, key, val)
+	})
+
+	err = g.Wait()
 	if err != nil {
 		return
 	}
@@ -149,7 +196,34 @@ func (i *Idempotent[K, V]) replace(ctx context.Context, key string, oldVal []byt
 	argv := []any{oldVal, newVal, formatMs(i.keepTTL)}
 	err = replace.Run(ctx, i.client, keys, argv...).Err()
 	if errors.Is(err, redis.Nil) {
-		return ErrKeyNotFound
+		return fmt.Errorf("%w: replace", ErrKeyReleased)
+	}
+
+	return err
+}
+
+func (i *Idempotent[K, V]) refresh(ctx context.Context, key string, val []byte) error {
+	t := time.NewTicker(i.lockTTL * 9 / 10)
+	defer t.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-t.C:
+			if err := i.extend(ctx, key, val); err != nil {
+				return err
+			}
+		}
+	}
+}
+
+func (i *Idempotent[K, V]) extend(ctx context.Context, key string, val []byte) error {
+	keys := []string{key}
+	argv := []any{val, formatMs(i.lockTTL)}
+	err := extend.Run(ctx, i.client, keys, argv...).Err()
+	if errors.Is(err, redis.Nil) {
+		return fmt.Errorf("%w: extend", ErrKeyReleased)
 	}
 
 	return err
@@ -207,7 +281,7 @@ func (i *Idempotent[K, V]) unlock(ctx context.Context, key string, val []byte) e
 	argv := []any{val}
 	err := unlock.Run(ctx, i.client, keys, argv...).Err()
 	if errors.Is(err, redis.Nil) {
-		return ErrKeyNotFound
+		return fmt.Errorf("%w: unlock", ErrKeyReleased)
 	}
 	return err
 }
