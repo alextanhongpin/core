@@ -29,14 +29,20 @@ func (i *InMemory) Get(ctx context.Context, key string) (*State, error) {
 	}
 
 	cp := *res
-
 	return &cp, nil
 }
 
 func (i *InMemory) Set(ctx context.Context, key string, res *State) error {
 	i.rw.Lock()
-	cp := *res
-	i.data[key] = &cp
+	i.data[key] = &State{
+		status:  res.status,
+		Status:  res.Status,
+		Count:   res.Count,
+		Total:   res.Total,
+		CloseAt: res.CloseAt,
+		ResetAt: res.ResetAt,
+	}
 	i.rw.Unlock()
+
 	return nil
 }

@@ -3,6 +3,7 @@ package circuitbreaker_test
 import (
 	"errors"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -19,7 +20,7 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-func TestRedisStore(t *testing.T) {
+func TestCircuitBreaker_Do_RedisStore(t *testing.T) {
 	now := time.Now()
 
 	var statuses []circuitbreaker.Status
@@ -31,7 +32,7 @@ func TestRedisStore(t *testing.T) {
 	opt.OnStateChanged = func(from, to circuitbreaker.Status) {
 		statuses = append(statuses, from, to)
 	}
-	opt.Store = circuitbreaker.NewRedisStore(setupRedis(t), 1*time.Minute)
+	opt.Store = circuitbreaker.NewRedisStore(setupRedis(t))
 	opt.Now = func() time.Time {
 		return now
 	}
@@ -39,7 +40,7 @@ func TestRedisStore(t *testing.T) {
 	// Create a new circuit breaker.
 	cb := circuitbreaker.New(opt)
 
-	key := "key"
+	key := t.Name()
 
 	run := func(t *testing.T, n int, wantErr, gotErr error) {
 		t.Helper()
@@ -95,6 +96,57 @@ func TestRedisStore(t *testing.T) {
 		testStatus(t, circuitbreaker.Closed)
 		testStatusChanged(t, circuitbreaker.HalfOpen, circuitbreaker.Closed)
 	})
+}
+
+func TestCircuitBreaker_Do_RedisStore_ConcurrentWrite(t *testing.T) {
+	var statuses []circuitbreaker.Status
+	// Create a new circuit breaker with default options.
+	opt := circuitbreaker.NewOption()
+	opt.SuccessThreshold = 3
+	opt.FailureThreshold = 5
+	opt.BreakDuration = 5 * time.Second
+	opt.OnStateChanged = func(from, to circuitbreaker.Status) {
+		statuses = append(statuses, from, to)
+	}
+	opt.Store = circuitbreaker.NewRedisStore(setupRedis(t))
+
+	// Create a new circuit breaker.
+	cb := circuitbreaker.New(opt)
+
+	key := t.Name()
+
+	var wantErr = errors.New("wantErr")
+	n := 5
+
+	var wg sync.WaitGroup
+	wg.Add(n)
+	errs := make(chan error, n)
+
+	for i := 0; i < n; i++ {
+		go func() {
+			defer wg.Done()
+
+			errs <- cb.Do(ctx, key, func() error {
+				time.Sleep(time.Duration(i) * 100 * time.Millisecond)
+				return wantErr
+			})
+		}()
+	}
+
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil && !errors.Is(err, wantErr) {
+			t.Fatal(err)
+		}
+	}
+	res, err := opt.Store.Get(ctx, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Logf("%+v\n", res)
+	t.Log(statuses)
 }
 
 func setupRedis(t *testing.T) *redis.Client {
