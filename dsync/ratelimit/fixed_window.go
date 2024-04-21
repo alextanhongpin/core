@@ -40,13 +40,13 @@ func NewFixedWindow(client *redis.Client, opt *FixedWindowOption) *FixedWindow {
 func (r *FixedWindow) AllowN(ctx context.Context, key string, n int64) (*Result, error) {
 	key = r.buildKey(r.Now(), key)
 	now := r.Now()
-	n, err := r.client.Incr(ctx, key).Result()
+	c, err := r.client.IncrBy(ctx, key, n).Result()
 	if err != nil {
 		return nil, err
 	}
-	if n == 1 {
-		err = r.client.PExpire(ctx, key, r.opt.Period).Err()
-		if err != nil {
+
+	if c == n {
+		if err := r.client.PExpire(ctx, key, r.opt.Period).Err(); err != nil {
 			return nil, err
 		}
 	}
@@ -54,13 +54,13 @@ func (r *FixedWindow) AllowN(ctx context.Context, key string, n int64) (*Result,
 	end := start.Add(r.opt.Period)
 
 	retryAt := now
-	if n < r.opt.Limit {
+	if c+n <= r.opt.Limit {
 		retryAt = end
 	}
 
 	return &Result{
-		Allow:     n <= r.opt.Limit,
-		Remaining: max(0, r.opt.Limit-n),
+		Allow:     c <= r.opt.Limit,
+		Remaining: max(0, r.opt.Limit-c),
 		Limit:     r.opt.Limit,
 		ResetAt:   end,
 		RetryAt:   retryAt,
