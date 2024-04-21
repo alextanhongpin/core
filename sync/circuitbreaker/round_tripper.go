@@ -10,43 +10,52 @@ type transporter interface {
 	RoundTrip(r *http.Request) (*http.Response, error)
 }
 
-type breaker[T any] interface {
-	Do(func() (T, error)) (T, error)
+type breaker interface {
+	Do(ctx context.Context, key string, fn func() error) error
 }
 
 type RoundTripper struct {
-	Transport      transporter
-	CircuitBreaker breaker[*http.Response]
+	t              transporter
+	cb             breaker
+	KeyFromRequest func(*http.Request) string
 }
 
-func NewRoundTripper(t transporter) *RoundTripper {
-	opt := NewOption()
-	cb := New[*http.Response](opt)
-	cb.ShouldHandle = func(resp *http.Response, err error) (bool, error) {
-		// Skip if cancelled by caller.
-		if errors.Is(err, context.Canceled) {
-			return false, err
-		}
-
-		if resp != nil && resp.StatusCode >= http.StatusInternalServerError {
-			return true, errors.New(resp.Status)
-		}
-
-		return err != nil, err
-	}
-
+func NewRoundTripper(t transporter, cb breaker) *RoundTripper {
 	return &RoundTripper{
-		Transport:      t,
-		CircuitBreaker: cb,
+		t:  t,
+		cb: cb,
+		KeyFromRequest: func(r *http.Request) string {
+			rc := r.Clone(r.Context())
+			rc.URL.RawQuery = ""
+			rc.URL.Fragment = ""
+			return rc.URL.String()
+		},
 	}
 }
 
 func (t *RoundTripper) RoundTrip(r *http.Request) (resp *http.Response, err error) {
-	resp, err = t.CircuitBreaker.Do(func() (*http.Response, error) {
-		return t.Transport.RoundTrip(r)
+	cbErr := t.cb.Do(r.Context(), t.KeyFromRequest(r), func() error {
+		resp, err = t.t.RoundTrip(r)
+		if err != nil {
+			return err
+		}
+
+		// Ignore context cancellation.
+		if errors.Is(err, context.Canceled) {
+			return nil
+		}
+
+		// Ignore non-5xx errors.
+		if resp != nil && resp.StatusCode >= http.StatusInternalServerError {
+			return errors.New(resp.Status)
+		}
+
+		return err
 	})
-	if err != nil {
-		return nil, err
+
+	allErr := errors.Join(err, cbErr)
+	if allErr != nil {
+		return nil, allErr
 	}
 
 	return resp, nil
