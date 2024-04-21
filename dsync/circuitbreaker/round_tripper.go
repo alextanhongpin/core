@@ -25,7 +25,10 @@ func NewRoundTripper(t transporter, cb breaker) *RoundTripper {
 		t:  t,
 		cb: cb,
 		KeyFromRequest: func(r *http.Request) string {
-			return r.URL.String()
+			rc := r.Clone(r.Context())
+			rc.URL.RawQuery = ""
+			rc.URL.Fragment = ""
+			return rc.URL.String()
 		},
 	}
 }

@@ -31,11 +31,10 @@ func main() {
 	})
 
 	opt := circuitbreaker.NewOption()
-	opt.Store = circuitbreaker.NewRedisStore(client)
-	opt.OnStateChanged = func(ctx context.Context, from, to circuitbreaker.Status) {
+	cb := circuitbreaker.New(client, opt)
+	cb.OnStateChanged = func(ctx context.Context, from, to circuitbreaker.Status) {
 		stateChangedCount.Add(1)
 	}
-	cb := circuitbreaker.New(opt)
 
 	mux := http.NewServeMux()
 	mux.Handle("/debug/vars", expvar.Handler())
@@ -65,7 +64,7 @@ func main() {
 
 		if err != nil {
 			errorsTotal.Add(1)
-			http.Error(w, "internal server error", http.StatusInternalServerError)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 
