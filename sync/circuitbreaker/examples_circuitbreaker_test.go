@@ -1,6 +1,7 @@
 package circuitbreaker_test
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"time"
@@ -13,16 +14,19 @@ func ExampleCircuitBreaker() {
 	opt.BreakDuration = 100 * time.Millisecond
 	opt.SamplingDuration = 1 * time.Second
 
-	cb := circuitbreaker.New[any](opt)
-	cb.OnStateChanged = func(from, to circuitbreaker.Status) {
+	cb := circuitbreaker.New(opt)
+	cb.OnStateChanged = func(ctx context.Context, from, to circuitbreaker.Status) {
 		fmt.Printf("status changed from %s to %s\n", from, to)
 	}
-	fmt.Println("initial status:", cb.Status())
+
+	key := "key"
+	fmt.Println("initial status:")
+	fmt.Println(cb.Status(ctx, key))
 
 	// Opens after failure ratio exceeded.
 	for i := 0; i <= int(opt.FailureThreshold+1); i++ {
-		_, _ = cb.Do(func() (any, error) {
-			return nil, errors.New("foo")
+		_ = cb.Do(ctx, key, func() error {
+			return errors.New("foo")
 		})
 	}
 
@@ -31,12 +35,13 @@ func ExampleCircuitBreaker() {
 
 	// Recover.
 	for i := 0; i <= int(opt.SuccessThreshold+1); i++ {
-		_, _ = cb.Do(func() (any, error) {
-			return nil, nil
+		_ = cb.Do(ctx, key, func() error {
+			return nil
 		})
 	}
 	// Output:
-	// initial status: closed
+	// initial status:
+	// closed <nil>
 	// status changed from closed to open
 	// status changed from open to half-open
 	// status changed from half-open to closed
