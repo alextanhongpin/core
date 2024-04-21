@@ -8,16 +8,26 @@ import (
 	"regexp"
 
 	"github.com/alextanhongpin/core/dsync/circuitbreaker"
+	"github.com/alextanhongpin/core/storage/redis/redistest"
+	"github.com/redis/go-redis/v9"
 )
 
 func ExampleRoundTripper() {
+	client := redis.NewClient(&redis.Options{
+		Addr: redistest.Addr(),
+	})
+	defer func() {
+		client.FlushAll(ctx).Err()
+		client.Close()
+	}()
+
 	opt := circuitbreaker.NewOption()
 	opt.FailureThreshold = 3
-	opt.OnStateChanged = func(ctx context.Context, from, to circuitbreaker.Status) {
+
+	cb := circuitbreaker.New(client, opt)
+	cb.OnStateChanged = func(ctx context.Context, from, to circuitbreaker.Status) {
 		fmt.Printf("status changed from %s to %s\n", from, to)
 	}
-
-	cb := circuitbreaker.New(opt)
 
 	status := http.StatusBadRequest
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -25,14 +35,14 @@ func ExampleRoundTripper() {
 	}))
 	defer ts.Close()
 
-	client := ts.Client()
-	client.Transport = circuitbreaker.NewRoundTripper(client.Transport, cb)
+	httpClient := ts.Client()
+	httpClient.Transport = circuitbreaker.NewRoundTripper(httpClient.Transport, cb)
 
 	re := regexp.MustCompile(`\d{5}`)
 
 	// Ignores http status 4xx
 	for i := 0; i < int(opt.FailureThreshold); i++ {
-		_, err := client.Get(ts.URL)
+		_, err := httpClient.Get(ts.URL)
 		if err != nil {
 			// Replace port since it changes dynamically and breaks the test.
 			msg := re.ReplaceAllString(err.Error(), "8080")
@@ -45,7 +55,7 @@ func ExampleRoundTripper() {
 	status = http.StatusInternalServerError
 
 	for i := 0; i < int(opt.FailureThreshold)+1; i++ {
-		_, err := client.Get(ts.URL)
+		_, err := httpClient.Get(ts.URL)
 		if err != nil {
 			// Replace port since it changes dynamically and breaks the test.
 			msg := re.ReplaceAllString(err.Error(), "8080")
