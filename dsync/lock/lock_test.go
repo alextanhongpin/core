@@ -225,15 +225,86 @@ func TestLock_KeyReleased_Timeout(t *testing.T) {
 func TestLock_KeyReleased_ContextCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(ctx)
 
+	key := t.Name()
+
 	client := newClient(t)
 	locker := lock.New(client)
-	key := t.Name()
 	err := locker.Lock(ctx, key, 1*time.Second, 1*time.Second, func(ctx context.Context) error {
 		cancel()
 		return nil
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+
+	testKeyReleased(t, client, key)
+}
+
+func TestLock_KeyReleased_Error(t *testing.T) {
+	key := t.Name()
+
+	client := newClient(t)
+	locker := lock.New(client)
+	var wantErr = errors.New("want error")
+	err := locker.Lock(ctx, key, 1*time.Second, 1*time.Second, func(ctx context.Context) error {
+		return wantErr
+	})
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("want error, got %v", err)
+	}
+
+	testKeyReleased(t, client, key)
+}
+
+func TestLock_Extend_Success(t *testing.T) {
+	client := newClient(t)
+	key := t.Name()
+	errs := make(chan error, 10)
+	ch := make(chan bool)
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	go func() {
+		defer wg.Done()
+
+		locker := lock.New(client)
+		errs <- locker.Lock(ctx, key, 100*time.Millisecond, 0, func(ctx context.Context) error {
+			// Signal the second goroutine to start.
+			close(ch)
+			// Holds the lock for 1s. The lock will refresh every 9/10 of 100ms.
+			time.Sleep(1 * time.Second)
+			return nil
+		})
+	}()
+
+	go func() {
+		defer wg.Done()
+
+		// Wait for the signal from the first goroutine.
+		<-ch
+
+		locker := lock.New(client)
+		for i := 1; i < 10; i++ {
+			// Try to obtain the lock every 100ms. Because the lock is still held by
+			// the first goroutine, it is expected to fail.
+			time.Sleep(100 * time.Millisecond)
+			errs <- locker.Lock(ctx, key, 100*time.Millisecond, 0, func(ctx context.Context) error {
+				return nil
+			})
+		}
+	}()
+
+	wg.Wait()
+	close(errs)
+
+	for err := range errs {
+		if err == nil {
+			continue
+		}
+		if !errors.Is(err, lock.ErrLocked) {
+			t.Fatalf("want ErrLocked, got %v", err)
+		}
 	}
 
 	testKeyReleased(t, client, key)
@@ -256,11 +327,12 @@ func newClient(t *testing.T) *redis.Client {
 func testKeyReleased(t *testing.T, client *redis.Client, key string) {
 	t.Helper()
 
-	exists, err := client.Exists(context.Background(), key).Result()
+	ttl, err := client.TTL(context.Background(), key).Result()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if exists == 1 {
-		t.Fatal("want exists to be false, got true")
+
+	if ttl > 0 {
+		t.Fatalf("want ttl to be -2, got %v", ttl)
 	}
 }
