@@ -3,7 +3,6 @@ package lock_test
 import (
 	"context"
 	"errors"
-	"fmt"
 	"os"
 	"sync"
 	"testing"
@@ -25,14 +24,16 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-func TestLock(t *testing.T) {
+func TestLock_Success(t *testing.T) {
 	client := newClient(t)
 
-	ok := make(chan bool)
+	ch := make(chan bool)
 	key := t.Name()
 
+	var events []string
 	var wg sync.WaitGroup
 	wg.Add(2)
+
 	errs := make(chan error, 2)
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
@@ -42,14 +43,17 @@ func TestLock(t *testing.T) {
 
 		locker := lock.New(client)
 		err := locker.Lock(ctx, key, 1*time.Second, 1*time.Second, func(ctx context.Context) error {
-			close(ok)
+			// Start the second goroutine.
+			events = append(events, "worker #1: lock acquired")
+			close(ch)
+
 			// Hold for 100 ms.
 			time.Sleep(100 * time.Millisecond)
 
-			t.Log("1. done")
+			events = append(events, "worker #1: awake")
 			return nil
 		})
-		t.Log("1. err", err)
+		events = append(events, "worker #1: done")
 		if err != nil {
 			errs <- err
 		}
@@ -59,14 +63,15 @@ func TestLock(t *testing.T) {
 		defer wg.Done()
 
 		// Wait for the first lock to be acquired.
-		<-ok
+		<-ch
 
 		locker := lock.New(client)
+		// Lock for 1s minimum, wait for 200ms to acquire lock.
 		err := locker.Lock(ctx, key, 1*time.Second, 200*time.Millisecond, func(ctx context.Context) error {
-			t.Log("2. done")
+			events = append(events, "worker #2: lock acquired")
 			return nil
 		})
-		t.Log("2. err", err)
+		events = append(events, "worker #2: done")
 		if err != nil {
 			errs <- err
 		}
@@ -80,35 +85,59 @@ func TestLock(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+
+	expected := []string{
+		"worker #1: lock acquired",
+		"worker #1: awake",
+		"worker #1: done",
+		"worker #2: lock acquired",
+		"worker #2: done",
+	}
+
+	for i := 0; i < len(expected); i++ {
+		want := expected[i]
+		got := events[i]
+		if want != got {
+			t.Fatalf("want %v, got %v", want, got)
+		}
+	}
 }
 
-func TestLockTimeout(t *testing.T) {
+// TestLock_WaitTimeout is similar to TestLock_Success, except that the second
+// goroutine will fail to acquire the lock.
+// The first goroutine holds the lock for 200ms.
+// The second goroutine fails to acquire the lock within 100ms.
+// The second goroutine fails with error.
+func TestLock_WaitTimeout(t *testing.T) {
 	client := newClient(t)
 
-	ok := make(chan bool)
+	ch := make(chan bool)
 	key := t.Name()
 
+	var events []string
 	var wg sync.WaitGroup
 	wg.Add(2)
+
 	errs := make(chan error, 2)
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
-
-	var wantErr = errors.New("want")
 
 	go func() {
 		defer wg.Done()
 
 		locker := lock.New(client)
 		err := locker.Lock(ctx, key, 1*time.Second, 1*time.Second, func(ctx context.Context) error {
-			close(ok)
-			// Hold for 300 ms that will cause timeout.
-			time.Sleep(300 * time.Millisecond)
+			// Start the second goroutine.
+			events = append(events, "worker #1: lock acquired")
+			close(ch)
 
-			t.Log("1. done")
+			// Hold for 200 ms.
+			time.Sleep(200 * time.Millisecond)
+
+			events = append(events, "worker #1: awake")
 			return nil
 		})
-		t.Log("1. err", err)
+		events = append(events, "worker #1: done")
 		if err != nil {
 			errs <- err
 		}
@@ -118,16 +147,17 @@ func TestLockTimeout(t *testing.T) {
 		defer wg.Done()
 
 		// Wait for the first lock to be acquired.
-		<-ok
+		<-ch
 
 		locker := lock.New(client)
-		err := locker.Lock(ctx, key, 1*time.Second, 200*time.Millisecond, func(ctx context.Context) error {
-			t.Log("2. done")
+		// Lock for 1s minimum, wait for 100ms to acquire lock.
+		err := locker.Lock(ctx, key, 1*time.Second, 100*time.Millisecond, func(ctx context.Context) error {
+			events = append(events, "worker #2: lock acquired")
 			return nil
 		})
-		t.Log("2. err", err)
+		events = append(events, "worker #2: done")
 		if err != nil {
-			errs <- fmt.Errorf("%w: %w", err, wantErr)
+			errs <- err
 		}
 	}(t)
 
@@ -135,17 +165,64 @@ func TestLockTimeout(t *testing.T) {
 	close(errs)
 
 	for err := range errs {
-		if err != nil {
-			if errors.Is(err, wantErr) && errors.Is(err, lock.ErrLockWaitTimeout) {
-				t.Log("expected error", err)
-				continue
-			}
-			t.Fatal(err)
+		if err != nil && !errors.Is(err, lock.ErrLockWaitTimeout) {
+			t.Fatalf("want ErrLockWaitTimeout, got %v", err)
+		}
+	}
+
+	expected := []string{
+		"worker #1: lock acquired",
+		"worker #2: done",
+		"worker #1: awake",
+		"worker #1: done",
+	}
+
+	for i := 0; i < len(expected); i++ {
+		want := expected[i]
+		got := events[i]
+		if want != got {
+			t.Fatalf("want %v, got %v", want, got)
 		}
 	}
 }
 
-func TestLockContextCancelled(t *testing.T) {
+func TestLock_KeyReleased_Timeout(t *testing.T) {
+	client := newClient(t)
+	errs := make(chan error)
+	ch := make(chan bool)
+	key := t.Name()
+
+	go func() {
+		defer close(errs)
+
+		// Goroutine 1 holds the lock for 200ms.
+		locker := lock.New(client)
+		errs <- locker.Lock(ctx, key, 1*time.Second, 1*time.Second, func(ctx context.Context) error {
+			close(ch)
+			time.Sleep(200 * time.Millisecond)
+			return nil
+		})
+	}()
+
+	<-ch
+	locker := lock.New(client)
+	err := locker.Lock(ctx, key, 1*time.Second, 100*time.Millisecond, func(ctx context.Context) error {
+		return nil
+	})
+	if !errors.Is(err, lock.ErrLockWaitTimeout) {
+		t.Fatalf("want ErrLockWaitTimeout, got %v", err)
+	}
+
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	testKeyReleased(t, client, key)
+}
+
+func TestLock_KeyReleased_ContextCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(ctx)
 
 	client := newClient(t)
@@ -158,9 +235,13 @@ func TestLockContextCancelled(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	testKeyReleased(t, client, key)
 }
 
 func newClient(t *testing.T) *redis.Client {
+	t.Helper()
+
 	client := redis.NewClient(&redis.Options{
 		Addr: redistest.Addr(),
 	})
@@ -170,4 +251,16 @@ func newClient(t *testing.T) *redis.Client {
 	})
 
 	return client
+}
+
+func testKeyReleased(t *testing.T, client *redis.Client, key string) {
+	t.Helper()
+
+	exists, err := client.Exists(context.Background(), key).Result()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if exists == 1 {
+		t.Fatal("want exists to be false, got true")
+	}
 }
