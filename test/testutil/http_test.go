@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/PuerkitoBio/goquery"
 	"github.com/alextanhongpin/core/http/httputil"
 	"github.com/alextanhongpin/core/test/testutil"
 )
@@ -342,4 +343,28 @@ func TestHTTPTrailer(t *testing.T) {
 		testutil.FileName("dump_http"),
 		testutil.IgnoreHeaders("Host", "Date"),
 	)
+}
+
+func TestHTTPDumpHTML(t *testing.T) {
+	h := func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Add("Content-Type", "text/html")
+		// NOTE: WriteHeader must be called after Header.
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `<!DOCTYPE html><html><head><title>Hello</title></head><body><h1>Hello world</h1></body></html>`)
+	}
+
+	r := httptest.NewRequest("GET", "/", nil)
+	br := testutil.DumpHTTPHandler(t, r, h)
+
+	// Load the HTML document.
+	doc, err := goquery.NewDocumentFromReader(br)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	doc.Find("title").Each(func(i int, s *goquery.Selection) {
+		if got, want := s.Text(), "Hello"; got != want {
+			t.Fatalf("want %s, got %s", want, got)
+		}
+	})
 }

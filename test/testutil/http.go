@@ -23,7 +23,7 @@ type HTTPOption interface {
 	isHTTP()
 }
 
-func DumpHTTPHandler(t *testing.T, r *http.Request, handler http.HandlerFunc, opts ...HTTPOption) {
+func DumpHTTPHandler(t *testing.T, r *http.Request, handler http.HandlerFunc, opts ...HTTPOption) io.Reader {
 	t.Helper()
 
 	// Make a copy of the body.
@@ -53,10 +53,10 @@ func DumpHTTPHandler(t *testing.T, r *http.Request, handler http.HandlerFunc, op
 		reset()
 	}
 
-	DumpHTTP(t, w, r, opts...)
+	return DumpHTTP(t, w, r, opts...)
 }
 
-func DumpHTTP(t *testing.T, w *http.Response, r *http.Request, opts ...HTTPOption) {
+func DumpHTTP(t *testing.T, w *http.Response, r *http.Request, opts ...HTTPOption) io.Reader {
 	t.Helper()
 
 	var fileName string
@@ -85,9 +85,23 @@ func DumpHTTP(t *testing.T, w *http.Response, r *http.Request, opts ...HTTPOptio
 		FileExt:  ".http",
 	}
 
+	// Read the body and reset it.
+	defer w.Body.Close()
+
+	b, err := io.ReadAll(w.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	br := bytes.NewReader(b)
+	defer br.Seek(0, 0)
+	w.Body = io.NopCloser(br)
+
 	if err := testdump.HTTP(testdump.NewFile(p.String()), &HTTPDump{W: w, R: r}, httpOpt, hooks...); err != nil {
 		t.Fatal(err)
 	}
+
+	return br
 }
 
 type RoundTripper struct {
