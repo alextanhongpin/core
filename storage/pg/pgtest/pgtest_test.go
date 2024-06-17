@@ -12,7 +12,7 @@ import (
 
 func TestMain(m *testing.M) {
 	// Start the container.
-	stop := pgtest.InitDB(pgtest.Hook(migrate), pgtest.Tag("15.1-alpine"))
+	stop := pgtest.InitDB(pgtest.Hook(migrate), pgtest.Image("postgres:15.1-alpine"))
 	code := m.Run() // Run tests.
 	stop()          // You can't defer this because os.Exit doesn't care for defer.
 	os.Exit(code)

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -71,9 +72,9 @@ type Hook func(*sql.DB) error
 
 func (h Hook) isOption() {}
 
-type Tag string
+type Image string
 
-func (t Tag) isOption() {}
+func (t Image) isOption() {}
 
 func InitDB(opts ...Option) func() {
 	stop, err := initDB(opts...)
@@ -86,12 +87,17 @@ func InitDB(opts ...Option) func() {
 
 func initDB(opts ...Option) (func(), error) {
 	var fn func(*sql.DB) error
+	image := "postgres"
 	tag := "latest"
 
 	for _, opt := range opts {
 		switch v := opt.(type) {
-		case Tag:
-			tag = string(v)
+		case Image:
+			var ok bool
+			image, tag, ok = strings.Cut(string(v), ":")
+			if !ok {
+				tag = "latest"
+			}
 		case Hook:
 			fn = v
 		}
@@ -108,7 +114,7 @@ func initDB(opts ...Option) (func(), error) {
 
 	// Pulls an image, creates a container based on it and run it.
 	resource, err := pool.RunWithOptions(&dockertest.RunOptions{
-		Repository: "postgres",
+		Repository: image,
 		Tag:        tag,
 		Env: []string{
 			"POSTGRES_PASSWORD=123456",
