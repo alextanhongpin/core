@@ -1,8 +1,8 @@
+-- request.http --
 GET /user/1 HTTP/1.1
 Host: example.com
 
-###
-
+-- response.http --
 HTTP/1.1 500 Internal Server Error
 Connection: close
 Content-Type: application/json

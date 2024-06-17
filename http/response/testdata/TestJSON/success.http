@@ -1,8 +1,8 @@
+-- request.http --
 GET /users HTTP/1.1
 Host: example.com
 
-###
-
+-- response.http --
 HTTP/1.1 200 OK
 Connection: close
 Content-Type: application/json

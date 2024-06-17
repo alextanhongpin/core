@@ -3,14 +3,16 @@
 package snapshot
 
 import (
+	"cmp"
 	"context"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"slices"
+
 	"github.com/alextanhongpin/core/internal"
 	"github.com/alextanhongpin/core/types/sliceutil"
-	"golang.org/x/exp/slices"
 )
 
 type Policy struct {
@@ -40,8 +42,8 @@ func New(policies []Policy) *Manager {
 		panic("snapshot: cannot instantiate new snapshot with no policies")
 	}
 
-	slices.SortFunc(policies, func(a, b Policy) bool {
-		return a.IntervalSeconds() < b.IntervalSeconds()
+	slices.SortFunc(policies, func(a, b Policy) int {
+		return cmp.Compare(a.IntervalSeconds(), b.IntervalSeconds())
 	})
 
 	return &Manager{

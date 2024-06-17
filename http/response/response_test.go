@@ -8,18 +8,20 @@ import (
 	"testing"
 
 	"github.com/alextanhongpin/core/http/response"
-	"github.com/alextanhongpin/core/test/testutil"
+	"github.com/alextanhongpin/testdump/httpdump"
 )
 
 func TestJSONError(t *testing.T) {
 	dumpError := func(t *testing.T, err error) {
 		t.Helper()
 
+		wr := httptest.NewRecorder()
 		r := httptest.NewRequest("GET", "/user/1", nil)
-		h := func(w http.ResponseWriter, r *http.Request) {
+		h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			response.JSONError(w, err)
-		}
-		testutil.DumpHTTPHandler(t, r, h)
+		})
+		hd := httpdump.Handler(t, h)
+		hd.ServeHTTP(wr, r)
 	}
 
 	t.Run("known error", func(t *testing.T) {
@@ -38,8 +40,9 @@ func TestJSON(t *testing.T) {
 	}
 
 	t.Run("success", func(t *testing.T) {
+		wr := httptest.NewRecorder()
 		r := httptest.NewRequest("GET", "/users", nil)
-		h := func(w http.ResponseWriter, r *http.Request) {
+		h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			payload := response.
 				OK([]user{
 					{ID: "user-1", Name: "Alice"},
@@ -54,19 +57,22 @@ func TestJSON(t *testing.T) {
 				})
 
 			response.JSON(w, payload, http.StatusOK)
-		}
+		})
 
-		testutil.DumpHTTPHandler(t, r, h)
+		hd := httpdump.Handler(t, h)
+		hd.ServeHTTP(wr, r)
 	})
 
 	t.Run("failed", func(t *testing.T) {
+		wr := httptest.NewRecorder()
 		r := httptest.NewRequest("GET", "/users", nil)
-		h := func(w http.ResponseWriter, r *http.Request) {
+		h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			response.JSON(w, map[string]any{
 				"bad_number": json.Number("1.5x"),
 			}, http.StatusOK)
-		}
+		})
 
-		testutil.DumpHTTPHandler(t, r, h)
+		hd := httpdump.Handler(t, h)
+		hd.ServeHTTP(wr, r)
 	})
 }
