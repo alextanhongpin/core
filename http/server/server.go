@@ -12,14 +12,16 @@ import (
 )
 
 const (
-	MaxBytesSize    = 1 << 20 // 1 MB
-	readTimeout     = 5 * time.Second
-	shutdownTimeout = 5 * time.Second
-	handlerTimeout  = 5 * time.Second
+	MB                = 1 << 20 // 1 MB
+	writeTimeout      = 5 * time.Second
+	readTimeout       = 5 * time.Second
+	readHeaderTimeout = 5 * time.Second
+	shutdownTimeout   = 5 * time.Second
+	handlerTimeout    = 5 * time.Second
 )
 
 // ListenAndServe starts the HTTP server with some sane defaults.
-func ListenAndServe(port string, handler http.Handler) {
+func ListenAndServe(port string, handler http.Handler, opts ...Option) {
 
 	// SIGINT: When a process is interrupted from keyboard by pressing CTRL+C.
 	//         Use os.Interrupt instead for OS-agnostic interrupt.
@@ -30,21 +32,26 @@ func ListenAndServe(port string, handler http.Handler) {
 
 	// Instead of setting WriteTimeout, we use http.TimeoutHandler to specify the
 	// maximum amount of time for a handler to complete.
-	handler = http.TimeoutHandler(handler, handlerTimeout, "")
+	//handler = http.TimeoutHandler(handler, handlerTimeout, "")
 
 	// Also limit the payload size to 1 MB.
-	handler = http.MaxBytesHandler(handler, MaxBytesSize)
+	//handler = http.MaxBytesHandler(handler, MaxBytesSize)
 
 	srv := &http.Server{
 		Addr:              port,
-		ReadHeaderTimeout: readTimeout,
+		ReadHeaderTimeout: readHeaderTimeout,
 		ReadTimeout:       readTimeout,
+		WriteTimeout:      writeTimeout,
 		Handler:           handler,
 		BaseContext: func(_ net.Listener) context.Context {
 			// https://www.rudderstack.com/blog/implementing-graceful-shutdown-in-go/
 			// Pass the main ctx as the context for every request.
 			return ctx
 		},
+	}
+
+	for _, o := range opts {
+		o.Apply(srv)
 	}
 
 	done := make(chan bool)

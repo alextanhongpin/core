@@ -25,7 +25,7 @@ import (
 // $ go build -o main
 // $ kill -SIGUSR2 `lsof -ti:8080`
 // $ curl localhost:8080
-func ListenAndServeForever(port string, handler http.Handler) {
+func ListenAndServeForever(port string, handler http.Handler, opts ...Option) {
 	var l net.Listener
 
 	// Try to obtain parent's listener and kill him.
@@ -44,17 +44,26 @@ func ListenAndServeForever(port string, handler http.Handler) {
 
 	// Instead of setting WriteTimeout, we use http.TimeoutHandler to specify the
 	// maximum amount of time for a handler to complete.
-	handler = http.TimeoutHandler(handler, handlerTimeout, "")
+	// NOTE: Don't use this if you are doing
+	// Server-Sent-Events, as this does not implement the
+	// Flusher interface.
+	//handler = http.TimeoutHandler(handler, handlerTimeout, "")
 
 	// Also limit the payload size to 1 MB.
-	handler = http.MaxBytesHandler(handler, MaxBytesSize)
+	//handler = http.MaxBytesHandler(handler, MB)
 
 	// Start the web server.
 	s := &http.Server{
 		ReadHeaderTimeout: readTimeout,
 		ReadTimeout:       readTimeout,
+		WriteTimeout:      writeTimeout,
 		Handler:           handler,
 	}
+
+	for _, o := range opts {
+		o.Apply(s)
+	}
+
 	go func() {
 		if err := s.Serve(l); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Fatalf("failed to close serve: %v", err)
