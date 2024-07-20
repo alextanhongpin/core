@@ -18,6 +18,13 @@ func NewErrors(period time.Duration) *Errors {
 	}
 }
 
+func (e *Errors) Reset() {
+	e.mu.Lock()
+	e.success.reset()
+	e.failure.reset()
+	e.mu.Unlock()
+}
+
 func (e *Errors) Inc(n int64) (sucesses, failures float64) {
 	var s, f int64
 	switch {

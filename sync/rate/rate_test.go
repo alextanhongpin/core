@@ -30,6 +30,17 @@ func TestRate(t *testing.T) {
 	f("reset", 5*time.Second, 2)
 }
 
+func TestResetRate(t *testing.T) {
+	perSecond := rate.NewRate(time.Second)
+	perSecond.Inc(1)
+	perSecond.Reset()
+	got := perSecond.Inc(0)
+	exp := int64(0)
+	if exp != got {
+		t.Fatalf("expected %d, got %d,", exp, got)
+	}
+}
+
 func TestErrors(t *testing.T) {
 	now := time.Now()
 	period := 5 * time.Second
@@ -49,6 +60,19 @@ func TestErrors(t *testing.T) {
 
 	f("success", 0, 1, 0.0)
 	f("failed", 0, -1, 0.5)
+}
+
+func TestResetErrors(t *testing.T) {
+	perSecond := rate.NewErrors(time.Second)
+	perSecond.Inc(-1)
+	perSecond.Inc(1)
+	perSecond.Reset()
+	successes, failures := perSecond.Inc(0)
+	exp := 0.0
+	got := errorRate(successes, failures)
+	if exp != got {
+		t.Fatalf("expected %f, got %f", exp, got)
+	}
 }
 
 func errorRate(successes, failures float64) float64 {

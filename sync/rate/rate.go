@@ -21,6 +21,17 @@ type Rate struct {
 	Now    func() time.Time
 }
 
+func (r *Rate) Reset() {
+	r.mu.Lock()
+	r.reset()
+	r.mu.Unlock()
+}
+
+func (r *Rate) reset() {
+	r.count = 0
+	r.last = time.Time{}
+}
+
 func (r *Rate) Inc(n int64) int64 {
 	r.mu.Lock()
 	f := r.inc(n)
