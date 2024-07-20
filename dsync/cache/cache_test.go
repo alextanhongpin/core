@@ -47,7 +47,7 @@ func TestCache(t *testing.T) {
 	is.True(hit)
 }
 
-func TestSingleflight(t *testing.T) {
+func TestSingleFlight(t *testing.T) {
 	type User struct {
 		Name string `json:"name"`
 		Age  int    `json:"age"`
@@ -101,7 +101,57 @@ func TestSingleflight(t *testing.T) {
 	wg.Wait()
 }
 
-func TestWithoutSingleflight(t *testing.T) {
+func TestSingleFlightPassthrough(t *testing.T) {
+	type User struct {
+		Name string `json:"name"`
+		Age  int    `json:"age"`
+	}
+
+	c := cache.New(newClient(t), func(ctx context.Context) (*User, error) {
+		time.Sleep(100 * time.Millisecond)
+		return &User{
+			Name: "John Appleseed",
+			Age:  13,
+		}, nil
+	})
+	c.SingleFlight = &cache.SingleFlight{
+		KeyFn: func(key string) string {
+			return "singleflight:" + key
+		},
+	}
+
+	is := assert.New(t)
+
+	// Simulate 2 concurrent requests. Only, one will hit the cache.
+	// The second will wait for the cache to be populated.
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	go func() {
+		defer wg.Done()
+
+		u, hit, err := c.Get(ctx, "john.appleseed", 5*time.Second)
+		is.Nil(err)
+		is.False(hit)
+		is.Equal("John Appleseed", u.Name)
+		is.Equal(13, u.Age)
+	}()
+
+	go func() {
+		defer wg.Done()
+
+		time.Sleep(5 * time.Millisecond)
+		u, hit, err := c.Get(ctx, "john.appleseed", 5*time.Second)
+		is.Nil(err)
+		is.False(hit)
+		is.Equal("John Appleseed", u.Name)
+		is.Equal(13, u.Age)
+	}()
+
+	wg.Wait()
+}
+
+func TestWithoutSingleFlight(t *testing.T) {
 	type User struct {
 		Name string `json:"name"`
 		Age  int    `json:"age"`

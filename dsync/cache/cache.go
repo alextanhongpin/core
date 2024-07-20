@@ -14,9 +14,6 @@ import (
 // When enabled, it will prevent multiple requests from hitting the same key.
 // If the key is not found, it will execute the getter function and cache the result.
 type SingleFlight struct {
-	// If true,then it will not wait for the cache to be populated, but instead
-	// it will hit the getter immediately.
-	Passthrough bool
 	// When non-empty, it will wait for the duration before attempting to request
 	// the key from the cache again.
 	Retries []time.Duration
@@ -59,7 +56,7 @@ func (c *Cacheable[T]) Get(ctx context.Context, key string, ttl time.Duration) (
 		}
 
 		// Fail to acquire the lock, another operation is filling the cache.
-		if !ok && !sf.Passthrough {
+		if !ok {
 			// Periodically check the cache.
 			for _, d := range sf.Retries {
 				time.Sleep(d)
@@ -70,7 +67,9 @@ func (c *Cacheable[T]) Get(ctx context.Context, key string, ttl time.Duration) (
 					return v, true, nil
 				}
 			}
-			// Otherwise, hit the getter.
+
+			v, err := c.getter(ctx)
+			return v, false, err
 		}
 	}
 
