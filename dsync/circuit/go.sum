@@ -10,6 +10,10 @@ github.com/alextanhongpin/core/storage/redis v0.0.0-20240720094717-7b540d721d99 
 github.com/alextanhongpin/core/storage/redis v0.0.0-20240720094717-7b540d721d99/go.mod h1:sTQSolmJeZyMkrHz1jjYhkAmIV7jLd/4dCCtad2d6fg=
 github.com/alextanhongpin/core/sync/rate v0.0.0-20240720131919-51e071dce9ef h1:s24/jrLc70Low+FLuztluOmLVVhbaTdP1GQc75KPjqU=
 github.com/alextanhongpin/core/sync/rate v0.0.0-20240720131919-51e071dce9ef/go.mod h1:2DAEBM5Xkye/az93rp6BIHA7DXKTThAUHdIquLtqxYg=
+github.com/alextanhongpin/core/sync/rate v0.0.0-20240720143219-762f286dad6a h1:Op1FsXBitQpOqk6zZL7XJwh/IifDHx0x9+vI0SV9T6k=
+github.com/alextanhongpin/core/sync/rate v0.0.0-20240720143219-762f286dad6a/go.mod h1:2DAEBM5Xkye/az93rp6BIHA7DXKTThAUHdIquLtqxYg=
+github.com/alextanhongpin/core/sync/rate v0.0.0-20240720152141-8e3a47483339 h1:I4GzBvLswafuF2TppEuUYvAnz+S9pv0rlSklZBlwdxs=
+github.com/alextanhongpin/core/sync/rate v0.0.0-20240720152141-8e3a47483339/go.mod h1:2DAEBM5Xkye/az93rp6BIHA7DXKTThAUHdIquLtqxYg=
 github.com/bsm/ginkgo/v2 v2.12.0 h1:Ny8MWAHyOepLGlLKYmXG4IEkioBysk6GpaRTLC8zwWs=
 github.com/bsm/ginkgo/v2 v2.12.0/go.mod h1:SwYbGRRDovPVboqFv0tPTcG1sN61LM1Z4ARdbAV9g4c=
 github.com/bsm/gomega v1.27.10 h1:yeMWxP2pV2fG3FgAODIY8EiRE3dy0aeFYt4l7wh6yKA=

@@ -12,9 +12,25 @@ import (
 	redis "github.com/redis/go-redis/v9"
 )
 
-const (
-	payload = "open"
+type Status int
 
+const (
+	Closed Status = iota
+	Open
+	HalfOpen
+)
+
+var statusText = map[Status]string{
+	Closed:   "closed",
+	Open:     "open",
+	HalfOpen: "half-open",
+}
+
+func (s Status) String() string {
+	return statusText[s]
+}
+
+const (
 	breakDuration    = 5 * time.Second
 	failureThreshold = 10               // min 10 failures before the circuit breaker becomes open.
 	failureRatio     = 0.5              // at least 50% of the requests fails
@@ -44,8 +60,8 @@ type Breaker struct {
 	once sync.Once
 
 	// State.
-	open bool
-	t    *time.Timer
+	status Status
+	t      *time.Timer
 
 	// Option.
 	Now     func() time.Time
@@ -76,23 +92,8 @@ func (b *Breaker) Start() func() {
 		go func() {
 			defer wg.Done()
 
-			for msg := range pubsub.Channel() {
-				if msg.Payload != payload {
-					continue
-				}
-
-				b.mu.Lock()
-				b.open = true
-				if b.t != nil {
-					b.t.Stop()
-				}
-				b.t = time.AfterFunc(b.opt.BreakDuration, func() {
-					b.mu.Lock()
-					b.open = false
-					b.t = nil
-					b.mu.Unlock()
-				})
-				b.mu.Unlock()
+			for _ = range pubsub.Channel() {
+				b.open()
 			}
 		}()
 
@@ -107,23 +108,30 @@ func (b *Breaker) Start() func() {
 
 func (b *Breaker) Do(ctx context.Context, key string, fn func() error) error {
 	b.mu.RLock()
-	open := b.open
+	status := b.status
 	b.mu.RUnlock()
 
-	if open {
+	if status == Open {
 		return ErrUnavailable
 	}
 
 	if err := fn(); err != nil {
-		if b.isTripped(b.counter.Inc(-1)) {
-			pubErr := b.client.Publish(ctx, b.channel, payload).Err()
+		if status == HalfOpen || b.isTripped(b.counter.Inc(-1)) {
+			pubErr := b.client.Publish(ctx, b.channel, "").Err()
 			return errors.Join(err, pubErr)
 		}
 
 		return err
 	}
 
-	b.counter.Inc(1)
+	if status == HalfOpen {
+		b.mu.Lock()
+		b.status = Closed
+		b.mu.Unlock()
+	} else {
+		b.counter.Inc(1)
+	}
+
 	return nil
 }
 
@@ -132,6 +140,22 @@ func (b *Breaker) isTripped(successes, failures float64) bool {
 	isFailureThresholdExceeded := math.Ceil(failures) >= float64(b.opt.FailureThreshold)
 
 	return isFailureRatioExceeded && isFailureThresholdExceeded
+}
+
+func (b *Breaker) open() {
+	b.mu.Lock()
+	b.counter.Reset()
+	b.status = Open
+	if b.t != nil {
+		b.t.Stop()
+	}
+	b.t = time.AfterFunc(b.opt.BreakDuration, func() {
+		b.mu.Lock()
+		b.status = HalfOpen
+		b.t = nil
+		b.mu.Unlock()
+	})
+	b.mu.Unlock()
 }
 
 func failureRate(successes, failures float64) float64 {

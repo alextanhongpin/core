@@ -4,7 +4,7 @@ go 1.22.4
 
 require (
 	github.com/alextanhongpin/core/storage/redis v0.0.0-20240720094717-7b540d721d99
-	github.com/alextanhongpin/core/sync/rate v0.0.0-20240720131919-51e071dce9ef
+	github.com/alextanhongpin/core/sync/rate v0.0.0-20240720152141-8e3a47483339
 	github.com/redis/go-redis/v9 v9.6.0
 	github.com/stretchr/testify v1.9.0
 )
