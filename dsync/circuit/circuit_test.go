@@ -31,7 +31,10 @@ func TestCircuit(t *testing.T) {
 	opt.FailureThreshold = 5
 	opt.BreakDuration = 1 * time.Second
 
-	cb := circuit.New(newClient(t), opt)
+	cb := circuit.New(newClient(t), "circuit", opt)
+	stop := cb.Start()
+	defer stop()
+
 	key := t.Name()
 
 	is := assert.New(t)
@@ -43,13 +46,15 @@ func TestCircuit(t *testing.T) {
 		is.ErrorIs(err, wantErr)
 	}
 
+	// Wait for the redis subscribe message to be processed.
+	time.Sleep(100 * time.Millisecond)
+
 	t.Run("failure", func(t *testing.T) {
 		err := cb.Do(ctx, key, func() error {
 			return wantErr
 		})
 
-		is := assert.New(t)
-		is.ErrorIs(err, circuit.ErrUnavailable)
+		assert.ErrorIs(t, err, circuit.ErrUnavailable)
 	})
 
 	t.Run("recover", func(t *testing.T) {
@@ -60,8 +65,7 @@ func TestCircuit(t *testing.T) {
 			return nil
 		})
 
-		is := assert.New(t)
-		is.ErrorIs(err, nil)
+		assert.ErrorIs(t, err, nil)
 	})
 }
 
