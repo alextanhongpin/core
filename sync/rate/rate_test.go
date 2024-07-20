@@ -39,7 +39,8 @@ func TestErrors(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			r.SetNow(now.Add(d))
 
-			got := r.Inc(n)
+			s, f := r.Inc(n)
+			got := errorRate(s, f)
 			if exp != got {
 				t.Fatalf("expected %f, got %f", exp, got)
 			}
@@ -48,4 +49,14 @@ func TestErrors(t *testing.T) {
 
 	f("success", 0, 1, 0.0)
 	f("failed", 0, -1, 0.5)
+}
+
+func errorRate(successes, failures float64) float64 {
+	num := failures
+	den := failures + successes
+	if den == 0 {
+		return 0
+	}
+
+	return num / den
 }

@@ -18,27 +18,21 @@ func NewErrors(period time.Duration) *Errors {
 	}
 }
 
-func (e *Errors) Inc(n int64) float64 {
-	var s, f float64
+func (e *Errors) Inc(n int64) (sucesses, failures float64) {
+	var s, f int64
 	switch {
 	case n < 0:
-		e.mu.Lock()
-		f = e.failure.inc(-n)
-		s = e.success.inc(0)
-		e.mu.Unlock()
+		f = -n
 	case n > 0:
-		e.mu.Lock()
-		s = e.success.inc(n)
-		f = e.failure.inc(0)
-		e.mu.Unlock()
+		s = n
 	}
 
-	num := f
-	den := f + s
-	if den == 0.0 {
-		return 0.0
-	}
-	return num / den
+	e.mu.Lock()
+	failures = e.failure.inc(f)
+	sucesses = e.success.inc(s)
+	e.mu.Unlock()
+
+	return
 }
 
 func (e *Errors) SetNow(now time.Time) {
