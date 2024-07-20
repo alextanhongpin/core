@@ -48,7 +48,6 @@ func (c *Cacheable[T]) Get(ctx context.Context, key string, ttl time.Duration) (
 
 	if c.SingleFlight != nil {
 		sf := c.SingleFlight
-		var v T
 		// Lock the key.
 		ok, err := c.client.SetNX(ctx, sf.KeyFn(key), fmt.Sprint(time.Now().Unix()), sf.Lock).Result()
 		if err != nil {
