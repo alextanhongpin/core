@@ -19,12 +19,14 @@ const (
 	Closed Status = iota
 	Open
 	HalfOpen
+	Isolated
 )
 
 var statusText = map[Status]string{
 	Closed:   "closed",
 	Open:     "open",
 	HalfOpen: "half-open",
+	Isolated: "isolated",
 }
 
 func (s Status) String() string {
@@ -86,15 +88,27 @@ func (b *Breaker) Start() func() {
 	var stop func() = func() {}
 
 	b.once.Do(func() {
-		pubsub := b.client.Subscribe(context.Background(), b.channel)
+		ctx := context.Background()
+		b.init(ctx)
+
+		pubsub := b.client.Subscribe(ctx, b.channel)
 
 		var wg sync.WaitGroup
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 
-			for _ = range pubsub.Channel() {
-				b.open()
+			for msg := range pubsub.Channel() {
+				switch msg.Payload {
+				case Open.String():
+					b.open()
+				case Closed.String():
+					b.close()
+				case HalfOpen.String():
+					b.halfOpen()
+				case Isolated.String():
+					b.isolate()
+				}
 			}
 		}()
 
@@ -115,6 +129,8 @@ func (b *Breaker) Do(ctx context.Context, fn func() error) error {
 		return b.halfOpened(ctx, fn)
 	case Closed:
 		return b.closed(ctx, fn)
+	case Isolated:
+		return fn()
 	default:
 		return fmt.Errorf("unknown status: %s", status)
 	}
@@ -128,15 +144,37 @@ func (b *Breaker) Status() Status {
 	return status
 }
 
+func (b *Breaker) init(ctx context.Context) {
+	status, err := b.client.Get(ctx, b.channel).Result()
+	if err == nil {
+		switch status {
+		case Open.String():
+			b.open()
+		case Closed.String():
+			b.close()
+		case HalfOpen.String():
+			b.halfOpen()
+		case Isolated.String():
+			b.isolate()
+		}
+	}
+}
+
 func (b *Breaker) open() {
+	duration, _ := b.client.TTL(context.Background(), b.channel).Result()
+	if duration <= 0 {
+		duration = b.opt.BreakDuration
+	}
+
 	b.mu.Lock()
-	b.counter.Reset()
 	b.status = Open
+	b.counter.Reset()
 
 	if b.t != nil {
 		b.t.Stop()
 	}
-	b.t = time.AfterFunc(b.opt.BreakDuration, func() {
+
+	b.t = time.AfterFunc(duration, func() {
 		b.halfOpen()
 	})
 	b.mu.Unlock()
@@ -149,13 +187,14 @@ func (b *Breaker) opened() error {
 func (b *Breaker) halfOpen() {
 	b.mu.Lock()
 	b.status = HalfOpen
+	b.counter.Reset()
 	b.t = nil
 	b.mu.Unlock()
 }
 
 func (b *Breaker) halfOpened(ctx context.Context, fn func() error) error {
 	if err := fn(); err != nil {
-		return errors.Join(err, b.publish(ctx))
+		return errors.Join(err, b.publish(ctx, Open))
 	}
 
 	b.close()
@@ -166,13 +205,14 @@ func (b *Breaker) halfOpened(ctx context.Context, fn func() error) error {
 func (b *Breaker) close() {
 	b.mu.Lock()
 	b.status = Closed
+	b.counter.Reset()
 	b.mu.Unlock()
 }
 
 func (b *Breaker) closed(ctx context.Context, fn func() error) error {
 	if err := fn(); err != nil {
 		if b.isTripped(b.counter.Inc(-1)) {
-			return errors.Join(err, b.publish(ctx))
+			return errors.Join(err, b.publish(ctx, Open))
 		}
 
 		return err
@@ -183,8 +223,17 @@ func (b *Breaker) closed(ctx context.Context, fn func() error) error {
 	return nil
 }
 
-func (b *Breaker) publish(ctx context.Context) error {
-	return b.client.Publish(ctx, b.channel, "").Err()
+func (b *Breaker) isolate() {
+	b.mu.Lock()
+	b.status = Isolated
+	b.counter.Reset()
+	b.mu.Unlock()
+}
+
+func (b *Breaker) publish(ctx context.Context, status Status) error {
+	setErr := b.client.Set(ctx, b.channel, status.String(), b.opt.BreakDuration).Err()
+	pubErr := b.client.Publish(ctx, b.channel, status.String()).Err()
+	return errors.Join(setErr, pubErr)
 }
 
 func (b *Breaker) isTripped(successes, failures float64) bool {
