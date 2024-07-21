@@ -74,8 +74,7 @@ func NewOption() *Option {
 }
 
 type Breaker struct {
-	mu   sync.RWMutex
-	once sync.Once
+	mu sync.RWMutex
 
 	// State.
 	status Status
@@ -101,32 +100,26 @@ func New(client *redis.Client, channel string, opt *Option) (*Breaker, func()) {
 }
 
 func (b *Breaker) init() func() {
-	var stop func() = func() {}
+	ctx := context.Background()
+	status, _ := b.client.Get(ctx, b.channel).Result()
+	b.transition(NewStatus(status))
 
-	b.once.Do(func() {
-		ctx := context.Background()
-		status, _ := b.client.Get(ctx, b.channel).Result()
-		b.transition(NewStatus(status))
+	pubsub := b.client.Subscribe(ctx, b.channel)
 
-		pubsub := b.client.Subscribe(ctx, b.channel)
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
 
-		var wg sync.WaitGroup
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-
-			for msg := range pubsub.Channel() {
-				b.transition(NewStatus(msg.Payload))
-			}
-		}()
-
-		stop = func() {
-			pubsub.Close()
-			wg.Wait()
+		for msg := range pubsub.Channel() {
+			b.transition(NewStatus(msg.Payload))
 		}
-	})
+	}()
 
-	return stop
+	return func() {
+		pubsub.Close()
+		wg.Wait()
+	}
 }
 
 func (b *Breaker) Do(ctx context.Context, fn func() error) error {
