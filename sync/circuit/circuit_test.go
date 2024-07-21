@@ -34,7 +34,9 @@ func TestCircuit(t *testing.T) {
 		err := cb.Do(func() error {
 			return wantErr
 		})
-		assert.ErrorIs(t, err, circuit.ErrBrokenCircuit)
+		is := assert.New(t)
+		is.ErrorIs(err, circuit.ErrBrokenCircuit)
+		is.Equal(circuit.Open, cb.Status())
 	})
 
 	t.Run("half-opened", func(t *testing.T) {
