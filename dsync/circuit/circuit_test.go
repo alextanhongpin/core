@@ -31,16 +31,10 @@ func TestCircuit(t *testing.T) {
 	opt.FailureThreshold = 5
 	opt.BreakDuration = 1 * time.Second
 
-	cb := circuit.New(newClient(t), t.Name(), opt)
-	{
-		stop := cb.Start()
-		defer stop()
-	}
-	cb2 := circuit.New(newClient(t), t.Name(), opt)
-	{
-		stop := cb2.Start()
-		defer stop()
-	}
+	cb, stop1 := circuit.New(newClient(t), t.Name(), opt)
+	defer stop1()
+	cb2, stop2 := circuit.New(newClient(t), t.Name(), opt)
+	defer stop2()
 
 	is := assert.New(t)
 	for i := 0; i < opt.FailureThreshold; i++ {
