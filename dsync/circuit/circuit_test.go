@@ -31,15 +31,20 @@ func TestCircuit(t *testing.T) {
 	opt.FailureThreshold = 5
 	opt.BreakDuration = 1 * time.Second
 
-	cb := circuit.New(newClient(t), "circuit", opt)
-	stop := cb.Start()
-	defer stop()
-
-	key := t.Name()
+	cb := circuit.New(newClient(t), t.Name(), opt)
+	{
+		stop := cb.Start()
+		defer stop()
+	}
+	cb2 := circuit.New(newClient(t), t.Name(), opt)
+	{
+		stop := cb2.Start()
+		defer stop()
+	}
 
 	is := assert.New(t)
 	for i := 0; i < opt.FailureThreshold; i++ {
-		err := cb.Do(ctx, key, func() error {
+		err := cb.Do(ctx, func() error {
 			return wantErr
 		})
 
@@ -50,7 +55,15 @@ func TestCircuit(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	t.Run("failure", func(t *testing.T) {
-		err := cb.Do(ctx, key, func() error {
+		err := cb.Do(ctx, func() error {
+			return wantErr
+		})
+
+		assert.ErrorIs(t, err, circuit.ErrUnavailable)
+	})
+
+	t.Run("pubsub", func(t *testing.T) {
+		err := cb2.Do(ctx, func() error {
 			return wantErr
 		})
 
@@ -61,7 +74,7 @@ func TestCircuit(t *testing.T) {
 		// Because this is Redis TTL, we need to wait for it to expire.
 		time.Sleep(opt.BreakDuration)
 
-		err := cb.Do(ctx, key, func() error {
+		err := cb.Do(ctx, func() error {
 			return nil
 		})
 

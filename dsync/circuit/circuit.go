@@ -4,6 +4,7 @@ package circuit
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"sync"
 	"time"
@@ -106,33 +107,84 @@ func (b *Breaker) Start() func() {
 	return stop
 }
 
-func (b *Breaker) Do(ctx context.Context, key string, fn func() error) error {
+func (b *Breaker) Do(ctx context.Context, fn func() error) error {
+	switch status := b.Status(); status {
+	case Open:
+		return b.opened()
+	case HalfOpen:
+		return b.halfOpened(ctx, fn)
+	case Closed:
+		return b.closed(ctx, fn)
+	default:
+		return fmt.Errorf("unknown status: %s", status)
+	}
+}
+
+func (b *Breaker) Status() Status {
 	b.mu.RLock()
 	status := b.status
 	b.mu.RUnlock()
 
-	if status == Open {
-		return ErrUnavailable
+	return status
+}
+
+func (b *Breaker) open() {
+	b.mu.Lock()
+	b.counter.Reset()
+	b.status = Open
+
+	if b.t != nil {
+		b.t.Stop()
+	}
+	b.t = time.AfterFunc(b.opt.BreakDuration, func() {
+		b.halfOpen()
+	})
+	b.mu.Unlock()
+}
+
+func (b *Breaker) opened() error {
+	return ErrUnavailable
+}
+
+func (b *Breaker) halfOpen() {
+	b.mu.Lock()
+	b.status = HalfOpen
+	b.t = nil
+	b.mu.Unlock()
+}
+
+func (b *Breaker) halfOpened(ctx context.Context, fn func() error) error {
+	if err := fn(); err != nil {
+		return errors.Join(err, b.publish(ctx))
 	}
 
+	b.close()
+
+	return nil
+}
+
+func (b *Breaker) close() {
+	b.mu.Lock()
+	b.status = Closed
+	b.mu.Unlock()
+}
+
+func (b *Breaker) closed(ctx context.Context, fn func() error) error {
 	if err := fn(); err != nil {
-		if status == HalfOpen || b.isTripped(b.counter.Inc(-1)) {
-			pubErr := b.client.Publish(ctx, b.channel, "").Err()
-			return errors.Join(err, pubErr)
+		if b.isTripped(b.counter.Inc(-1)) {
+			return errors.Join(err, b.publish(ctx))
 		}
 
 		return err
 	}
 
-	if status == HalfOpen {
-		b.mu.Lock()
-		b.status = Closed
-		b.mu.Unlock()
-	} else {
-		b.counter.Inc(1)
-	}
+	b.counter.Inc(1)
 
 	return nil
+}
+
+func (b *Breaker) publish(ctx context.Context) error {
+	return b.client.Publish(ctx, b.channel, "").Err()
 }
 
 func (b *Breaker) isTripped(successes, failures float64) bool {
@@ -140,22 +192,6 @@ func (b *Breaker) isTripped(successes, failures float64) bool {
 	isFailureThresholdExceeded := math.Ceil(failures) >= float64(b.opt.FailureThreshold)
 
 	return isFailureRatioExceeded && isFailureThresholdExceeded
-}
-
-func (b *Breaker) open() {
-	b.mu.Lock()
-	b.counter.Reset()
-	b.status = Open
-	if b.t != nil {
-		b.t.Stop()
-	}
-	b.t = time.AfterFunc(b.opt.BreakDuration, func() {
-		b.mu.Lock()
-		b.status = HalfOpen
-		b.t = nil
-		b.mu.Unlock()
-	})
-	b.mu.Unlock()
 }
 
 func failureRate(successes, failures float64) float64 {
