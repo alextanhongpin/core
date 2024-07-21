@@ -153,6 +153,10 @@ func (b *Breaker) Status() Status {
 }
 
 func (b *Breaker) transition(status Status) {
+	if b.Status() == status {
+		return
+	}
+
 	switch status {
 	case Open:
 		b.open()
