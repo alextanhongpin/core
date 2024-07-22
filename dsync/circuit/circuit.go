@@ -67,8 +67,6 @@ var (
 
 type Option struct {
 	BreakDuration    time.Duration
-	DurationPenalty  func(dur time.Duration) int
-	ErrorPenalty     func(err error) int
 	FailureRatio     float64
 	FailureThreshold int
 	SamplingDuration time.Duration
@@ -77,20 +75,7 @@ type Option struct {
 
 func NewOption() *Option {
 	return &Option{
-		BreakDuration: breakDuration,
-		DurationPenalty: func(dur time.Duration) int {
-			// Every 5th second the penalty increases by 1.
-			return int(dur / (5 * time.Second))
-		},
-		ErrorPenalty: func(err error) int {
-			// A deadline indicates the service fails to respond in time, so we
-			// accelerate the circuit breaker tripping progress.
-			if errors.Is(err, context.DeadlineExceeded) {
-				return 5
-			}
-
-			return 0
-		},
+		BreakDuration:    breakDuration,
 		FailureRatio:     failureRatio,
 		FailureThreshold: failureThreshold,
 		SamplingDuration: samplingDuration,
@@ -162,6 +147,14 @@ func (b *Breaker) Do(ctx context.Context, fn func() error) error {
 	default:
 		return fmt.Errorf("unknown status: %s", status)
 	}
+}
+
+func (b *Breaker) Escalate(ctx context.Context, n int64) error {
+	if b.isTripped(b.counter.Inc(-n)) {
+		return b.publish(ctx, Open)
+	}
+
+	return nil
 }
 
 func (b *Breaker) Status() Status {
@@ -243,14 +236,8 @@ func (b *Breaker) close() {
 }
 
 func (b *Breaker) closed(ctx context.Context, fn func() error) error {
-	start := time.Now()
 	if err := fn(); err != nil {
-		score := 1 + b.opt.ErrorPenalty(err) + b.opt.DurationPenalty(b.Now().Sub(start))
-		if b.isTripped(b.counter.Inc(-int64(score))) {
-			return errors.Join(err, b.publish(ctx, Open))
-		}
-
-		return err
+		return errors.Join(err, b.Escalate(ctx, 1))
 	}
 
 	b.counter.Inc(1)
