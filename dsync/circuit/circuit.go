@@ -255,7 +255,7 @@ func (b *Breaker) closed(ctx context.Context, fn func() error) error {
 	if err := fn(); err != nil {
 		n := b.FailureCount(err)
 		n += b.SlowCallCount(b.Now().Sub(start))
-		if b.isTripped(b.counter.Inc(-int64(n))) {
+		if b.isUnhealthy(b.counter.Inc(-int64(n))) {
 			return errors.Join(err, b.publish(ctx, Open))
 		}
 
@@ -263,7 +263,7 @@ func (b *Breaker) closed(ctx context.Context, fn func() error) error {
 	}
 
 	n := b.SlowCallCount(b.Now().Sub(start))
-	if n > 0 && b.isTripped(b.counter.Inc(-int64(n))) {
+	if n > 0 && b.isUnhealthy(b.counter.Inc(-int64(n))) {
 		return b.publish(ctx, Open)
 	}
 
@@ -296,15 +296,15 @@ func (b *Breaker) publish(ctx context.Context, status Status) error {
 	return errors.Join(setErr, pubErr)
 }
 
-func (b *Breaker) isTripped(successes, failures float64) bool {
+func (b *Breaker) isHealthy(successes, _ float64) bool {
+	return math.Ceil(successes) >= float64(b.opt.SuccessThreshold)
+}
+
+func (b *Breaker) isUnhealthy(successes, failures float64) bool {
 	isFailureRatioExceeded := failureRate(successes, failures) >= b.opt.FailureRatio
 	isFailureThresholdExceeded := math.Ceil(failures) >= float64(b.opt.FailureThreshold)
 
 	return isFailureRatioExceeded && isFailureThresholdExceeded
-}
-
-func (b *Breaker) isHealthy(successes, _ float64) bool {
-	return math.Ceil(successes) >= float64(b.opt.SuccessThreshold)
 }
 
 func failureRate(successes, failures float64) float64 {
