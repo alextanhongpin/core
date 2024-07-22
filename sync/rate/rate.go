@@ -4,6 +4,8 @@ import (
 	"math"
 	"sync"
 	"time"
+
+	"golang.org/x/exp/constraints"
 )
 
 func NewRate(period time.Duration) *Rate {
@@ -47,14 +49,15 @@ func (r *Rate) inc(n int64) float64 {
 	return r.count
 }
 
-func dampFactor(d time.Duration, period time.Duration) float64 {
-	// It's in the future.
-	if d < 0 {
-		d = 0
-	}
-	// It's way in the past.
-	if d > period {
-		d = period
-	}
-	return float64(period-d) / float64(period)
+func dampFactor(elapsed time.Duration, period time.Duration) float64 {
+	f := float64(period-elapsed) / float64(period)
+	return clip(0.0, 1.0, f)
+}
+
+type Number interface {
+	constraints.Integer | constraints.Float
+}
+
+func clip[T Number](lo, hi, v T) T {
+	return min(hi, max(lo, v))
 }
