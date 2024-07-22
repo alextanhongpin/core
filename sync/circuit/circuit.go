@@ -1,6 +1,7 @@
 package circuit
 
 import (
+	"context"
 	"errors"
 	"math"
 	"sync"
@@ -56,11 +57,13 @@ func NewOption() *Option {
 }
 
 type Breaker struct {
-	counter *rate.Errors
-	mu      sync.RWMutex
-	opt     *Option
-	status  Status
-	timer   *time.Timer
+	FailureCount  func(error) int
+	SlowCallCount func(time.Duration) int
+	counter       *rate.Errors
+	mu            sync.RWMutex
+	opt           *Option
+	status        Status
+	timer         *time.Timer
 }
 
 func New(opt *Option) *Breaker {
@@ -69,6 +72,23 @@ func New(opt *Option) *Breaker {
 	}
 
 	return &Breaker{
+		FailureCount: func(err error) int {
+			// Ignore context cancellation.
+			if errors.Is(err, context.Canceled) {
+				return 0
+			}
+
+			// Additional penalty for deadlines.
+			if errors.Is(err, context.DeadlineExceeded) {
+				return 5
+			}
+
+			return 1
+		},
+		SlowCallCount: func(duration time.Duration) int {
+			// Every 5th second, penalize the slow call.
+			return int(duration / (5 * time.Second))
+		},
 		counter: rate.NewErrors(opt.SamplingDuration),
 		opt:     opt,
 	}
@@ -120,12 +140,22 @@ func (b *Breaker) close() {
 }
 
 func (b *Breaker) closed(fn func() error) error {
+	start := time.Now()
 	if err := fn(); err != nil {
-		if b.isTripped(b.counter.Inc(-1)) {
+		n := b.FailureCount(err)
+		n += b.SlowCallCount(time.Since(start))
+		if b.isUnhealthy(b.counter.Inc(-int64(n))) {
 			b.open()
 		}
 
 		return err
+	}
+
+	n := b.SlowCallCount(time.Since(start))
+	if n > 0 && b.isUnhealthy(b.counter.Inc(-int64(n))) {
+		b.open()
+
+		return nil
 	}
 
 	b.counter.Inc(1)
@@ -146,15 +176,18 @@ func (b *Breaker) halfOpened(fn func() error) error {
 		return err
 	}
 
-	successes, _ := b.counter.Inc(1)
-	if int(math.Ceil(successes)) >= b.opt.SuccessThreshold {
+	if b.isHealthy(b.counter.Inc(1)) {
 		b.close()
 	}
 
 	return nil
 }
 
-func (b *Breaker) isTripped(successes, failures float64) bool {
+func (b *Breaker) isHealthy(successes, _ float64) bool {
+	return math.Ceil(successes) >= float64(b.opt.SuccessThreshold)
+}
+
+func (b *Breaker) isUnhealthy(successes, failures float64) bool {
 	isFailureRatioExceeded := failureRate(successes, failures) >= b.opt.FailureRatio
 	isFailureThresholdExceeded := math.Ceil(failures) >= float64(b.opt.FailureThreshold)
 

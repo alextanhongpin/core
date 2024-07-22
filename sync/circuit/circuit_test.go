@@ -60,3 +60,18 @@ func TestCircuit(t *testing.T) {
 		is.Equal(circuit.Closed, cb.Status())
 	})
 }
+
+func TestSlowCount(t *testing.T) {
+	opt := circuit.NewOption()
+	cb := circuit.New(opt)
+	cb.SlowCallCount = func(time.Duration) int {
+		return opt.FailureThreshold
+	}
+	err := cb.Do(func() error {
+		// No error, but the slow call count is incremented.
+		return nil
+	})
+	is := assert.New(t)
+	is.Nil(err)
+	is.Equal(circuit.Open, cb.Status())
+}

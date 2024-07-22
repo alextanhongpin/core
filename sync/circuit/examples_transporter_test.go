@@ -10,7 +10,7 @@ import (
 	"github.com/alextanhongpin/core/sync/circuit"
 )
 
-func ExampleRoundTripper() {
+func ExampleTransporter() {
 	opt := circuit.NewOption()
 	opt.BreakDuration = 100 * time.Millisecond
 	opt.SamplingDuration = 1 * time.Second
