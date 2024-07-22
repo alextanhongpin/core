@@ -149,12 +149,14 @@ func (b *Breaker) Do(ctx context.Context, fn func() error) error {
 	}
 }
 
+// Escalate increases the failure threshold by `n` when the circuitbreaker is
+// closed.
 func (b *Breaker) Escalate(ctx context.Context, n int64) error {
-	if b.isTripped(b.counter.Inc(-n)) {
-		return b.publish(ctx, Open)
+	if b.Status() != Closed {
+		return nil
 	}
 
-	return nil
+	return b.escalate(ctx, n)
 }
 
 func (b *Breaker) Status() Status {
@@ -261,6 +263,14 @@ func (b *Breaker) disable() {
 	b.status = Disabled
 	b.counter.Reset()
 	b.mu.Unlock()
+}
+
+func (b *Breaker) escalate(ctx context.Context, n int64) error {
+	if b.isTripped(b.counter.Inc(-n)) {
+		return b.publish(ctx, Open)
+	}
+
+	return nil
 }
 
 func (b *Breaker) publish(ctx context.Context, status Status) error {
