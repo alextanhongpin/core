@@ -27,30 +27,33 @@ func ExampleRoundTripper() {
 	client := ts.Client()
 	client.Transport = circuit.NewTransporter(client.Transport, cb)
 
-	re := regexp.MustCompile(`\d{5}`)
 	// Opens after failure ratio exceeded.
-	for i := 0; i < int(opt.FailureThreshold)+1; i++ {
-		_, err := client.Get(ts.URL)
+	for range opt.FailureThreshold {
+		resp, err := client.Get(ts.URL)
 		if err != nil {
-			// Replace port since it changes dynamically and breaks the test.
-			msg := re.ReplaceAllString(err.Error(), "8080")
-			fmt.Println(msg)
-			continue
+			panic(err)
 		}
+		defer resp.Body.Close()
+		fmt.Println(resp.Status)
 	}
+	_, err := client.Get(ts.URL)
+
+	re := regexp.MustCompile(`\d{5}`)
+	msg := re.ReplaceAllString(err.Error(), "8080")
+	fmt.Println(msg)
 
 	// Output:
 	// initial status:
 	// closed
-	// Get "http://127.0.0.1:8080": 500 Internal Server Error
-	// Get "http://127.0.0.1:8080": 500 Internal Server Error
-	// Get "http://127.0.0.1:8080": 500 Internal Server Error
-	// Get "http://127.0.0.1:8080": 500 Internal Server Error
-	// Get "http://127.0.0.1:8080": 500 Internal Server Error
-	// Get "http://127.0.0.1:8080": 500 Internal Server Error
-	// Get "http://127.0.0.1:8080": 500 Internal Server Error
-	// Get "http://127.0.0.1:8080": 500 Internal Server Error
-	// Get "http://127.0.0.1:8080": 500 Internal Server Error
-	// Get "http://127.0.0.1:8080": 500 Internal Server Error
+	// 500 Internal Server Error
+	// 500 Internal Server Error
+	// 500 Internal Server Error
+	// 500 Internal Server Error
+	// 500 Internal Server Error
+	// 500 Internal Server Error
+	// 500 Internal Server Error
+	// 500 Internal Server Error
+	// 500 Internal Server Error
+	// 500 Internal Server Error
 	// Get "http://127.0.0.1:8080": circuit-breaker: broken
 }
