@@ -19,16 +19,16 @@ const (
 	Closed Status = iota
 	Disabled
 	HalfOpen
-	Isolated
+	ForcedOpen
 	Open
 )
 
 var statusText = map[Status]string{
-	Closed:   "closed",
-	Disabled: "disabled",
-	HalfOpen: "half-open",
-	Isolated: "isolated",
-	Open:     "open",
+	Closed:     "closed",
+	Disabled:   "disabled",
+	HalfOpen:   "half-open",
+	ForcedOpen: "forced-open",
+	Open:       "open",
 }
 
 func (s Status) String() string {
@@ -43,8 +43,8 @@ func NewStatus(status string) Status {
 		return Disabled
 	case HalfOpen.String():
 		return HalfOpen
-	case Isolated.String():
-		return Isolated
+	case ForcedOpen.String():
+		return ForcedOpen
 	case Open.String():
 		return Open
 	default:
@@ -62,7 +62,7 @@ const (
 
 var (
 	ErrUnavailable = errors.New("circuit: unavailable")
-	ErrIsolated    = errors.New("circuit: isolated")
+	ErrForcedOpen  = errors.New("circuit: forced open")
 )
 
 type Option struct {
@@ -91,16 +91,39 @@ type Breaker struct {
 	timer  *time.Timer
 
 	// Option.
-	Now     func() time.Time
-	channel string
-	client  *redis.Client
-	counter *rate.Errors
-	opt     *Option
+	FailureCount  func(error) int
+	Now           func() time.Time
+	SlowCallCount func(time.Duration) int
+	channel       string
+	client        *redis.Client
+	counter       *rate.Errors
+	opt           *Option
 }
 
 func New(client *redis.Client, channel string, opt *Option) (*Breaker, func()) {
+	if opt == nil {
+		opt = NewOption()
+	}
+
 	b := &Breaker{
-		Now:     time.Now,
+		FailureCount: func(err error) int {
+			// Ignore context cancellation.
+			if errors.Is(err, context.Canceled) {
+				return 0
+			}
+
+			// Deadlines are considered as failures.
+			if errors.Is(err, context.DeadlineExceeded) {
+				return 5
+			}
+
+			return 1
+		},
+		Now: time.Now,
+		SlowCallCount: func(duration time.Duration) int {
+			// Every 5th second, penalize the slow call.
+			return int(duration / (5 * time.Second))
+		},
 		channel: channel,
 		client:  client,
 		counter: rate.NewErrors(opt.SamplingDuration),
@@ -112,7 +135,7 @@ func New(client *redis.Client, channel string, opt *Option) (*Breaker, func()) {
 func (b *Breaker) init() func() {
 	ctx := context.Background()
 	status, _ := b.client.Get(ctx, b.channel).Result()
-	b.transition(NewStatus(status))
+	b.Transition(NewStatus(status))
 
 	pubsub := b.client.Subscribe(ctx, b.channel)
 
@@ -122,7 +145,7 @@ func (b *Breaker) init() func() {
 		defer wg.Done()
 
 		for msg := range pubsub.Channel() {
-			b.transition(NewStatus(msg.Payload))
+			b.Transition(NewStatus(msg.Payload))
 		}
 	}()
 
@@ -142,21 +165,11 @@ func (b *Breaker) Do(ctx context.Context, fn func() error) error {
 		return b.closed(ctx, fn)
 	case Disabled:
 		return fn()
-	case Isolated:
-		return b.isolated()
+	case ForcedOpen:
+		return b.forcedOpen()
 	default:
 		return fmt.Errorf("unknown status: %s", status)
 	}
-}
-
-// Escalate increases the failure threshold by `n` when the circuitbreaker is
-// closed.
-func (b *Breaker) Escalate(ctx context.Context, n int64) error {
-	if b.Status() != Closed {
-		return nil
-	}
-
-	return b.escalate(ctx, n)
 }
 
 func (b *Breaker) Status() Status {
@@ -167,7 +180,7 @@ func (b *Breaker) Status() Status {
 	return status
 }
 
-func (b *Breaker) transition(status Status) {
+func (b *Breaker) Transition(status Status) {
 	if b.Status() == status {
 		return
 	}
@@ -181,8 +194,8 @@ func (b *Breaker) transition(status Status) {
 		b.halfOpen()
 	case Disabled:
 		b.disable()
-	case Isolated:
-		b.isolate()
+	case ForcedOpen:
+		b.forceOpen()
 	}
 }
 
@@ -238,24 +251,36 @@ func (b *Breaker) close() {
 }
 
 func (b *Breaker) closed(ctx context.Context, fn func() error) error {
+	start := time.Now()
 	if err := fn(); err != nil {
-		return errors.Join(err, b.Escalate(ctx, 1))
+		n := b.FailureCount(err)
+		n += b.SlowCallCount(b.Now().Sub(start))
+		if b.isTripped(b.counter.Inc(-int64(n))) {
+			return errors.Join(err, b.publish(ctx, Open))
+		}
+
+		return err
 	}
 
-	b.counter.Inc(1)
+	n := b.SlowCallCount(b.Now().Sub(start))
+	if n > 0 && b.isTripped(b.counter.Inc(-int64(n))) {
+		return b.publish(ctx, Open)
+	}
+
+	b.counter.Inc(int64(1))
 
 	return nil
 }
 
-func (b *Breaker) isolate() {
+func (b *Breaker) forceOpen() {
 	b.mu.Lock()
-	b.status = Isolated
+	b.status = ForcedOpen
 	b.counter.Reset()
 	b.mu.Unlock()
 }
 
-func (b *Breaker) isolated() error {
-	return ErrIsolated
+func (b *Breaker) forcedOpen() error {
+	return ErrForcedOpen
 }
 
 func (b *Breaker) disable() {
@@ -263,14 +288,6 @@ func (b *Breaker) disable() {
 	b.status = Disabled
 	b.counter.Reset()
 	b.mu.Unlock()
-}
-
-func (b *Breaker) escalate(ctx context.Context, n int64) error {
-	if b.isTripped(b.counter.Inc(-n)) {
-		return b.publish(ctx, Open)
-	}
-
-	return nil
 }
 
 func (b *Breaker) publish(ctx context.Context, status Status) error {

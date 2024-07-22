@@ -84,6 +84,28 @@ func TestCircuit(t *testing.T) {
 	})
 }
 
+func TestSlowCall(t *testing.T) {
+	opt := circuit.NewOption()
+	cb, stop := circuit.New(newClient(t), t.Name(), opt)
+	defer stop()
+
+	cb.SlowCallCount = func(time.Duration) int {
+		// Ignore duration, just return a constant value.
+		return opt.FailureThreshold
+	}
+
+	err := cb.Do(ctx, func() error {
+		// No error, but failed due to slow call.
+		return nil
+	})
+
+	// Wait for the message to be subscribed.
+	time.Sleep(100 * time.Millisecond)
+	is := assert.New(t)
+	is.Nil(err)
+	is.Equal(circuit.Open, cb.Status())
+}
+
 func newClient(t *testing.T) *redis.Client {
 	client := redis.NewClient(&redis.Options{
 		Addr: redistest.Addr(),
