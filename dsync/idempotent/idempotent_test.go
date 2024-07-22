@@ -124,7 +124,7 @@ func TestPrivateLockUnlock(t *testing.T) {
 
 		t.Run("when unlock failed with wrong key", func(t *testing.T) {
 			err := idem.unlock(ctx, key, []byte("wrong-key"))
-			assert.ErrorIs(t, err, ErrKeyReleased, "expected error to be ErrKeyReleased")
+			assert.ErrorIs(t, err, ErrKeyMismatch, "expected error to be ErrKeyMismatch")
 
 			val, err := client.Get(ctx, key).Result()
 			assert.Nil(t, err, "expected error to be nil")
@@ -165,9 +165,9 @@ func TestPrivateReplace(t *testing.T) {
 		// Set a value to be replaced.
 		a.Nil(client.Set(ctx, key, "world", 0).Err())
 
-		err := idem.replace(ctx, key, []byte("invalid-old-value"), "new-value")
+		err := idem.replace(ctx, key, []byte("invalid-old-value"), []byte("new-value"))
 		// The key should be released.
-		a.ErrorIs(err, ErrKeyReleased)
+		a.ErrorIs(err, ErrKeyMismatch)
 
 		v, err := client.Get(ctx, key).Result()
 		a.Nil(err, "expected error to be nil")
@@ -183,12 +183,12 @@ func TestPrivateReplace(t *testing.T) {
 		// Set a value to be replaced.
 		a.Nil(client.Set(ctx, key, "world", 0).Err())
 
-		err := idem.replace(ctx, key, []byte("world"), "new-value")
+		err := idem.replace(ctx, key, []byte("world"), []byte("new-value"))
 		a.Nil(err, "expected error to be nil")
 
 		v, err := client.Get(ctx, key).Result()
 		a.Nil(err, "expected error to be nil")
-		a.Equal(`"new-value"`, v, "then the value will be replaced")
+		a.Equal("new-value", v, "then the value will be replaced")
 
 		// Check the updated TTL.
 		updatedTTL := client.PTTL(ctx, key).Val()
