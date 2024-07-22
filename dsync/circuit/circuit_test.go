@@ -28,7 +28,6 @@ func TestMain(m *testing.M) {
 func TestCircuit(t *testing.T) {
 	opt := circuit.NewOption()
 	opt.SamplingDuration = 1 * time.Second
-	opt.FailureThreshold = 5
 	opt.BreakDuration = 1 * time.Second
 
 	cb, stop1 := circuit.New(newClient(t), t.Name(), opt)
@@ -36,43 +35,52 @@ func TestCircuit(t *testing.T) {
 	cb2, stop2 := circuit.New(newClient(t), t.Name(), opt)
 	defer stop2()
 
-	is := assert.New(t)
-	for i := 0; i < opt.FailureThreshold; i++ {
+	t.Run("open", func(t *testing.T) {
+		is := assert.New(t)
+		for range opt.FailureThreshold {
+			err := cb.Do(ctx, func() error {
+				return wantErr
+			})
+
+			is.ErrorIs(err, wantErr)
+		}
+
+		// Wait for the redis subscribe message to be processed.
+		time.Sleep(100 * time.Millisecond)
+
 		err := cb.Do(ctx, func() error {
 			return wantErr
 		})
 
-		is.ErrorIs(err, wantErr)
-	}
-
-	// Wait for the redis subscribe message to be processed.
-	time.Sleep(100 * time.Millisecond)
-
-	t.Run("failure", func(t *testing.T) {
-		err := cb.Do(ctx, func() error {
-			return wantErr
-		})
-
-		assert.ErrorIs(t, err, circuit.ErrUnavailable)
+		is.ErrorIs(err, circuit.ErrUnavailable)
+		is.Equal(circuit.Open, cb.Status())
+		is.Equal(circuit.Open, cb2.Status())
 	})
 
-	t.Run("pubsub", func(t *testing.T) {
-		err := cb2.Do(ctx, func() error {
-			return wantErr
-		})
-
-		assert.ErrorIs(t, err, circuit.ErrUnavailable)
-	})
-
-	t.Run("recover", func(t *testing.T) {
+	t.Run("half-open", func(t *testing.T) {
 		// Because this is Redis TTL, we need to wait for it to expire.
-		time.Sleep(opt.BreakDuration)
+		time.Sleep(opt.BreakDuration + time.Millisecond)
 
 		err := cb.Do(ctx, func() error {
 			return nil
 		})
 
-		assert.ErrorIs(t, err, nil)
+		is := assert.New(t)
+		is.ErrorIs(err, nil)
+		is.Equal(circuit.HalfOpen, cb.Status())
+	})
+
+	t.Run("closed", func(t *testing.T) {
+		is := assert.New(t)
+		for range opt.SuccessThreshold {
+			err := cb.Do(ctx, func() error {
+				return nil
+			})
+
+			is.Nil(err)
+		}
+
+		is.Equal(circuit.Closed, cb.Status())
 	})
 }
 

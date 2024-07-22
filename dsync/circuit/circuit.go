@@ -17,16 +17,18 @@ type Status int
 
 const (
 	Closed Status = iota
-	Open
+	Disabled
 	HalfOpen
 	Isolated
+	Open
 )
 
 var statusText = map[Status]string{
 	Closed:   "closed",
-	Open:     "open",
+	Disabled: "disabled",
 	HalfOpen: "half-open",
 	Isolated: "isolated",
+	Open:     "open",
 }
 
 func (s Status) String() string {
@@ -35,14 +37,16 @@ func (s Status) String() string {
 
 func NewStatus(status string) Status {
 	switch status {
-	case Open.String():
-		return Open
 	case Closed.String():
 		return Closed
+	case Disabled.String():
+		return Disabled
 	case HalfOpen.String():
 		return HalfOpen
 	case Isolated.String():
 		return Isolated
+	case Open.String():
+		return Open
 	default:
 		return Closed
 	}
@@ -50,26 +54,47 @@ func NewStatus(status string) Status {
 
 const (
 	breakDuration    = 5 * time.Second
-	failureThreshold = 10               // min 10 failures before the circuit breaker becomes open.
 	failureRatio     = 0.5              // at least 50% of the requests fails
+	failureThreshold = 10               // min 10 failures before the circuit breaker becomes open.
 	samplingDuration = 10 * time.Second // time window to measure the error rate.
+	successThreshold = 5
 )
 
-var ErrUnavailable = errors.New("circuit: unavailable")
+var (
+	ErrUnavailable = errors.New("circuit: unavailable")
+	ErrIsolated    = errors.New("circuit: isolated")
+)
 
 type Option struct {
 	BreakDuration    time.Duration
+	DurationPenalty  func(dur time.Duration) int
+	ErrorPenalty     func(err error) int
 	FailureRatio     float64
 	FailureThreshold int
 	SamplingDuration time.Duration
+	SuccessThreshold int
 }
 
 func NewOption() *Option {
 	return &Option{
-		BreakDuration:    breakDuration,
+		BreakDuration: breakDuration,
+		DurationPenalty: func(dur time.Duration) int {
+			// Every 5th second the penalty increases by 1.
+			return int(dur / (5 * time.Second))
+		},
+		ErrorPenalty: func(err error) int {
+			// A deadline indicates the service fails to respond in time, so we
+			// accelerate the circuit breaker tripping progress.
+			if errors.Is(err, context.DeadlineExceeded) {
+				return 5
+			}
+
+			return 0
+		},
 		FailureRatio:     failureRatio,
 		FailureThreshold: failureThreshold,
 		SamplingDuration: samplingDuration,
+		SuccessThreshold: successThreshold,
 	}
 }
 
@@ -78,7 +103,7 @@ type Breaker struct {
 
 	// State.
 	status Status
-	t      *time.Timer
+	timer  *time.Timer
 
 	// Option.
 	Now     func() time.Time
@@ -130,8 +155,10 @@ func (b *Breaker) Do(ctx context.Context, fn func() error) error {
 		return b.halfOpened(ctx, fn)
 	case Closed:
 		return b.closed(ctx, fn)
-	case Isolated:
+	case Disabled:
 		return fn()
+	case Isolated:
+		return b.isolated()
 	default:
 		return fmt.Errorf("unknown status: %s", status)
 	}
@@ -157,6 +184,8 @@ func (b *Breaker) transition(status Status) {
 		b.close()
 	case HalfOpen:
 		b.halfOpen()
+	case Disabled:
+		b.disable()
 	case Isolated:
 		b.isolate()
 	}
@@ -172,11 +201,11 @@ func (b *Breaker) open() {
 	b.status = Open
 	b.counter.Reset()
 
-	if b.t != nil {
-		b.t.Stop()
+	if b.timer != nil {
+		b.timer.Stop()
 	}
 
-	b.t = time.AfterFunc(duration, func() {
+	b.timer = time.AfterFunc(duration, func() {
 		b.halfOpen()
 	})
 	b.mu.Unlock()
@@ -190,7 +219,7 @@ func (b *Breaker) halfOpen() {
 	b.mu.Lock()
 	b.status = HalfOpen
 	b.counter.Reset()
-	b.t = nil
+	b.timer = nil
 	b.mu.Unlock()
 }
 
@@ -199,7 +228,9 @@ func (b *Breaker) halfOpened(ctx context.Context, fn func() error) error {
 		return errors.Join(err, b.publish(ctx, Open))
 	}
 
-	b.close()
+	if b.isHealthy(b.counter.Inc(1)) {
+		b.close()
+	}
 
 	return nil
 }
@@ -212,8 +243,10 @@ func (b *Breaker) close() {
 }
 
 func (b *Breaker) closed(ctx context.Context, fn func() error) error {
+	start := time.Now()
 	if err := fn(); err != nil {
-		if b.isTripped(b.counter.Inc(-1)) {
+		score := 1 + b.opt.ErrorPenalty(err) + b.opt.DurationPenalty(b.Now().Sub(start))
+		if b.isTripped(b.counter.Inc(-int64(score))) {
 			return errors.Join(err, b.publish(ctx, Open))
 		}
 
@@ -232,6 +265,17 @@ func (b *Breaker) isolate() {
 	b.mu.Unlock()
 }
 
+func (b *Breaker) isolated() error {
+	return ErrIsolated
+}
+
+func (b *Breaker) disable() {
+	b.mu.Lock()
+	b.status = Disabled
+	b.counter.Reset()
+	b.mu.Unlock()
+}
+
 func (b *Breaker) publish(ctx context.Context, status Status) error {
 	setErr := b.client.Set(ctx, b.channel, status.String(), b.opt.BreakDuration).Err()
 	pubErr := b.client.Publish(ctx, b.channel, status.String()).Err()
@@ -243,6 +287,10 @@ func (b *Breaker) isTripped(successes, failures float64) bool {
 	isFailureThresholdExceeded := math.Ceil(failures) >= float64(b.opt.FailureThreshold)
 
 	return isFailureRatioExceeded && isFailureThresholdExceeded
+}
+
+func (b *Breaker) isHealthy(successes, _ float64) bool {
+	return math.Ceil(successes) >= float64(b.opt.SuccessThreshold)
 }
 
 func failureRate(successes, failures float64) float64 {
