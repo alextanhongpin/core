@@ -45,15 +45,15 @@ func TestCircuit(t *testing.T) {
 			is.ErrorIs(err, wantErr)
 		}
 
-		// Wait for the redis subscribe message to be processed.
-		time.Sleep(100 * time.Millisecond)
-
 		err := cb.Do(ctx, func() error {
 			return wantErr
 		})
 
 		is.ErrorIs(err, circuit.ErrUnavailable)
 		is.Equal(circuit.Open, cb.Status())
+
+		// Wait for message to be subscribed.
+		time.Sleep(100 * time.Millisecond)
 		is.Equal(circuit.Open, cb2.Status())
 	})
 
@@ -99,8 +99,6 @@ func TestSlowCall(t *testing.T) {
 		return nil
 	})
 
-	// Wait for the message to be subscribed.
-	time.Sleep(100 * time.Millisecond)
 	is := assert.New(t)
 	is.Nil(err)
 	is.Equal(circuit.Open, cb.Status())

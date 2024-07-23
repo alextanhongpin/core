@@ -135,7 +135,7 @@ func New(client *redis.Client, channel string, opt *Option) (*Breaker, func()) {
 func (b *Breaker) init() func() {
 	ctx := context.Background()
 	status, _ := b.client.Get(ctx, b.channel).Result()
-	b.Transition(NewStatus(status))
+	b.transition(NewStatus(status))
 
 	pubsub := b.client.Subscribe(ctx, b.channel)
 
@@ -145,7 +145,7 @@ func (b *Breaker) init() func() {
 		defer wg.Done()
 
 		for msg := range pubsub.Channel() {
-			b.Transition(NewStatus(msg.Payload))
+			b.transition(NewStatus(msg.Payload))
 		}
 	}()
 
@@ -180,7 +180,7 @@ func (b *Breaker) Status() Status {
 	return status
 }
 
-func (b *Breaker) Transition(status Status) {
+func (b *Breaker) transition(status Status) {
 	if b.Status() == status {
 		return
 	}
@@ -197,6 +197,14 @@ func (b *Breaker) Transition(status Status) {
 	case ForcedOpen:
 		b.forceOpen()
 	}
+}
+
+func (b *Breaker) canOpen(n int) bool {
+	if n <= 0 {
+		return false
+	}
+
+	return b.isUnhealthy(b.counter.Inc(-int64(n)))
 }
 
 func (b *Breaker) open() {
@@ -232,15 +240,29 @@ func (b *Breaker) halfOpen() {
 }
 
 func (b *Breaker) halfOpened(ctx context.Context, fn func() error) error {
+	start := time.Now()
 	if err := fn(); err != nil {
+		b.open()
+
 		return errors.Join(err, b.publish(ctx, Open))
 	}
 
-	if b.isHealthy(b.counter.Inc(1)) {
+	n := b.SlowCallCount(b.Now().Sub(start))
+	if b.canOpen(n) {
+		b.open()
+
+		return b.publish(ctx, Open)
+	}
+
+	if b.canClose() {
 		b.close()
 	}
 
 	return nil
+}
+
+func (b *Breaker) canClose() bool {
+	return b.isHealthy(b.counter.Inc(1))
 }
 
 func (b *Breaker) close() {
@@ -255,7 +277,9 @@ func (b *Breaker) closed(ctx context.Context, fn func() error) error {
 	if err := fn(); err != nil {
 		n := b.FailureCount(err)
 		n += b.SlowCallCount(b.Now().Sub(start))
-		if b.isUnhealthy(b.counter.Inc(-int64(n))) {
+		if b.canOpen(n) {
+			b.open()
+
 			return errors.Join(err, b.publish(ctx, Open))
 		}
 
@@ -263,11 +287,13 @@ func (b *Breaker) closed(ctx context.Context, fn func() error) error {
 	}
 
 	n := b.SlowCallCount(b.Now().Sub(start))
-	if n > 0 && b.isUnhealthy(b.counter.Inc(-int64(n))) {
+	if b.canOpen(n) {
+		b.open()
+
 		return b.publish(ctx, Open)
 	}
 
-	b.counter.Inc(int64(1))
+	b.counter.Inc(1)
 
 	return nil
 }
