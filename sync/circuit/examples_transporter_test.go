@@ -27,33 +27,27 @@ func ExampleTransporter() {
 	client := ts.Client()
 	client.Transport = circuit.NewTransporter(client.Transport, cb)
 
-	// Opens after failure ratio exceeded.
-	for range opt.FailureThreshold {
-		resp, err := client.Get(ts.URL)
-		if err != nil {
-			panic(err)
-		}
-		defer resp.Body.Close()
-		fmt.Println(resp.Status)
-	}
-	_, err := client.Get(ts.URL)
-
 	re := regexp.MustCompile(`\d{5}`)
-	msg := re.ReplaceAllString(err.Error(), "8080")
-	fmt.Println(msg)
+
+	// Opens after failure ratio exceeded.
+	for range opt.FailureThreshold + 1 {
+		_, err := client.Get(ts.URL)
+		msg := re.ReplaceAllString(err.Error(), "8080")
+		fmt.Println(msg)
+	}
 
 	// Output:
 	// initial status:
 	// closed
-	// 500 Internal Server Error
-	// 500 Internal Server Error
-	// 500 Internal Server Error
-	// 500 Internal Server Error
-	// 500 Internal Server Error
-	// 500 Internal Server Error
-	// 500 Internal Server Error
-	// 500 Internal Server Error
-	// 500 Internal Server Error
-	// 500 Internal Server Error
+	// Get "http://127.0.0.1:8080": 500 Internal Server Error
+	// Get "http://127.0.0.1:8080": 500 Internal Server Error
+	// Get "http://127.0.0.1:8080": 500 Internal Server Error
+	// Get "http://127.0.0.1:8080": 500 Internal Server Error
+	// Get "http://127.0.0.1:8080": 500 Internal Server Error
+	// Get "http://127.0.0.1:8080": 500 Internal Server Error
+	// Get "http://127.0.0.1:8080": 500 Internal Server Error
+	// Get "http://127.0.0.1:8080": 500 Internal Server Error
+	// Get "http://127.0.0.1:8080": 500 Internal Server Error
+	// Get "http://127.0.0.1:8080": 500 Internal Server Error
 	// Get "http://127.0.0.1:8080": circuit-breaker: broken
 }
