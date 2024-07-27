@@ -4,28 +4,31 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math/rand"
 	"time"
 
 	"github.com/alextanhongpin/core/sync/retry"
 )
 
-func init() {
-	rand.Seed(42)
-}
+func ExampleRetry_Error() {
+	n := 10
+	r := retry.New(n)
+	r.Policy = func(ctx context.Context, i int) time.Duration {
+		return time.Millisecond
+	}
 
-func ExampleRetry() {
-	r := retry.New(0)
-	r.Now = func() time.Time { return time.Time{} }
-
-	ctx := context.Background()
-	res, err := r.Do(ctx, func(ctx context.Context) error {
+	i := 0
+	start := time.Now()
+	err := r.Do(context.Background(), func(ctx context.Context) error {
+		i++
 		return errors.New("random")
 	})
-	fmt.Printf("retry.Result: %+v\n", res)
+
 	fmt.Println(err)
+	fmt.Println(time.Now().Sub(start) > time.Duration(n)*time.Millisecond)
+	fmt.Println(i)
 	// Output:
-	// retry.Result: &{Retries:[0001-01-01 00:00:00 +0000 UTC]}
-	// retry: too many attempts
+	// retry: limit exceeded
 	// random
+	// true
+	// 10
 }

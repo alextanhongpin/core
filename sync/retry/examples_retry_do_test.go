@@ -7,15 +7,11 @@ import (
 	"github.com/alextanhongpin/core/sync/retry"
 )
 
-func ExampleRetryDo() {
-	r := retry.New()
-	ctx := context.Background()
-	res, err := r.Do(ctx, func(ctx context.Context) error {
+func ExampleRetry_Do() {
+	err := retry.New(10).Do(context.Background(), func(ctx context.Context) error {
 		return nil
 	})
-	fmt.Printf("retry.Result: %+v\n", res)
 	fmt.Println(err)
 	// Output:
-	// retry.Result: &{Retries:[]}
 	// <nil>
 }
