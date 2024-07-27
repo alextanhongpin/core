@@ -240,7 +240,7 @@ func (b *Breaker) halfOpen() {
 }
 
 func (b *Breaker) halfOpened(ctx context.Context, fn func() error) error {
-	start := time.Now()
+	start := b.Now()
 	if err := fn(); err != nil {
 		b.open()
 
