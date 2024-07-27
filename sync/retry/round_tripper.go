@@ -22,7 +22,7 @@ type transporter interface {
 }
 
 type retrier interface {
-	Do(ctx context.Context, fn func(ctx context.Context) error) error
+	DoCtx(ctx context.Context, fn func(ctx context.Context) error) error
 }
 
 type RoundTripper struct {
@@ -38,7 +38,7 @@ func NewRoundTripper(t transporter, r retrier) *RoundTripper {
 }
 
 func (t *RoundTripper) RoundTrip(r *http.Request) (resp *http.Response, err error) {
-	err = t.Retrier.Do(r.Context(), func(ctx context.Context) error {
+	err = t.Retrier.DoCtx(r.Context(), func(ctx context.Context) error {
 		resp, err = t.Transport.RoundTrip(r)
 		if err != nil {
 			return err

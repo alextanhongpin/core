@@ -28,7 +28,26 @@ func New(attempts int) *Retry {
 	}
 }
 
-func (r *Retry) Do(ctx context.Context, fn func(ctx context.Context) error) (err error) {
+func (r *Retry) Do(fn func() error) (err error) {
+	for i := range r.Attempts {
+		if i != 0 {
+			time.Sleep(r.Policy(context.Background(), i))
+		}
+
+		err = fn()
+		if errors.Is(err, ErrAborted) {
+			return err
+		}
+
+		if err == nil {
+			return nil
+		}
+	}
+
+	return errors.Join(ErrRetryLimitExceeded, err)
+}
+
+func (r *Retry) DoCtx(ctx context.Context, fn func(ctx context.Context) error) (err error) {
 	for i := range r.Attempts {
 		if i != 0 {
 			time.Sleep(r.Policy(ctx, i))

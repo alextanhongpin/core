@@ -19,7 +19,7 @@ func ExampleRetry_Abort() {
 		return time.Millisecond
 	}
 
-	err := r.Do(ctx, func(ctx context.Context) error {
+	err := r.DoCtx(ctx, func(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
 			// Cancel retry when timeout.

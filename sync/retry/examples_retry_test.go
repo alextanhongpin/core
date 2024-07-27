@@ -18,7 +18,7 @@ func ExampleRetry_Error() {
 
 	i := 0
 	start := time.Now()
-	err := r.Do(context.Background(), func(ctx context.Context) error {
+	err := r.Do(func() error {
 		i++
 		return errors.New("random")
 	})
