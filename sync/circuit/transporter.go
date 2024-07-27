@@ -26,18 +26,20 @@ func NewTransporter(t transporter, cb circuitbreaker) *Transporter {
 }
 
 func (t *Transporter) RoundTrip(r *http.Request) (resp *http.Response, err error) {
-	resp, err = t.t.RoundTrip(r)
+	err = t.cb.Do(func() error {
+		resp, err = t.t.RoundTrip(r)
+		if err != nil {
+			return err
+		}
+
+		if resp != nil && resp.StatusCode >= http.StatusInternalServerError {
+			return errors.New(resp.Status)
+		}
+
+		return nil
+	})
 	if err != nil {
 		return nil, err
-	}
-
-	if resp != nil && resp.StatusCode >= http.StatusInternalServerError {
-		cbErr := t.cb.Do(func() error {
-			return errors.New(resp.Status)
-		})
-		if errors.Is(cbErr, ErrBrokenCircuit) {
-			return nil, cbErr
-		}
 	}
 
 	return resp, nil

@@ -86,7 +86,7 @@ func New(opt *Option) *Breaker {
 			return 1
 		},
 		SlowCallCount: func(duration time.Duration) int {
-			// Every 5th second, penalize the slow call.
+			// Every 5th second, penalty increases by 1.
 			return int(duration / (5 * time.Second))
 		},
 		counter: rate.NewErrors(opt.SamplingDuration),
@@ -115,6 +115,14 @@ func (b *Breaker) Do(fn func() error) error {
 	}
 }
 
+func (b *Breaker) canOpen(n int) bool {
+	if n <= 0 {
+		return false
+	}
+
+	return b.isUnhealthy(b.counter.Inc(-int64(n)))
+}
+
 func (b *Breaker) open() {
 	b.mu.Lock()
 	b.status = Open
@@ -132,6 +140,10 @@ func (b *Breaker) opened() error {
 	return ErrBrokenCircuit
 }
 
+func (b *Breaker) canClose() bool {
+	return b.isHealthy(b.counter.Inc(1))
+}
+
 func (b *Breaker) close() {
 	b.mu.Lock()
 	b.status = Closed
@@ -144,7 +156,7 @@ func (b *Breaker) closed(fn func() error) error {
 	if err := fn(); err != nil {
 		n := b.FailureCount(err)
 		n += b.SlowCallCount(time.Since(start))
-		if b.isUnhealthy(b.counter.Inc(-int64(n))) {
+		if b.canOpen(n) {
 			b.open()
 		}
 
@@ -152,7 +164,7 @@ func (b *Breaker) closed(fn func() error) error {
 	}
 
 	n := b.SlowCallCount(time.Since(start))
-	if n > 0 && b.isUnhealthy(b.counter.Inc(-int64(n))) {
+	if b.canOpen(n) {
 		b.open()
 
 		return nil
@@ -171,12 +183,21 @@ func (b *Breaker) halfOpen() {
 }
 
 func (b *Breaker) halfOpened(fn func() error) error {
+	start := time.Now()
 	if err := fn(); err != nil {
 		b.open()
+
 		return err
 	}
 
-	if b.isHealthy(b.counter.Inc(1)) {
+	n := b.SlowCallCount(time.Since(start))
+	if b.canOpen(n) {
+		b.open()
+
+		return nil
+	}
+
+	if b.canClose() {
 		b.close()
 	}
 
