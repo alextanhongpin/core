@@ -29,7 +29,7 @@ func (v ValidatorFunc[T]) Validate(s T) error {
 	return v(s)
 }
 
-func StringExpr(expr string, funcs ...func(string) error) ValidatorFunc[string] {
+func StringExpr(expr string, funcs ...ValidatorFunc[string]) ValidatorFunc[string] {
 	sb := NewStringBuilder().Parse(expr)
 	for _, fn := range funcs {
 		sb = sb.Func(fn)
@@ -37,7 +37,7 @@ func StringExpr(expr string, funcs ...func(string) error) ValidatorFunc[string] 
 	return sb.Build()
 }
 
-func SliceExpr[T any](expr string, funcs ...func(T) error) ValidatorFunc[[]T] {
+func SliceExpr[T any](expr string, funcs ...ValidatorFunc[T]) ValidatorFunc[[]T] {
 	sb := NewSliceBuilder[T]().Parse(expr)
 	for _, fn := range funcs {
 		sb = sb.Each(fn)
@@ -45,7 +45,7 @@ func SliceExpr[T any](expr string, funcs ...func(T) error) ValidatorFunc[[]T] {
 	return sb.Build()
 }
 
-func NumberExpr[T Number](expr string, funcs ...func(T) error) ValidatorFunc[T] {
+func NumberExpr[T Number](expr string, funcs ...ValidatorFunc[T]) ValidatorFunc[T] {
 	nb := NewNumberBuilder[T]().Parse(expr)
 	for _, fn := range funcs {
 		nb = nb.Func(fn)
