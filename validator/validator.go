@@ -3,6 +3,7 @@ package validator
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"math"
 	"net"
 	"net/url"
@@ -23,10 +24,14 @@ var (
 
 var ErrSkip = errors.New("skip")
 
-type ValidatorFunc[T any] func(s T) error
+type Validator[T any] interface {
+	Validate(T) error
+}
 
-func (v ValidatorFunc[T]) Validate(s T) error {
-	err := v(s)
+type ValidateFunc[T any] func(T) error
+
+func (val ValidateFunc[T]) Validate(v T) error {
+	err := val(v)
 	if errors.Is(err, ErrSkip) {
 		return nil
 	}
@@ -60,7 +65,7 @@ func NumberExpr[T Number](expr string, fms ...FuncMap[T]) *NumberBuilder[T] {
 	return nb.Parse(expr)
 }
 
-type ParserFunc[T any] func(params string) ValidatorFunc[T]
+type ParserFunc[T any] func(params string) func(T) error
 
 type FuncMap[T any] map[string]ParserFunc[T]
 
@@ -78,16 +83,8 @@ func NewStringBuilder() *StringBuilder {
 	}
 }
 
-func (sb *StringBuilder) Clone() *StringBuilder {
-	sbc := NewStringBuilder()
-	sbc.fn = sb.fn
-	for k, v := range sb.fm {
-		sbc.fm[k] = v
-	}
-	return sbc
-}
-
-func (sb *StringBuilder) Parse(exprs string) *StringBuilder {
+func (sbo *StringBuilder) Parse(exprs string) *StringBuilder {
+	sb := sbo.Clone()
 	for _, expr := range strings.Split(exprs, ",") {
 		k, v, _ := strings.Cut(expr, "=")
 		switch k {
@@ -134,7 +131,7 @@ func (sb *StringBuilder) Parse(exprs string) *StringBuilder {
 }
 
 func (sb *StringBuilder) Min(n int) *StringBuilder {
-	sb.fn = seq(sb.fn, func(s string) error {
+	return sb.clone(func(s string) error {
 		if len([]rune(s)) < n {
 			if n == 1 {
 				return errors.New("min 1 character")
@@ -144,11 +141,10 @@ func (sb *StringBuilder) Min(n int) *StringBuilder {
 		}
 		return nil
 	})
-	return sb
 }
 
 func (sb *StringBuilder) Max(n int) *StringBuilder {
-	sb.fn = seq(sb.fn, func(s string) error {
+	return sb.clone(func(s string) error {
 		if len([]rune(s)) > n {
 			if n == 1 {
 				return errors.New("max 1 character")
@@ -157,82 +153,74 @@ func (sb *StringBuilder) Max(n int) *StringBuilder {
 		}
 		return nil
 	})
-	return sb
 }
 
 func (sb *StringBuilder) Email() *StringBuilder {
-	sb.fn = seq(sb.fn, func(s string) error {
+	return sb.clone(func(s string) error {
 		if !email.MatchString(s) {
 			return errors.New("invalid email")
 		}
 		return nil
 	})
-	return sb
 }
 
 func (sb *StringBuilder) AlphaNumeric() *StringBuilder {
-	sb.fn = seq(sb.fn, func(s string) error {
+	return sb.clone(func(s string) error {
 		if !alphaNumeric.MatchString(s) {
 			return errors.New("must be alphanumeric only")
 		}
 		return nil
 	})
-	return sb
 }
 
 func (sb *StringBuilder) Alpha() *StringBuilder {
-	sb.fn = seq(sb.fn, func(s string) error {
+	return sb.clone(func(s string) error {
 		if !alpha.MatchString(s) {
 			return errors.New("must be alphabets only")
 		}
 		return nil
 	})
-	return sb
 }
 
 func (sb *StringBuilder) Numeric() *StringBuilder {
-	sb.fn = seq(sb.fn, func(s string) error {
+	return sb.clone(func(s string) error {
 		if !numeric.MatchString(s) {
 			return errors.New("must be numbers only")
 		}
 		return nil
 	})
-	return sb
 }
 
 func (sb *StringBuilder) IP() *StringBuilder {
-	sb.fn = seq(sb.fn, func(s string) error {
+	return sb.clone(func(s string) error {
 		if net.ParseIP(s) == nil {
 			return errors.New("invalid ip")
 		}
 		return nil
 	})
-	return sb
 }
 
 func (sb *StringBuilder) URL() *StringBuilder {
-	sb.fn = seq(sb.fn, func(s string) error {
+	return sb.clone(func(s string) error {
 		_, err := url.Parse(s)
 		if err != nil {
 			return errors.New("invalid url")
 		}
 		return nil
 	})
-	return sb
 }
 
 func (sb *StringBuilder) Is(str string) *StringBuilder {
-	sb.fn = seq(sb.fn, func(s string) error {
+	return sb.clone(func(s string) error {
 		if !strings.EqualFold(str, s) {
 			return fmt.Errorf("must be %q", str)
 		}
 		return nil
 	})
-	return sb
 }
 
 func (sb *StringBuilder) Len(n int) *StringBuilder {
-	sb.fn = seq(sb.fn, func(s string) error {
+	return sb.clone(func(s string) error {
 		if len([]rune(s)) != n {
 			if n == 1 {
 				return errors.New("must be 1 character")
@@ -242,51 +230,46 @@ func (sb *StringBuilder) Len(n int) *StringBuilder {
 		}
 		return nil
 	})
-	return sb
 }
 
 func (sb *StringBuilder) Required() *StringBuilder {
-	sb.fn = seq(sb.fn, func(s string) error {
+	return sb.clone(func(s string) error {
 		if s == "" {
 			return errors.New("must not be empty")
 		}
 		return nil
 	})
-	return sb
 }
 
 func (sb *StringBuilder) StartsWith(prefix string) *StringBuilder {
-	sb.fn = seq(sb.fn, func(s string) error {
+	return sb.clone(func(s string) error {
 		if !strings.HasPrefix(s, prefix) {
 			return fmt.Errorf("must start with %q", prefix)
 		}
 		return nil
 	})
-	return sb
 }
 
 func (sb *StringBuilder) EndsWith(suffix string) *StringBuilder {
-	sb.fn = seq(sb.fn, func(s string) error {
+	return sb.clone(func(s string) error {
 		if !strings.HasSuffix(s, suffix) {
 			return fmt.Errorf("must end with %q", suffix)
 		}
 		return nil
 	})
-	return sb
 }
 
 func (sb *StringBuilder) Optional() *StringBuilder {
-	sb.fn = seq(sb.fn, func(s string) error {
+	return sb.clone(func(s string) error {
 		if s == "" {
 			return ErrSkip
 		}
 		return nil
 	})
-	return sb
 }
 
 func (sb *StringBuilder) OneOf(vals ...string) *StringBuilder {
-	sb.fn = seq(sb.fn, func(s string) error {
+	return sb.clone(func(s string) error {
 		for _, v := range vals {
 			if v == s {
 				return nil
@@ -294,33 +277,33 @@ func (sb *StringBuilder) OneOf(vals ...string) *StringBuilder {
 		}
 		return fmt.Errorf("must be one of %s", strings.Join(vals, ", "))
 	})
-	return sb
 }
 
 func (sb *StringBuilder) Regexp(name string, pattern string) *StringBuilder {
 	re := regexp.MustCompile(pattern)
-	sb.fn = seq(sb.fn, func(s string) error {
+	return sb.clone(func(s string) error {
 		if !re.MatchString(s) {
 			return fmt.Errorf("pattern does not match %q", name)
 		}
 		return nil
 	})
-	return sb
 }
 
-func (sb *StringBuilder) Func(fn ValidatorFunc[string]) *StringBuilder {
+func (sb *StringBuilder) Func(fn func(string) error) *StringBuilder {
 	return sb.Funcs(fn)
 }
 
-func (sb *StringBuilder) Funcs(fns ...ValidatorFunc[string]) *StringBuilder {
+func (sbo *StringBuilder) Funcs(fns ...func(string) error) *StringBuilder {
+	sb := sbo.Clone()
 	for _, fn := range fns {
-		sb.fn = seq(sb.fn, fn)
+		sb = sb.clone(fn)
 	}
 
 	return sb
 }
 
-func (sb *StringBuilder) FuncMap(fm FuncMap[string]) *StringBuilder {
+func (sbo *StringBuilder) FuncMap(fm FuncMap[string]) *StringBuilder {
+	sb := sbo.Clone()
 	for k, fn := range fm {
 		sb.fm[k] = fn
 	}
@@ -329,11 +312,21 @@ func (sb *StringBuilder) FuncMap(fm FuncMap[string]) *StringBuilder {
 }
 
 func (sb *StringBuilder) Validate(s string) error {
-	return sb.Build().Validate(s)
+	//return sb.Build().Validate(s)
+	return ValidateFunc[string](sb.fn).Validate(s)
 }
 
-func (sb *StringBuilder) Build() ValidatorFunc[string] {
-	return ValidatorFunc[string](sb.fn)
+func (sb *StringBuilder) Clone() *StringBuilder {
+	sbc := NewStringBuilder()
+	sbc.fn = sb.fn
+	sbc.fm = maps.Clone(sb.fm)
+	return sbc
+}
+
+func (sb *StringBuilder) clone(fn func(string) error) *StringBuilder {
+	sbc := sb.Clone()
+	sbc.fn = seq(sb.fn, fn)
+	return sbc
 }
 
 func seq[T any](fn func(T) error, fns ...func(T) error) func(T) error {
@@ -366,13 +359,18 @@ func NewSliceBuilder[T any]() *SliceBuilder[T] {
 func (sb *SliceBuilder[T]) Clone() *SliceBuilder[T] {
 	sbc := NewSliceBuilder[T]()
 	sbc.fn = sb.fn
-	for k, v := range sb.fm {
-		sbc.fm[k] = v
-	}
+	sbc.fm = maps.Clone(sb.fm)
 	return sbc
 }
 
-func (sb *SliceBuilder[T]) Parse(exprs string) *SliceBuilder[T] {
+func (sb *SliceBuilder[T]) clone(fn func([]T) error) *SliceBuilder[T] {
+	sbc := sb.Clone()
+	sbc.fn = seq(sb.fn, fn)
+	return sbc
+}
+
+func (sbo *SliceBuilder[T]) Parse(exprs string) *SliceBuilder[T] {
+	sb := sbo.Clone()
 	for _, expr := range strings.Split(exprs, ",") {
 		k, v, _ := strings.Cut(expr, "=")
 		switch k {
@@ -399,27 +397,25 @@ func (sb *SliceBuilder[T]) Parse(exprs string) *SliceBuilder[T] {
 }
 
 func (sb *SliceBuilder[T]) Required() *SliceBuilder[T] {
-	sb.fn = seq(sb.fn, func(vs []T) error {
+	return sb.clone(func(vs []T) error {
 		if len(vs) == 0 {
 			return errors.New("must not be empty")
 		}
 		return nil
 	})
-	return sb
 }
 
 func (sb *SliceBuilder[T]) Optional() *SliceBuilder[T] {
-	sb.fn = seq(sb.fn, func(vs []T) error {
+	return sb.clone(func(vs []T) error {
 		if len(vs) == 0 {
 			return ErrSkip
 		}
 		return nil
 	})
-	return sb
 }
 
 func (sb *SliceBuilder[T]) Min(n int) *SliceBuilder[T] {
-	sb.fn = seq(sb.fn, func(vs []T) error {
+	return sb.clone(func(vs []T) error {
 		if len(vs) < n {
 			if n == 1 {
 				return errors.New("min 1 item")
@@ -428,11 +424,10 @@ func (sb *SliceBuilder[T]) Min(n int) *SliceBuilder[T] {
 		}
 		return nil
 	})
-	return sb
 }
 
 func (sb *SliceBuilder[T]) Max(n int) *SliceBuilder[T] {
-	sb.fn = seq(sb.fn, func(vs []T) error {
+	return sb.clone(func(vs []T) error {
 		if len(vs) > n {
 			if n == 1 {
 				return errors.New("max 1 item")
@@ -442,11 +437,10 @@ func (sb *SliceBuilder[T]) Max(n int) *SliceBuilder[T] {
 		}
 		return nil
 	})
-	return sb
 }
 
 func (sb *SliceBuilder[T]) Len(n int) *SliceBuilder[T] {
-	sb.fn = seq(sb.fn, func(vs []T) error {
+	return sb.clone(func(vs []T) error {
 		if len(vs) != n {
 			if n == 1 {
 				return errors.New("must have 1 item")
@@ -456,11 +450,10 @@ func (sb *SliceBuilder[T]) Len(n int) *SliceBuilder[T] {
 		}
 		return nil
 	})
-	return sb
 }
 
-func (sb *SliceBuilder[T]) Each(fn func(T) error) *SliceBuilder[T] {
-	sb.fn = seq(sb.fn, func(vs []T) error {
+func (sb *SliceBuilder[T]) EachFunc(fn func(T) error) *SliceBuilder[T] {
+	return sb.clone(func(vs []T) error {
 		for _, v := range vs {
 			if err := fn(v); err != nil {
 				return err
@@ -468,14 +461,25 @@ func (sb *SliceBuilder[T]) Each(fn func(T) error) *SliceBuilder[T] {
 		}
 		return nil
 	})
-	return sb
 }
 
-func (sb *SliceBuilder[T]) Func(fn ValidatorFunc[[]T]) *SliceBuilder[T] {
+func (sb *SliceBuilder[T]) Each(fn Validator[T]) *SliceBuilder[T] {
+	return sb.clone(func(vs []T) error {
+		for _, v := range vs {
+			if err := fn.Validate(v); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+func (sb *SliceBuilder[T]) Func(fn func([]T) error) *SliceBuilder[T] {
 	return sb.Funcs(fn)
 }
 
-func (sb *SliceBuilder[T]) Funcs(fns ...ValidatorFunc[[]T]) *SliceBuilder[T] {
+func (sbo *SliceBuilder[T]) Funcs(fns ...func([]T) error) *SliceBuilder[T] {
+	sb := sbo.Clone()
 	for _, fn := range fns {
 		sb.fn = seq(sb.fn, fn)
 	}
@@ -483,7 +487,8 @@ func (sb *SliceBuilder[T]) Funcs(fns ...ValidatorFunc[[]T]) *SliceBuilder[T] {
 	return sb
 }
 
-func (sb *SliceBuilder[T]) FuncMap(fm FuncMap[[]T]) *SliceBuilder[T] {
+func (sbo *SliceBuilder[T]) FuncMap(fm FuncMap[[]T]) *SliceBuilder[T] {
+	sb := sbo.Clone()
 	for k, fn := range fm {
 		sb.fm[k] = fn
 	}
@@ -492,11 +497,7 @@ func (sb *SliceBuilder[T]) FuncMap(fm FuncMap[[]T]) *SliceBuilder[T] {
 }
 
 func (sb *SliceBuilder[T]) Validate(vs []T) error {
-	return sb.Build().Validate(vs)
-}
-
-func (sb *SliceBuilder[T]) Build() ValidatorFunc[[]T] {
-	return ValidatorFunc[[]T](sb.fn)
+	return ValidateFunc[[]T](sb.fn).Validate(vs)
 }
 
 type Number interface {
@@ -517,16 +518,8 @@ func NewNumberBuilder[T Number]() *NumberBuilder[T] {
 	}
 }
 
-func (nb *NumberBuilder[T]) Clone() *NumberBuilder[T] {
-	nbc := NewNumberBuilder[T]()
-	nbc.fn = nb.fn
-	for k, v := range nb.fm {
-		nbc.fm[k] = v
-	}
-	return nbc
-}
-
-func (nb *NumberBuilder[T]) Parse(exprs string) *NumberBuilder[T] {
+func (nbo *NumberBuilder[T]) Parse(exprs string) *NumberBuilder[T] {
+	nb := nbo.Clone()
 	for _, expr := range strings.Split(exprs, ",") {
 		k, v, _ := strings.Cut(expr, "=")
 		switch k {
@@ -571,29 +564,27 @@ func (nb *NumberBuilder[T]) Parse(exprs string) *NumberBuilder[T] {
 }
 
 func (nb *NumberBuilder[T]) Required() *NumberBuilder[T] {
-	nb.fn = seq(nb.fn, func(v T) error {
+	return nb.clone(func(v T) error {
 		var zero T
 		if v == zero {
 			return errors.New("must not be zero")
 		}
 		return nil
 	})
-	return nb
 }
 
 func (nb *NumberBuilder[T]) Optional() *NumberBuilder[T] {
-	nb.fn = seq(nb.fn, func(v T) error {
+	return nb.clone(func(v T) error {
 		var zero T
 		if v == zero {
 			return ErrSkip
 		}
 		return nil
 	})
-	return nb
 }
 
 func (nb *NumberBuilder[T]) Min(n T) *NumberBuilder[T] {
-	nb.fn = seq(nb.fn, func(v T) error {
+	return nb.clone(func(v T) error {
 		if v < n {
 			if n == 1 {
 				return errors.New("min 1")
@@ -602,31 +593,28 @@ func (nb *NumberBuilder[T]) Min(n T) *NumberBuilder[T] {
 		}
 		return nil
 	})
-	return nb
 }
 
 func (nb *NumberBuilder[T]) Max(n T) *NumberBuilder[T] {
-	nb.fn = seq(nb.fn, func(v T) error {
+	return nb.clone(func(v T) error {
 		if v > n {
 			return fmt.Errorf("max %v", n)
 		}
 		return nil
 	})
-	return nb
 }
 
 func (nb *NumberBuilder[T]) Is(n T) *NumberBuilder[T] {
-	nb.fn = seq(nb.fn, func(v T) error {
+	return nb.clone(func(v T) error {
 		if v != n {
 			return fmt.Errorf("must be %v", n)
 		}
 		return nil
 	})
-	return nb
 }
 
 func (nb *NumberBuilder[T]) OneOf(ns ...T) *NumberBuilder[T] {
-	nb.fn = seq(nb.fn, func(v T) error {
+	return nb.clone(func(v T) error {
 		for _, n := range ns {
 			if n == v {
 				return nil
@@ -636,73 +624,69 @@ func (nb *NumberBuilder[T]) OneOf(ns ...T) *NumberBuilder[T] {
 		s = s[1 : len(s)-1]
 		return fmt.Errorf("must be one of %v", strings.Join(strings.Fields(s), ", "))
 	})
-	return nb
 }
 
 func (nb *NumberBuilder[T]) Between(lo, hi T) *NumberBuilder[T] {
-	nb.fn = seq(nb.fn, func(v T) error {
+	return nb.clone(func(v T) error {
 		if v < lo || v > hi {
 			return fmt.Errorf("must be between %v and %v", lo, hi)
 		}
 		return nil
 	})
-	return nb
 }
 
 func (nb *NumberBuilder[T]) Positive() *NumberBuilder[T] {
-	nb.fn = seq(nb.fn, func(v T) error {
+	return nb.clone(func(v T) error {
 		var zero T
 		if v < zero {
 			return fmt.Errorf("must be greater than 0")
 		}
 		return nil
 	})
-	return nb
 }
 
 func (nb *NumberBuilder[T]) Negative() *NumberBuilder[T] {
-	nb.fn = seq(nb.fn, func(v T) error {
+	return nb.clone(func(v T) error {
 		var zero T
 		if v > zero {
 			return fmt.Errorf("must be less than 0")
 		}
 		return nil
 	})
-	return nb
 }
 
 func (nb *NumberBuilder[T]) Latitude() *NumberBuilder[T] {
-	nb.fn = seq(nb.fn, func(v T) error {
+	return nb.clone(func(v T) error {
 		if math.Abs(float64(v)) > 90.0 {
 			return errors.New("must be between -90 and 90")
 		}
 		return nil
 	})
-	return nb
 }
 
 func (nb *NumberBuilder[T]) Longitude() *NumberBuilder[T] {
-	nb.fn = seq(nb.fn, func(v T) error {
+	return nb.clone(func(v T) error {
 		if math.Abs(float64(v)) > 180.0 {
 			return errors.New("must be between -180 and 180")
 		}
 		return nil
 	})
-	return nb
 }
 
-func (nb *NumberBuilder[T]) Func(fn ValidatorFunc[T]) *NumberBuilder[T] {
+func (nb *NumberBuilder[T]) Func(fn func(T) error) *NumberBuilder[T] {
 	return nb.Funcs(fn)
 }
 
-func (nb *NumberBuilder[T]) Funcs(fns ...ValidatorFunc[T]) *NumberBuilder[T] {
+func (nbo *NumberBuilder[T]) Funcs(fns ...func(T) error) *NumberBuilder[T] {
+	nb := nbo.Clone()
 	for _, fn := range fns {
 		nb.fn = seq(nb.fn, fn)
 	}
 	return nb
 }
 
-func (nb *NumberBuilder[T]) FuncMap(fm FuncMap[T]) *NumberBuilder[T] {
+func (nbo *NumberBuilder[T]) FuncMap(fm FuncMap[T]) *NumberBuilder[T] {
+	nb := nbo.Clone()
 	for k, fn := range fm {
 		nb.fm[k] = fn
 	}
@@ -710,12 +694,30 @@ func (nb *NumberBuilder[T]) FuncMap(fm FuncMap[T]) *NumberBuilder[T] {
 	return nb
 }
 
-func (nb *NumberBuilder[T]) Validate(v T) error {
-	return nb.Build().Validate(v)
+func (nb *NumberBuilder[T]) Clone() *NumberBuilder[T] {
+	nbc := NewNumberBuilder[T]()
+	nbc.fn = nb.fn
+	nbc.fm = maps.Clone(nb.fm)
+	return nbc
 }
 
-func (nb *NumberBuilder[T]) Build() ValidatorFunc[T] {
-	return ValidatorFunc[T](nb.fn)
+func (nb *NumberBuilder[T]) clone(fn func(T) error) *NumberBuilder[T] {
+	nbc := nb.Clone()
+	nbc.fn = seq(nb.fn, fn)
+	return nbc
+}
+
+func (nb *NumberBuilder[T]) Validate(v T) error {
+	return ValidateFunc[T](nb.fn).Validate(v)
+}
+
+func Value[T any](v *T) (t T) {
+	if v == nil {
+		return
+	}
+	t = *v
+
+	return
 }
 
 func toInt(s string) int {

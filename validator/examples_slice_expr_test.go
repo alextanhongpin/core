@@ -8,7 +8,7 @@ import (
 
 var (
 	urlField   = validator.StringExpr("required,url,min=3")
-	linksField = validator.SliceExpr[Link]("required,min=2").Each((Link).Valid)
+	linksField = validator.SliceExpr[Link]("required,min=2").EachFunc((Link).Valid)
 )
 
 type Link struct {

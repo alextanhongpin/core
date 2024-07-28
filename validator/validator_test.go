@@ -71,7 +71,7 @@ func TestStringFuncMap(t *testing.T) {
 	}
 
 	fm := validator.FuncMap[string]{
-		"repeat": func(params string) validator.ValidatorFunc[string] {
+		"repeat": func(params string) func(string) error {
 			ch, ns, _ := strings.Cut(params, " ")
 			n := toInt(ns)
 
@@ -94,9 +94,10 @@ func TestStringFuncMap(t *testing.T) {
 
 func TestStringValidatorClone(t *testing.T) {
 	val := validator.StringExpr("required,min=5")
-	max10 := val.Clone().Max(10)
-	max20 := val.Clone().Max(20)
+	max10 := val.Max(10)
+	max20 := val.Max(20)
 	is := assert.New(t)
+	is.Nil(val.Validate("abcdefghijklmnopqrsuvwxyz"))
 	is.Equal("max 10 characters", max10.Validate("abcdefghijklmnopqrsuvwxyz").Error())
 	is.Equal("max 20 characters", max20.Validate("abcdefghijklmnopqrsuvwxyz").Error())
 }
@@ -171,8 +172,8 @@ func TestSliceValidator(t *testing.T) {
 	test("chain invalid", "required,min=2,max=3", []string{"a"}, "min 2 items")
 	test("chain invalid", "required,min=2,max=3", []string{"a", "b", "c", "d"}, "max 3 items")
 
-	validateEmail := validator.NewStringBuilder().Parse("required,email").Build()
-	validateSlice := validator.NewSliceBuilder[string]().Parse("required,min=2").Each(validateEmail).Build()
-	assert.Nil(t, validateSlice([]string{"john.doe@mail.com", "jane.doe@mail.com"}))
-	assert.Equal(t, validateSlice([]string{"john", "jane"}).Error(), "invalid email")
+	validateEmail := validator.NewStringBuilder().Parse("required,email")
+	validateSlice := validator.NewSliceBuilder[string]().Parse("required,min=2").Each(validateEmail)
+	assert.Nil(t, validateSlice.Validate([]string{"john.doe@mail.com", "jane.doe@mail.com"}))
+	assert.Equal(t, validateSlice.Validate([]string{"john", "jane"}).Error(), "invalid email")
 }

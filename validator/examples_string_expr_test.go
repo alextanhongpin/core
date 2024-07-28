@@ -15,15 +15,32 @@ func adminOnly(email string) error {
 	return errors.New("admin only")
 }
 
-var emailField = validator.StringExpr("required,email,ends_with=@mail.com").Func(adminOnly)
+var (
+	emailField         = validator.StringExpr("required,email,ends_with=@mail.com").Func(adminOnly)
+	maritalStatusField = validator.StringExpr("optional,oneof=single married divorced")
+)
 
 type Account struct {
-	Email string
+	Email         string
+	MaritalStatus *string
+}
+
+func (a *Account) String() string {
+	email := "n/a"
+	status := "n/a"
+	if a.Email != "" {
+		email = a.Email
+	}
+	if a.MaritalStatus != nil {
+		status = *a.MaritalStatus
+	}
+	return fmt.Sprintf("email: %s, marital_status: %s", email, status)
 }
 
 func (u *Account) Valid() error {
 	return validator.NewErrors(
 		validator.Field("email", emailField.Validate(u.Email)),
+		validator.Field("marital_status", maritalStatusField.Validate(validator.Value(u.MaritalStatus))),
 	)
 }
 
@@ -31,12 +48,16 @@ func ExampleStringExpr() {
 	noemail := &Account{Email: ""}
 	nonadmin := &Account{Email: "jane.doe@mail.com"}
 	email := &Account{Email: "john.doe@mail.com"}
+	unknownStatus := "unknown"
+	unknown := &Account{Email: "john.doe@mail.com", MaritalStatus: &unknownStatus}
 
-	fmt.Printf("%q => %v\n", noemail.Email, noemail.Valid())
-	fmt.Printf("%q => %v\n", nonadmin.Email, nonadmin.Valid())
-	fmt.Printf("%q => %v\n", email.Email, email.Valid())
+	fmt.Printf("%s => %v\n", noemail, noemail.Valid())
+	fmt.Printf("%s => %v\n", nonadmin, nonadmin.Valid())
+	fmt.Printf("%s => %v\n", email, email.Valid())
+	fmt.Printf("%s => %v\n", unknown, unknown.Valid())
 	// Output:
-	// "" => email: must not be empty
-	// "jane.doe@mail.com" => email: admin only
-	// "john.doe@mail.com" => <nil>
+	// email: n/a, marital_status: n/a => email: must not be empty
+	// email: jane.doe@mail.com, marital_status: n/a => email: admin only
+	// email: john.doe@mail.com, marital_status: n/a => <nil>
+	// email: john.doe@mail.com, marital_status: unknown => marital_status: must be one of single, married, divorced
 }
