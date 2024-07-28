@@ -50,14 +50,18 @@ func ExampleStringExpr() {
 	email := &Account{Email: "john.doe@mail.com"}
 	unknownStatus := "unknown"
 	unknown := &Account{Email: "john.doe@mail.com", MaritalStatus: &unknownStatus}
+	invalidUnknown := &Account{Email: "jane.doe@mail.com", MaritalStatus: &unknownStatus}
 
 	fmt.Printf("%s => %v\n", noemail, noemail.Valid())
 	fmt.Printf("%s => %v\n", nonadmin, nonadmin.Valid())
 	fmt.Printf("%s => %v\n", email, email.Valid())
 	fmt.Printf("%s => %v\n", unknown, unknown.Valid())
+	fmt.Printf("%s => %v\n", invalidUnknown, invalidUnknown.Valid())
 	// Output:
 	// email: n/a, marital_status: n/a => email: must not be empty
 	// email: jane.doe@mail.com, marital_status: n/a => email: admin only
 	// email: john.doe@mail.com, marital_status: n/a => <nil>
 	// email: john.doe@mail.com, marital_status: unknown => marital_status: must be one of single, married, divorced
+	// email: jane.doe@mail.com, marital_status: unknown => email: admin only
+	// marital_status: must be one of single, married, divorced
 }
