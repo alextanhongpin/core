@@ -1,6 +1,9 @@
 package validator_test
 
 import (
+	"errors"
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/alextanhongpin/core/validator"
@@ -12,7 +15,7 @@ func TestStringValidator(t *testing.T) {
 		t.Helper()
 		t.Run(name, func(t *testing.T) {
 			validate := validator.StringExpr(expr)
-			got := validate(input)
+			got := validate.Validate(input)
 			is := assert.New(t)
 			if want == "" {
 				is.Nil(got)
@@ -58,12 +61,52 @@ func TestStringValidator(t *testing.T) {
 	test("chain invalid", "required,email,starts_with=john,ends_with=@mail.com", "john.doe@yourmail.com", `must end with "@mail.com"`)
 }
 
+func TestStringFuncMap(t *testing.T) {
+	toInt := func(s string) int {
+		n, err := strconv.Atoi(s)
+		if err != nil {
+			panic(err)
+		}
+		return n
+	}
+
+	fm := validator.FuncMap[string]{
+		"repeat": func(params string) validator.ValidatorFunc[string] {
+			ch, ns, _ := strings.Cut(params, " ")
+			n := toInt(ns)
+
+			return func(v string) error {
+				if strings.Repeat(ch, n) != v {
+					return errors.New("does not repeat")
+				}
+
+				return nil
+			}
+		},
+	}
+
+	val := validator.StringExpr("repeat=# 10", fm)
+
+	is := assert.New(t)
+	is.Nil(val.Validate("##########"))
+	is.Equal("does not repeat", val.Validate("1").Error())
+}
+
+func TestStringValidatorClone(t *testing.T) {
+	val := validator.StringExpr("required,min=5")
+	max10 := val.Clone().Max(10)
+	max20 := val.Clone().Max(20)
+	is := assert.New(t)
+	is.Equal("max 10 characters", max10.Validate("abcdefghijklmnopqrsuvwxyz").Error())
+	is.Equal("max 20 characters", max20.Validate("abcdefghijklmnopqrsuvwxyz").Error())
+}
+
 func TestNumberValidator(t *testing.T) {
 	test := func(name, expr string, input int, want string) {
 		t.Helper()
 		t.Run(name, func(t *testing.T) {
 			validate := validator.NumberExpr[int](expr)
-			got := validate(input)
+			got := validate.Validate(input)
 			is := assert.New(t)
 			if want == "" {
 				is.Nil(got)
@@ -105,7 +148,7 @@ func TestSliceValidator(t *testing.T) {
 		t.Helper()
 		t.Run(name, func(t *testing.T) {
 			validate := validator.SliceExpr[string](expr)
-			got := validate(input)
+			got := validate.Validate(input)
 			is := assert.New(t)
 			if want == "" {
 				is.Nil(got)

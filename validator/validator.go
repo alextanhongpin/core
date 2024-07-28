@@ -26,35 +26,47 @@ var ErrSkip = errors.New("skip")
 type ValidatorFunc[T any] func(s T) error
 
 func (v ValidatorFunc[T]) Validate(s T) error {
-	return v(s)
+	err := v(s)
+	if errors.Is(err, ErrSkip) {
+		return nil
+	}
+	return err
 }
 
-func StringExpr(expr string, funcs ...ValidatorFunc[string]) ValidatorFunc[string] {
-	sb := NewStringBuilder().Parse(expr)
-	for _, fn := range funcs {
-		sb = sb.Func(fn)
+func StringExpr(expr string, fms ...FuncMap[string]) *StringBuilder {
+	sb := NewStringBuilder()
+	for _, fm := range fms {
+		sb = sb.FuncMap(fm)
 	}
-	return sb.Build()
+
+	return sb.Parse(expr)
 }
 
-func SliceExpr[T any](expr string, funcs ...ValidatorFunc[T]) ValidatorFunc[[]T] {
-	sb := NewSliceBuilder[T]().Parse(expr)
-	for _, fn := range funcs {
-		sb = sb.Each(fn)
+func SliceExpr[T any](expr string, fms ...FuncMap[[]T]) *SliceBuilder[T] {
+	sb := NewSliceBuilder[T]()
+	for _, fm := range fms {
+		sb = sb.FuncMap(fm)
 	}
-	return sb.Build()
+
+	return sb.Parse(expr)
 }
 
-func NumberExpr[T Number](expr string, funcs ...ValidatorFunc[T]) ValidatorFunc[T] {
-	nb := NewNumberBuilder[T]().Parse(expr)
-	for _, fn := range funcs {
-		nb = nb.Func(fn)
+func NumberExpr[T Number](expr string, fms ...FuncMap[T]) *NumberBuilder[T] {
+	nb := NewNumberBuilder[T]()
+	for _, fm := range fms {
+		nb = nb.FuncMap(fm)
 	}
-	return nb.Build()
+
+	return nb.Parse(expr)
 }
+
+type ParserFunc[T any] func(params string) ValidatorFunc[T]
+
+type FuncMap[T any] map[string]ParserFunc[T]
 
 type StringBuilder struct {
 	fn func(string) error
+	fm FuncMap[string]
 }
 
 func NewStringBuilder() *StringBuilder {
@@ -62,7 +74,17 @@ func NewStringBuilder() *StringBuilder {
 		fn: func(s string) error {
 			return nil
 		},
+		fm: make(FuncMap[string]),
 	}
+}
+
+func (sb *StringBuilder) Clone() *StringBuilder {
+	sbc := NewStringBuilder()
+	sbc.fn = sb.fn
+	for k, v := range sb.fm {
+		sbc.fm[k] = v
+	}
+	return sbc
 }
 
 func (sb *StringBuilder) Parse(exprs string) *StringBuilder {
@@ -100,7 +122,11 @@ func (sb *StringBuilder) Parse(exprs string) *StringBuilder {
 		case "ends_with":
 			sb = sb.EndsWith(v)
 		default:
-			panic(fmt.Sprintf("unknown expression %q", expr))
+			fn, ok := sb.fm[k]
+			if !ok {
+				panic(fmt.Sprintf("unknown expression %q", expr))
+			}
+			sb = sb.Func(fn(v))
 		}
 	}
 
@@ -282,21 +308,32 @@ func (sb *StringBuilder) Regexp(name string, pattern string) *StringBuilder {
 	return sb
 }
 
-func (sb *StringBuilder) Func(fn func(string) error) *StringBuilder {
-	sb.fn = seq(sb.fn, fn)
+func (sb *StringBuilder) Func(fn ValidatorFunc[string]) *StringBuilder {
+	return sb.Funcs(fn)
+}
+
+func (sb *StringBuilder) Funcs(fns ...ValidatorFunc[string]) *StringBuilder {
+	for _, fn := range fns {
+		sb.fn = seq(sb.fn, fn)
+	}
+
 	return sb
 }
 
-func (sb *StringBuilder) Build() ValidatorFunc[string] {
-	return func(s string) error {
-		if err := sb.fn(s); err != nil {
-			if errors.Is(err, ErrSkip) {
-				return nil
-			}
-			return err
-		}
-		return nil
+func (sb *StringBuilder) FuncMap(fm FuncMap[string]) *StringBuilder {
+	for k, fn := range fm {
+		sb.fm[k] = fn
 	}
+
+	return sb
+}
+
+func (sb *StringBuilder) Validate(s string) error {
+	return sb.Build().Validate(s)
+}
+
+func (sb *StringBuilder) Build() ValidatorFunc[string] {
+	return ValidatorFunc[string](sb.fn)
 }
 
 func seq[T any](fn func(T) error, fns ...func(T) error) func(T) error {
@@ -314,6 +351,7 @@ func seq[T any](fn func(T) error, fns ...func(T) error) func(T) error {
 
 type SliceBuilder[T any] struct {
 	fn func([]T) error
+	fm FuncMap[[]T]
 }
 
 func NewSliceBuilder[T any]() *SliceBuilder[T] {
@@ -321,7 +359,17 @@ func NewSliceBuilder[T any]() *SliceBuilder[T] {
 		fn: func(vs []T) error {
 			return nil
 		},
+		fm: make(FuncMap[[]T]),
 	}
+}
+
+func (sb *SliceBuilder[T]) Clone() *SliceBuilder[T] {
+	sbc := NewSliceBuilder[T]()
+	sbc.fn = sb.fn
+	for k, v := range sb.fm {
+		sbc.fm[k] = v
+	}
+	return sbc
 }
 
 func (sb *SliceBuilder[T]) Parse(exprs string) *SliceBuilder[T] {
@@ -339,7 +387,11 @@ func (sb *SliceBuilder[T]) Parse(exprs string) *SliceBuilder[T] {
 		case "len":
 			sb = sb.Len(toInt(v))
 		default:
-			panic(fmt.Sprintf("unknown expression %q", expr))
+			fn, ok := sb.fm[k]
+			if !ok {
+				panic(fmt.Sprintf("unknown expression %q", expr))
+			}
+			sb = sb.Func(fn(v))
 		}
 	}
 
@@ -419,21 +471,32 @@ func (sb *SliceBuilder[T]) Each(fn func(T) error) *SliceBuilder[T] {
 	return sb
 }
 
-func (sb *SliceBuilder[T]) Func(fn func([]T) error) *SliceBuilder[T] {
-	sb.fn = seq(sb.fn, fn)
+func (sb *SliceBuilder[T]) Func(fn ValidatorFunc[[]T]) *SliceBuilder[T] {
+	return sb.Funcs(fn)
+}
+
+func (sb *SliceBuilder[T]) Funcs(fns ...ValidatorFunc[[]T]) *SliceBuilder[T] {
+	for _, fn := range fns {
+		sb.fn = seq(sb.fn, fn)
+	}
+
 	return sb
 }
 
-func (sb *SliceBuilder[T]) Build() ValidatorFunc[[]T] {
-	return func(vs []T) error {
-		if err := sb.fn(vs); err != nil {
-			if errors.Is(err, ErrSkip) {
-				return nil
-			}
-			return err
-		}
-		return nil
+func (sb *SliceBuilder[T]) FuncMap(fm FuncMap[[]T]) *SliceBuilder[T] {
+	for k, fn := range fm {
+		sb.fm[k] = fn
 	}
+
+	return sb
+}
+
+func (sb *SliceBuilder[T]) Validate(vs []T) error {
+	return sb.Build().Validate(vs)
+}
+
+func (sb *SliceBuilder[T]) Build() ValidatorFunc[[]T] {
+	return ValidatorFunc[[]T](sb.fn)
 }
 
 type Number interface {
@@ -442,6 +505,7 @@ type Number interface {
 
 type NumberBuilder[T Number] struct {
 	fn func(T) error
+	fm FuncMap[T]
 }
 
 func NewNumberBuilder[T Number]() *NumberBuilder[T] {
@@ -449,7 +513,17 @@ func NewNumberBuilder[T Number]() *NumberBuilder[T] {
 		fn: func(v T) error {
 			return nil
 		},
+		fm: make(FuncMap[T]),
 	}
+}
+
+func (nb *NumberBuilder[T]) Clone() *NumberBuilder[T] {
+	nbc := NewNumberBuilder[T]()
+	nbc.fn = nb.fn
+	for k, v := range nb.fm {
+		nbc.fm[k] = v
+	}
+	return nbc
 }
 
 func (nb *NumberBuilder[T]) Parse(exprs string) *NumberBuilder[T] {
@@ -485,7 +559,11 @@ func (nb *NumberBuilder[T]) Parse(exprs string) *NumberBuilder[T] {
 		case "longitude":
 			nb = nb.Longitude()
 		default:
-			panic(fmt.Sprintf("unknown expression %q", expr))
+			fn, ok := nb.fm[k]
+			if !ok {
+				panic(fmt.Sprintf("unknown expression %q", expr))
+			}
+			nb = nb.Func(fn(v))
 		}
 	}
 
@@ -613,21 +691,31 @@ func (nb *NumberBuilder[T]) Longitude() *NumberBuilder[T] {
 	return nb
 }
 
-func (nb *NumberBuilder[T]) Func(fn func(T) error) *NumberBuilder[T] {
-	nb.fn = seq(nb.fn, fn)
+func (nb *NumberBuilder[T]) Func(fn ValidatorFunc[T]) *NumberBuilder[T] {
+	return nb.Funcs(fn)
+}
+
+func (nb *NumberBuilder[T]) Funcs(fns ...ValidatorFunc[T]) *NumberBuilder[T] {
+	for _, fn := range fns {
+		nb.fn = seq(nb.fn, fn)
+	}
 	return nb
 }
 
-func (nb *NumberBuilder[T]) Build() ValidatorFunc[T] {
-	return func(v T) error {
-		if err := nb.fn(v); err != nil {
-			if errors.Is(err, ErrSkip) {
-				return nil
-			}
-			return err
-		}
-		return nil
+func (nb *NumberBuilder[T]) FuncMap(fm FuncMap[T]) *NumberBuilder[T] {
+	for k, fn := range fm {
+		nb.fm[k] = fn
 	}
+
+	return nb
+}
+
+func (nb *NumberBuilder[T]) Validate(v T) error {
+	return nb.Build().Validate(v)
+}
+
+func (nb *NumberBuilder[T]) Build() ValidatorFunc[T] {
+	return ValidatorFunc[T](nb.fn)
 }
 
 func toInt(s string) int {

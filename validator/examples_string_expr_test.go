@@ -15,7 +15,7 @@ func adminOnly(email string) error {
 	return errors.New("admin only")
 }
 
-var emailField = validator.StringExpr("required,email,ends_with=@mail.com", adminOnly)
+var emailField = validator.StringExpr("required,email,ends_with=@mail.com").Func(adminOnly)
 
 type Account struct {
 	Email string
