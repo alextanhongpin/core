@@ -57,6 +57,11 @@ func ExampleStringExpr() {
 	fmt.Printf("%s => %v\n", email, email.Valid())
 	fmt.Printf("%s => %v\n", unknown, unknown.Valid())
 	fmt.Printf("%s => %v\n", invalidUnknown, invalidUnknown.Valid())
+
+	var ve validator.Errors
+	fmt.Println(errors.As(invalidUnknown.Valid(), &ve))
+	fmt.Println(ve["email"])
+	fmt.Println(ve["marital_status"])
 	// Output:
 	// email: n/a, marital_status: n/a => email: must not be empty
 	// email: jane.doe@mail.com, marital_status: n/a => email: admin only
@@ -64,4 +69,7 @@ func ExampleStringExpr() {
 	// email: john.doe@mail.com, marital_status: unknown => marital_status: must be one of single, married, divorced
 	// email: jane.doe@mail.com, marital_status: unknown => email: admin only
 	// marital_status: must be one of single, married, divorced
+	// true
+	// admin only
+	// must be one of single, married, divorced
 }
