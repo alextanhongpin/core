@@ -16,9 +16,9 @@ type Link struct {
 }
 
 func (l Link) Valid() error {
-	return validator.NewErrors(
-		validator.Field("url", urlField.Validate(l.URL)),
-	)
+	return validator.NewErrors(map[string]error{
+		"url": urlField.Validate(l.URL),
+	})
 }
 
 type Page struct {
@@ -26,9 +26,9 @@ type Page struct {
 }
 
 func (p *Page) Valid() error {
-	return validator.NewErrors(
-		validator.Field("links", linksField.Validate(p.Links)),
-	)
+	return validator.NewErrors(map[string]error{
+		"links": linksField.Validate(p.Links),
+	})
 }
 
 func ExampleSliceExpr() {

@@ -13,9 +13,9 @@ type User struct {
 }
 
 func (u *User) Valid() error {
-	return validator.NewErrors(
-		validator.Field("age", ageField.Validate(u.Age)),
-	)
+	return validator.NewErrors(map[string]error{
+		"age": ageField.Validate(u.Age),
+	})
 }
 
 func ExampleNumberExpr() {

@@ -5,15 +5,6 @@ import (
 	"strings"
 )
 
-type FieldError struct {
-	Field string
-	Error error
-}
-
-func Field(field string, err error) FieldError {
-	return FieldError{Field: field, Error: err}
-}
-
 type Errors map[string]string
 
 func (ve Errors) Error() string {
@@ -25,13 +16,13 @@ func (ve Errors) Error() string {
 	return strings.Join(errs, "\n")
 }
 
-func NewErrors(fes ...FieldError) error {
+func NewErrors(m map[string]error) error {
 	ve := make(Errors)
-	for _, fe := range fes {
-		if fe.Error == nil {
+	for field, err := range m {
+		if err == nil {
 			continue
 		}
-		ve[fe.Field] = fe.Error.Error()
+		ve[field] = err.Error()
 	}
 
 	if len(ve) == 0 {

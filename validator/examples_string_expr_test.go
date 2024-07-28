@@ -38,10 +38,10 @@ func (a *Account) String() string {
 }
 
 func (u *Account) Valid() error {
-	return validator.NewErrors(
-		validator.Field("email", emailField.Validate(u.Email)),
-		validator.Field("marital_status", maritalStatusField.Validate(validator.Value(u.MaritalStatus))),
-	)
+	return validator.NewErrors(map[string]error{
+		"email":          emailField.Validate(u.Email),
+		"marital_status": maritalStatusField.Validate(validator.Value(u.MaritalStatus)),
+	})
 }
 
 func ExampleStringExpr() {
