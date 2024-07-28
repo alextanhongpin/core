@@ -11,7 +11,7 @@ func TestStringValidator(t *testing.T) {
 	test := func(name, expr, input string, want string) {
 		t.Helper()
 		t.Run(name, func(t *testing.T) {
-			validate := validator.NewStringBuilder().Parse(expr).Build()
+			validate := validator.StringExpr(expr)
 			got := validate(input)
 			is := assert.New(t)
 			if want == "" {
@@ -62,7 +62,7 @@ func TestNumberValidator(t *testing.T) {
 	test := func(name, expr string, input int, want string) {
 		t.Helper()
 		t.Run(name, func(t *testing.T) {
-			validate := validator.NewNumberBuilder[int]().Parse(expr).Build()
+			validate := validator.NumberExpr[int](expr)
 			got := validate(input)
 			is := assert.New(t)
 			if want == "" {
@@ -104,7 +104,7 @@ func TestSliceValidator(t *testing.T) {
 	test := func(name, expr string, input []string, want string) {
 		t.Helper()
 		t.Run(name, func(t *testing.T) {
-			validate := validator.NewSliceBuilder[string]().Parse(expr).Build()
+			validate := validator.SliceExpr[string](expr)
 			got := validate(input)
 			is := assert.New(t)
 			if want == "" {

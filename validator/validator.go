@@ -23,6 +23,36 @@ var (
 
 var ErrSkip = errors.New("skip")
 
+type ValidatorFunc[T any] func(s T) error
+
+func (v ValidatorFunc[T]) Validate(s T) error {
+	return v(s)
+}
+
+func StringExpr(expr string, funcs ...func(string) error) ValidatorFunc[string] {
+	sb := NewStringBuilder().Parse(expr)
+	for _, fn := range funcs {
+		sb = sb.Func(fn)
+	}
+	return sb.Build()
+}
+
+func SliceExpr[T any](expr string, funcs ...func(T) error) ValidatorFunc[[]T] {
+	sb := NewSliceBuilder[T]().Parse(expr)
+	for _, fn := range funcs {
+		sb = sb.Each(fn)
+	}
+	return sb.Build()
+}
+
+func NumberExpr[T Number](expr string, funcs ...func(T) error) ValidatorFunc[T] {
+	nb := NewNumberBuilder[T]().Parse(expr)
+	for _, fn := range funcs {
+		nb = nb.Func(fn)
+	}
+	return nb.Build()
+}
+
 type StringBuilder struct {
 	fn func(string) error
 }
@@ -257,7 +287,7 @@ func (sb *StringBuilder) Func(fn func(string) error) *StringBuilder {
 	return sb
 }
 
-func (sb *StringBuilder) Build() func(s string) error {
+func (sb *StringBuilder) Build() ValidatorFunc[string] {
 	return func(s string) error {
 		if err := sb.fn(s); err != nil {
 			if errors.Is(err, ErrSkip) {
@@ -394,7 +424,7 @@ func (sb *SliceBuilder[T]) Func(fn func([]T) error) *SliceBuilder[T] {
 	return sb
 }
 
-func (sb *SliceBuilder[T]) Build() func(vs []T) error {
+func (sb *SliceBuilder[T]) Build() ValidatorFunc[[]T] {
 	return func(vs []T) error {
 		if err := sb.fn(vs); err != nil {
 			if errors.Is(err, ErrSkip) {
@@ -588,7 +618,7 @@ func (nb *NumberBuilder[T]) Func(fn func(T) error) *NumberBuilder[T] {
 	return nb
 }
 
-func (nb *NumberBuilder[T]) Build() func(T) error {
+func (nb *NumberBuilder[T]) Build() ValidatorFunc[T] {
 	return func(v T) error {
 		if err := nb.fn(v); err != nil {
 			if errors.Is(err, ErrSkip) {
