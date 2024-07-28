@@ -8,7 +8,7 @@ import (
 
 var (
 	urlField   = validator.StringExpr("required,url,min=3")
-	linksField = validator.SliceExpr[Link]("required,min=2", func(l Link) error {
+	linksField = validator.SliceExpr("required,min=2", func(l Link) error {
 		return l.Valid()
 	})
 )
