@@ -23,7 +23,7 @@ func ExampleRetry_Abort() {
 		select {
 		case <-ctx.Done():
 			// Cancel retry when timeout.
-			return errors.Join(retry.ErrAborted, context.Cause(ctx))
+			return retry.Abort(context.Cause(ctx))
 		default:
 			return errors.New("random")
 		}
@@ -31,6 +31,5 @@ func ExampleRetry_Abort() {
 
 	fmt.Println(err)
 	// Output:
-	// retry: aborted
 	// context deadline exceeded
 }
