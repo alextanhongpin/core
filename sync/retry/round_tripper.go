@@ -1,7 +1,6 @@
 package retry
 
 import (
-	"context"
 	"errors"
 	"net/http"
 	"slices"
@@ -10,7 +9,6 @@ import (
 var retryableStatusCodes = []int{
 	http.StatusRequestTimeout,
 	http.StatusTooEarly,
-	http.StatusTooManyRequests,
 	http.StatusInternalServerError,
 	http.StatusBadGateway,
 	http.StatusServiceUnavailable,
@@ -22,23 +20,23 @@ type transporter interface {
 }
 
 type retrier interface {
-	DoCtx(ctx context.Context, fn func(ctx context.Context) error) error
+	Do(func() error) error
 }
 
 type RoundTripper struct {
 	Transport transporter
-	Retrier   retrier
+	retrier   retrier
 }
 
 func NewRoundTripper(t transporter, r retrier) *RoundTripper {
 	return &RoundTripper{
 		Transport: t,
-		Retrier:   r,
+		retrier:   r,
 	}
 }
 
 func (t *RoundTripper) RoundTrip(r *http.Request) (resp *http.Response, err error) {
-	err = t.Retrier.DoCtx(r.Context(), func(ctx context.Context) error {
+	err = t.retrier.Do(func() error {
 		resp, err = t.Transport.RoundTrip(r)
 		if err != nil {
 			return err
@@ -49,10 +47,11 @@ func (t *RoundTripper) RoundTrip(r *http.Request) (resp *http.Response, err erro
 		}
 
 		return nil
+
 	})
 	if err != nil {
 		return nil, err
 	}
 
-	return resp, nil
+	return resp, err
 }

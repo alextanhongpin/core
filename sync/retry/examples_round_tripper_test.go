@@ -1,7 +1,6 @@
 package retry_test
 
 import (
-	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -19,7 +18,7 @@ func ExampleRoundTripper() {
 	defer ts.Close()
 
 	r := retry.New(10)
-	r.Policy = func(ctx context.Context, n int) time.Duration {
+	r.Policy = func(n int) time.Duration {
 		return time.Millisecond
 	}
 

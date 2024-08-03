@@ -1,7 +1,6 @@
 package retry_test
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"time"
@@ -12,7 +11,7 @@ import (
 func ExampleRetry_Error() {
 	n := 10
 	r := retry.New(n)
-	r.Policy = func(ctx context.Context, i int) time.Duration {
+	r.Policy = func(i int) time.Duration {
 		return time.Millisecond
 	}
 

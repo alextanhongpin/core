@@ -1,8 +1,7 @@
-// Package retry implements functions for retry mechanism.
+// Package retry implements functions for DoFunc mechanism.
 package retry
 
 import (
-	"context"
 	"errors"
 	"math"
 	"math/rand"
@@ -10,27 +9,28 @@ import (
 )
 
 var ErrRetryLimitExceeded = errors.New("retry: limit exceeded")
-var ErrAborted = errors.New("retry: aborted")
+
+type PolicyFunc func(i int) time.Duration
 
 type Retry struct {
 	Attempts int
-	Policy   func(ctx context.Context, attempts int) time.Duration
+	Policy   PolicyFunc
 }
 
-func New(attempts int) *Retry {
-	if attempts <= 0 {
-		panic("retry: attempts must be greater than 0")
-	}
-
+func New(n int) *Retry {
 	return &Retry{
-		Attempts: attempts,
+		Attempts: n,
 		Policy:   ExponentialBackoff(100*time.Millisecond, 1*time.Minute, true),
 	}
 }
 
-func (r *Retry) Do(fn func() error) (err error) {
-	for i := range r.Attempts {
-		time.Sleep(r.Policy(context.Background(), i))
+func (r *Retry) Do(fn func() error) error {
+	return DoFunc(r.Attempts, r.Policy, fn)
+}
+
+func DoFunc(n int, p PolicyFunc, fn func() error) (err error) {
+	for i := range n {
+		time.Sleep(p(i))
 
 		err = fn()
 		if err == nil {
@@ -46,42 +46,22 @@ func (r *Retry) Do(fn func() error) (err error) {
 	return errors.Join(ErrRetryLimitExceeded, err)
 }
 
-func (r *Retry) DoCtx(ctx context.Context, fn func(ctx context.Context) error) (err error) {
-	for i := range r.Attempts {
-		time.Sleep(r.Policy(ctx, i))
+func DoFunc2[T any](n int, p PolicyFunc, fn func() (T, error)) (res T, err error) {
+	for i := range n {
+		time.Sleep(p(i))
 
-		err = fn(ctx)
+		res, err = fn()
 		if err == nil {
-			return nil
+			return res, nil
 		}
 
 		var abortErr *AbortError
 		if errors.As(err, &abortErr) {
-			return abortErr.Unwrap()
+			return res, abortErr.Unwrap()
 		}
 	}
 
-	return errors.Join(ErrRetryLimitExceeded, err)
-}
-
-func ExponentialBackoff(base, cap time.Duration, jitter bool) func(ctx context.Context, attempts int) time.Duration {
-	b := float64(base)
-	c := float64(cap)
-
-	return func(ctx context.Context, attempts int) time.Duration {
-		if attempts <= 0 {
-			return 0
-		}
-
-		a := float64(attempts)
-		j := 1.0
-		if jitter {
-			j += rand.Float64()
-		}
-		e := math.Pow(2, a)
-
-		return time.Duration(min(c, j*b*e))
-	}
+	return res, errors.Join(ErrRetryLimitExceeded, err)
 }
 
 func Abort(err error) *AbortError {
@@ -98,4 +78,24 @@ func (e *AbortError) Error() string {
 
 func (e *AbortError) Unwrap() error {
 	return e.err
+}
+
+func ExponentialBackoff(base, cap time.Duration, jitter bool) func(attempts int) time.Duration {
+	b := float64(base)
+	c := float64(cap)
+
+	return func(attempts int) time.Duration {
+		if attempts <= 0 {
+			return 0
+		}
+
+		a := float64(attempts)
+		j := 1.0
+		if jitter {
+			j += rand.Float64()
+		}
+		e := math.Pow(2, a)
+
+		return time.Duration(min(c, j*b*e))
+	}
 }

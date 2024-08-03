@@ -15,11 +15,11 @@ func ExampleRetry_Abort() {
 	defer cancel()
 
 	r := retry.New(10)
-	r.Policy = func(ctx context.Context, i int) time.Duration {
+	r.Policy = func(i int) time.Duration {
 		return time.Millisecond
 	}
 
-	err := r.DoCtx(ctx, func(ctx context.Context) error {
+	err := r.Do(func() error {
 		select {
 		case <-ctx.Done():
 			// Cancel retry when timeout.
