@@ -3,81 +3,125 @@ package retry
 
 import (
 	"errors"
+	"fmt"
 	"math"
 	"math/rand"
 	"time"
 )
 
-var ErrRetryLimitExceeded = errors.New("retry: limit exceeded")
+var (
+	ErrLimitExceeded = errors.New("retry: limit exceeded")
+	ErrAborted       = errors.New("retry: aborted")
+)
 
 type PolicyFunc func(i int) time.Duration
 
-type Retry struct {
+type Options struct {
 	Attempts int
 	Policy   PolicyFunc
 }
 
-func New(n int) *Retry {
-	return &Retry{
-		Attempts: n,
+func NewOptions() *Options {
+	return &Options{
+		Attempts: 10,
 		Policy:   ExponentialBackoff(100*time.Millisecond, 1*time.Minute, true),
 	}
 }
 
-func (r *Retry) Do(fn func() error) error {
-	return DoFunc(r.Attempts, r.Policy, fn)
+type Handler struct {
+	opts *Options
 }
 
-func DoFunc(n int, p PolicyFunc, fn func() error) (err error) {
-	for i := range n {
-		time.Sleep(p(i))
+func New(opts *Options) *Handler {
+	if opts == nil {
+		opts = NewOptions()
+	}
+	if opts.Attempts < 1 {
+		panic("retry: attempts must be greater than 0")
+	}
+	if opts.Policy == nil {
+		panic("retry: policy must be set")
+	}
+
+	return &Handler{
+		opts: opts,
+	}
+}
+
+func (r *Handler) Do(fn func() error) error {
+	return DoFunc(fn, WithAttempts(r.opts.Attempts), WithPolicy(r.opts.Policy))
+}
+
+type Option func(opts *Options)
+
+func WithAttempts(attempts int) Option {
+	return func(opts *Options) {
+		opts.Attempts = attempts
+	}
+}
+
+func WithPolicy(policy PolicyFunc) Option {
+	return func(opts *Options) {
+		opts.Policy = policy
+	}
+}
+
+func DoFunc(fn func() error, opts ...Option) (err error) {
+	o := NewOptions()
+	for _, opt := range opts {
+		opt(o)
+	}
+
+	for i := range o.Attempts {
+		time.Sleep(o.Policy(i))
 
 		err = fn()
 		if err == nil {
 			return nil
 		}
 
-		var abortErr *AbortError
-		if errors.As(err, &abortErr) {
-			return abortErr.Unwrap()
+		if errors.Is(err, ErrAborted) {
+			return err
 		}
 	}
 
-	return errors.Join(ErrRetryLimitExceeded, err)
+	return limitExceeded(err)
 }
 
-func DoFunc2[T any](n int, p PolicyFunc, fn func() (T, error)) (res T, err error) {
-	for i := range n {
-		time.Sleep(p(i))
+func DoFunc2[T any](fn func() (T, error), opts ...Option) (res T, err error) {
+	o := NewOptions()
+	for _, opt := range opts {
+		opt(o)
+	}
+
+	for i := range o.Attempts {
+		time.Sleep(o.Policy(i))
 
 		res, err = fn()
 		if err == nil {
 			return res, nil
 		}
 
-		var abortErr *AbortError
-		if errors.As(err, &abortErr) {
-			return res, abortErr.Unwrap()
+		if errors.Is(err, ErrAborted) {
+			return res, err
 		}
 	}
 
-	return res, errors.Join(ErrRetryLimitExceeded, err)
+	return res, limitExceeded(err)
 }
 
-func Abort(err error) *AbortError {
-	return &AbortError{err}
+func Abort(err error) error {
+	return &retryError{
+		err: ErrAborted,
+		ori: err,
+	}
 }
 
-type AbortError struct {
-	err error
-}
-
-func (e *AbortError) Error() string {
-	return e.err.Error()
-}
-
-func (e *AbortError) Unwrap() error {
-	return e.err
+func limitExceeded(err error) error {
+	return &retryError{
+		err: ErrLimitExceeded,
+		ori: err,
+	}
 }
 
 func ExponentialBackoff(base, cap time.Duration, jitter bool) func(attempts int) time.Duration {
@@ -98,4 +142,21 @@ func ExponentialBackoff(base, cap time.Duration, jitter bool) func(attempts int)
 
 		return time.Duration(min(c, j*b*e))
 	}
+}
+
+type retryError struct {
+	err error
+	ori error
+}
+
+func (t *retryError) Error() string {
+	return fmt.Sprintf("%s: %s", t.err, t.ori)
+}
+
+func (t *retryError) Unwrap() error {
+	return t.ori
+}
+
+func (t *retryError) Is(err error) bool {
+	return errors.Is(t.err, err) || errors.Is(t.ori, err)
 }

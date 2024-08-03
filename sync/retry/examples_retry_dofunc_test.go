@@ -13,19 +13,19 @@ func ExampleRetry_DoFunc() {
 		return 0
 	}
 
-	err := retry.DoFunc(10, noopPolicy, func() error {
+	opts := []retry.Option{retry.WithAttempts(10), retry.WithPolicy(noopPolicy)}
+	err := retry.DoFunc(func() error {
 		return errors.New("random")
-	})
+	}, opts...)
 
 	fmt.Println(err)
 
-	n, err := retry.DoFunc2(10, noopPolicy, func() (int, error) {
+	n, err := retry.DoFunc2(func() (int, error) {
 		return 1234, nil
-	})
+	}, opts...)
 
 	fmt.Println(n, err)
 	// Output:
-	// retry: limit exceeded
-	// random
+	// retry: limit exceeded: random
 	// 1234 <nil>
 }

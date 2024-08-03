@@ -14,10 +14,11 @@ func ExampleRetry_Abort() {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Millisecond)
 	defer cancel()
 
-	r := retry.New(10)
-	r.Policy = func(i int) time.Duration {
+	opts := retry.NewOptions()
+	opts.Policy = func(i int) time.Duration {
 		return time.Millisecond
 	}
+	r := retry.New(opts)
 
 	err := r.Do(func() error {
 		select {
@@ -30,6 +31,8 @@ func ExampleRetry_Abort() {
 	})
 
 	fmt.Println(err)
+	fmt.Println(errors.Unwrap(err))
 	// Output:
+	// retry: aborted: context deadline exceeded
 	// context deadline exceeded
 }

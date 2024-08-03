@@ -17,10 +17,11 @@ func ExampleRoundTripper() {
 	}))
 	defer ts.Close()
 
-	r := retry.New(10)
-	r.Policy = func(n int) time.Duration {
+	opts := retry.NewOptions()
+	opts.Policy = func(n int) time.Duration {
 		return time.Millisecond
 	}
+	r := retry.New(opts)
 
 	client := ts.Client()
 	client.Transport = retry.NewRoundTripper(client.Transport, r)
@@ -44,6 +45,5 @@ func ExampleRoundTripper() {
 
 	// Output:
 	// 401 Unauthorized
-	// Get "http://127.0.0.1:8080": retry: limit exceeded
-	// 500 Internal Server Error
+	// Get "http://127.0.0.1:8080": retry: limit exceeded: 500 Internal Server Error
 }

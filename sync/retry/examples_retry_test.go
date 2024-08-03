@@ -9,24 +9,31 @@ import (
 )
 
 func ExampleRetry_Error() {
-	n := 10
-	r := retry.New(n)
-	r.Policy = func(i int) time.Duration {
+	opts := retry.NewOptions()
+	opts.Attempts = 10
+	opts.Policy = func(i int) time.Duration {
 		return time.Millisecond
 	}
+	r := retry.New(opts)
 
+	var wantErr = errors.New("random")
 	i := 0
 	start := time.Now()
 	err := r.Do(func() error {
 		i++
-		return errors.New("random")
+		return wantErr
 	})
 
 	fmt.Println(err)
-	fmt.Println(time.Now().Sub(start) > time.Duration(n)*time.Millisecond)
+	fmt.Println(errors.Is(err, retry.ErrLimitExceeded))
+	fmt.Println(errors.Is(err, wantErr))
+	fmt.Println(errors.Unwrap(err))
+	fmt.Println(time.Now().Sub(start) > time.Duration(opts.Attempts)*time.Millisecond)
 	fmt.Println(i)
 	// Output:
-	// retry: limit exceeded
+	// retry: limit exceeded: random
+	// true
+	// true
 	// random
 	// true
 	// 10

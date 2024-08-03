@@ -7,7 +7,7 @@ import (
 )
 
 func ExampleRetry_Do() {
-	err := retry.New(10).Do(func() error {
+	err := retry.New(nil).Do(func() error {
 		return nil
 	})
 	fmt.Println(err)
