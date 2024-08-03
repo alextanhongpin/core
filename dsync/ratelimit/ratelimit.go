@@ -7,18 +7,18 @@ import (
 
 type Result struct {
 	Allow     bool
-	Remaining int64
-	RetryAt   time.Time
-	ResetAt   time.Time
 	Limit     int64
+	Remaining int64
+	ResetAt   time.Time
+	RetryAt   time.Time
 }
 
 func newResult(res []int64, limit int64) *Result {
 	return &Result{
 		Allow:     res[0] == 1,
 		Remaining: res[1],
-		RetryAt:   unixMillisecondToTime(res[2]),
-		ResetAt:   unixMillisecondToTime(res[3]),
+		RetryAt:   time.UnixMilli(res[2]),
+		ResetAt:   time.UnixMilli(res[3]),
 		Limit:     limit,
 	}
 }
@@ -43,9 +43,4 @@ func (r *Result) ResetIn() time.Duration {
 
 func (r *Result) Wait() {
 	time.Sleep(r.RetryIn())
-}
-
-func unixMillisecondToTime(unixMs int64) time.Time {
-	ns := unixMs * 1e6
-	return time.Unix(0, ns)
 }

@@ -51,7 +51,7 @@ func (tb *TokenBucket) AllowN(ctx context.Context, key string, n int) (*Result, 
 		tb.opt.Limit,
 		tb.opt.Period.Milliseconds(),
 		tb.opt.Burst,
-		now.UnixNano() / 1e6,
+		now.UnixMilli(),
 		n,
 	}
 	res, err := tokenBucket.Run(ctx, tb.client, keys, argv...).Int64Slice()
