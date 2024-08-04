@@ -2,105 +2,132 @@ package cache
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"fmt"
 	"time"
 
 	redis "github.com/redis/go-redis/v9"
 )
 
-// SingleFlight is a policy for handling concurrent requests.
-// When enabled, it will prevent multiple requests from hitting the same key.
-// If the key is not found, it will execute the getter function and cache the result.
-type SingleFlight struct {
-	// When non-empty, it will wait for the duration before attempting to request
-	// the key from the cache again.
-	Retries []time.Duration
-	// Allows customizing the key that is used to lock.
-	KeyFn func(key string) string
-	// How long to lock the key.
-	Lock time.Duration
+var ErrNotFound = errors.New("cache: not found")
+
+type Cacheable struct {
+	client *redis.Client
 }
 
-type Cacheable[T any] struct {
-	client       *redis.Client
-	getter       func(ctx context.Context) (T, error)
-	SingleFlight *SingleFlight
-}
-
-func New[T any](client *redis.Client, getter func(ctx context.Context) (T, error)) *Cacheable[T] {
-	return &Cacheable[T]{
+func New(client *redis.Client) *Cacheable {
+	return &Cacheable{
 		client: client,
-		getter: getter,
 	}
 }
 
-func (c *Cacheable[T]) Get(ctx context.Context, key string, ttl time.Duration) (v T, hit bool, err error) {
-	v, err = c.get(ctx, key)
-	if err == nil {
-		return v, true, nil
+func (c *Cacheable) Load(ctx context.Context, key string) (value string, err error) {
+	s, err := c.client.Get(ctx, key).Result()
+	if errors.Is(err, redis.Nil) {
+		return "", ErrNotFound
 	}
 
-	if !errors.Is(err, redis.Nil) {
-		return v, false, err
-	}
-
-	if c.SingleFlight != nil {
-		sf := c.SingleFlight
-		// Lock the key.
-		ok, err := c.client.SetNX(ctx, sf.KeyFn(key), fmt.Sprint(time.Now().Unix()), sf.Lock).Result()
-		if err != nil {
-			return v, false, err
-		}
-
-		// Fail to acquire the lock, another operation is filling the cache.
-		if !ok {
-			// Periodically check the cache.
-			for _, d := range sf.Retries {
-				time.Sleep(d)
-
-				// If the cache is filled, return the value.
-				v, err := c.get(ctx, key)
-				if err == nil {
-					return v, true, nil
-				}
-			}
-
-			v, err := c.getter(ctx)
-			return v, false, err
-		}
-	}
-
-	v, err = c.getter(ctx)
-	if err != nil {
-		return v, false, err
-	}
-
-	if err := c.Set(ctx, key, v, ttl); err != nil {
-		return v, false, err
-	}
-
-	return v, false, nil
+	return s, err
 }
 
-func (c *Cacheable[T]) Set(ctx context.Context, key string, v T, ttl time.Duration) error {
-	b, err := json.Marshal(v)
-	if err != nil {
-		return err
-	}
-
-	return c.client.Set(ctx, key, string(b), ttl).Err()
+func (c *Cacheable) Store(ctx context.Context, key, value string, ttl time.Duration) error {
+	return c.client.Set(ctx, key, value, ttl).Err()
 }
 
-func (c *Cacheable[T]) get(ctx context.Context, key string) (T, error) {
-	var v T
-	b, err := c.client.Get(ctx, key).Bytes()
+// LoadOrStore returns the existing value for the key if present. Otherwise, it
+// stores and returns the given value. The loaded result is true if the value
+// was loaded, false if stored.
+// Also see usecase here: https://github.com/golang/go/issues/33762#issuecomment-523757434
+func (c *Cacheable) LoadOrStore(ctx context.Context, key, value string, ttl time.Duration) (old string, loaded bool, err error) {
+	v, err := c.client.Do(ctx, "SET", key, value, "NX", "GET", "PX", ttl.Milliseconds()).Result()
+	// If the previous value does not exist when GET, then it will be nil.
+	if errors.Is(err, redis.Nil) {
+		return value, false, nil
+	}
+
 	if err != nil {
-		return v, err
+		return "", false, err
 	}
-	if err := json.Unmarshal(b, &v); err != nil {
-		return v, err
+
+	return v.(string), true, nil
+}
+
+// LoadAndDelete deletes the value for a key, returning the previous value if
+// any. The loaded result reports whether the key was present.
+// Also see usecase here: https://github.com/golang/go/issues/33762#issuecomment-523757434
+func (c *Cacheable) LoadAndDelete(ctx context.Context, key string) (value string, loaded bool, err error) {
+	v, err := c.client.Do(ctx, "GETDEL", key).Result()
+	if errors.Is(err, redis.Nil) {
+		return value, false, nil
 	}
-	return v, nil
+	if err != nil {
+		return value, false, err
+	}
+
+	return v.(string), true, nil
+}
+
+var compareAndDelete = redis.NewScript(`
+	-- KEYS[1]: The key
+	-- ARGV[1]: The value
+	local key = KEYS[1]
+	local val = ARGV[1]
+
+	if redis.call('GET', key) == val then
+		return redis.call('DEL', key)
+	end
+
+	return nil
+`)
+
+// CompareAndDelete deletes the entry for key if its value is equal to old. The
+// old value must be of a comparable type.
+// If there is no current value for key in the map, CompareAndDelete returns
+// false (even if the old value is the nil interface value).
+func (c *Cacheable) CompareAndDelete(ctx context.Context, key, old string) (deleted bool, err error) {
+	keys := []string{key}
+	argv := []any{old}
+	err = compareAndDelete.Run(ctx, c.client, keys, argv...).Err()
+	if errors.Is(err, redis.Nil) {
+		return false, nil
+	}
+
+	if err != nil {
+		return false, err
+	}
+
+	return true, nil
+}
+
+var compareAndSwap = redis.NewScript(`
+	-- KEYS[1]: The key
+	-- ARGV[1]: The old value
+	-- ARGV[2]: The new value
+	-- ARGV[3]: The period in milliseconds.
+	local key = KEYS[1]
+	local old = ARGV[1]
+	local new = ARGV[2]
+	local ttl = ARGV[3]
+
+	if redis.call('GET', key) == old then
+		return redis.call('SET', key, new, 'PX', ttl)
+	end
+
+	return nil
+`)
+
+// CompareAndSwap swaps the old and new values for key if the value stored in
+// the map is equal to old. The old value must be of a comparable type.
+func (c *Cacheable) CompareAndSwap(ctx context.Context, key, old, value string, ttl time.Duration) (swapped bool, err error) {
+	keys := []string{key}
+	argv := []any{old, value, ttl.Milliseconds()}
+	err = compareAndSwap.Run(ctx, c.client, keys, argv...).Err()
+	if errors.Is(err, redis.Nil) {
+		return false, nil
+	}
+
+	if err != nil {
+		return false, err
+	}
+
+	return true, nil
 }

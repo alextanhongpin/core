@@ -3,7 +3,6 @@ package cache_test
 import (
 	"context"
 	"os"
-	"sync"
 	"testing"
 	"time"
 
@@ -23,175 +22,156 @@ func TestMain(m *testing.M) {
 }
 
 func TestCache(t *testing.T) {
-	type User struct {
-		Name string `json:"name"`
-		Age  int    `json:"age"`
-	}
+	c := cache.New(newClient(t))
 
-	c := cache.New(newClient(t), func(ctx context.Context) (*User, error) {
-		return &User{
-			Name: "John Appleseed",
-			Age:  13,
-		}, nil
+	t.Run("empty", func(t *testing.T) {
+		key := t.Name()
+
+		value, err := c.Load(ctx, key)
+		is := assert.New(t)
+		is.ErrorIs(err, cache.ErrNotFound)
+		is.Empty(value)
 	})
 
-	is := assert.New(t)
-	u, hit, err := c.Get(ctx, "john.appleseed", 5*time.Second)
-	is.Nil(err)
-	is.False(hit)
-	is.Equal("John Appleseed", u.Name)
-	is.Equal(13, u.Age)
+	t.Run("exist", func(t *testing.T) {
+		key := t.Name()
+		value := "hello"
 
-	_, hit, err = c.Get(ctx, "john.appleseed", 5*time.Second)
-	is.Nil(err)
-	is.True(hit)
-}
+		err := c.Store(ctx, key, value, time.Second)
 
-func TestSingleFlight(t *testing.T) {
-	type User struct {
-		Name string `json:"name"`
-		Age  int    `json:"age"`
-	}
-
-	c := cache.New(newClient(t), func(ctx context.Context) (*User, error) {
-		time.Sleep(100 * time.Millisecond)
-		return &User{
-			Name: "John Appleseed",
-			Age:  13,
-		}, nil
-	})
-	c.SingleFlight = &cache.SingleFlight{
-		Retries: []time.Duration{100 * time.Millisecond, 25 * time.Millisecond},
-		KeyFn: func(key string) string {
-			return "singleflight:" + key
-		},
-	}
-
-	is := assert.New(t)
-
-	// Simulate 2 concurrent requests. Only, one will hit the cache.
-	// The second will wait for the cache to be populated.
-	var wg sync.WaitGroup
-	wg.Add(2)
-
-	go func() {
-		defer wg.Done()
-
-		u, hit, err := c.Get(ctx, "john.appleseed", 5*time.Second)
+		is := assert.New(t)
 		is.Nil(err)
-		is.False(hit)
-		is.Equal("John Appleseed", u.Name)
-		is.Equal(13, u.Age)
-	}()
 
-	go func() {
-		defer wg.Done()
-
-		time.Sleep(5 * time.Millisecond)
-		start := time.Now()
-		u, hit, err := c.Get(ctx, "john.appleseed", 5*time.Second)
+		loaded, err := c.Load(ctx, key)
 		is.Nil(err)
-		is.True(hit)
-		is.Equal("John Appleseed", u.Name)
-		is.Equal(13, u.Age)
-		is.Greater(time.Since(start), c.SingleFlight.Retries[0])
-		is.Less(time.Since(start), c.SingleFlight.Retries[0]+c.SingleFlight.Retries[1])
-	}()
-
-	wg.Wait()
-}
-
-func TestSingleFlightPassthrough(t *testing.T) {
-	type User struct {
-		Name string `json:"name"`
-		Age  int    `json:"age"`
-	}
-
-	c := cache.New(newClient(t), func(ctx context.Context) (*User, error) {
-		time.Sleep(100 * time.Millisecond)
-		return &User{
-			Name: "John Appleseed",
-			Age:  13,
-		}, nil
-	})
-	c.SingleFlight = &cache.SingleFlight{
-		KeyFn: func(key string) string {
-			return "singleflight:" + key
-		},
-	}
-
-	is := assert.New(t)
-
-	// Simulate 2 concurrent requests. Only, one will hit the cache.
-	// The second will wait for the cache to be populated.
-	var wg sync.WaitGroup
-	wg.Add(2)
-
-	go func() {
-		defer wg.Done()
-
-		u, hit, err := c.Get(ctx, "john.appleseed", 5*time.Second)
-		is.Nil(err)
-		is.False(hit)
-		is.Equal("John Appleseed", u.Name)
-		is.Equal(13, u.Age)
-	}()
-
-	go func() {
-		defer wg.Done()
-
-		time.Sleep(5 * time.Millisecond)
-		u, hit, err := c.Get(ctx, "john.appleseed", 5*time.Second)
-		is.Nil(err)
-		is.False(hit)
-		is.Equal("John Appleseed", u.Name)
-		is.Equal(13, u.Age)
-	}()
-
-	wg.Wait()
-}
-
-func TestWithoutSingleFlight(t *testing.T) {
-	type User struct {
-		Name string `json:"name"`
-		Age  int    `json:"age"`
-	}
-
-	c := cache.New(newClient(t), func(ctx context.Context) (*User, error) {
-		time.Sleep(100 * time.Millisecond)
-		return &User{
-			Name: "John Appleseed",
-			Age:  13,
-		}, nil
+		is.Equal(value, loaded)
 	})
 
-	is := assert.New(t)
+	t.Run("load or store empty", func(t *testing.T) {
+		key := t.Name()
+		value := "hello"
 
-	// Simulate 2 concurrent requests. Only, both will hit the cache.
-	var wg sync.WaitGroup
-	wg.Add(2)
+		old, loaded, err := c.LoadOrStore(ctx, key, value, time.Second)
 
-	go func() {
-		defer wg.Done()
-
-		u, hit, err := c.Get(ctx, "john.appleseed", 5*time.Second)
+		is := assert.New(t)
 		is.Nil(err)
-		is.False(hit)
-		is.Equal("John Appleseed", u.Name)
-		is.Equal(13, u.Age)
-	}()
+		is.Equal(value, old)
+		is.False(loaded)
 
-	go func() {
-		defer wg.Done()
-
-		u, hit, err := c.Get(ctx, "john.appleseed", 5*time.Second)
+		old, loaded, err = c.LoadOrStore(ctx, key, value, time.Second)
 		is.Nil(err)
-		is.False(hit)
-		is.Equal("John Appleseed", u.Name)
-		is.Equal(13, u.Age)
-	}()
+		is.Equal(value, old)
+		is.True(loaded)
+	})
 
-	wg.Wait()
+	t.Run("load or store exist", func(t *testing.T) {
+		key := t.Name()
+		value := "hello"
+
+		err := c.Store(ctx, key, value, time.Second)
+		is := assert.New(t)
+		is.Nil(err)
+
+		old, loaded, err := c.LoadOrStore(ctx, key, value, time.Second)
+
+		is.Nil(err)
+		is.Equal(value, old)
+		is.True(loaded)
+	})
+
+	t.Run("load and delete empty", func(t *testing.T) {
+		key := t.Name()
+		old, loaded, err := c.LoadAndDelete(ctx, key)
+
+		is := assert.New(t)
+		is.Nil(err)
+		is.Empty(old)
+		is.False(loaded)
+
+		_, err = c.Load(ctx, key)
+		is.ErrorIs(err, cache.ErrNotFound)
+	})
+
+	t.Run("load and delete exist", func(t *testing.T) {
+		key := t.Name()
+		value := "hello"
+
+		err := c.Store(ctx, key, value, time.Second)
+		is := assert.New(t)
+		is.Nil(err)
+
+		old, loaded, err := c.LoadAndDelete(ctx, key)
+
+		is.Nil(err)
+		is.Equal(value, old)
+		is.True(loaded)
+
+		_, err = c.Load(ctx, key)
+		is.ErrorIs(err, cache.ErrNotFound)
+	})
+
+	t.Run("compare and delete empty", func(t *testing.T) {
+		key := t.Name()
+		old := "hello"
+		deleted, err := c.CompareAndDelete(ctx, key, old)
+
+		is := assert.New(t)
+		is.Nil(err)
+		is.False(deleted)
+
+		_, err = c.Load(ctx, key)
+		is.ErrorIs(err, cache.ErrNotFound)
+	})
+
+	t.Run("compare and delete exist", func(t *testing.T) {
+		key := t.Name()
+		value := "hello"
+
+		err := c.Store(ctx, key, value, time.Second)
+		is := assert.New(t)
+		is.Nil(err)
+
+		deleted, err := c.CompareAndDelete(ctx, key, value)
+
+		is.Nil(err)
+		is.True(deleted)
+
+		_, err = c.Load(ctx, key)
+		is.ErrorIs(err, cache.ErrNotFound)
+	})
+
+	t.Run("compare and swap empty", func(t *testing.T) {
+		key := t.Name()
+		old := "hello"
+		value := "hello"
+		swapped, err := c.CompareAndSwap(ctx, key, old, value, time.Second)
+
+		is := assert.New(t)
+		is.Nil(err)
+		is.False(swapped)
+
+		_, err = c.Load(ctx, key)
+		is.ErrorIs(err, cache.ErrNotFound)
+	})
+
+	t.Run("compare and swap exist", func(t *testing.T) {
+		key := t.Name()
+		value := "hello"
+
+		err := c.Store(ctx, key, value, time.Second)
+		is := assert.New(t)
+		is.Nil(err)
+
+		newValue := "world"
+		swapped, err := c.CompareAndSwap(ctx, key, value, newValue, time.Second)
+
+		is.Nil(err)
+		is.True(swapped)
+
+		loaded, err := c.Load(ctx, key)
+		is.Nil(err)
+		is.Equal(newValue, loaded)
+	})
 }
 
 func newClient(t *testing.T) *redis.Client {
