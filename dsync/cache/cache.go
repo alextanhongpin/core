@@ -8,7 +8,7 @@ import (
 	redis "github.com/redis/go-redis/v9"
 )
 
-var ErrNotFound = errors.New("cache: not found")
+var ErrNotExist = errors.New("cache: not exist")
 
 type Cacheable struct {
 	client *redis.Client
@@ -23,7 +23,7 @@ func New(client *redis.Client) *Cacheable {
 func (c *Cacheable) Load(ctx context.Context, key string) (value string, err error) {
 	s, err := c.client.Get(ctx, key).Result()
 	if errors.Is(err, redis.Nil) {
-		return "", ErrNotFound
+		return "", ErrNotExist
 	}
 
 	return s, err

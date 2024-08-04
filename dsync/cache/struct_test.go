@@ -1,28 +1,34 @@
 package cache_test
 
 import (
-	"context"
-	"os"
 	"testing"
 	"time"
 
 	"github.com/alextanhongpin/core/dsync/cache"
-	"github.com/alextanhongpin/core/storage/redis/redistest"
-	redis "github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 )
 
-var ctx = context.Background()
-
-func TestMain(m *testing.M) {
-	stop := redistest.Init()
-	code := m.Run()
-	stop()
-	os.Exit(code)
+type User struct {
+	Name    string `json:"name"`
+	Age     int    `json:"age"`
+	Married bool   `json:"married"`
 }
 
-func TestCache(t *testing.T) {
-	c := cache.New(newClient(t))
+var (
+	john = &User{
+		Name:    "John",
+		Age:     30,
+		Married: true,
+	}
+	jane = &User{
+		Name:    "Jane",
+		Age:     13,
+		Married: false,
+	}
+)
+
+func TestStruct(t *testing.T) {
+	c := cache.NewStruct[*User](cache.New(newClient(t)))
 
 	t.Run("empty", func(t *testing.T) {
 		key := t.Name()
@@ -30,12 +36,12 @@ func TestCache(t *testing.T) {
 		value, err := c.Load(ctx, key)
 		is := assert.New(t)
 		is.ErrorIs(err, cache.ErrNotExist)
-		is.Empty(value)
+		is.Nil(value)
 	})
 
 	t.Run("exist", func(t *testing.T) {
 		key := t.Name()
-		value := "hello"
+		value := john
 
 		err := c.Store(ctx, key, value, time.Second)
 
@@ -49,7 +55,7 @@ func TestCache(t *testing.T) {
 
 	t.Run("load or store empty", func(t *testing.T) {
 		key := t.Name()
-		value := "hello"
+		value := john
 
 		old, loaded, err := c.LoadOrStore(ctx, key, value, time.Second)
 
@@ -66,7 +72,7 @@ func TestCache(t *testing.T) {
 
 	t.Run("load or store exist", func(t *testing.T) {
 		key := t.Name()
-		value := "hello"
+		value := john
 
 		err := c.Store(ctx, key, value, time.Second)
 		is := assert.New(t)
@@ -85,7 +91,7 @@ func TestCache(t *testing.T) {
 
 		is := assert.New(t)
 		is.Nil(err)
-		is.Empty(old)
+		is.Nil(old)
 		is.False(loaded)
 
 		_, err = c.Load(ctx, key)
@@ -94,7 +100,7 @@ func TestCache(t *testing.T) {
 
 	t.Run("load and delete exist", func(t *testing.T) {
 		key := t.Name()
-		value := "hello"
+		value := john
 
 		err := c.Store(ctx, key, value, time.Second)
 		is := assert.New(t)
@@ -112,7 +118,7 @@ func TestCache(t *testing.T) {
 
 	t.Run("compare and delete empty", func(t *testing.T) {
 		key := t.Name()
-		old := "hello"
+		old := john
 		deleted, err := c.CompareAndDelete(ctx, key, old)
 
 		is := assert.New(t)
@@ -125,7 +131,7 @@ func TestCache(t *testing.T) {
 
 	t.Run("compare and delete exist", func(t *testing.T) {
 		key := t.Name()
-		value := "hello"
+		value := john
 
 		err := c.Store(ctx, key, value, time.Second)
 		is := assert.New(t)
@@ -142,8 +148,8 @@ func TestCache(t *testing.T) {
 
 	t.Run("compare and swap empty", func(t *testing.T) {
 		key := t.Name()
-		old := "hello"
-		value := "hello"
+		old := john
+		value := jane
 		swapped, err := c.CompareAndSwap(ctx, key, old, value, time.Second)
 
 		is := assert.New(t)
@@ -156,13 +162,13 @@ func TestCache(t *testing.T) {
 
 	t.Run("compare and swap exist", func(t *testing.T) {
 		key := t.Name()
-		value := "hello"
+		value := john
 
 		err := c.Store(ctx, key, value, time.Second)
 		is := assert.New(t)
 		is.Nil(err)
 
-		newValue := "world"
+		newValue := jane
 		swapped, err := c.CompareAndSwap(ctx, key, value, newValue, time.Second)
 
 		is.Nil(err)
@@ -172,18 +178,4 @@ func TestCache(t *testing.T) {
 		is.Nil(err)
 		is.Equal(newValue, loaded)
 	})
-}
-
-func newClient(t *testing.T) *redis.Client {
-	client := redis.NewClient(&redis.Options{
-		Addr: redistest.Addr(),
-	})
-
-	t.Helper()
-	t.Cleanup(func() {
-		client.FlushAll(ctx).Err()
-		client.Close()
-	})
-
-	return client
 }
