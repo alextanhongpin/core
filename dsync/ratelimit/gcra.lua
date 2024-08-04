@@ -10,16 +10,12 @@ local token = tonumber(ARGV[6])
 
 local ok = 0
 local ts = tonumber(redis.call('GET', key) or 0)
-local lo = now - (now % interval) - (burst + token) * interval
-if ts < lo then
-	ts = lo
-	redis.call('SET', key, ts, 'PX', period)
-end
+ts = math.max(ts, now)
 
-if ts + token*interval <= now then
+if ts - burst*interval <= now then
 	ok = 1
 	ts = ts + token*interval
-	redis.call('SET', key, ts)
+	redis.call('SET', key, ts, 'PX', period)
 end
 
 
