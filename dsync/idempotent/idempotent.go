@@ -152,7 +152,6 @@ func (i *Idempotent[K, V]) Do(ctx context.Context, key string, fn func(ctx conte
 
 	g, gctx := errgroup.WithContext(ctx)
 	gctx, cancel := context.WithCancelCause(gctx)
-	defer cancel(errDone)
 
 	g.Go(func() error {
 		err := i.refresh(gctx, key, val, i.lockTTL)
