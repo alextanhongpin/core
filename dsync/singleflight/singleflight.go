@@ -61,7 +61,6 @@ func (g *Group[T]) Do(ctx context.Context, key string, fn func(context.Context) 
 
 	eg, gctx := errgroup.WithContext(ctx)
 	gctx, cancel := context.WithCancelCause(gctx)
-	defer cancel(errDone)
 
 	eg.Go(func() error {
 		err := g.refresh(gctx, key, token, g.LockTTL)
@@ -137,7 +136,7 @@ func (g *Group[T]) refresh(ctx context.Context, key string, value []byte, ttl ti
 	for {
 		select {
 		case <-ctx.Done():
-			return nil
+			return context.Cause(ctx)
 		case <-t.C:
 			if err := g.extend(ctx, key, value, ttl); err != nil {
 				return err
