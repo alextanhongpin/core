@@ -21,41 +21,45 @@ var (
 
 	ErrLockWaitTimeout = errors.New("lock: lock wait exceeded")
 
-	ErrDone = errors.New("lock: done")
+	errDone = errors.New("lock: done")
 )
 
 // Locker represents a distributed lock implementation using Redis.
 type Locker struct {
-	client *redis.Client
+	client  *redis.Client
+	LockTTL time.Duration
+	WaitTTL time.Duration
 }
 
 // New returns a pointer to Locker.
 func New(client *redis.Client) *Locker {
 	return &Locker{
-		client: client,
+		client:  client,
+		LockTTL: 10 * time.Second,
+		WaitTTL: 1 * time.Minute,
 	}
 }
 
 // Lock locks the given key until the function completes.
 // If the lock cannot be acquired within the given wait, it will error.
 // The lock is released after the function completes.
-func (l *Locker) Lock(ctx context.Context, key string, ttl, wait time.Duration, fn func(ctx context.Context) error) (err error) {
+func (l *Locker) Lock(ctx context.Context, key string, fn func(ctx context.Context) error) (err error) {
 	// Generate a random uuid as the lock value.
 	val := uuid.New().String()
-	if err := l.lockWait(ctx, key, val, ttl, wait); err != nil {
+	if err := l.lockWait(ctx, key, val, l.LockTTL, l.WaitTTL); err != nil {
 		return err
 	}
 
 	defer l.unlock(context.WithoutCancel(ctx), key, val)
 
 	ctx, cancel := context.WithCancelCause(ctx)
-	defer cancel(ErrDone)
+	defer cancel(errDone)
 
 	g, ctx := errgroup.WithContext(ctx)
 	g.Go(func() error {
-		err := l.refresh(ctx, key, val, ttl)
+		err := l.refresh(ctx, key, val, l.LockTTL)
 		// Ignore if the fn is completed.
-		if errors.Is(err, ErrDone) {
+		if errors.Is(err, errDone) {
 			return nil
 		}
 
@@ -64,7 +68,7 @@ func (l *Locker) Lock(ctx context.Context, key string, ttl, wait time.Duration, 
 
 	g.Go(func() error {
 		// Signal the refresh to stop.
-		defer cancel(ErrDone)
+		defer cancel(errDone)
 
 		return fn(ctx)
 	})
