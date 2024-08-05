@@ -15,7 +15,10 @@ import (
 )
 
 var (
-	ErrTokenMismatch = errors.New("singleflight: token mismatch")
+	ErrTokenMismatch   = errors.New("singleflight: token mismatch")
+	ErrLockWaitTimeout = errors.New("singleflight: lock wait timeout")
+
+	errDone = errors.New("singleflight: done")
 )
 
 type Group[T any] struct {
@@ -45,6 +48,9 @@ func (g *Group[T]) Do(ctx context.Context, key string, fn func(context.Context) 
 	if !ok {
 		v, err = g.wait(ctx, key, g.WaitTTL)
 		if err != nil {
+			// If all attempts failed, just fail fast without retrying.
+			// Let another process retry.
+			v, err = fn(ctx)
 			return v, err, false
 		}
 
@@ -52,26 +58,31 @@ func (g *Group[T]) Do(ctx context.Context, key string, fn func(context.Context) 
 	}
 
 	// Use a separate context to avoid cancellation.
-	defer g.unlock(context.Background(), key, token)
+	defer g.unlock(context.WithoutCancel(ctx), key, token)
 
-	grp, gctx := errgroup.WithContext(ctx)
-	gctx, cancel := context.WithCancel(gctx)
-	defer cancel()
+	ctx, cancel := context.WithCancelCause(ctx)
+	defer cancel(errDone)
 
-	grp.Go(func() error {
-		return g.refresh(gctx, key, token, g.LockTTL)
-	})
+	eg, ctx := errgroup.WithContext(ctx)
+	eg.Go(func() error {
+		err := g.refresh(ctx, key, token, g.LockTTL)
+		if errors.Is(err, errDone) {
+			return nil
+		}
 
-	grp.Go(func() error {
-		// Cancel the refresh after loading and replacing
-		// completes.
-		defer cancel()
-
-		v, err = g.load(gctx, key, token, fn)
 		return err
 	})
 
-	if err := grp.Wait(); err != nil {
+	eg.Go(func() error {
+		// Cancel the refresh after loading and replacing
+		// completes.
+		defer cancel(errDone)
+
+		v, err = g.load(ctx, key, token, fn)
+		return err
+	})
+
+	if err := eg.Wait(); err != nil {
 		return v, err, false
 	}
 
@@ -89,7 +100,7 @@ func (g *Group[T]) load(ctx context.Context, key string, token []byte, fn func(c
 		return v, err
 	}
 
-	if err := g.replace(ctx, key, []byte(token), b, g.KeepTTL); err != nil {
+	if err := g.replace(ctx, key, token, b, g.KeepTTL); err != nil {
 		return v, err
 	}
 
@@ -97,29 +108,34 @@ func (g *Group[T]) load(ctx context.Context, key string, token []byte, fn func(c
 }
 
 func (g *Group[T]) wait(ctx context.Context, key string, ttl time.Duration) (v T, err error) {
-	ctx, cancel := context.WithTimeout(ctx, ttl)
+	ctx, cancel := context.WithTimeoutCause(ctx, ttl, ErrLockWaitTimeout)
 	defer cancel()
 
 	var i int
 	for {
-		time.Sleep(exponentialBackoff(i))
-		i++
+		select {
+		case <-ctx.Done():
+			return v, context.Cause(ctx)
+		// Retry at most 10 times.
+		case <-time.After(exponentialGrowthDecay(i)):
+			i++
+			b, err := g.client.Get(ctx, key).Bytes()
+			if err != nil {
+				return v, fmt.Errorf("wait: %w", err)
+			}
 
-		b, err := g.client.Get(ctx, key).Bytes()
-		if err != nil {
-			return v, fmt.Errorf("%w: wait", err)
-		}
-		// Still not completed.
-		if isUUID(b) {
-			continue
-		}
+			// Is pending.
+			if isUUID(b) {
+				continue
+			}
 
-		err = json.Unmarshal(b, &v)
-		return v, err
+			err = json.Unmarshal(b, &v)
+			return v, err
+		}
 	}
 }
 
-func (g *Group[T]) refresh(ctx context.Context, key string, val []byte, ttl time.Duration) error {
+func (g *Group[T]) refresh(ctx context.Context, key string, value []byte, ttl time.Duration) error {
 	t := time.NewTicker(ttl * 9 / 10)
 	defer t.Stop()
 
@@ -128,7 +144,7 @@ func (g *Group[T]) refresh(ctx context.Context, key string, val []byte, ttl time
 		case <-ctx.Done():
 			return nil
 		case <-t.C:
-			if err := g.extend(ctx, key, val, ttl); err != nil {
+			if err := g.extend(ctx, key, value, ttl); err != nil {
 				return err
 			}
 		}
@@ -140,15 +156,15 @@ func (g *Group[T]) lock(ctx context.Context, key string, value []byte, ttl time.
 }
 
 // unlock releases the lock on the specified key using the provided value.
-func (g *Group[T]) unlock(ctx context.Context, key string, val []byte) error {
+func (g *Group[T]) unlock(ctx context.Context, key string, value []byte) error {
 	keys := []string{key}
-	argv := []any{val}
+	argv := []any{value}
 	err := unlock.Run(ctx, g.client, keys, argv...).Err()
 	if errors.Is(err, redis.Nil) {
-		return fmt.Errorf("%w: unlock", ErrTokenMismatch)
+		return fmt.Errorf("unlock: %w", ErrTokenMismatch)
 	}
 	if err != nil {
-		return fmt.Errorf("%w: unlock", err)
+		return fmt.Errorf("unlock: %w", err)
 	}
 
 	return nil
@@ -162,7 +178,7 @@ func (g *Group[T]) extend(ctx context.Context, key string, val []byte, ttl time.
 		return fmt.Errorf("extend: %w", ErrTokenMismatch)
 	}
 	if err != nil {
-		return fmt.Errorf("%w: extend", err)
+		return fmt.Errorf("extend: %w", err)
 	}
 
 	return nil
@@ -175,10 +191,10 @@ func (g *Group[T]) replace(ctx context.Context, key string, oldVal, newVal []byt
 	argv := []any{oldVal, newVal, ttl.Milliseconds()}
 	err := replace.Run(ctx, g.client, keys, argv...).Err()
 	if errors.Is(err, redis.Nil) {
-		return fmt.Errorf("%w: replace", ErrTokenMismatch)
+		return fmt.Errorf("replace: %w", ErrTokenMismatch)
 	}
 	if err != nil {
-		return fmt.Errorf("%w: replace", err)
+		return fmt.Errorf("replace: %w", err)
 	}
 
 	return nil
@@ -190,12 +206,17 @@ func isUUID(b []byte) bool {
 	return err == nil
 }
 
-func exponentialBackoff(attempts int) time.Duration {
-	if attempts <= 0 {
-		return 0
+func exponentialGrowthDecay(i int) time.Duration {
+	x := float64(i)
+	base := 1.0 + rand.Float64()
+	switch {
+	case x < 4: // intersection point rounded to 4
+		base *= math.Pow(2, x)
+	case x < 10:
+		base *= 5 * math.Log(-0.9*x+10)
+	default:
 	}
-	base := float64(25 * time.Millisecond)
-	cap := float64(time.Minute)
-	jitter := 1.0 + rand.Float64()
-	return time.Duration(min(cap, jitter*base*math.Pow(2, float64(attempts))))
+
+	return time.Duration(base*100) * time.Millisecond
+
 }
