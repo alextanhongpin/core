@@ -50,7 +50,6 @@ func (g *Group[T]) Do(ctx context.Context, key string, fn func(context.Context) 
 		if err != nil {
 			// If all attempts failed, just fail fast without retrying.
 			// Let another process retry.
-			v, err = fn(ctx)
 			return v, err, false
 		}
 
@@ -60,12 +59,12 @@ func (g *Group[T]) Do(ctx context.Context, key string, fn func(context.Context) 
 	// Use a separate context to avoid cancellation.
 	defer g.unlock(context.WithoutCancel(ctx), key, token)
 
-	ctx, cancel := context.WithCancelCause(ctx)
+	eg, gctx := errgroup.WithContext(ctx)
+	gctx, cancel := context.WithCancelCause(gctx)
 	defer cancel(errDone)
 
-	eg, ctx := errgroup.WithContext(ctx)
 	eg.Go(func() error {
-		err := g.refresh(ctx, key, token, g.LockTTL)
+		err := g.refresh(gctx, key, token, g.LockTTL)
 		if errors.Is(err, errDone) {
 			return nil
 		}
@@ -78,33 +77,29 @@ func (g *Group[T]) Do(ctx context.Context, key string, fn func(context.Context) 
 		// completes.
 		defer cancel(errDone)
 
-		v, err = g.load(ctx, key, token, fn)
-		return err
+		v, err = fn(gctx)
+		if err != nil {
+			return err
+		}
+
+		// Extend the lock duration to allow buffer for the replace.
+		return g.extend(gctx, key, token, g.LockTTL)
 	})
 
 	if err := eg.Wait(); err != nil {
 		return v, err, false
 	}
 
-	return v, nil, false
-}
-
-func (g *Group[T]) load(ctx context.Context, key string, token []byte, fn func(ctx context.Context) (T, error)) (v T, err error) {
-	v, err = fn(ctx)
-	if err != nil {
-		return v, err
-	}
-
 	b, err := json.Marshal(v)
 	if err != nil {
-		return v, err
+		return v, err, false
 	}
 
 	if err := g.replace(ctx, key, token, b, g.KeepTTL); err != nil {
-		return v, err
+		return v, err, false
 	}
 
-	return v, nil
+	return v, nil, false
 }
 
 func (g *Group[T]) wait(ctx context.Context, key string, ttl time.Duration) (v T, err error) {
@@ -136,7 +131,7 @@ func (g *Group[T]) wait(ctx context.Context, key string, ttl time.Duration) (v T
 }
 
 func (g *Group[T]) refresh(ctx context.Context, key string, value []byte, ttl time.Duration) error {
-	t := time.NewTicker(ttl * 9 / 10)
+	t := time.NewTicker(ttl * 7 / 10)
 	defer t.Stop()
 
 	for {
