@@ -53,7 +53,6 @@ func (l *Locker) Lock(ctx context.Context, key string, fn func(ctx context.Conte
 	defer l.unlock(context.WithoutCancel(ctx), key, val)
 
 	ctx, cancel := context.WithCancelCause(ctx)
-	defer cancel(errDone)
 
 	g, ctx := errgroup.WithContext(ctx)
 	g.Go(func() error {
@@ -117,7 +116,7 @@ func (l *Locker) refresh(ctx context.Context, key, val string, ttl time.Duration
 	for {
 		select {
 		case <-ctx.Done():
-			return nil
+			return context.Cause(ctx)
 		case <-t.C:
 			if err := l.extend(ctx, key, val, ttl); err != nil {
 				return err
@@ -168,6 +167,8 @@ func (l *Locker) extend(ctx context.Context, key, val string, ttl time.Duration)
 	return nil
 }
 
+// combination of two curves. the duration increases exponentially in the beginning before beginning to decay.
+// The idea is the wait duration should eventually be lesser and lesser over time.
 func exponentialGrowthDecay(i int) time.Duration {
 	x := float64(i)
 	base := 1.0 + rand.Float64()
