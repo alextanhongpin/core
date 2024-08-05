@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"math/rand"
 	"time"
 
@@ -83,6 +84,7 @@ func (l *Locker) lockWait(ctx context.Context, key, val string, ttl, wait time.D
 	ctx, cancel := context.WithTimeoutCause(ctx, wait, ErrLockWaitTimeout)
 	defer cancel()
 
+	var i int
 	for {
 		select {
 		case <-ctx.Done():
@@ -93,8 +95,8 @@ func (l *Locker) lockWait(ctx context.Context, key, val string, ttl, wait time.D
 				select {
 				case <-ctx.Done():
 					return context.Cause(ctx)
-					// Retry at most 10 times.
-				case <-time.After(time.Duration(rand.Intn(int(ttl)/10)) + ttl/10):
+				case <-time.After(exponentialGrowthDecay(i)):
+					i++
 					continue
 				}
 			}
@@ -105,7 +107,7 @@ func (l *Locker) lockWait(ctx context.Context, key, val string, ttl, wait time.D
 }
 
 func (l *Locker) refresh(ctx context.Context, key, val string, ttl time.Duration) error {
-	t := time.NewTicker(ttl * 9 / 10)
+	t := time.NewTicker(ttl * 7 / 10)
 	defer t.Stop()
 
 	for {
@@ -160,4 +162,18 @@ func (l *Locker) extend(ctx context.Context, key, val string, ttl time.Duration)
 	}
 
 	return nil
+}
+
+func exponentialGrowthDecay(i int) time.Duration {
+	x := float64(i)
+	base := 1.0 + rand.Float64()
+	switch {
+	case x < 4: // intersection point rounded to 4
+		base *= math.Pow(2, x)
+	case x < 10:
+		base *= 5 * math.Log(-0.9*x+10)
+	default:
+	}
+
+	return time.Duration(base*100) * time.Millisecond
 }
