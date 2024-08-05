@@ -218,5 +218,4 @@ func exponentialGrowthDecay(i int) time.Duration {
 	}
 
 	return time.Duration(base*100) * time.Millisecond
-
 }
