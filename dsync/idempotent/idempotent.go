@@ -24,8 +24,11 @@ var (
 	// request for the specified key.
 	ErrRequestMismatch = errors.New("idempotent: request mismatch")
 
-	// ErrKeyMismatch indicates that the key is being updated by another node.
-	ErrKeyMismatch = errors.New("idempotent: key mismatch")
+	// ErrLeaseInvalid indicates that the caller doesn't hold the correct token
+	// for the lease and failed to write.
+	ErrLeaseInvalid = errors.New("idempotent: lease invalid")
+
+	errDone = errors.New("idempotent: done")
 )
 
 // unlock deletes the key only if the lease id matches.
@@ -129,7 +132,7 @@ func (i *Idempotent[K, V]) Do(ctx context.Context, key string, fn func(ctx conte
 	// Lock the key to ensure there are no duplicate request.
 	val := []byte(uuid.New().String())
 
-	ok, err := i.lock(ctx, key, val)
+	ok, err := i.lock(ctx, key, val, i.lockTTL)
 
 	// Lock should return true or false.
 	// Otherwise, it is redis error.
@@ -146,35 +149,47 @@ func (i *Idempotent[K, V]) Do(ctx context.Context, key string, fn func(ctx conte
 	defer i.unlock(context.WithoutCancel(ctx), key, val)
 
 	// If the lock is successful, perform the task and save the response.
+
 	g, gctx := errgroup.WithContext(ctx)
-	gctx, cancel := context.WithCancel(gctx)
-	defer cancel()
+	gctx, cancel := context.WithCancelCause(gctx)
+	defer cancel(errDone)
+
+	g.Go(func() error {
+		err := i.refresh(gctx, key, val, i.lockTTL)
+		if errors.Is(err, errDone) {
+			return nil
+		}
+
+		return err
+	})
 
 	g.Go(func() error {
 		// Cancel the refresh once this is done.
-		defer cancel()
+		defer cancel(errDone)
 
 		res, err = fn(gctx, req)
 		if err != nil {
 			return err
 		}
 
-		newval, err := json.Marshal(data[V]{
-			Request:  i.hashRequest(req),
-			Response: res,
-		})
-		if err != nil {
-			return err
-		}
-
-		return i.replace(gctx, key, val, newval)
-	})
-
-	g.Go(func() error {
-		return i.refresh(gctx, key, val)
+		// extend one more time allow enough time for the response to be written.
+		return i.extend(gctx, key, val, i.lockTTL)
 	})
 
 	if err := g.Wait(); err != nil {
+		return res, err
+	}
+
+	newval, err := json.Marshal(data[V]{
+		Request:  i.hashRequest(req),
+		Response: res,
+	})
+	if err != nil {
+		return res, err
+	}
+
+	err = i.replace(ctx, key, val, newval, i.keepTTL)
+	if err != nil {
 		return res, err
 	}
 
@@ -183,42 +198,48 @@ func (i *Idempotent[K, V]) Do(ctx context.Context, key string, fn func(ctx conte
 
 // replace sets the value of the specified key to the provided new value, if
 // the existing value matches the old value.
-func (i *Idempotent[K, V]) replace(ctx context.Context, key string, oldVal, newVal []byte) error {
+func (i *Idempotent[K, V]) replace(ctx context.Context, key string, oldVal, newVal []byte, ttl time.Duration) error {
 	keys := []string{key}
-	argv := []any{oldVal, newVal, formatMs(i.keepTTL)}
+	argv := []any{oldVal, newVal, ttl.Milliseconds()}
 	err := replace.Run(ctx, i.client, keys, argv...).Err()
 	if errors.Is(err, redis.Nil) {
-		return fmt.Errorf("%w: replace", ErrKeyMismatch)
+		return fmt.Errorf("replace: %w", ErrLeaseInvalid)
+	}
+	if err != nil {
+		return fmt.Errorf("replace: %w", err)
 	}
 
-	return err
+	return nil
 }
 
-func (i *Idempotent[K, V]) refresh(ctx context.Context, key string, val []byte) error {
-	t := time.NewTicker(i.lockTTL * 9 / 10)
+func (i *Idempotent[K, V]) refresh(ctx context.Context, key string, val []byte, ttl time.Duration) error {
+	t := time.NewTicker(ttl * 7 / 10)
 	defer t.Stop()
 
 	for {
 		select {
 		case <-ctx.Done():
-			return nil
+			return context.Cause(ctx)
 		case <-t.C:
-			if err := i.extend(ctx, key, val); err != nil {
+			if err := i.extend(ctx, key, val, i.lockTTL); err != nil {
 				return err
 			}
 		}
 	}
 }
 
-func (i *Idempotent[K, V]) extend(ctx context.Context, key string, val []byte) error {
+func (i *Idempotent[K, V]) extend(ctx context.Context, key string, val []byte, ttl time.Duration) error {
 	keys := []string{key}
-	argv := []any{val, formatMs(i.lockTTL)}
+	argv := []any{val, ttl.Milliseconds()}
 	err := extend.Run(ctx, i.client, keys, argv...).Err()
 	if errors.Is(err, redis.Nil) {
-		return fmt.Errorf("extend: %w", ErrKeyMismatch)
+		return fmt.Errorf("extend: %w", ErrLeaseInvalid)
+	}
+	if err != nil {
+		return fmt.Errorf("extend: %w", err)
 	}
 
-	return err
+	return nil
 }
 
 // load retrieves the value of the specified key and returns it as a data
@@ -263,8 +284,8 @@ func (i *Idempotent[K, V]) hashRequest(req K) string {
 }
 
 // lock acquires a lock on the specified key using the provided value.
-func (i *Idempotent[K, V]) lock(ctx context.Context, key string, val []byte) (bool, error) {
-	return i.client.SetNX(ctx, key, val, i.lockTTL).Result()
+func (i *Idempotent[K, V]) lock(ctx context.Context, key string, val []byte, ttl time.Duration) (bool, error) {
+	return i.client.SetNX(ctx, key, val, ttl).Result()
 }
 
 // unlock releases the lock on the specified key using the provided value.
@@ -273,10 +294,13 @@ func (i *Idempotent[K, V]) unlock(ctx context.Context, key string, val []byte) e
 	argv := []any{val}
 	err := unlock.Run(ctx, i.client, keys, argv...).Err()
 	if errors.Is(err, redis.Nil) {
-		return fmt.Errorf("unlock: %w", ErrKeyMismatch)
+		return fmt.Errorf("unlock: %w", ErrLeaseInvalid)
+	}
+	if err != nil {
+		return fmt.Errorf("unlock: %w", err)
 	}
 
-	return err
+	return nil
 }
 
 // hash generates a SHA-256 hash of the provided data.
@@ -291,13 +315,4 @@ func hash(data []byte) string {
 func isUUID(b []byte) bool {
 	_, err := uuid.ParseBytes(b)
 	return err == nil
-}
-
-// formatMs converts a time duration to milliseconds.
-func formatMs(dur time.Duration) int64 {
-	if dur > 0 && dur < time.Millisecond {
-		return 1
-	}
-
-	return int64(dur / time.Millisecond)
 }

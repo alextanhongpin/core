@@ -104,7 +104,7 @@ func TestPrivateLockUnlock(t *testing.T) {
 		cleanup(t)
 
 		key := t.Name()
-		ok, err := idem.lock(ctx, key, []byte("world"))
+		ok, err := idem.lock(ctx, key, []byte("world"), idem.lockTTL)
 		assert.Nil(t, err, "expected error to be nil")
 		assert.True(t, ok, "expected lock to succeed")
 
@@ -113,7 +113,7 @@ func TestPrivateLockUnlock(t *testing.T) {
 		assert.True(t, 100*time.Millisecond-lockTTL < 10*time.Millisecond, "expected lock TTL to be close to 100ms")
 
 		t.Run("when lock second time", func(t *testing.T) {
-			ok, err = idem.lock(ctx, key, []byte("world"))
+			ok, err = idem.lock(ctx, key, []byte("world"), idem.lockTTL)
 			assert.Nil(t, err, "expected error to be nil")
 			assert.False(t, ok, "then it will fail to lock")
 			// Verify that the lock is still held by the first request
@@ -124,7 +124,7 @@ func TestPrivateLockUnlock(t *testing.T) {
 
 		t.Run("when unlock failed with wrong key", func(t *testing.T) {
 			err := idem.unlock(ctx, key, []byte("wrong-key"))
-			assert.ErrorIs(t, err, ErrKeyMismatch, "expected error to be ErrKeyMismatch")
+			assert.ErrorIs(t, err, ErrLeaseInvalid, "expected error to be ErrLeaseInvalid")
 
 			val, err := client.Get(ctx, key).Result()
 			assert.Nil(t, err, "expected error to be nil")
@@ -165,9 +165,9 @@ func TestPrivateReplace(t *testing.T) {
 		// Set a value to be replaced.
 		a.Nil(client.Set(ctx, key, "world", 0).Err())
 
-		err := idem.replace(ctx, key, []byte("invalid-old-value"), []byte("new-value"))
+		err := idem.replace(ctx, key, []byte("invalid-old-value"), []byte("new-value"), idem.keepTTL)
 		// The key should be released.
-		a.ErrorIs(err, ErrKeyMismatch)
+		a.ErrorIs(err, ErrLeaseInvalid)
 
 		v, err := client.Get(ctx, key).Result()
 		a.Nil(err, "expected error to be nil")
@@ -183,7 +183,7 @@ func TestPrivateReplace(t *testing.T) {
 		// Set a value to be replaced.
 		a.Nil(client.Set(ctx, key, "world", 0).Err())
 
-		err := idem.replace(ctx, key, []byte("world"), []byte("new-value"))
+		err := idem.replace(ctx, key, []byte("world"), []byte("new-value"), idem.keepTTL)
 		a.Nil(err, "expected error to be nil")
 
 		v, err := client.Get(ctx, key).Result()
