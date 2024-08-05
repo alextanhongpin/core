@@ -215,7 +215,7 @@ func (i *Idempotent[K, V]) extend(ctx context.Context, key string, val []byte) e
 	argv := []any{val, formatMs(i.lockTTL)}
 	err := extend.Run(ctx, i.client, keys, argv...).Err()
 	if errors.Is(err, redis.Nil) {
-		return fmt.Errorf("unlock: %w", ErrKeyMismatch)
+		return fmt.Errorf("extend: %w", ErrKeyMismatch)
 	}
 
 	return err
