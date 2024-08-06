@@ -24,29 +24,75 @@ var (
 	errDone = errors.New("lock: done")
 )
 
-// Locker represents a distributed lock implementation using Redis.
-type Locker struct {
-	client  *redis.Client
+type Options struct {
 	LockTTL time.Duration
 	WaitTTL time.Duration
 }
 
-// New returns a pointer to Locker.
-func New(client *redis.Client) *Locker {
-	return &Locker{
-		client:  client,
+func NewOptions() *Options {
+	return &Options{
 		LockTTL: 10 * time.Second,
 		WaitTTL: 1 * time.Minute,
+	}
+}
+
+func (o *Options) Clone() *Options {
+	return &Options{
+		LockTTL: o.LockTTL,
+		WaitTTL: o.WaitTTL,
+	}
+}
+
+type Option func(o *Options)
+
+func NoWait() Option {
+	return func(o *Options) {
+		o.WaitTTL = 0
+	}
+}
+
+func WithLockTTL(t time.Duration) Option {
+	return func(o *Options) {
+		o.LockTTL = t
+	}
+}
+
+func WithWaitTTL(t time.Duration) Option {
+	return func(o *Options) {
+		o.WaitTTL = t
+	}
+}
+
+// Locker represents a distributed lock implementation using Redis.
+type Locker struct {
+	client *redis.Client
+	opts   *Options
+}
+
+// New returns a pointer to Locker.
+func New(client *redis.Client, opts *Options) *Locker {
+	if opts == nil {
+		opts = NewOptions()
+	}
+
+	return &Locker{
+		client: client,
+		opts:   opts,
 	}
 }
 
 // Lock locks the given key until the function completes.
 // If the lock cannot be acquired within the given wait, it will error.
 // The lock is released after the function completes.
-func (l *Locker) Lock(ctx context.Context, key string, fn func(ctx context.Context) error) (err error) {
+func (l *Locker) Lock(ctx context.Context, key string, fn func(ctx context.Context) error, opts ...Option) error {
+	o := l.opts.Clone()
+	for _, opt := range opts {
+		opt(o)
+	}
+
 	// Generate a random uuid as the lock value.
 	val := uuid.New().String()
-	if err := l.lockWait(ctx, key, val, l.LockTTL, l.WaitTTL); err != nil {
+	if err := l.lockWait(ctx, key, val, o.LockTTL, o.WaitTTL); err != nil {
 		return err
 	}
 
@@ -56,7 +102,7 @@ func (l *Locker) Lock(ctx context.Context, key string, fn func(ctx context.Conte
 
 	g, ctx := errgroup.WithContext(ctx)
 	g.Go(func() error {
-		err := l.refresh(ctx, key, val, l.LockTTL)
+		err := l.refresh(ctx, key, val, o.LockTTL)
 		// Ignore if the fn is completed.
 		if errors.Is(err, errDone) {
 			return nil
@@ -71,8 +117,8 @@ func (l *Locker) Lock(ctx context.Context, key string, fn func(ctx context.Conte
 
 		return fn(ctx)
 	})
-	err = g.Wait()
-	return
+
+	return g.Wait()
 }
 
 // lockWait attempts to acquire the lock. If the lock is already acquired, it
