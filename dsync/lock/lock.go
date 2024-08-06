@@ -98,27 +98,24 @@ func (l *Locker) Lock(ctx context.Context, key string, fn func(ctx context.Conte
 
 	defer l.unlock(context.WithoutCancel(ctx), key, val)
 
-	ctx, cancel := context.WithCancelCause(ctx)
-
 	g, ctx := errgroup.WithContext(ctx)
 	g.Go(func() error {
-		err := l.refresh(ctx, key, val, o.LockTTL)
-		// Ignore if the fn is completed.
-		if errors.Is(err, errDone) {
-			return nil
-		}
-
-		return err
+		return l.refresh(ctx, key, val, o.LockTTL)
 	})
 
 	g.Go(func() error {
-		// Signal the refresh to stop.
-		defer cancel(errDone)
-
-		return fn(ctx)
+		if err := fn(ctx); err != nil {
+			return err
+		}
+		return errDone
 	})
 
-	return g.Wait()
+	err := g.Wait()
+	if errors.Is(err, errDone) {
+		return nil
+	}
+
+	return err
 }
 
 // lockWait attempts to acquire the lock. If the lock is already acquired, it
