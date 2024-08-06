@@ -39,13 +39,20 @@ func New[T any](client *redis.Client) *Group[T] {
 
 func (g *Group[T]) Do(ctx context.Context, key string, fn func(context.Context) (T, error)) (v T, err error, shared bool) {
 	token := []byte(uuid.New().String())
-	ok, err := g.lock(ctx, key, token, g.LockTTL)
+	b, loaded, err := g.loadOrStore(ctx, key, token, g.LockTTL)
 	if err != nil {
 		return v, err, false
 	}
 
-	// The data already exists.
-	if !ok {
+	if loaded {
+		if !isUUID(b) {
+			err = json.Unmarshal(b, &v)
+			if err != nil {
+				return v, err, false
+			}
+			return v, nil, true
+		}
+
 		v, err = g.wait(ctx, key, g.WaitTTL)
 		if err != nil {
 			// If all attempts failed, just fail fast without retrying.
@@ -89,7 +96,7 @@ func (g *Group[T]) Do(ctx context.Context, key string, fn func(context.Context) 
 		return v, err, false
 	}
 
-	b, err := json.Marshal(v)
+	b, err = json.Marshal(v)
 	if err != nil {
 		return v, err, false
 	}
@@ -192,6 +199,20 @@ func (g *Group[T]) replace(ctx context.Context, key string, oldVal, newVal []byt
 	}
 
 	return nil
+}
+
+func (g *Group[T]) loadOrStore(ctx context.Context, key string, value []byte, ttl time.Duration) ([]byte, bool, error) {
+	v, err := g.client.Do(ctx, "SET", key, string(value), "NX", "GET", "PX", ttl.Milliseconds()).Result()
+	// If the previous value does not exist when GET, then it will be nil.
+	if errors.Is(err, redis.Nil) {
+		return value, false, nil
+	}
+
+	if err != nil {
+		return nil, false, err
+	}
+
+	return []byte(v.(string)), true, nil
 }
 
 // isUUID checks if the provided byte slice represents a valid UUID.
