@@ -130,45 +130,33 @@ func (i *Idempotent[K, V]) Do(ctx context.Context, key string, fn func(ctx conte
 	// context.WithoutCancel ensures that the unlock is always called.
 	defer i.unlock(context.WithoutCancel(ctx), key, token)
 
-	g, gctx := errgroup.WithContext(ctx)
-	gctx, cancel := context.WithCancelCause(gctx)
-
+	g, ctx := errgroup.WithContext(ctx)
 	g.Go(func() error {
-		err := i.refresh(gctx, key, token, i.opts.LockTTL)
-		if errors.Is(err, errDone) {
-			return nil
-		}
-
-		return err
+		return i.refresh(ctx, key, token, i.opts.LockTTL)
 	})
 
 	g.Go(func() error {
-		// Cancel the refresh once this is done.
-		defer cancel(errDone)
-
-		res, err = fn(gctx, req)
+		res, err = fn(ctx, req)
 		if err != nil {
 			return err
 		}
 
-		// extend one more time allow enough time for the response to be written.
-		return i.extend(gctx, key, token, i.opts.LockTTL)
+		value, err := json.Marshal(data[V]{
+			Request:  i.hashRequest(req),
+			Response: res,
+		})
+		if err != nil {
+			return err
+		}
+
+		if err := i.replace(ctx, key, token, value, i.opts.KeepTTL); err != nil {
+			return err
+		}
+
+		return errDone
 	})
 
-	if err := g.Wait(); err != nil {
-		return res, err
-	}
-
-	value, err := json.Marshal(data[V]{
-		Request:  i.hashRequest(req),
-		Response: res,
-	})
-	if err != nil {
-		return res, err
-	}
-
-	err = i.replace(ctx, key, token, value, i.opts.KeepTTL)
-	if err != nil {
+	if err := g.Wait(); err != nil && !errors.Is(err, errDone) {
 		return res, err
 	}
 
