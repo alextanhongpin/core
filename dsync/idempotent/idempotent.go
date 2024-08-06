@@ -84,30 +84,33 @@ type data[T any] struct {
 	Response T      `json:"response,omitempty"`
 }
 
-type Idempotent[K comparable, V any] struct {
-	client  *redis.Client
-	lockTTL time.Duration
-	keepTTL time.Duration
-}
-
-type Option struct {
+type Options struct {
 	LockTTL time.Duration
 	KeepTTL time.Duration
 }
 
+func NewOptions() *Options {
+	return &Options{
+		LockTTL: 30 * time.Second,
+		KeepTTL: 24 * time.Hour,
+	}
+}
+
+type Idempotent[K, V any] struct {
+	client *redis.Client
+	opts   *Options
+}
+
 // New creates a new Idempotent instance with the specified Redis client, lock
 // TTL, and keep TTL.
-func New[K comparable, V any](client *redis.Client, opt *Option) *Idempotent[K, V] {
-	if opt == nil {
-		opt = &Option{
-			LockTTL: 30 * time.Second,
-			KeepTTL: 24 * time.Hour,
-		}
+func New[K, V any](client *redis.Client, opts *Options) *Idempotent[K, V] {
+	if opts == nil {
+		opts = NewOptions()
 	}
+
 	return &Idempotent[K, V]{
-		client:  client,
-		lockTTL: opt.LockTTL,
-		keepTTL: opt.KeepTTL,
+		client: client,
+		opts:   opts,
 	}
 }
 
@@ -132,7 +135,7 @@ func (i *Idempotent[K, V]) Do(ctx context.Context, key string, fn func(ctx conte
 	// Lock the key to ensure there are no duplicate request.
 	val := []byte(uuid.New().String())
 
-	ok, err := i.lock(ctx, key, val, i.lockTTL)
+	ok, err := i.lock(ctx, key, val, i.opts.LockTTL)
 
 	// Lock should return true or false.
 	// Otherwise, it is redis error.
@@ -154,7 +157,7 @@ func (i *Idempotent[K, V]) Do(ctx context.Context, key string, fn func(ctx conte
 	gctx, cancel := context.WithCancelCause(gctx)
 
 	g.Go(func() error {
-		err := i.refresh(gctx, key, val, i.lockTTL)
+		err := i.refresh(gctx, key, val, i.opts.LockTTL)
 		if errors.Is(err, errDone) {
 			return nil
 		}
@@ -172,7 +175,7 @@ func (i *Idempotent[K, V]) Do(ctx context.Context, key string, fn func(ctx conte
 		}
 
 		// extend one more time allow enough time for the response to be written.
-		return i.extend(gctx, key, val, i.lockTTL)
+		return i.extend(gctx, key, val, i.opts.LockTTL)
 	})
 
 	if err := g.Wait(); err != nil {
@@ -187,7 +190,7 @@ func (i *Idempotent[K, V]) Do(ctx context.Context, key string, fn func(ctx conte
 		return res, err
 	}
 
-	err = i.replace(ctx, key, val, newval, i.keepTTL)
+	err = i.replace(ctx, key, val, newval, i.opts.KeepTTL)
 	if err != nil {
 		return res, err
 	}
@@ -220,7 +223,7 @@ func (i *Idempotent[K, V]) refresh(ctx context.Context, key string, val []byte, 
 		case <-ctx.Done():
 			return context.Cause(ctx)
 		case <-t.C:
-			if err := i.extend(ctx, key, val, i.lockTTL); err != nil {
+			if err := i.extend(ctx, key, val, i.opts.LockTTL); err != nil {
 				return err
 			}
 		}

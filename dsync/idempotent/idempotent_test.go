@@ -33,7 +33,7 @@ func TestPrivateLoad(t *testing.T) {
 		})
 	}
 
-	idem := New[string, int](client, &Option{
+	idem := New[string, int](client, &Options{
 		LockTTL: 100 * time.Millisecond,
 		KeepTTL: 200 * time.Millisecond,
 	})
@@ -95,7 +95,7 @@ func TestPrivateLockUnlock(t *testing.T) {
 		})
 	}
 
-	idem := New[string, int](client, &Option{
+	idem := New[string, int](client, &Options{
 		LockTTL: 100 * time.Millisecond,
 		KeepTTL: 200 * time.Millisecond,
 	})
@@ -104,7 +104,7 @@ func TestPrivateLockUnlock(t *testing.T) {
 		cleanup(t)
 
 		key := t.Name()
-		ok, err := idem.lock(ctx, key, []byte("world"), idem.lockTTL)
+		ok, err := idem.lock(ctx, key, []byte("world"), idem.opts.LockTTL)
 		assert.Nil(t, err, "expected error to be nil")
 		assert.True(t, ok, "expected lock to succeed")
 
@@ -113,7 +113,7 @@ func TestPrivateLockUnlock(t *testing.T) {
 		assert.True(t, 100*time.Millisecond-lockTTL < 10*time.Millisecond, "expected lock TTL to be close to 100ms")
 
 		t.Run("when lock second time", func(t *testing.T) {
-			ok, err = idem.lock(ctx, key, []byte("world"), idem.lockTTL)
+			ok, err = idem.lock(ctx, key, []byte("world"), idem.opts.LockTTL)
 			assert.Nil(t, err, "expected error to be nil")
 			assert.False(t, ok, "then it will fail to lock")
 			// Verify that the lock is still held by the first request
@@ -151,7 +151,7 @@ func TestPrivateReplace(t *testing.T) {
 		})
 	}
 
-	idem := New[string, int](client, &Option{
+	idem := New[string, int](client, &Options{
 		LockTTL: 1 * time.Second,
 		KeepTTL: 2 * time.Second,
 	})
@@ -165,7 +165,7 @@ func TestPrivateReplace(t *testing.T) {
 		// Set a value to be replaced.
 		a.Nil(client.Set(ctx, key, "world", 0).Err())
 
-		err := idem.replace(ctx, key, []byte("invalid-old-value"), []byte("new-value"), idem.keepTTL)
+		err := idem.replace(ctx, key, []byte("invalid-old-value"), []byte("new-value"), idem.opts.KeepTTL)
 		// The key should be released.
 		a.ErrorIs(err, ErrLeaseInvalid)
 
@@ -183,7 +183,7 @@ func TestPrivateReplace(t *testing.T) {
 		// Set a value to be replaced.
 		a.Nil(client.Set(ctx, key, "world", 0).Err())
 
-		err := idem.replace(ctx, key, []byte("world"), []byte("new-value"), idem.keepTTL)
+		err := idem.replace(ctx, key, []byte("world"), []byte("new-value"), idem.opts.KeepTTL)
 		a.Nil(err, "expected error to be nil")
 
 		v, err := client.Get(ctx, key).Result()
@@ -203,7 +203,7 @@ func TestPrivateReplace(t *testing.T) {
 func TestSlow(t *testing.T) {
 	client := setupRedis(t)
 
-	idem := New[string, int](client, &Option{
+	idem := New[string, int](client, &Options{
 		LockTTL: 100 * time.Millisecond,
 		KeepTTL: 200 * time.Millisecond,
 	})
