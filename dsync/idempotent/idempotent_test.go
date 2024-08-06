@@ -2,12 +2,10 @@ package idempotent
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"testing"
 	"time"
 
-	"github.com/google/uuid"
 	redis "github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 
@@ -21,68 +19,6 @@ func TestMain(m *testing.M) {
 	code := m.Run()
 	stop()
 	os.Exit(code)
-}
-
-func TestPrivateLoad(t *testing.T) {
-	client := setupRedis(t)
-
-	cleanup := func(t *testing.T) {
-		t.Helper()
-		t.Cleanup(func() {
-			client.FlushAll(ctx).Err()
-		})
-	}
-
-	idem := New[string, int](client, &Options{
-		LockTTL: 100 * time.Millisecond,
-		KeepTTL: 200 * time.Millisecond,
-	})
-
-	t.Run("when key does not exist", func(t *testing.T) {
-		cleanup(t)
-
-		_, err := idem.load(ctx, t.Name(), "world")
-		// Assert that the error is redis.Nil, indicating that the key does not
-		// exist.
-		assert.ErrorIs(t, err, redis.Nil)
-	})
-
-	t.Run("when key is uuid", func(t *testing.T) {
-		cleanup(t)
-
-		a := assert.New(t)
-		key := t.Name()
-		a.Nil(client.Set(ctx, key, uuid.New().String(), 0).Err())
-		_, err := idem.load(ctx, key, "world")
-		// Assert that the error is ErrRequestInFlight, indicating that a request
-		// is already in flight for the key.
-		a.ErrorIs(err, ErrRequestInFlight)
-	})
-
-	t.Run("when key is data", func(t *testing.T) {
-		cleanup(t)
-
-		a := assert.New(t)
-
-		key := t.Name()
-		reqHash := hash([]byte(`"world"`))
-		a.Nil(client.Set(ctx, key, fmt.Sprintf(`{"request": %q, "response": 42}`, reqHash), 0).Err())
-		v, err := idem.load(ctx, key, "world")
-		a.Nil(err)
-		a.Equal(42, v)
-	})
-
-	t.Run("when request does not match", func(t *testing.T) {
-		cleanup(t)
-
-		a := assert.New(t)
-		key := t.Name()
-		a.Nil(client.Set(ctx, key, `{"request": "world", "response": 42}`, 0).Err())
-		_, err := idem.load(ctx, key, "not-world")
-		// Assert that the error is ErrRequestMismatch, indicating that the request
-		// does not match the stored request for the key.
-		a.ErrorIs(err, ErrRequestMismatch)
-	})
 }
 
 func TestPrivateLockUnlock(t *testing.T) {

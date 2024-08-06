@@ -116,48 +116,25 @@ func New[K, V any](client *redis.Client, opts *Options) *Idempotent[K, V] {
 
 // Do executes the provided function idempotently, using the specified key and
 // request.
-func (i *Idempotent[K, V]) Do(ctx context.Context, key string, fn func(ctx context.Context, req K) (V, error), req K) (V, error) {
-	// Check if the value exists in cache.
-	res, err := i.load(ctx, key, req)
-
-	// Return result if exists.
-	if err == nil {
-		return res, nil
-	}
-
-	// Return error if non-nil errors.
-	if !errors.Is(err, redis.Nil) {
-		return res, err
-	}
-
-	// The key does not exists yet, attempt to fill the cache.
-
-	// Lock the key to ensure there are no duplicate request.
-	val := []byte(uuid.New().String())
-
-	ok, err := i.lock(ctx, key, val, i.opts.LockTTL)
-
-	// Lock should return true or false.
-	// Otherwise, it is redis error.
+func (i *Idempotent[K, V]) Do(ctx context.Context, key string, fn func(ctx context.Context, req K) (V, error), req K) (res V, err error) {
+	token := []byte(uuid.New().String())
+	b, loaded, err := i.loadOrStore(ctx, key, token, i.opts.LockTTL)
 	if err != nil {
 		return res, err
 	}
-
-	// Unsuccessful lock, return the existing payload.
-	if !ok {
-		return i.load(ctx, key, req)
+	if loaded {
+		return i.parse(req, b)
 	}
+
 	// Any failure will just unlock the resource.
 	// context.WithoutCancel ensures that the unlock is always called.
-	defer i.unlock(context.WithoutCancel(ctx), key, val)
-
-	// If the lock is successful, perform the task and save the response.
+	defer i.unlock(context.WithoutCancel(ctx), key, token)
 
 	g, gctx := errgroup.WithContext(ctx)
 	gctx, cancel := context.WithCancelCause(gctx)
 
 	g.Go(func() error {
-		err := i.refresh(gctx, key, val, i.opts.LockTTL)
+		err := i.refresh(gctx, key, token, i.opts.LockTTL)
 		if errors.Is(err, errDone) {
 			return nil
 		}
@@ -175,14 +152,14 @@ func (i *Idempotent[K, V]) Do(ctx context.Context, key string, fn func(ctx conte
 		}
 
 		// extend one more time allow enough time for the response to be written.
-		return i.extend(gctx, key, val, i.opts.LockTTL)
+		return i.extend(gctx, key, token, i.opts.LockTTL)
 	})
 
 	if err := g.Wait(); err != nil {
 		return res, err
 	}
 
-	newval, err := json.Marshal(data[V]{
+	value, err := json.Marshal(data[V]{
 		Request:  i.hashRequest(req),
 		Response: res,
 	})
@@ -190,7 +167,7 @@ func (i *Idempotent[K, V]) Do(ctx context.Context, key string, fn func(ctx conte
 		return res, err
 	}
 
-	err = i.replace(ctx, key, val, newval, i.opts.KeepTTL)
+	err = i.replace(ctx, key, token, value, i.opts.KeepTTL)
 	if err != nil {
 		return res, err
 	}
@@ -244,15 +221,7 @@ func (i *Idempotent[K, V]) extend(ctx context.Context, key string, val []byte, t
 	return nil
 }
 
-// load retrieves the value of the specified key and returns it as a data
-// struct.
-func (i *Idempotent[K, V]) load(ctx context.Context, key string, req K) (V, error) {
-	var v V
-	b, err := i.client.Get(ctx, key).Bytes()
-	if err != nil {
-		return v, err
-	}
-
+func (i *Idempotent[K, V]) parse(req K, b []byte) (v V, err error) {
 	// Check if the request is pending.
 	if isUUID(b) {
 		return v, ErrRequestInFlight
@@ -269,6 +238,20 @@ func (i *Idempotent[K, V]) load(ctx context.Context, key string, req K) (V, erro
 	}
 
 	return d.Response, nil
+}
+
+func (i *Idempotent[K, V]) loadOrStore(ctx context.Context, key string, value []byte, ttl time.Duration) ([]byte, bool, error) {
+	v, err := i.client.Do(ctx, "SET", key, string(value), "NX", "GET", "PX", ttl.Milliseconds()).Result()
+	// If the previous value does not exist when GET, then it will be nil.
+	if errors.Is(err, redis.Nil) {
+		return value, false, nil
+	}
+
+	if err != nil {
+		return nil, false, err
+	}
+
+	return []byte(v.(string)), true, nil
 }
 
 // hashRequest generates a hash of the provided request.
