@@ -17,8 +17,6 @@ import (
 var (
 	ErrTokenMismatch   = errors.New("singleflight: token mismatch")
 	ErrLockWaitTimeout = errors.New("singleflight: lock wait timeout")
-
-	errDone = errors.New("singleflight: done")
 )
 
 type Group[T any] struct {
@@ -66,9 +64,11 @@ func (g *Group[T]) Do(ctx context.Context, key string, fn func(context.Context) 
 	// Use a separate context to avoid cancellation.
 	defer g.unlock(context.WithoutCancel(ctx), key, token)
 
+	ch := make(chan T)
+
 	eg, ctx := errgroup.WithContext(ctx)
 	eg.Go(func() error {
-		return g.refresh(ctx, key, token, g.LockTTL)
+		return g.refresh(ctx, ch, key, token, g.LockTTL, g.KeepTTL)
 	})
 
 	eg.Go(func() error {
@@ -77,20 +77,13 @@ func (g *Group[T]) Do(ctx context.Context, key string, fn func(context.Context) 
 			return err
 		}
 
-		b, err = json.Marshal(v)
-		if err != nil {
-			return err
-		}
+		ch <- v
+		close(ch)
 
-		if err := g.replace(ctx, key, token, b, g.KeepTTL); err != nil {
-			return err
-		}
-
-		// Signals completion.
-		return errDone
+		return nil
 	})
 
-	if err := eg.Wait(); err != nil && !errors.Is(err, errDone) {
+	if err := eg.Wait(); err != nil {
 		return v, err, false
 	}
 
@@ -125,16 +118,23 @@ func (g *Group[T]) wait(ctx context.Context, key string, ttl time.Duration) (v T
 	}
 }
 
-func (g *Group[T]) refresh(ctx context.Context, key string, value []byte, ttl time.Duration) error {
-	t := time.NewTicker(ttl * 7 / 10)
+func (g *Group[T]) refresh(ctx context.Context, ch chan T, key string, value []byte, lockTTL, keepTTL time.Duration) error {
+	t := time.NewTicker(lockTTL * 7 / 10)
 	defer t.Stop()
 
 	for {
 		select {
 		case <-ctx.Done():
 			return context.Cause(ctx)
+		case v := <-ch:
+			b, err := json.Marshal(v)
+			if err != nil {
+				return err
+			}
+
+			return g.replace(ctx, key, value, b, keepTTL)
 		case <-t.C:
-			if err := g.extend(ctx, key, value, ttl); err != nil {
+			if err := g.extend(ctx, key, value, lockTTL); err != nil {
 				return err
 			}
 		}
