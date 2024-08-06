@@ -66,42 +66,31 @@ func (g *Group[T]) Do(ctx context.Context, key string, fn func(context.Context) 
 	// Use a separate context to avoid cancellation.
 	defer g.unlock(context.WithoutCancel(ctx), key, token)
 
-	eg, gctx := errgroup.WithContext(ctx)
-	gctx, cancel := context.WithCancelCause(gctx)
-
+	eg, ctx := errgroup.WithContext(ctx)
 	eg.Go(func() error {
-		err := g.refresh(gctx, key, token, g.LockTTL)
-		if errors.Is(err, errDone) {
-			return nil
-		}
-
-		return err
+		return g.refresh(ctx, key, token, g.LockTTL)
 	})
 
 	eg.Go(func() error {
-		// Cancel the refresh after loading and replacing
-		// completes.
-		defer cancel(errDone)
-
-		v, err = fn(gctx)
+		v, err = fn(ctx)
 		if err != nil {
 			return err
 		}
 
-		// Extend the lock duration to allow buffer for the replace.
-		return g.extend(gctx, key, token, g.LockTTL)
+		b, err = json.Marshal(v)
+		if err != nil {
+			return err
+		}
+
+		if err := g.replace(ctx, key, token, b, g.KeepTTL); err != nil {
+			return err
+		}
+
+		// Signals completion.
+		return errDone
 	})
 
-	if err := eg.Wait(); err != nil {
-		return v, err, false
-	}
-
-	b, err = json.Marshal(v)
-	if err != nil {
-		return v, err, false
-	}
-
-	if err := g.replace(ctx, key, token, b, g.KeepTTL); err != nil {
+	if err := eg.Wait(); err != nil && !errors.Is(err, errDone) {
 		return v, err, false
 	}
 
