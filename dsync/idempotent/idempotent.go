@@ -28,8 +28,6 @@ var (
 	// ErrLeaseInvalid indicates that the caller doesn't hold the correct token
 	// for the lease and failed to write.
 	ErrLeaseInvalid = errors.New("idempotent: lease invalid")
-
-	errDone = errors.New("idempotent: done")
 )
 
 type data struct {
@@ -146,9 +144,11 @@ func (s *RedisStore) Do(ctx context.Context, key string, fn func(ctx context.Con
 	// context.WithoutCancel ensures that the unlock is always called.
 	defer s.unlock(context.WithoutCancel(ctx), key, token)
 
+	ch := make(chan data)
+
 	g, ctx := errgroup.WithContext(ctx)
 	g.Go(func() error {
-		return s.refresh(ctx, key, token, o.LockTTL)
+		return s.refresh(ctx, ch, key, token, o.LockTTL, o.KeepTTL)
 	})
 
 	g.Go(func() error {
@@ -157,38 +157,39 @@ func (s *RedisStore) Do(ctx context.Context, key string, fn func(ctx context.Con
 			return err
 		}
 
-		value, err := json.Marshal(data{
+		ch <- data{
 			Request:  hash(req),
 			Response: string(res),
-		})
-		if err != nil {
-			return err
 		}
+		close(ch)
 
-		if err := s.replace(ctx, key, token, string(value), o.KeepTTL); err != nil {
-			return err
-		}
-
-		return errDone
+		return nil
 	})
 
-	if err := g.Wait(); err != nil && !errors.Is(err, errDone) {
+	if err := g.Wait(); err != nil {
 		return res, false, err
 	}
 
 	return res, false, nil
 }
 
-func (s *RedisStore) refresh(ctx context.Context, key, value string, ttl time.Duration) error {
-	t := time.NewTicker(ttl * 7 / 10)
+func (s *RedisStore) refresh(ctx context.Context, ch chan data, key, value string, lockTTL, keepTTL time.Duration) error {
+	t := time.NewTicker(lockTTL * 7 / 10)
 	defer t.Stop()
 
 	for {
 		select {
 		case <-ctx.Done():
 			return context.Cause(ctx)
+		case d := <-ch:
+			b, err := json.Marshal(d)
+			if err != nil {
+				return err
+			}
+
+			return s.replace(ctx, key, value, string(b), keepTTL)
 		case <-t.C:
-			if err := s.extend(ctx, key, value, ttl); err != nil {
+			if err := s.extend(ctx, key, value, lockTTL); err != nil {
 				return err
 			}
 		}
