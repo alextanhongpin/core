@@ -21,7 +21,7 @@ type Response struct {
 	UserID int64
 }
 
-func ExampleIdempotent() {
+func ExampleMakeHandler() {
 	ctx := context.Background()
 	stop := redistest.Init()
 	defer stop()
@@ -33,7 +33,7 @@ func ExampleIdempotent() {
 
 	defer client.Close()
 
-	idem := idempotent.New[Request, *Response](client, nil)
+	store := idempotent.NewRedisStore(client, nil)
 
 	// Create a request object with the required fields.
 	req := Request{
@@ -50,19 +50,20 @@ func ExampleIdempotent() {
 		defer wg.Done()
 
 		// Define the handler function that simulates the actual task
-		h := func(ctx context.Context, req Request) (*Response, error) {
+		fn := func(ctx context.Context, req Request) (*Response, error) {
 			fmt.Printf("Executing get user #1: %+v\n", req)
 			time.Sleep(40 * time.Millisecond)
 			return &Response{UserID: 10}, nil
 		}
 
 		// Execute the idempotent operation and handle the response
-		v, err := idem.Do(ctx, "get-user", h, req)
+		h := idempotent.MakeHandler(store, fn)
+		v, shared, err := h.Do(ctx, "get-user", req)
 		if err != nil {
 			panic(err)
 		}
 
-		fmt.Printf("Success #1: %+v\n", v)
+		fmt.Printf("Success #1: %+v %t\n", v, shared)
 	}()
 
 	// Start the second concurrent request.
@@ -73,13 +74,14 @@ func ExampleIdempotent() {
 		time.Sleep(25 * time.Millisecond)
 
 		// Define the handler function that simulates the actual task.
-		h := func(ctx context.Context, req Request) (*Response, error) {
+		fn := func(ctx context.Context, req Request) (*Response, error) {
 			fmt.Printf("Executing get user #2: %+v\n", req)
 			return &Response{UserID: 10}, nil
 		}
 
 		// Execute the idempotent operation and handle the response.
-		_, err := idem.Do(ctx, "get-user", h, req)
+		h := idempotent.MakeHandler(store, fn)
+		_, _, err := h.Do(ctx, "get-user", req)
 		if err == nil {
 			fmt.Println(err)
 			panic("want error, got nil")
@@ -99,18 +101,19 @@ func ExampleIdempotent() {
 		time.Sleep(60 * time.Millisecond)
 
 		// Define the handler function that simulates the actual task.
-		h := func(ctx context.Context, req Request) (*Response, error) {
+		fn := func(ctx context.Context, req Request) (*Response, error) {
 			fmt.Printf("Executing get user #3: %+v\n", req)
 			return &Response{UserID: 10}, nil
 		}
 
 		// Execute the idempotent operation and handle the response.
-		v, err := idem.Do(ctx, "get-user", h, req)
+		h := idempotent.MakeHandler(store, fn)
+		v, shared, err := h.Do(ctx, "get-user", req)
 		if err != nil {
 			panic(err)
 		}
 
-		fmt.Printf("Success #3: %+v\n", v)
+		fmt.Printf("Success #3: %+v %t\n", v, shared)
 	}()
 
 	wg.Wait()
@@ -118,6 +121,6 @@ func ExampleIdempotent() {
 	// Executing get user #1: {Age:10 Name:john}
 	// Failed #2: idempotent: request in flight
 	// true
-	// Success #1: &{UserID:10}
-	// Success #3: &{UserID:10}
+	// Success #1: &{UserID:10} false
+	// Success #3: &{UserID:10} true
 }

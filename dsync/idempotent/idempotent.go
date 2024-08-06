@@ -2,6 +2,7 @@
 package idempotent
 
 import (
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
@@ -30,6 +31,258 @@ var (
 
 	errDone = errors.New("idempotent: done")
 )
+
+type data struct {
+	Request  string `json:"request,omitempty"`
+	Response string `json:"response,omitempty"`
+}
+
+type Handler[K, V any] func(ctx context.Context, key string, req K) (V, bool, error)
+
+func (h Handler[K, V]) Do(ctx context.Context, key string, req K) (V, bool, error) {
+	return h(ctx, key, req)
+}
+
+func MakeHandler[K, V any](store Store, h func(context.Context, K) (V, error), opts ...Option) Handler[K, V] {
+	return func(ctx context.Context, key string, req K) (res V, shared bool, err error) {
+		b, err := json.Marshal(req)
+		if err != nil {
+			return res, false, err
+		}
+
+		b, shared, err = store.Do(ctx, key, func(ctx context.Context, _ []byte) ([]byte, error) {
+			res, err := h(ctx, req)
+			if err != nil {
+				return nil, err
+			}
+
+			return json.Marshal(res)
+		}, b, opts...)
+		if err != nil {
+			return res, false, err
+		}
+
+		if err := json.Unmarshal(b, &res); err != nil {
+			return res, false, err
+		}
+
+		return res, shared, err
+	}
+}
+
+type Options struct {
+	KeepTTL time.Duration
+	LockTTL time.Duration
+}
+
+func (o *Options) Clone() *Options {
+	return &Options{
+		KeepTTL: o.KeepTTL,
+		LockTTL: o.LockTTL,
+	}
+}
+
+func NewOptions() *Options {
+	return &Options{
+		KeepTTL: 24 * time.Hour,
+		LockTTL: 10 * time.Second,
+	}
+}
+
+type Option func(*Options)
+
+func WithKeepTTL(ttl time.Duration) Option {
+	return func(o *Options) {
+		o.KeepTTL = ttl
+	}
+}
+
+func WithLockTTL(ttl time.Duration) Option {
+	return func(o *Options) {
+		o.LockTTL = ttl
+	}
+}
+
+type Store interface {
+	Do(ctx context.Context, key string, fn func(ctx context.Context, req []byte) ([]byte, error), req []byte, opts ...Option) (res []byte, shared bool, err error)
+}
+
+type RedisStore struct {
+	client *redis.Client
+	opts   *Options
+}
+
+// NewRedisStore creates a new RedisStore instance with the specified Redis
+// client, lock TTL, and keep TTL.
+func NewRedisStore(client *redis.Client, opts *Options) *RedisStore {
+	return &RedisStore{
+		client: client,
+		opts:   cmp.Or(opts, NewOptions()),
+	}
+}
+
+// Do executes the provided function idempotently, using the specified key and
+// request.
+func (s *RedisStore) Do(ctx context.Context, key string, fn func(ctx context.Context, req []byte) ([]byte, error), req []byte, opts ...Option) (res []byte, shared bool, err error) {
+	o := s.opts.Clone()
+	for _, opt := range opts {
+		opt(o)
+	}
+
+	token := uuid.New().String()
+	b, loaded, err := s.loadOrStore(ctx, key, token, o.LockTTL)
+	if err != nil {
+		return res, false, err
+	}
+	if loaded {
+		res, err := s.parse(req, b)
+		return res, err == nil, err
+	}
+
+	// Any failure will just unlock the resource.
+	// context.WithoutCancel ensures that the unlock is always called.
+	defer s.unlock(context.WithoutCancel(ctx), key, token)
+
+	g, ctx := errgroup.WithContext(ctx)
+	g.Go(func() error {
+		return s.refresh(ctx, key, token, o.LockTTL)
+	})
+
+	g.Go(func() error {
+		res, err = fn(ctx, req)
+		if err != nil {
+			return err
+		}
+
+		value, err := json.Marshal(data{
+			Request:  hash(req),
+			Response: string(res),
+		})
+		if err != nil {
+			return err
+		}
+
+		if err := s.replace(ctx, key, token, string(value), o.KeepTTL); err != nil {
+			return err
+		}
+
+		return errDone
+	})
+
+	if err := g.Wait(); err != nil && !errors.Is(err, errDone) {
+		return res, false, err
+	}
+
+	return res, false, nil
+}
+
+func (s *RedisStore) refresh(ctx context.Context, key, value string, ttl time.Duration) error {
+	t := time.NewTicker(ttl * 7 / 10)
+	defer t.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return context.Cause(ctx)
+		case <-t.C:
+			if err := s.extend(ctx, key, value, ttl); err != nil {
+				return err
+			}
+		}
+	}
+}
+
+// replace sets the value of the specified key to the provided new value, if
+// the existing value matches the old value.
+func (s *RedisStore) replace(ctx context.Context, key string, oldVal, newVal string, ttl time.Duration) error {
+	keys := []string{key}
+	argv := []any{oldVal, newVal, ttl.Milliseconds()}
+	err := replace.Run(ctx, s.client, keys, argv...).Err()
+	if errors.Is(err, redis.Nil) {
+		return fmt.Errorf("replace: %w", ErrLeaseInvalid)
+	}
+	if err != nil {
+		return fmt.Errorf("replace: %w", err)
+	}
+
+	return nil
+}
+
+func (s *RedisStore) extend(ctx context.Context, key, value string, ttl time.Duration) error {
+	keys := []string{key}
+	argv := []any{value, ttl.Milliseconds()}
+	err := extend.Run(ctx, s.client, keys, argv...).Err()
+	if errors.Is(err, redis.Nil) {
+		return fmt.Errorf("extend: %w", ErrLeaseInvalid)
+	}
+	if err != nil {
+		return fmt.Errorf("extend: %w", err)
+	}
+
+	return nil
+}
+
+func (s *RedisStore) parse(req, b []byte) ([]byte, error) {
+	// Check if the request is pending.
+	if isUUID(b) {
+		return nil, ErrRequestInFlight
+	}
+
+	var d data
+	if err := json.Unmarshal(b, &d); err != nil {
+		return nil, err
+	}
+
+	// Check if the request matches.
+	if d.Request != string(hash(req)) {
+		return nil, ErrRequestMismatch
+	}
+
+	return []byte(d.Response), nil
+}
+
+func (s *RedisStore) loadOrStore(ctx context.Context, key, value string, ttl time.Duration) ([]byte, bool, error) {
+	v, err := s.client.Do(ctx, "SET", key, value, "NX", "GET", "PX", ttl.Milliseconds()).Result()
+	// If the previous value does not exist when GET, then it will be nil.
+	if errors.Is(err, redis.Nil) {
+		return []byte(value), false, nil
+	}
+
+	if err != nil {
+		return nil, false, err
+	}
+
+	return []byte(v.(string)), true, nil
+}
+
+// unlock releases the lock on the specified key using the provided value.
+func (s *RedisStore) unlock(ctx context.Context, key, value string) error {
+	keys := []string{key}
+	argv := []any{value}
+	err := unlock.Run(ctx, s.client, keys, argv...).Err()
+	if errors.Is(err, redis.Nil) {
+		return fmt.Errorf("unlock: %w", ErrLeaseInvalid)
+	}
+	if err != nil {
+		return fmt.Errorf("unlock: %w", err)
+	}
+
+	return nil
+}
+
+// hash generates a SHA-256 hash of the provided data.
+func hash(data []byte) string {
+	h := sha256.New()
+	h.Write(data)
+	b := h.Sum(nil)
+	return base64.StdEncoding.EncodeToString(b)
+}
+
+// isUUID checks if the provided byte slice represents a valid UUID.
+func isUUID(b []byte) bool {
+	_, err := uuid.ParseBytes(b)
+	return err == nil
+}
 
 // unlock deletes the key only if the lease id matches.
 var unlock = redis.NewScript(`
@@ -78,214 +331,3 @@ var extend = redis.NewScript(`
 
 	return nil
 `)
-
-type data[T any] struct {
-	Request  string `json:"request,omitempty"`
-	Response T      `json:"response,omitempty"`
-}
-
-type Options struct {
-	LockTTL time.Duration
-	KeepTTL time.Duration
-}
-
-func NewOptions() *Options {
-	return &Options{
-		LockTTL: 30 * time.Second,
-		KeepTTL: 24 * time.Hour,
-	}
-}
-
-type Idempotent[K, V any] struct {
-	client *redis.Client
-	opts   *Options
-}
-
-// New creates a new Idempotent instance with the specified Redis client, lock
-// TTL, and keep TTL.
-func New[K, V any](client *redis.Client, opts *Options) *Idempotent[K, V] {
-	if opts == nil {
-		opts = NewOptions()
-	}
-
-	return &Idempotent[K, V]{
-		client: client,
-		opts:   opts,
-	}
-}
-
-// Do executes the provided function idempotently, using the specified key and
-// request.
-func (i *Idempotent[K, V]) Do(ctx context.Context, key string, fn func(ctx context.Context, req K) (V, error), req K) (res V, err error) {
-	token := []byte(uuid.New().String())
-	b, loaded, err := i.loadOrStore(ctx, key, token, i.opts.LockTTL)
-	if err != nil {
-		return res, err
-	}
-	if loaded {
-		return i.parse(req, b)
-	}
-
-	// Any failure will just unlock the resource.
-	// context.WithoutCancel ensures that the unlock is always called.
-	defer i.unlock(context.WithoutCancel(ctx), key, token)
-
-	g, ctx := errgroup.WithContext(ctx)
-	g.Go(func() error {
-		return i.refresh(ctx, key, token, i.opts.LockTTL)
-	})
-
-	g.Go(func() error {
-		res, err = fn(ctx, req)
-		if err != nil {
-			return err
-		}
-
-		value, err := json.Marshal(data[V]{
-			Request:  i.hashRequest(req),
-			Response: res,
-		})
-		if err != nil {
-			return err
-		}
-
-		if err := i.replace(ctx, key, token, value, i.opts.KeepTTL); err != nil {
-			return err
-		}
-
-		return errDone
-	})
-
-	if err := g.Wait(); err != nil && !errors.Is(err, errDone) {
-		return res, err
-	}
-
-	return res, nil
-}
-
-// replace sets the value of the specified key to the provided new value, if
-// the existing value matches the old value.
-func (i *Idempotent[K, V]) replace(ctx context.Context, key string, oldVal, newVal []byte, ttl time.Duration) error {
-	keys := []string{key}
-	argv := []any{oldVal, newVal, ttl.Milliseconds()}
-	err := replace.Run(ctx, i.client, keys, argv...).Err()
-	if errors.Is(err, redis.Nil) {
-		return fmt.Errorf("replace: %w", ErrLeaseInvalid)
-	}
-	if err != nil {
-		return fmt.Errorf("replace: %w", err)
-	}
-
-	return nil
-}
-
-func (i *Idempotent[K, V]) refresh(ctx context.Context, key string, val []byte, ttl time.Duration) error {
-	t := time.NewTicker(ttl * 7 / 10)
-	defer t.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return context.Cause(ctx)
-		case <-t.C:
-			if err := i.extend(ctx, key, val, i.opts.LockTTL); err != nil {
-				return err
-			}
-		}
-	}
-}
-
-func (i *Idempotent[K, V]) extend(ctx context.Context, key string, val []byte, ttl time.Duration) error {
-	keys := []string{key}
-	argv := []any{val, ttl.Milliseconds()}
-	err := extend.Run(ctx, i.client, keys, argv...).Err()
-	if errors.Is(err, redis.Nil) {
-		return fmt.Errorf("extend: %w", ErrLeaseInvalid)
-	}
-	if err != nil {
-		return fmt.Errorf("extend: %w", err)
-	}
-
-	return nil
-}
-
-func (i *Idempotent[K, V]) parse(req K, b []byte) (v V, err error) {
-	// Check if the request is pending.
-	if isUUID(b) {
-		return v, ErrRequestInFlight
-	}
-
-	var d data[V]
-	if err = json.Unmarshal(b, &d); err != nil {
-		return v, err
-	}
-
-	// Check if the request matches.
-	if d.Request != i.hashRequest(req) {
-		return v, ErrRequestMismatch
-	}
-
-	return d.Response, nil
-}
-
-func (i *Idempotent[K, V]) loadOrStore(ctx context.Context, key string, value []byte, ttl time.Duration) ([]byte, bool, error) {
-	v, err := i.client.Do(ctx, "SET", key, string(value), "NX", "GET", "PX", ttl.Milliseconds()).Result()
-	// If the previous value does not exist when GET, then it will be nil.
-	if errors.Is(err, redis.Nil) {
-		return value, false, nil
-	}
-
-	if err != nil {
-		return nil, false, err
-	}
-
-	return []byte(v.(string)), true, nil
-}
-
-// hashRequest generates a hash of the provided request.
-func (i *Idempotent[K, V]) hashRequest(req K) string {
-	// We hash the request for several reasons
-	// - we want to fix the size of the request, regardless of how large it is
-	// - we do not need to diff if the request does not match
-	// - we do not want to keep confidential data
-	b, err := json.Marshal(req)
-	if err != nil {
-		panic(err)
-	}
-
-	return hash(b)
-}
-
-// lock acquires a lock on the specified key using the provided value.
-func (i *Idempotent[K, V]) lock(ctx context.Context, key string, val []byte, ttl time.Duration) (bool, error) {
-	return i.client.SetNX(ctx, key, val, ttl).Result()
-}
-
-// unlock releases the lock on the specified key using the provided value.
-func (i *Idempotent[K, V]) unlock(ctx context.Context, key string, val []byte) error {
-	keys := []string{key}
-	argv := []any{val}
-	err := unlock.Run(ctx, i.client, keys, argv...).Err()
-	if errors.Is(err, redis.Nil) {
-		return fmt.Errorf("unlock: %w", ErrLeaseInvalid)
-	}
-	if err != nil {
-		return fmt.Errorf("unlock: %w", err)
-	}
-
-	return nil
-}
-
-// hash generates a SHA-256 hash of the provided data.
-func hash(data []byte) string {
-	h := sha256.New()
-	h.Write(data)
-	b := h.Sum(nil)
-	return base64.StdEncoding.EncodeToString(b)
-}
-
-// isUUID checks if the provided byte slice represents a valid UUID.
-func isUUID(b []byte) bool {
-	_, err := uuid.ParseBytes(b)
-	return err == nil
-}

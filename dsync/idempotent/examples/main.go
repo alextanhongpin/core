@@ -40,7 +40,7 @@ func main() {
 		Addr: "localhost:6379",
 	})
 
-	idem := idempotent.New[int, string](client, &idempotent.Option{
+	store := idempotent.NewRedisStore(client, &idempotent.Options{
 		LockTTL: 1 * time.Second,
 		KeepTTL: 1 * time.Hour,
 	})
@@ -51,6 +51,7 @@ func main() {
 		time.Sleep(sleep)
 		return fmt.Sprint(req), nil
 	}
+	h := idempotent.MakeHandler(store, fn)
 
 	mux := http.NewServeMux()
 	mux.Handle("/debug/vars", expvar.Handler())
@@ -62,7 +63,7 @@ func main() {
 		if mismatch {
 			m = n - 1
 		}
-		res, err := idem.Do(r.Context(), fmt.Sprint(n), fn, m)
+		res, _, err := h.Do(r.Context(), fmt.Sprint(n), m)
 		if err != nil {
 			errorsTotal.Add(1)
 			if errors.Is(err, idempotent.ErrRequestInFlight) {
@@ -71,7 +72,7 @@ func main() {
 			if errors.Is(err, idempotent.ErrRequestMismatch) {
 				errRequestMismatch.Add(1)
 			}
-			if errors.Is(err, idempotent.ErrKeyReleased) {
+			if errors.Is(err, idempotent.ErrLeaseInvalid) {
 				errKeyReleased.Add(1)
 			}
 			http.Error(w, "internal server error", http.StatusInternalServerError)
