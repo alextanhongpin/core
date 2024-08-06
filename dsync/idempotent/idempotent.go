@@ -51,7 +51,7 @@ func MakeHandler[K, V any](store Store, h func(context.Context, K) (V, error), o
 		}
 
 		b, shared, err = store.Do(ctx, key, func(ctx context.Context, _ []byte) ([]byte, error) {
-			res, err := h(ctx, req)
+			res, err = h(ctx, req)
 			if err != nil {
 				return nil, err
 			}
@@ -60,6 +60,9 @@ func MakeHandler[K, V any](store Store, h func(context.Context, K) (V, error), o
 		}, b, opts...)
 		if err != nil {
 			return res, false, err
+		}
+		if !shared {
+			return res, false, nil
 		}
 
 		if err := json.Unmarshal(b, &res); err != nil {
