@@ -25,6 +25,24 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
+func TestRedisStore(t *testing.T) {
+	fn := func(ctx context.Context, req []byte) ([]byte, error) {
+		return []byte("world"), nil
+	}
+
+	store := NewRedisStore(newClient(t), nil)
+	res, shared, err := store.Do(ctx, t.Name(), fn, []byte("hello"))
+	is := assert.New(t)
+	is.Nil(err)
+	is.False(shared)
+	is.Equal([]byte("world"), res)
+
+	res, shared, err = store.Do(ctx, t.Name(), fn, []byte("hello"))
+	is.Nil(err)
+	is.True(shared)
+	is.Equal([]byte("world"), res)
+}
+
 func TestMakeHandler(t *testing.T) {
 	store := NewRedisStore(newClient(t), nil)
 	h := MakeHandler(store, func(ctx context.Context, req string) (string, error) {
