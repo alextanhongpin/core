@@ -8,8 +8,6 @@ github.com/Nvveen/Gotty v0.0.0-20120604004816-cd527374f1e5 h1:TngWCqHvy9oXAN6lEV
 github.com/Nvveen/Gotty v0.0.0-20120604004816-cd527374f1e5/go.mod h1:lmUJ/7eu/Q8D7ML55dXQrVaamCz2vxCfdQBasLZfHKk=
 github.com/alextanhongpin/core/storage/redis v0.0.0-20240720094717-7b540d721d99 h1:Iz3c9sI1fhuyimJImMsFip+7wzJQF/dSHCD9BxhOAac=
 github.com/alextanhongpin/core/storage/redis v0.0.0-20240720094717-7b540d721d99/go.mod h1:sTQSolmJeZyMkrHz1jjYhkAmIV7jLd/4dCCtad2d6fg=
-github.com/alextanhongpin/core/sync/rate v0.0.0-20240720152141-8e3a47483339 h1:I4GzBvLswafuF2TppEuUYvAnz+S9pv0rlSklZBlwdxs=
-github.com/alextanhongpin/core/sync/rate v0.0.0-20240720152141-8e3a47483339/go.mod h1:2DAEBM5Xkye/az93rp6BIHA7DXKTThAUHdIquLtqxYg=
 github.com/alextanhongpin/core/sync/rate v0.0.0-20240722033021-5ee735afa5c2 h1:PpWyHbptEZDOa9xTAf2Ec2wayKH6/6gvRe+XFx1sSOg=
 github.com/alextanhongpin/core/sync/rate v0.0.0-20240722033021-5ee735afa5c2/go.mod h1:2DAEBM5Xkye/az93rp6BIHA7DXKTThAUHdIquLtqxYg=
 github.com/bsm/ginkgo/v2 v2.12.0 h1:Ny8MWAHyOepLGlLKYmXG4IEkioBysk6GpaRTLC8zwWs=

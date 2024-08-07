@@ -2,6 +2,7 @@
 package circuit
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -53,11 +54,12 @@ func NewStatus(status string) Status {
 }
 
 const (
-	breakDuration    = 5 * time.Second
-	failureRatio     = 0.5              // at least 50% of the requests fails
-	failureThreshold = 10               // min 10 failures before the circuit breaker becomes open.
-	samplingDuration = 10 * time.Second // time window to measure the error rate.
-	successThreshold = 5
+	breakDuration     = 5 * time.Second
+	failureRatio      = 0.5 // at least 50% of the requests fails
+	failureThreshold  = 10  // min 10 failures before the circuit breaker becomes open.
+	heartbeatDuration = 1 * time.Second
+	samplingDuration  = 10 * time.Second // time window to measure the error rate.
+	successThreshold  = 5
 )
 
 var (
@@ -65,21 +67,23 @@ var (
 	ErrForcedOpen  = errors.New("circuit: forced open")
 )
 
-type Option struct {
-	BreakDuration    time.Duration
-	FailureRatio     float64
-	FailureThreshold int
-	SamplingDuration time.Duration
-	SuccessThreshold int
+type Options struct {
+	BreakDuration     time.Duration
+	FailureRatio      float64
+	FailureThreshold  int
+	HeartbeatDuration time.Duration
+	SamplingDuration  time.Duration
+	SuccessThreshold  int
 }
 
-func NewOption() *Option {
-	return &Option{
-		BreakDuration:    breakDuration,
-		FailureRatio:     failureRatio,
-		FailureThreshold: failureThreshold,
-		SamplingDuration: samplingDuration,
-		SuccessThreshold: successThreshold,
+func NewOptions() *Options {
+	return &Options{
+		BreakDuration:     breakDuration,
+		FailureRatio:      failureRatio,
+		FailureThreshold:  failureThreshold,
+		HeartbeatDuration: heartbeatDuration,
+		SamplingDuration:  samplingDuration,
+		SuccessThreshold:  successThreshold,
 	}
 }
 
@@ -90,20 +94,18 @@ type Breaker struct {
 	status Status
 	timer  *time.Timer
 
-	// Option.
+	// Options.
 	FailureCount  func(error) int
 	Now           func() time.Time
 	SlowCallCount func(time.Duration) int
 	channel       string
 	client        *redis.Client
 	counter       *rate.Errors
-	opt           *Option
+	opts          *Options
 }
 
-func New(client *redis.Client, channel string, opt *Option) (*Breaker, func()) {
-	if opt == nil {
-		opt = NewOption()
-	}
+func New(client *redis.Client, channel string, opts *Options) (*Breaker, func()) {
+	opts = cmp.Or(opts, NewOptions())
 
 	b := &Breaker{
 		FailureCount: func(err error) int {
@@ -126,8 +128,8 @@ func New(client *redis.Client, channel string, opt *Option) (*Breaker, func()) {
 		},
 		channel: channel,
 		client:  client,
-		counter: rate.NewErrors(opt.SamplingDuration),
-		opt:     opt,
+		counter: rate.NewErrors(opts.SamplingDuration),
+		opts:    opts,
 	}
 	return b, b.init()
 }
@@ -210,7 +212,7 @@ func (b *Breaker) canOpen(n int) bool {
 func (b *Breaker) open() {
 	duration, _ := b.client.PTTL(context.Background(), b.channel).Result()
 	if duration <= 0 {
-		duration = b.opt.BreakDuration
+		duration = b.opts.BreakDuration
 	}
 
 	b.mu.Lock()
@@ -274,6 +276,28 @@ func (b *Breaker) close() {
 
 func (b *Breaker) closed(ctx context.Context, fn func() error) error {
 	start := time.Now()
+
+	hctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	go func() {
+		d := b.opts.HeartbeatDuration
+		t := time.NewTicker(d)
+
+		for {
+			select {
+			case <-hctx.Done():
+				return
+			case <-t.C:
+				if b.canOpen(b.SlowCallCount(d)) {
+					b.open()
+
+					return
+				}
+			}
+		}
+	}()
+
 	if err := fn(); err != nil {
 		n := b.FailureCount(err)
 		n += b.SlowCallCount(b.Now().Sub(start))
@@ -317,18 +341,18 @@ func (b *Breaker) disable() {
 }
 
 func (b *Breaker) publish(ctx context.Context, status Status) error {
-	setErr := b.client.Set(ctx, b.channel, status.String(), b.opt.BreakDuration).Err()
+	setErr := b.client.Set(ctx, b.channel, status.String(), b.opts.BreakDuration).Err()
 	pubErr := b.client.Publish(ctx, b.channel, status.String()).Err()
 	return errors.Join(setErr, pubErr)
 }
 
 func (b *Breaker) isHealthy(successes, _ float64) bool {
-	return math.Ceil(successes) >= float64(b.opt.SuccessThreshold)
+	return math.Ceil(successes) >= float64(b.opts.SuccessThreshold)
 }
 
 func (b *Breaker) isUnhealthy(successes, failures float64) bool {
-	isFailureRatioExceeded := failureRate(successes, failures) >= b.opt.FailureRatio
-	isFailureThresholdExceeded := math.Ceil(failures) >= float64(b.opt.FailureThreshold)
+	isFailureRatioExceeded := failureRate(successes, failures) >= b.opts.FailureRatio
+	isFailureThresholdExceeded := math.Ceil(failures) >= float64(b.opts.FailureThreshold)
 
 	return isFailureRatioExceeded && isFailureThresholdExceeded
 }

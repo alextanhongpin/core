@@ -26,18 +26,18 @@ func TestMain(m *testing.M) {
 }
 
 func TestCircuit(t *testing.T) {
-	opt := circuit.NewOption()
-	opt.SamplingDuration = 1 * time.Second
-	opt.BreakDuration = 1 * time.Second
+	opts := circuit.NewOptions()
+	opts.SamplingDuration = 1 * time.Second
+	opts.BreakDuration = 1 * time.Second
 
-	cb, stop1 := circuit.New(newClient(t), t.Name(), opt)
+	cb, stop1 := circuit.New(newClient(t), t.Name(), opts)
 	defer stop1()
-	cb2, stop2 := circuit.New(newClient(t), t.Name(), opt)
+	cb2, stop2 := circuit.New(newClient(t), t.Name(), opts)
 	defer stop2()
 
 	t.Run("open", func(t *testing.T) {
 		is := assert.New(t)
-		for range opt.FailureThreshold {
+		for range opts.FailureThreshold {
 			err := cb.Do(ctx, func() error {
 				return wantErr
 			})
@@ -59,7 +59,7 @@ func TestCircuit(t *testing.T) {
 
 	t.Run("half-open", func(t *testing.T) {
 		// Because this is Redis TTL, we need to wait for it to expire.
-		time.Sleep(opt.BreakDuration + time.Millisecond)
+		time.Sleep(opts.BreakDuration + time.Millisecond)
 
 		err := cb.Do(ctx, func() error {
 			return nil
@@ -72,7 +72,7 @@ func TestCircuit(t *testing.T) {
 
 	t.Run("closed", func(t *testing.T) {
 		is := assert.New(t)
-		for range opt.SuccessThreshold {
+		for range opts.SuccessThreshold {
 			err := cb.Do(ctx, func() error {
 				return nil
 			})
@@ -85,13 +85,13 @@ func TestCircuit(t *testing.T) {
 }
 
 func TestSlowCall(t *testing.T) {
-	opt := circuit.NewOption()
-	cb, stop := circuit.New(newClient(t), t.Name(), opt)
+	opts := circuit.NewOptions()
+	cb, stop := circuit.New(newClient(t), t.Name(), opts)
 	defer stop()
 
 	cb.SlowCallCount = func(time.Duration) int {
 		// Ignore duration, just return a constant value.
-		return opt.FailureThreshold
+		return opts.FailureThreshold
 	}
 
 	err := cb.Do(ctx, func() error {
