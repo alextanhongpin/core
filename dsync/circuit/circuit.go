@@ -54,12 +54,11 @@ func NewStatus(status string) Status {
 }
 
 const (
-	breakDuration     = 5 * time.Second
-	failureRatio      = 0.5 // at least 50% of the requests fails
-	failureThreshold  = 10  // min 10 failures before the circuit breaker becomes open.
-	heartbeatDuration = 1 * time.Second
-	samplingDuration  = 10 * time.Second // time window to measure the error rate.
-	successThreshold  = 5
+	breakDuration    = 5 * time.Second
+	failureRatio     = 0.5              // at least 50% of the requests fails
+	failureThreshold = 10               // min 10 failures before the circuit breaker becomes open.
+	samplingDuration = 10 * time.Second // time window to measure the error rate.
+	successThreshold = 5
 )
 
 var (
@@ -78,12 +77,11 @@ type Options struct {
 
 func NewOptions() *Options {
 	return &Options{
-		BreakDuration:     breakDuration,
-		FailureRatio:      failureRatio,
-		FailureThreshold:  failureThreshold,
-		HeartbeatDuration: heartbeatDuration,
-		SamplingDuration:  samplingDuration,
-		SuccessThreshold:  successThreshold,
+		BreakDuration:    breakDuration,
+		FailureRatio:     failureRatio,
+		FailureThreshold: failureThreshold,
+		SamplingDuration: samplingDuration,
+		SuccessThreshold: successThreshold,
 	}
 }
 
@@ -277,26 +275,27 @@ func (b *Breaker) close() {
 func (b *Breaker) closed(ctx context.Context, fn func() error) error {
 	start := time.Now()
 
-	hctx, cancel := context.WithCancel(ctx)
-	defer cancel()
+	if d := b.opts.HeartbeatDuration; d > 0 {
+		ctx, cancel := context.WithCancel(ctx)
+		defer cancel()
 
-	go func() {
-		d := b.opts.HeartbeatDuration
-		t := time.NewTicker(d)
+		go func() {
+			t := time.NewTicker(d)
 
-		for {
-			select {
-			case <-hctx.Done():
-				return
-			case <-t.C:
-				if b.canOpen(b.SlowCallCount(d)) {
-					b.open()
-
+			for {
+				select {
+				case <-ctx.Done():
 					return
+				case <-t.C:
+					if b.canOpen(b.SlowCallCount(d)) {
+						b.open()
+
+						return
+					}
 				}
 			}
-		}
-	}()
+		}()
+	}
 
 	if err := fn(); err != nil {
 		n := b.FailureCount(err)
