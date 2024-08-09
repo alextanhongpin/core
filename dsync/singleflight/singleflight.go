@@ -59,6 +59,12 @@ func (g *Group[T]) DoSync(ctx context.Context, key string, fn func(context.Conte
 	g.promises[key] = p
 	g.mu.Unlock()
 
+	defer func() {
+		g.mu.Lock()
+		delete(g.promises, key)
+		g.mu.Unlock()
+	}()
+
 	v, err, shared = g.Do(ctx, key, fn)
 	if err != nil {
 		p.Reject(err)
