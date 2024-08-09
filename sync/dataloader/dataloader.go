@@ -1,113 +1,116 @@
 package dataloader
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"sync"
-	"sync/atomic"
 	"time"
 
-	"github.com/mitchellh/copystructure"
 	"golang.org/x/exp/maps"
 )
 
 var (
-	ErrKeyNotFound = errors.New("dataloader: key not found")
-	ErrKeyRejected = errors.New("dataloader: key rejected")
+	// ErrNoResult is returned if the key does not have a value.
+	// This might not necessarily be an error, for example, if the row is not
+	// found in the database when performing `SELECT ... IN (k1, k2, ... kn)`.
+	ErrNoResult = errors.New("no result")
+
+	// ErrAborted is returned when the operation is cancelled or replaced with
+	// another running process.
+	ErrAborted = errors.New("aborted")
+
+	// ErrTerminated is returned when the dataloader is terminated.
+	ErrTerminated = errors.New("terminated")
 )
 
-type Promise[T any] interface {
-	Await() (T, error)
-}
-
-type Option[K comparable, V any] struct {
+type Options[K comparable, V any] struct {
+	BatchFn      batchFunc[K, V]
 	BatchMaxKeys int
 	BatchTimeout time.Duration
-	IdleTimeout  time.Duration
-	BatchFn      batchFunc[K, V]
-	KeyFn        keyFunc[K, V]
-	PromiseFn    promiseFn[V]
+	// KeyFn maps the result back to the key.
+	// This is necessary, because the results from the batch function may not be
+	// in the same order as the keys, or may not even exists.
+	KeyFn      keyFunc[K, V]
+	NoDebounce bool
+}
+
+func (o *Options[K, V]) Valid() error {
+	if o.BatchFn == nil {
+		return errors.New("dataloader: BatchFn is required")
+	}
+
+	o.BatchMaxKeys = cmp.Or(o.BatchMaxKeys, 1_000)
+	if o.BatchMaxKeys < 1 {
+		return errors.New("dataloader: BatchMaxKeys must be greater than zero")
+	}
+
+	o.BatchTimeout = cmp.Or(o.BatchTimeout, 16*time.Millisecond)
+	if o.BatchTimeout < 1 {
+		return errors.New("dataloader: BatchTimeout must be greater than zero")
+	}
+
+	if o.KeyFn == nil {
+		return errors.New("dataloader: KeyFn is required")
+	}
+
+	return nil
 }
 
 type DataLoader[K comparable, V any] struct {
-	cache        map[K]*thunk[V]
-	ch           chan K
-	mu           sync.Mutex
-	wg           sync.WaitGroup
-	awake        atomic.Bool
-	end          sync.Once
-	batchMaxKeys int
-	batchTimeout time.Duration
-	batchFn      batchFunc[K, V]
-	idleTimeout  time.Duration
-	keyFn        keyFunc[K, V]
-	done         chan struct{}
-	promiseFn    promiseFn[V]
+	// Lifecycle control.
+	begin sync.Once
+	end   sync.Once
+
+	// Concurrency primitives.
+	mu sync.Mutex
+	wg sync.WaitGroup
+
+	// State.
+	cache  map[K]*Promise[V]
+	ch     chan K
+	ctx    context.Context
+	cancel func(error)
+
+	// Options.
+	opts *Options[K, V]
 }
 
-func New[K comparable, V any](opt Option[K, V]) *DataLoader[K, V] {
-	if opt.BatchMaxKeys <= 0 {
-		opt.BatchMaxKeys = 1_000
+// New returns a new DataLoader. The context is passed in to control the lifecycle.
+func New[K comparable, V any](ctx context.Context, opts *Options[K, V]) *DataLoader[K, V] {
+	if err := opts.Valid(); err != nil {
+		panic(err)
 	}
 
-	if opt.BatchTimeout == 0 {
-		opt.BatchTimeout = 1 * time.Millisecond
-	}
-
-	if opt.IdleTimeout == 0 {
-		opt.IdleTimeout = 10 * opt.BatchTimeout
-	}
-
-	if opt.IdleTimeout < opt.BatchTimeout {
-		panic("dataloader: idle timeout must be greater than batch timeout")
-	}
-
-	if opt.BatchFn == nil {
-		panic("dataloader: missing option BatchFn in constructor")
-	}
-
-	if opt.KeyFn == nil {
-		panic("dataloader: missing option KeyFn in constructor")
-	}
-
-	if opt.PromiseFn == nil {
-		opt.PromiseFn = func(p Promise[V]) Promise[V] {
-			return p
-		}
-	}
-
+	ctx, cancel := context.WithCancelCause(ctx)
 	return &DataLoader[K, V]{
-		cache:        make(map[K]*thunk[V]),
-		done:         make(chan struct{}),
-		ch:           make(chan K),
-		batchMaxKeys: opt.BatchMaxKeys,
-		batchTimeout: opt.BatchTimeout,
-		batchFn:      opt.BatchFn,
-		keyFn:        opt.KeyFn,
-		idleTimeout:  opt.IdleTimeout,
-		promiseFn:    opt.PromiseFn,
+		cache:  make(map[K]*Promise[V]),
+		ch:     make(chan K),
+		opts:   opts,
+		ctx:    ctx,
+		cancel: cancel,
 	}
 }
 
 // Set sets the key-value after expiring existing references.
-func (d *DataLoader[K, V]) Set(ctx context.Context, k K, v V) {
+// There is no use passing context as the first argument as it does not control
+// the lifecycle.
+func (d *DataLoader[K, V]) Set(k K, v V) {
 	d.mu.Lock()
 	e, ok := d.cache[k]
 	if ok {
-		e.reject(KeyRejectedError(k))
+		// Reject the running promise so that the caller will stop waiting.
+		e.Reject(newKeyError(k, ErrAborted))
 	}
 
-	t := newThunk[V]()
-	t.resolve(v)
-	d.cache[k] = t
-
+	d.cache[k] = NewPromise[V]().Resolve(v)
 	d.mu.Unlock()
 }
 
 // SetNX sets the key-value, only if the entry does not exists.
 // This prevents issue with references.
-func (d *DataLoader[K, V]) SetNX(ctx context.Context, k K, v V) bool {
+func (d *DataLoader[K, V]) SetNX(k K, v V) bool {
 	d.mu.Lock()
 	_, ok := d.cache[k]
 	if ok {
@@ -115,64 +118,73 @@ func (d *DataLoader[K, V]) SetNX(ctx context.Context, k K, v V) bool {
 		return false
 	}
 
-	t := newThunk[V]()
-	t.resolve(v)
-	d.cache[k] = t
-
+	d.cache[k] = NewPromise[V]().Resolve(v)
 	d.mu.Unlock()
 
 	return true
 }
 
-func (d *DataLoader[K, V]) Load(ctx context.Context, k K) Promise[V] {
-	_ = d.wake(ctx)
+func (d *DataLoader[K, V]) Load(k K) (V, error) {
+	select {
+	case <-d.ctx.Done():
+		var v V
+		return v, context.Cause(d.ctx)
+	default:
+		d.start(d.ctx)
+	}
 
 	d.mu.Lock()
 	v, ok := d.cache[k]
 	if ok {
 		d.mu.Unlock()
 
-		return d.promiseFn(v)
+		return v.Await()
 	}
 
-	t := newThunk[V]()
-	d.cache[k] = t
-
+	p := NewPromise[V]()
+	d.cache[k] = p
 	d.mu.Unlock()
 
 	select {
-	case <-d.done:
-		t.reject(KeyRejectedError(k))
+	case <-d.ctx.Done():
+		// Immediately rejects.
+		p.Reject(newKeyError(k, context.Cause(d.ctx)))
 	case d.ch <- k:
 	}
 
-	return d.promiseFn(t)
+	return p.Await()
 }
 
-func (d *DataLoader[K, V]) LoadMany(ctx context.Context, ks []K) Promises[V] {
+func (d *DataLoader[K, V]) LoadMany(ks []K) ([]Result[V], error) {
+	// No keys to load.
 	if len(ks) == 0 {
-		return nil
+		return nil, nil
 	}
 
-	_ = d.wake(ctx)
+	select {
+	case <-d.ctx.Done():
+		return nil, context.Cause(d.ctx)
+	default:
+		d.start(d.ctx)
+	}
 
-	result := make([]Promise[V], len(ks))
+	res := make(Promises[V], len(ks))
 
 	d.mu.Lock()
 
 	for i, k := range ks {
 		v, ok := d.cache[k]
 		if ok {
-			result[i] = d.promiseFn(v)
+			res[i] = v
 		} else {
-			t := newThunk[V]()
-			d.cache[k] = t
+			p := NewPromise[V]()
+			d.cache[k] = p
 
-			result[i] = d.promiseFn(t)
+			res[i] = p
 
 			select {
-			case <-d.done:
-				t.reject(KeyRejectedError(k))
+			case <-d.ctx.Done():
+				p.Reject(newKeyError(k, context.Cause(d.ctx)))
 			case d.ch <- k:
 			}
 		}
@@ -180,62 +192,32 @@ func (d *DataLoader[K, V]) LoadMany(ctx context.Context, ks []K) Promises[V] {
 
 	d.mu.Unlock()
 
-	return result
+	return res.AllSettled(), nil
 }
 
 func (d *DataLoader[K, V]) Stop() {
-	d.stop()
-}
-
-func (d *DataLoader[K, V]) wake(ctx context.Context) bool {
-	if d.isDone() {
-		return false
-	}
-
-	if d.awake.Swap(true) {
-		return false
-	}
-
-	d.start(ctx)
-	return true
-}
-
-func (d *DataLoader[K, V]) isDone() bool {
-	select {
-	case <-d.done:
-		return true
-	default:
-		return false
-	}
-}
-
-func (d *DataLoader[K, V]) start(ctx context.Context) {
-	d.wg.Add(1)
-	ctx, cancel := context.WithCancel(ctx)
-
-	go func() {
-		defer d.wg.Done()
-		defer cancel()
-		defer d.awake.Swap(false)
-
-		d.loop(ctx)
-	}()
-}
-
-func (d *DataLoader[K, V]) stop() {
 	d.end.Do(func() {
-		close(d.done)
+		d.cancel(ErrTerminated)
 
 		d.wg.Wait()
 	})
 }
 
-func (d *DataLoader[K, V]) loop(ctx context.Context) {
-	tick := time.NewTicker(d.batchTimeout)
-	defer tick.Stop()
+func (d *DataLoader[K, V]) start(ctx context.Context) {
+	d.begin.Do(func() {
+		d.wg.Add(1)
 
-	idle := time.NewTicker(d.idleTimeout)
-	defer idle.Stop()
+		go func() {
+			defer d.wg.Done()
+
+			d.loop(ctx)
+		}()
+	})
+}
+
+func (d *DataLoader[K, V]) loop(ctx context.Context) {
+	t := time.NewTicker(d.opts.BatchTimeout)
+	defer t.Stop()
 
 	keys := make(map[K]struct{})
 
@@ -246,6 +228,7 @@ func (d *DataLoader[K, V]) loop(ctx context.Context) {
 		return k
 	}
 
+	// flush clears all existing keys by doing a final batch request.
 	flush := func(keys []K) {
 		if len(keys) == 0 {
 			return
@@ -266,35 +249,35 @@ func (d *DataLoader[K, V]) loop(ctx context.Context) {
 
 	for {
 		select {
-		case <-d.done:
-			return
-		case <-idle.C:
+		case <-ctx.Done():
 			return
 		case k := <-d.ch:
 			// Two strategy for optimizing fetching data:
 			// 1. Batch: when the number of keys hits the threshold
 			// 2. Debounce: when no new keys after the timeout.
 			keys[k] = struct{}{}
-			if len(keys) >= d.batchMaxKeys {
+			// 1.
+			if len(keys) >= d.opts.BatchMaxKeys {
 				flush(fetch())
 			}
 
-			idle.Reset(d.idleTimeout)
-
-			// Fire after batchTimeout.
-			tick.Reset(d.batchTimeout)
-		case <-tick.C:
+			if !d.opts.NoDebounce {
+				// Keep debouncing until the max keys threshold is reached.
+				t.Reset(d.opts.BatchTimeout)
+			}
+		// 2.
+		case <-t.C:
 			flush(fetch())
 		}
 	}
 }
 
 func (d *DataLoader[K, V]) batch(ctx context.Context, keys []K) {
-	vals, err := d.batchFn(ctx, keys)
+	vals, err := d.opts.BatchFn(ctx, keys)
 	if err != nil {
 		d.mu.Lock()
 		for _, k := range keys {
-			d.cache[k].reject(KeyNotFoundError(k))
+			d.cache[k].Reject(newKeyError(k, err))
 		}
 		d.mu.Unlock()
 
@@ -303,16 +286,16 @@ func (d *DataLoader[K, V]) batch(ctx context.Context, keys []K) {
 
 	d.mu.Lock()
 	for _, v := range vals {
-		k, err := d.keyFn(v)
+		k, err := d.opts.KeyFn(v)
 		if err != nil {
-			d.cache[k].reject(err)
+			d.cache[k].Reject(err)
 		} else {
-			d.cache[k].resolve(v)
+			d.cache[k].Resolve(v)
 		}
 	}
 
 	for _, k := range keys {
-		d.cache[k].reject(KeyNotFoundError(k))
+		d.cache[k].Reject(newKeyError(k, ErrNoResult))
 	}
 
 	d.mu.Unlock()
@@ -322,88 +305,84 @@ type keyFunc[K comparable, V any] func(v V) (K, error)
 
 type batchFunc[K comparable, V any] func(ctx context.Context, keys []K) ([]V, error)
 
-type promiseFn[V any] func(Promise[V]) Promise[V]
-
-type thunk[T any] struct {
+type Promise[T any] struct {
 	wg    sync.WaitGroup
 	begin sync.Once
 	data  T
 	err   error
 }
 
-func newThunk[T any]() *thunk[T] {
-	t := &thunk[T]{}
-	t.wg.Add(1)
-	return t
+func NewPromise[T any]() *Promise[T] {
+	p := &Promise[T]{}
+	p.wg.Add(1)
+	return p
 }
 
-func (t *thunk[T]) resolve(v T) {
-	t.begin.Do(func() {
-		t.data = v
-		t.wg.Done()
+func (p *Promise[T]) Resolve(v T) *Promise[T] {
+	p.begin.Do(func() {
+		p.data = v
+		p.wg.Done()
 	})
+	return p
 }
 
-func (t *thunk[T]) reject(err error) {
-	t.begin.Do(func() {
-		t.err = err
-		t.wg.Done()
+func (p *Promise[T]) Reject(err error) *Promise[T] {
+	p.begin.Do(func() {
+		p.err = err
+		p.wg.Done()
 	})
+	return p
 }
 
-func (t *thunk[T]) Await() (T, error) {
-	t.wg.Wait()
+func (p *Promise[T]) Result() Result[T] {
+	p.wg.Wait()
 
-	return t.data, t.err
+	return Result[T]{Data: p.data, Err: p.err}
 }
 
-type Promises[T any] []Promise[T]
+func (p *Promise[T]) Await() (T, error) {
+	p.wg.Wait()
 
-func (promises Promises[T]) Await() ([]T, error) {
-	res := make([]T, len(promises))
+	return p.data, p.err
+}
 
-	var errs error
+type Promises[T any] []*Promise[T]
+
+func (promises Promises[T]) AllSettled() []Result[T] {
+	res := make([]Result[T], len(promises))
+
 	for i, p := range promises {
-		v, err := p.Await()
-		if err != nil {
-			errs = errors.Join(errs, err)
-		} else {
-			res[i] = v
-		}
-	}
-	if errs != nil {
-		return nil, errs
+		res[i] = p.Result()
 	}
 
-	return res, nil
+	return res
 }
 
-func KeyNotFoundError(k any) error {
-	return fmt.Errorf("%w: %s", ErrKeyNotFound, k)
+type Result[T any] struct {
+	Data T
+	Err  error
 }
 
-func KeyRejectedError(k any) error {
-	return fmt.Errorf("%w: %s", ErrKeyRejected, k)
-}
-
-type promiseCopier[T any] struct {
-	p Promise[T]
-}
-
-func (pc *promiseCopier[T]) Await() (T, error) {
-	v, err := pc.p.Await()
-	if err != nil {
-		return v, err
+func newKeyError(k any, err error) *KeyError {
+	return &KeyError{
+		Key: fmt.Sprint(k),
+		err: err,
 	}
-
-	u, err := copystructure.Copy(v)
-	if err != nil {
-		return v, err
-	}
-
-	return u.(T), nil
 }
 
-func Copier[T any](p Promise[T]) Promise[T] {
-	return &promiseCopier[T]{p}
+type KeyError struct {
+	Key string
+	err error
+}
+
+func (e *KeyError) Error() string {
+	return fmt.Sprintf("dataloader.KeyError(%s): %s", e.Key, e.err)
+}
+
+func (e *KeyError) Is(err error) bool {
+	return errors.Is(e.err, err)
+}
+
+func (e *KeyError) Unwrap() error {
+	return e.err
 }
