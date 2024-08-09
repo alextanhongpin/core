@@ -126,12 +126,14 @@ func (d *DataLoader[K, V]) SetNX(k K, v V) bool {
 }
 
 func (d *DataLoader[K, V]) Load(k K) (V, error) {
+	ctx := d.ctx
+
 	select {
-	case <-d.ctx.Done():
+	case <-ctx.Done():
 		var v V
-		return v, context.Cause(d.ctx)
+		return v, context.Cause(ctx)
 	default:
-		d.start(d.ctx)
+		d.start(ctx)
 	}
 
 	d.mu.Lock()
@@ -147,9 +149,9 @@ func (d *DataLoader[K, V]) Load(k K) (V, error) {
 	d.mu.Unlock()
 
 	select {
-	case <-d.ctx.Done():
+	case <-ctx.Done():
 		// Immediately rejects.
-		p.Reject(newKeyError(k, context.Cause(d.ctx)))
+		p.Reject(newKeyError(k, context.Cause(ctx)))
 	case d.ch <- k:
 	}
 
@@ -162,11 +164,13 @@ func (d *DataLoader[K, V]) LoadMany(ks []K) ([]promise.Result[V], error) {
 		return nil, nil
 	}
 
+	ctx := d.ctx
+
 	select {
-	case <-d.ctx.Done():
-		return nil, context.Cause(d.ctx)
+	case <-ctx.Done():
+		return nil, context.Cause(ctx)
 	default:
-		d.start(d.ctx)
+		d.start(ctx)
 	}
 
 	res := make(promise.Promises[V], len(ks))
@@ -184,8 +188,8 @@ func (d *DataLoader[K, V]) LoadMany(ks []K) ([]promise.Result[V], error) {
 			res[i] = p
 
 			select {
-			case <-d.ctx.Done():
-				p.Reject(newKeyError(k, context.Cause(d.ctx)))
+			case <-ctx.Done():
+				p.Reject(newKeyError(k, context.Cause(ctx)))
 			case d.ch <- k:
 			}
 		}
