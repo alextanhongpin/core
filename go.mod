@@ -1,10 +1,11 @@
 module github.com/alextanhongpin/core
 
-go 1.22.2
+go 1.22.5
 
-require golang.org/x/exp v0.0.0-20240613232115-7f521ea00fb8
+require golang.org/x/exp v0.0.0-20240808152545-0cdaa3abc0fa
 
 require (
+	github.com/alextanhongpin/core/sync/promise v0.0.0-20240809154704-f08b92a14686
 	github.com/alextanhongpin/errors v0.0.0-20230717124106-3e3c39edaa89
 	github.com/alextanhongpin/testdump/httpdump v0.0.0-20240617032328-5cdd37fc0156
 	github.com/go-playground/validator/v10 v10.22.0
@@ -18,8 +19,8 @@ require (
 	go.opentelemetry.io/otel/metric v1.27.0
 	go.opentelemetry.io/otel/trace v1.27.0
 	golang.org/x/exp/event v0.0.0-20240613232115-7f521ea00fb8
-	golang.org/x/sync v0.7.0
-	golang.org/x/sys v0.21.0
+	golang.org/x/sync v0.8.0
+	golang.org/x/sys v0.23.0
 )
 
 require (
@@ -41,10 +42,10 @@ require (
 	github.com/prometheus/common v0.54.0 // indirect
 	github.com/prometheus/procfs v0.15.1 // indirect
 	github.com/rogpeppe/go-internal v1.12.0 // indirect
-	golang.org/x/crypto v0.24.0 // indirect
-	golang.org/x/net v0.26.0 // indirect
-	golang.org/x/text v0.16.0 // indirect
-	golang.org/x/tools v0.22.0 // indirect
+	golang.org/x/crypto v0.26.0 // indirect
+	golang.org/x/net v0.28.0 // indirect
+	golang.org/x/text v0.17.0 // indirect
+	golang.org/x/tools v0.24.0 // indirect
 	google.golang.org/grpc v1.64.0 // indirect
 	google.golang.org/protobuf v1.34.2 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect

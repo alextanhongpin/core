@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/alextanhongpin/core/sync/promise"
 	"golang.org/x/exp/maps"
 )
 
@@ -68,7 +69,7 @@ type DataLoader[K comparable, V any] struct {
 	wg sync.WaitGroup
 
 	// State.
-	cache  map[K]*Promise[V]
+	cache  map[K]*promise.Promise[V]
 	ch     chan K
 	ctx    context.Context
 	cancel func(error)
@@ -85,7 +86,7 @@ func New[K comparable, V any](ctx context.Context, opts *Options[K, V]) *DataLoa
 
 	ctx, cancel := context.WithCancelCause(ctx)
 	return &DataLoader[K, V]{
-		cache:  make(map[K]*Promise[V]),
+		cache:  make(map[K]*promise.Promise[V]),
 		ch:     make(chan K),
 		opts:   opts,
 		ctx:    ctx,
@@ -104,7 +105,7 @@ func (d *DataLoader[K, V]) Set(k K, v V) {
 		e.Reject(newKeyError(k, ErrAborted))
 	}
 
-	d.cache[k] = NewPromise[V]().Resolve(v)
+	d.cache[k] = promise.Resolve(v)
 	d.mu.Unlock()
 }
 
@@ -118,7 +119,7 @@ func (d *DataLoader[K, V]) SetNX(k K, v V) bool {
 		return false
 	}
 
-	d.cache[k] = NewPromise[V]().Resolve(v)
+	d.cache[k] = promise.Resolve(v)
 	d.mu.Unlock()
 
 	return true
@@ -141,7 +142,7 @@ func (d *DataLoader[K, V]) Load(k K) (V, error) {
 		return v.Await()
 	}
 
-	p := NewPromise[V]()
+	p := promise.Deferred[V]()
 	d.cache[k] = p
 	d.mu.Unlock()
 
@@ -155,7 +156,7 @@ func (d *DataLoader[K, V]) Load(k K) (V, error) {
 	return p.Await()
 }
 
-func (d *DataLoader[K, V]) LoadMany(ks []K) ([]Result[V], error) {
+func (d *DataLoader[K, V]) LoadMany(ks []K) ([]promise.Result[V], error) {
 	// No keys to load.
 	if len(ks) == 0 {
 		return nil, nil
@@ -168,7 +169,7 @@ func (d *DataLoader[K, V]) LoadMany(ks []K) ([]Result[V], error) {
 		d.start(d.ctx)
 	}
 
-	res := make(Promises[V], len(ks))
+	res := make(promise.Promises[V], len(ks))
 
 	d.mu.Lock()
 
@@ -177,7 +178,7 @@ func (d *DataLoader[K, V]) LoadMany(ks []K) ([]Result[V], error) {
 		if ok {
 			res[i] = v
 		} else {
-			p := NewPromise[V]()
+			p := promise.Deferred[V]()
 			d.cache[k] = p
 
 			res[i] = p
@@ -304,64 +305,6 @@ func (d *DataLoader[K, V]) batch(ctx context.Context, keys []K) {
 type keyFunc[K comparable, V any] func(v V) (K, error)
 
 type batchFunc[K comparable, V any] func(ctx context.Context, keys []K) ([]V, error)
-
-type Promise[T any] struct {
-	wg    sync.WaitGroup
-	begin sync.Once
-	data  T
-	err   error
-}
-
-func NewPromise[T any]() *Promise[T] {
-	p := &Promise[T]{}
-	p.wg.Add(1)
-	return p
-}
-
-func (p *Promise[T]) Resolve(v T) *Promise[T] {
-	p.begin.Do(func() {
-		p.data = v
-		p.wg.Done()
-	})
-	return p
-}
-
-func (p *Promise[T]) Reject(err error) *Promise[T] {
-	p.begin.Do(func() {
-		p.err = err
-		p.wg.Done()
-	})
-	return p
-}
-
-func (p *Promise[T]) Result() Result[T] {
-	p.wg.Wait()
-
-	return Result[T]{Data: p.data, Err: p.err}
-}
-
-func (p *Promise[T]) Await() (T, error) {
-	p.wg.Wait()
-
-	return p.data, p.err
-}
-
-type Promises[T any] []*Promise[T]
-
-func (promises Promises[T]) AllSettled() []Result[T] {
-	res := make([]Result[T], len(promises))
-
-	for i, p := range promises {
-		res[i] = p.Result()
-	}
-
-	return res
-}
-
-type Result[T any] struct {
-	Data T
-	Err  error
-}
 
 func newKeyError(k any, err error) *KeyError {
 	return &KeyError{
