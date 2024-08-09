@@ -6,10 +6,16 @@ import (
 )
 
 type Promise[T any] struct {
-	wg    sync.WaitGroup
-	begin sync.Once
-	data  T
-	err   error
+	wg   sync.WaitGroup
+	once sync.Once
+	data T
+	err  error
+}
+
+func Deferred[T any]() *Promise[T] {
+	p := &Promise[T]{}
+	p.wg.Add(1)
+	return p
 }
 
 func Resolve[T any](v T) *Promise[T] {
@@ -41,7 +47,7 @@ func New[T any](fn func() (T, error)) *Promise[T] {
 }
 
 func (p *Promise[T]) Resolve(v T) *Promise[T] {
-	p.begin.Do(func() {
+	p.once.Do(func() {
 		p.data = v
 		p.wg.Done()
 	})
@@ -49,11 +55,17 @@ func (p *Promise[T]) Resolve(v T) *Promise[T] {
 }
 
 func (p *Promise[T]) Reject(err error) *Promise[T] {
-	p.begin.Do(func() {
+	p.once.Do(func() {
 		p.err = err
 		p.wg.Done()
 	})
 	return p
+}
+
+func (p *Promise[T]) Result() Result[T] {
+	p.wg.Wait()
+
+	return Result[T]{Data: p.data, Err: p.err}
 }
 
 func (p *Promise[T]) Await() (T, error) {
@@ -83,16 +95,11 @@ func (promises Promises[T]) All() ([]T, error) {
 	return res, nil
 }
 
-func (promises Promises[T]) AllSettled() []*Result[T] {
-	res := make([]*Result[T], len(promises))
+func (promises Promises[T]) AllSettled() []Result[T] {
+	res := make([]Result[T], len(promises))
 
 	for i, p := range promises {
-		v, err := p.Await()
-
-		r := new(Result[T])
-		r.Data = v
-		r.Err = err
-		res[i] = r
+		res[i] = p.Result()
 	}
 
 	return res
