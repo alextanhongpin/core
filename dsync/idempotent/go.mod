@@ -1,9 +1,10 @@
 module github.com/alextanhongpin/core/dsync/idempotent
 
-go 1.22.2
+go 1.22.5
 
 require (
 	github.com/alextanhongpin/core/storage/redis v0.0.0-20240410072006-c7395891d1a5
+	github.com/alextanhongpin/core/sync/promise v0.0.0-20240809085144-738b98e230f9
 	github.com/google/uuid v1.6.0
 	github.com/redis/go-redis/v9 v9.6.0
 	github.com/stretchr/testify v1.9.0

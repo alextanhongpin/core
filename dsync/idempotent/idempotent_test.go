@@ -41,11 +41,34 @@ func TestRedisStore(t *testing.T) {
 	is.Nil(err)
 	is.True(shared)
 	is.Equal([]byte("world"), res)
+
+	res, shared, err = store.DoSync(ctx, t.Name(), fn, []byte("hello"))
+	is.Nil(err)
+	is.True(shared)
+	is.Equal([]byte("world"), res)
 }
 
 func TestMakeHandler(t *testing.T) {
 	store := NewRedisStore(newClient(t), nil)
 	h := MakeHandler(store, func(ctx context.Context, req string) (string, error) {
+		return "world", nil
+	})
+
+	res, shared, err := h.Do(ctx, t.Name(), "hello")
+	is := assert.New(t)
+	is.Nil(err)
+	is.False(shared)
+	is.Equal("world", res)
+
+	res, shared, err = h.Do(ctx, t.Name(), "hello")
+	is.Nil(err)
+	is.True(shared)
+	is.Equal("world", res)
+}
+
+func TestMakeSyncHandler(t *testing.T) {
+	store := NewRedisStore(newClient(t), nil)
+	h := MakeSyncHandler(store, func(ctx context.Context, req string) (string, error) {
 		return "world", nil
 	})
 
@@ -186,20 +209,34 @@ func TestConcurrent(t *testing.T) {
 
 	client := newClient(t)
 	store := NewRedisStore(client, nil)
-	h := MakeHandler(store, fn)
+	h := MakeSyncHandler(store, fn)
 	n := 10
 
 	is := assert.New(t)
 
 	var wg sync.WaitGroup
-	wg.Add(n)
+	wg.Add(2 * n)
 
 	counter := new(atomic.Int64)
+	inFlight := new(atomic.Int64)
 
 	for range n {
 		go func() {
 			defer wg.Done()
 
+			res, shared, err := h.Do(ctx, t.Name(), Request{Msg: "hello"})
+			is.Nil(err)
+			is.Equal("HELLO", res.Msg)
+			if shared {
+				counter.Add(1)
+			}
+		}()
+
+		go func() {
+			defer wg.Done()
+			time.Sleep(10 * time.Millisecond)
+
+			h := MakeHandler(store, fn)
 			res, shared, err := h.Do(ctx, t.Name(), Request{Msg: "hello"})
 			if err == nil {
 				is.Equal("HELLO", res.Msg)
@@ -208,7 +245,7 @@ func TestConcurrent(t *testing.T) {
 			}
 
 			if errors.Is(err, ErrRequestInFlight) {
-				counter.Add(1)
+				inFlight.Add(1)
 				return
 			}
 
@@ -218,6 +255,7 @@ func TestConcurrent(t *testing.T) {
 
 	wg.Wait()
 	is.Equal(int64(n-1), counter.Load())
+	is.Equal(int64(n), inFlight.Load())
 }
 
 // TestExtendLock test the scenario where the callback function takes a longer

@@ -9,8 +9,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
+	"github.com/alextanhongpin/core/sync/promise"
 	"github.com/google/uuid"
 	redis "github.com/redis/go-redis/v9"
 	"golang.org/x/sync/errgroup"
@@ -39,6 +41,36 @@ type Handler[K, V any] func(ctx context.Context, key string, req K) (V, bool, er
 
 func (h Handler[K, V]) Do(ctx context.Context, key string, req K) (V, bool, error) {
 	return h(ctx, key, req)
+}
+
+func MakeSyncHandler[K, V any](store SyncStore, h func(context.Context, K) (V, error), opts ...Option) Handler[K, V] {
+	return func(ctx context.Context, key string, req K) (res V, shared bool, err error) {
+		b, err := json.Marshal(req)
+		if err != nil {
+			return res, false, err
+		}
+
+		b, shared, err = store.DoSync(ctx, key, func(ctx context.Context, _ []byte) ([]byte, error) {
+			res, err = h(ctx, req)
+			if err != nil {
+				return nil, err
+			}
+
+			return json.Marshal(res)
+		}, b, opts...)
+		if err != nil {
+			return res, false, err
+		}
+		if !shared {
+			return res, false, nil
+		}
+
+		if err := json.Unmarshal(b, &res); err != nil {
+			return res, false, err
+		}
+
+		return res, shared, err
+	}
 }
 
 func MakeHandler[K, V any](store Store, h func(context.Context, K) (V, error), opts ...Option) Handler[K, V] {
@@ -104,22 +136,57 @@ func WithLockTTL(ttl time.Duration) Option {
 	}
 }
 
+type SyncStore interface {
+	DoSync(ctx context.Context, key string, fn func(ctx context.Context, req []byte) ([]byte, error), req []byte, opts ...Option) (res []byte, shared bool, err error)
+}
+
 type Store interface {
 	Do(ctx context.Context, key string, fn func(ctx context.Context, req []byte) ([]byte, error), req []byte, opts ...Option) (res []byte, shared bool, err error)
 }
 
 type RedisStore struct {
-	client *redis.Client
-	opts   *Options
+	mu       sync.Mutex
+	promises map[string]*promise.Promise[[]byte]
+	client   *redis.Client
+	opts     *Options
 }
 
 // NewRedisStore creates a new RedisStore instance with the specified Redis
 // client, lock TTL, and keep TTL.
 func NewRedisStore(client *redis.Client, opts *Options) *RedisStore {
 	return &RedisStore{
-		client: client,
-		opts:   cmp.Or(opts, NewOptions()),
+		promises: make(map[string]*promise.Promise[[]byte]),
+		client:   client,
+		opts:     cmp.Or(opts, NewOptions()),
 	}
+}
+
+// DoSync is like Sync, except that it is thread-safe locally.
+// When multiple DoSync calls are made with the same key, only the first call
+// will execute the function, while the rest will wait for the result.
+// In contrast, Sync will execute the function for each call.
+func (s *RedisStore) DoSync(ctx context.Context, key string, fn func(ctx context.Context, req []byte) ([]byte, error), req []byte, opts ...Option) (res []byte, shared bool, err error) {
+	s.mu.Lock()
+	p, ok := s.promises[key]
+	if ok {
+		s.mu.Unlock()
+
+		res, err = p.Await()
+		return res, err == nil, err
+	}
+
+	p = promise.Deferred[[]byte]()
+	s.promises[key] = p
+	s.mu.Unlock()
+
+	res, shared, err = s.Do(ctx, key, fn, req)
+	if err != nil {
+		p.Reject(err)
+	} else {
+		p.Resolve(res)
+	}
+
+	return
 }
 
 // Do executes the provided function idempotently, using the specified key and
