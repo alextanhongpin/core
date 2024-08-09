@@ -179,6 +179,12 @@ func (s *RedisStore) DoSync(ctx context.Context, key string, fn func(ctx context
 	s.promises[key] = p
 	s.mu.Unlock()
 
+	defer func() {
+		s.mu.Lock()
+		delete(s.promises, key)
+		s.mu.Unlock()
+	}()
+
 	res, shared, err = s.Do(ctx, key, fn, req)
 	if err != nil {
 		p.Reject(err)
