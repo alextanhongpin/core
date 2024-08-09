@@ -32,20 +32,38 @@ var john = &User{
 
 func TestSingleflight(t *testing.T) {
 	sf := singleflight.New[*User](newClient(t))
-	v, err, shared := sf.Do(ctx, t.Name(), func(ctx context.Context) (*User, error) {
-		return john, nil
-	})
-	is := assert.New(t)
-	is.Nil(err)
-	is.False(shared)
-	is.Equal(john, v)
+	key := t.Name()
 
-	v, err, shared = sf.Do(ctx, t.Name(), func(ctx context.Context) (*User, error) {
-		return john, nil
+	t.Run("first time", func(t *testing.T) {
+		v, err, shared := sf.Do(ctx, key, func(ctx context.Context) (*User, error) {
+			return john, nil
+		})
+		is := assert.New(t)
+		is.Nil(err)
+		is.False(shared)
+		is.Equal(john, v)
 	})
-	is.Nil(err)
-	is.True(shared)
-	is.Equal(john, v)
+
+	t.Run("shared instance", func(t *testing.T) {
+		v, err, shared := sf.Do(ctx, key, func(ctx context.Context) (*User, error) {
+			return john, nil
+		})
+		is := assert.New(t)
+		is.Nil(err)
+		is.True(shared)
+		is.Equal(john, v)
+	})
+
+	t.Run("separate instance", func(t *testing.T) {
+		sf := singleflight.New[*User](newClient(t))
+		v, err, shared := sf.Do(ctx, key, func(ctx context.Context) (*User, error) {
+			return john, nil
+		})
+		is := assert.New(t)
+		is.Nil(err)
+		is.True(shared)
+		is.Equal(john, v)
+	})
 }
 
 func TestSingleflightConcurrent(t *testing.T) {
@@ -55,12 +73,26 @@ func TestSingleflightConcurrent(t *testing.T) {
 	counter := new(atomic.Int64)
 	n := 10
 	var wg sync.WaitGroup
-	wg.Add(n)
+	wg.Add(2 * n)
 
-	for _ = range n {
+	for range n {
 		go func() {
 			defer wg.Done()
 
+			v, err, shared := sf.DoSync(ctx, t.Name(), func(ctx context.Context) (*User, error) {
+				return john, nil
+			})
+			is.Nil(err)
+			if shared {
+				counter.Add(1)
+			}
+			is.Equal(john, v)
+		}()
+
+		go func() {
+			defer wg.Done()
+
+			sf := singleflight.New[*User](newClient(t))
 			v, err, shared := sf.Do(ctx, t.Name(), func(ctx context.Context) (*User, error) {
 				return john, nil
 			})
@@ -69,12 +101,11 @@ func TestSingleflightConcurrent(t *testing.T) {
 				counter.Add(1)
 			}
 			is.Equal(john, v)
-
 		}()
 	}
 
 	wg.Wait()
-	is.Equal(int64(n-1), counter.Load())
+	is.Equal(int64(2*n-1), counter.Load())
 }
 
 func newClient(t *testing.T) *redis.Client {

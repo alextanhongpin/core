@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
+	"sync"
 	"time"
 
+	"github.com/alextanhongpin/core/sync/promise"
 	"github.com/google/uuid"
 	redis "github.com/redis/go-redis/v9"
 	"golang.org/x/sync/errgroup"
@@ -20,19 +22,51 @@ var (
 )
 
 type Group[T any] struct {
-	client  *redis.Client
-	KeepTTL time.Duration
-	LockTTL time.Duration
-	WaitTTL time.Duration
+	mu       sync.Mutex
+	promises map[string]*promise.Promise[T]
+	client   *redis.Client
+	KeepTTL  time.Duration
+	LockTTL  time.Duration
+	WaitTTL  time.Duration
 }
 
 func New[T any](client *redis.Client) *Group[T] {
 	return &Group[T]{
-		client:  client,
-		KeepTTL: 1 * time.Hour,
-		LockTTL: 10 * time.Second,
-		WaitTTL: 1 * time.Minute,
+		promises: make(map[string]*promise.Promise[T]),
+		client:   client,
+		KeepTTL:  1 * time.Hour,
+		LockTTL:  10 * time.Second,
+		WaitTTL:  1 * time.Minute,
 	}
+}
+
+// DoSync is like Do, except  that it is thread-safe locally.
+func (g *Group[T]) DoSync(ctx context.Context, key string, fn func(context.Context) (T, error)) (v T, err error, shared bool) {
+	g.mu.Lock()
+	p, ok := g.promises[key]
+	if ok {
+		g.mu.Unlock()
+
+		v, err = p.Await()
+		if err != nil {
+			return v, err, false
+		}
+
+		return v, nil, true
+	}
+
+	p = promise.Deferred[T]()
+	g.promises[key] = p
+	g.mu.Unlock()
+
+	v, err, shared = g.Do(ctx, key, fn)
+	if err != nil {
+		p.Reject(err)
+	} else {
+		p.Resolve(v)
+	}
+
+	return
 }
 
 func (g *Group[T]) Do(ctx context.Context, key string, fn func(context.Context) (T, error)) (v T, err error, shared bool) {
