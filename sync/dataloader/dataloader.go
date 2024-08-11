@@ -132,8 +132,6 @@ func (d *DataLoader[K, V]) Load(k K) (V, error) {
 
 	select {
 	case <-ctx.Done():
-		var v V
-		return v, context.Cause(ctx)
 	default:
 		d.start(ctx)
 	}
@@ -170,7 +168,6 @@ func (d *DataLoader[K, V]) LoadMany(ks []K) ([]promise.Result[V], error) {
 
 	select {
 	case <-ctx.Done():
-		return nil, context.Cause(ctx)
 	default:
 		d.start(ctx)
 	}
