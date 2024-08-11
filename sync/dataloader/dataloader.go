@@ -73,6 +73,7 @@ type DataLoader[K comparable, V any] struct {
 	ch     chan K
 	ctx    context.Context
 	cancel func(error)
+	f      chan struct{}
 
 	// Options.
 	opts *Options[K, V]
@@ -91,6 +92,7 @@ func New[K comparable, V any](ctx context.Context, opts *Options[K, V]) *DataLoa
 		opts:   opts,
 		ctx:    ctx,
 		cancel: cancel,
+		f:      make(chan struct{}),
 	}
 }
 
@@ -200,6 +202,15 @@ func (d *DataLoader[K, V]) LoadMany(ks []K) ([]promise.Result[V], error) {
 	return res.AllSettled(), nil
 }
 
+func (d *DataLoader[K, V]) Flush() bool {
+	select {
+	case <-d.ctx.Done():
+		return false
+	case d.f <- struct{}{}:
+		return true
+	}
+}
+
 func (d *DataLoader[K, V]) Stop() {
 	d.end.Do(func() {
 		d.cancel(ErrTerminated)
@@ -226,16 +237,12 @@ func (d *DataLoader[K, V]) loop(ctx context.Context) {
 
 	keys := make(map[K]struct{})
 
-	fetch := func() []K {
+	// flush clears all existing keys by doing a final batch request.
+	flush := func() {
 		k := maps.Keys(keys)
 		clear(keys)
 
-		return k
-	}
-
-	// flush clears all existing keys by doing a final batch request.
-	flush := func(keys []K) {
-		if len(keys) == 0 {
+		if len(k) == 0 {
 			return
 		}
 
@@ -244,13 +251,11 @@ func (d *DataLoader[K, V]) loop(ctx context.Context) {
 		go func() {
 			defer d.wg.Done()
 
-			d.batch(ctx, keys)
+			d.batch(ctx, k)
 		}()
 	}
 
-	defer func() {
-		flush(fetch())
-	}()
+	defer flush()
 
 	for {
 		select {
@@ -260,10 +265,12 @@ func (d *DataLoader[K, V]) loop(ctx context.Context) {
 			// Two strategy for optimizing fetching data:
 			// 1. Batch: when the number of keys hits the threshold
 			// 2. Debounce: when no new keys after the timeout.
+			// 3. Manual: manually flush when you know there are no further keys to
+			// fetch, e.g at the end of the loop.
 			keys[k] = struct{}{}
 			// 1.
 			if len(keys) >= d.opts.BatchMaxKeys {
-				flush(fetch())
+				flush()
 			}
 
 			if !d.opts.NoDebounce {
@@ -272,7 +279,10 @@ func (d *DataLoader[K, V]) loop(ctx context.Context) {
 			}
 		// 2.
 		case <-t.C:
-			flush(fetch())
+			flush()
+		// 3.
+		case <-d.f:
+			flush()
 		}
 	}
 }

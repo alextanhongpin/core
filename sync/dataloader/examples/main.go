@@ -36,6 +36,7 @@ func main() {
 			return u.ID, nil
 		},
 	})
+
 	defer dl.Stop()
 
 	// When using dataloader, we can fetch individual keys in separate goroutines.
@@ -47,6 +48,9 @@ func main() {
 			fmt.Println(dl.Load(id))
 		}(id)
 	}
+
+	// Manually flush since we know we are not loading any more keys.
+	fmt.Println("Flush:", dl.Flush())
 
 	time.Sleep(5 * time.Millisecond)
 
