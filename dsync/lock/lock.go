@@ -1,6 +1,7 @@
 package lock
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -10,23 +11,25 @@ import (
 
 	"github.com/google/uuid"
 	redis "github.com/redis/go-redis/v9"
-	"golang.org/x/sync/errgroup"
 )
 
 var (
-	// ErrLocked indicates that the key is already locked.
-	ErrLocked = errors.New("lock: already locked")
-
-	ErrLockReleased = errors.New("lock: already released")
-
-	ErrLockWaitTimeout = errors.New("lock: lock wait exceeded")
-
-	errDone = errors.New("lock: done")
+	ErrLocked          = errors.New("lock: another process has acquired the lock")
+	ErrConflict        = errors.New("lock: lock expired or acquired by another process")
+	ErrLockWaitTimeout = errors.New("lock: failed to acquire lock within the wait duration")
 )
 
 type Options struct {
-	LockTTL time.Duration
-	WaitTTL time.Duration
+	LockTTL time.Duration // How long the lock is held.
+	WaitTTL time.Duration // How long to wait for the lock to be acquired.
+}
+
+func (o *Options) Apply(opts ...Option) *Options {
+	for _, opt := range opts {
+		opt(o)
+	}
+
+	return o
 }
 
 func NewOptions() *Options {
@@ -71,60 +74,62 @@ type Locker struct {
 
 // New returns a pointer to Locker.
 func New(client *redis.Client, opts *Options) *Locker {
-	if opts == nil {
-		opts = NewOptions()
-	}
-
 	return &Locker{
 		client: client,
-		opts:   opts,
+		opts:   cmp.Or(opts, NewOptions()),
 	}
 }
 
-// Lock locks the given key until the function completes.
+// Do locks the given key until the function completes.
 // If the lock cannot be acquired within the given wait, it will error.
 // The lock is released after the function completes.
-func (l *Locker) Lock(ctx context.Context, key string, fn func(ctx context.Context) error, opts ...Option) error {
-	o := l.opts.Clone()
-	for _, opt := range opts {
-		opt(o)
-	}
+func (l *Locker) Do(ctx context.Context, key string, fn func(ctx context.Context) error, opts ...Option) error {
+	o := l.opts.Clone().Apply(opts...)
 
 	// Generate a random uuid as the lock value.
-	val := uuid.New().String()
-	if err := l.lockWait(ctx, key, val, o.LockTTL, o.WaitTTL); err != nil {
+	token, err := l.TryLock(ctx, key, o.LockTTL, o.WaitTTL)
+	if err != nil {
 		return err
 	}
 
-	defer l.unlock(context.WithoutCancel(ctx), key, val)
+	// To ensure the unlock is called, we avoid using the same context.
+	defer l.Unlock(context.WithoutCancel(ctx), key, token)
 
-	g, ctx := errgroup.WithContext(ctx)
-	g.Go(func() error {
-		return l.refresh(ctx, key, val, o.LockTTL)
-	})
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 
-	g.Go(func() error {
-		if err := fn(ctx); err != nil {
+	// Create a channel with a buffer of 1 to prevent goroutine leak.
+	ch := make(chan error, 1)
+
+	go func() {
+		ch <- fn(ctx)
+		close(ch)
+	}()
+
+	t := time.NewTicker(o.LockTTL * 7 / 10)
+	defer t.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return context.Cause(ctx)
+		case err := <-ch:
 			return err
+		case <-t.C:
+			if err := l.Extend(ctx, key, token, o.LockTTL); err != nil {
+				return err
+			}
 		}
-		return errDone
-	})
-
-	err := g.Wait()
-	if errors.Is(err, errDone) {
-		return nil
 	}
-
-	return err
 }
 
-// lockWait attempts to acquire the lock. If the lock is already acquired, it
+// TryLock attempts to acquire the lock. If the lock is already acquired, it
 // will wait for the lock to be released.
 // If the wait is less than or equal to 0, it will not wait.
-func (l *Locker) lockWait(ctx context.Context, key, val string, ttl, wait time.Duration) error {
+func (l *Locker) TryLock(ctx context.Context, key string, ttl, wait time.Duration) (string, error) {
 	noWait := wait <= 0
 	if noWait {
-		return l.lock(ctx, key, val, ttl)
+		return l.Lock(ctx, key, ttl)
 	}
 
 	ctx, cancel := context.WithTimeoutCause(ctx, wait, ErrLockWaitTimeout)
@@ -134,58 +139,46 @@ func (l *Locker) lockWait(ctx context.Context, key, val string, ttl, wait time.D
 	for {
 		select {
 		case <-ctx.Done():
-			return context.Cause(ctx)
+			return "", context.Cause(ctx)
 		default:
-			err := l.lock(ctx, key, val, ttl)
+			token, err := l.Lock(ctx, key, ttl)
 			if errors.Is(err, ErrLocked) {
 				select {
 				case <-ctx.Done():
-					return context.Cause(ctx)
+					return "", context.Cause(ctx)
 				case <-time.After(exponentialGrowthDecay(i)):
 					i++
 					continue
 				}
 			}
 
-			return err
+			return token, err
 		}
 	}
 }
 
-func (l *Locker) refresh(ctx context.Context, key, val string, ttl time.Duration) error {
-	t := time.NewTicker(ttl * 7 / 10)
-	defer t.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return context.Cause(ctx)
-		case <-t.C:
-			if err := l.extend(ctx, key, val, ttl); err != nil {
-				return err
-			}
-		}
-	}
-}
-
-func (l *Locker) lock(ctx context.Context, key, val string, ttl time.Duration) error {
-	ok, err := l.client.SetNX(ctx, key, val, ttl).Result()
+// Lock the key with the given ttl and returns a fencing token.
+// If the lock is already acquired, it will return an error.
+func (l *Locker) Lock(ctx context.Context, key string, ttl time.Duration) (string, error) {
+	token := newFencingToken()
+	ok, err := l.client.SetNX(ctx, key, token, ttl).Result()
 	if err != nil {
-		return fmt.Errorf("lock: %w", err)
+		return "", fmt.Errorf("lock: %w", err)
 	}
 	if !ok {
-		return ErrLocked
+		return "", ErrLocked
 	}
 
-	return nil
+	return token, nil
 }
 
-func (l *Locker) unlock(ctx context.Context, key, val string) error {
+// Unlocks the key with the given token.
+func (l *Locker) Unlock(ctx context.Context, key, token string) error {
 	keys := []string{key}
-	argv := []any{val}
+	argv := []any{token}
 	err := unlock.Run(ctx, l.client, keys, argv...).Err()
 	if errors.Is(err, redis.Nil) {
-		return ErrLockReleased
+		return ErrConflict
 	}
 
 	if err != nil {
@@ -195,12 +188,12 @@ func (l *Locker) unlock(ctx context.Context, key, val string) error {
 	return nil
 }
 
-func (l *Locker) extend(ctx context.Context, key, val string, ttl time.Duration) error {
+func (l *Locker) Extend(ctx context.Context, key, val string, ttl time.Duration) error {
 	keys := []string{key}
 	argv := []any{val, ttl.Milliseconds()}
 	err := extend.Run(ctx, l.client, keys, argv...).Err()
 	if errors.Is(err, redis.Nil) {
-		return ErrLockReleased
+		return ErrConflict
 	}
 
 	if err != nil {
@@ -224,4 +217,8 @@ func exponentialGrowthDecay(i int) time.Duration {
 	}
 
 	return time.Duration(base*100) * time.Millisecond
+}
+
+func newFencingToken() string {
+	return uuid.Must(uuid.NewV7()).String()
 }
