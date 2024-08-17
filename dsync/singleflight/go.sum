@@ -6,6 +6,8 @@ github.com/Microsoft/go-winio v0.6.1 h1:9/kr64B9VUZrLm5YYwbGtUJnMgqWVOdUAXu6Migc
 github.com/Microsoft/go-winio v0.6.1/go.mod h1:LRdKpFKfdobln8UmuiYcKPot9D2v6svN5+sAH+4kjUM=
 github.com/Nvveen/Gotty v0.0.0-20120604004816-cd527374f1e5 h1:TngWCqHvy9oXAN6lEVMRuU21PR1EtLVZJmdB18Gu3Rw=
 github.com/Nvveen/Gotty v0.0.0-20120604004816-cd527374f1e5/go.mod h1:lmUJ/7eu/Q8D7ML55dXQrVaamCz2vxCfdQBasLZfHKk=
+github.com/alextanhongpin/core/dsync/lock v0.0.0-20240817182837-65522cce4ec8 h1:aMXPdjmlLP/aAuhApdFzFbO4qYF5utwuz7qp8PD1BCA=
+github.com/alextanhongpin/core/dsync/lock v0.0.0-20240817182837-65522cce4ec8/go.mod h1:gtE7yRNR/6n+OSi3zWdXYR0a2+D3vOIGdDMUONh35QA=
 github.com/alextanhongpin/core/storage/redis v0.0.0-20240804140435-6087db8c34b5 h1:GQAchDattqaIx2RFiD1cZUYGLBEzZKK7QYFIUVbAbIY=
 github.com/alextanhongpin/core/storage/redis v0.0.0-20240804140435-6087db8c34b5/go.mod h1:sTQSolmJeZyMkrHz1jjYhkAmIV7jLd/4dCCtad2d6fg=
 github.com/alextanhongpin/core/sync/promise v0.0.0-20240809085144-738b98e230f9 h1:kbN+W66uh725ixPCkxkRukz4mVw958BvElyDTUTK23M=
