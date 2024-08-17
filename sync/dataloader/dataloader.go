@@ -129,14 +129,7 @@ func (d *DataLoader[K, V]) SetNX(k K, v V) bool {
 
 func (d *DataLoader[K, V]) Load(k K) (V, error) {
 	ctx := d.ctx
-
-	select {
-	case <-ctx.Done():
-		var v V
-		return v, context.Cause(ctx)
-	default:
-		d.start(ctx)
-	}
+	d.start(ctx)
 
 	d.mu.Lock()
 	v, ok := d.cache[k]
@@ -167,13 +160,7 @@ func (d *DataLoader[K, V]) LoadMany(ks []K) ([]promise.Result[V], error) {
 	}
 
 	ctx := d.ctx
-
-	select {
-	case <-ctx.Done():
-		return nil, context.Cause(ctx)
-	default:
-		d.start(ctx)
-	}
+	d.start(ctx)
 
 	res := make(promise.Promises[V], len(ks))
 
