@@ -203,6 +203,39 @@ func (l *Locker) Extend(ctx context.Context, key, val string, ttl time.Duration)
 	return nil
 }
 
+// Replace sets the value of the specified key to the provided new value, if
+// the existing value matches the old value.
+func (l *Locker) Replace(ctx context.Context, key string, oldVal, newVal []byte, ttl time.Duration) error {
+	keys := []string{key}
+	argv := []any{oldVal, newVal, ttl.Milliseconds()}
+	err := replace.Run(ctx, l.client, keys, argv...).Err()
+	if errors.Is(err, redis.Nil) {
+		return fmt.Errorf("replace: %w", ErrConflict)
+	}
+	if err != nil {
+		return fmt.Errorf("replace: %w", err)
+	}
+
+	return nil
+}
+
+// LoadOrStore allows loading or storing a value to the key in a single
+// operation.
+// Returns true if the value is loaded, false if the value is stored.
+func (l *Locker) LoadOrStore(ctx context.Context, key string, value []byte, ttl time.Duration) ([]byte, bool, error) {
+	v, err := l.client.Do(ctx, "SET", key, string(value), "NX", "GET", "PX", ttl.Milliseconds()).Result()
+	// If the previous value does not exist when GET, then it will be nil.
+	if errors.Is(err, redis.Nil) {
+		return value, false, nil
+	}
+
+	if err != nil {
+		return nil, false, err
+	}
+
+	return []byte(v.(string)), true, nil
+}
+
 // combination of two curves. the duration increases exponentially in the beginning before beginning to decay.
 // The idea is the wait duration should eventually be lesser and lesser over time.
 func exponentialGrowthDecay(i int) time.Duration {

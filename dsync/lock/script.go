@@ -29,3 +29,21 @@ var extend = redis.NewScript(`
 
 	return nil
 `)
+
+// replace sets the value to the key only if the existing lease id matches.
+var replace = redis.NewScript(`
+	-- KEYS[1]: The idempotency key
+	-- ARGV[1]: The old value for optimisic locking
+	-- ARGV[2]: The new value
+	-- ARGV[3]: How long to keep the idempotency key-value pair
+	local key = KEYS[1]
+	local old = ARGV[1]
+	local new = ARGV[2]
+	local ttl = ARGV[3]
+
+	if redis.call('GET', key) == old then
+		return redis.call('SET', key, new, 'XX', 'PX', ttl) 
+	end
+
+	return nil
+`)
