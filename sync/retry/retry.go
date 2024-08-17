@@ -2,30 +2,46 @@
 package retry
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"math"
 	"math/rand"
+	"sync"
 	"time"
 )
 
 var (
 	ErrLimitExceeded = errors.New("retry: limit exceeded")
 	ErrAborted       = errors.New("retry: aborted")
+	ErrThrottled     = errors.New("retry: throttled")
 )
 
 type PolicyFunc func(i int) time.Duration
 
 type Options struct {
-	Attempts int
-	Policy   PolicyFunc
+	Attempts  int
+	Policy    PolicyFunc
+	Throttler *Throttler
 }
 
 func NewOptions() *Options {
 	return &Options{
-		Attempts: 10,
-		Policy:   ExponentialBackoff(100*time.Millisecond, 1*time.Minute, true),
+		Attempts:  10,
+		Policy:    ExponentialBackoff(100*time.Millisecond, 1*time.Minute, true),
+		Throttler: NewThrottler(NewThrottlerOptions()),
 	}
+}
+
+func (o *Options) Valid() error {
+	if o.Attempts < 1 {
+		return errors.New("retry: attempts must be greater than 0")
+	}
+	if o.Policy == nil {
+		return errors.New("retry: policy must be set")
+	}
+
+	return nil
 }
 
 type Handler struct {
@@ -33,14 +49,9 @@ type Handler struct {
 }
 
 func New(opts *Options) *Handler {
-	if opts == nil {
-		opts = NewOptions()
-	}
-	if opts.Attempts < 1 {
-		panic("retry: attempts must be greater than 0")
-	}
-	if opts.Policy == nil {
-		panic("retry: policy must be set")
+	opts = cmp.Or(opts, NewOptions())
+	if err := opts.Valid(); err != nil {
+		panic(err)
 	}
 
 	return &Handler{
@@ -49,7 +60,11 @@ func New(opts *Options) *Handler {
 }
 
 func (r *Handler) Do(fn func() error) error {
-	return DoFunc(fn, WithAttempts(r.opts.Attempts), WithPolicy(r.opts.Policy))
+	return DoFunc(fn,
+		WithAttempts(r.opts.Attempts),
+		WithPolicy(r.opts.Policy),
+		WithThrottler(r.opts.Throttler),
+	)
 }
 
 type Option func(opts *Options)
@@ -66,6 +81,12 @@ func WithPolicy(policy PolicyFunc) Option {
 	}
 }
 
+func WithThrottler(t *Throttler) Option {
+	return func(opts *Options) {
+		opts.Throttler = t
+	}
+}
+
 func DoFunc(fn func() error, opts ...Option) (err error) {
 	o := NewOptions()
 	for _, opt := range opts {
@@ -73,10 +94,17 @@ func DoFunc(fn func() error, opts ...Option) (err error) {
 	}
 
 	for i := range o.Attempts {
+		t := o.Throttler
+
 		time.Sleep(o.Policy(i))
+		if i > 0 && !t.allow() {
+			return Abort(ErrThrottled)
+		}
 
 		err = fn()
 		if err == nil {
+			t.success()
+
 			return nil
 		}
 
@@ -95,10 +123,16 @@ func DoFunc2[T any](fn func() (T, error), opts ...Option) (res T, err error) {
 	}
 
 	for i := range o.Attempts {
+		t := o.Throttler
 		time.Sleep(o.Policy(i))
+		if i > 0 && !t.allow() {
+			return res, Abort(ErrThrottled)
+		}
 
 		res, err = fn()
 		if err == nil {
+			t.success()
+
 			return res, nil
 		}
 
@@ -159,4 +193,63 @@ func (t *retryError) Unwrap() error {
 
 func (t *retryError) Is(err error) bool {
 	return errors.Is(t.err, err) || errors.Is(t.ori, err)
+}
+
+type Throttler struct {
+	ratio  float64
+	thresh float64 // max / 2
+	max    float64
+
+	mu     sync.Mutex
+	tokens float64
+}
+
+type ThrottlerOptions struct {
+	MaxTokens  float64
+	TokenRatio float64
+}
+
+func NewThrottlerOptions() *ThrottlerOptions {
+	return &ThrottlerOptions{
+		MaxTokens:  10,
+		TokenRatio: 0.1,
+	}
+}
+
+func NewThrottler(opts *ThrottlerOptions) *Throttler {
+	opts = cmp.Or(opts, NewThrottlerOptions())
+
+	ratio := opts.TokenRatio
+	maxTokens := opts.MaxTokens
+
+	return &Throttler{
+		ratio:  ratio,
+		max:    maxTokens,
+		tokens: maxTokens,
+		thresh: maxTokens / 2,
+	}
+}
+
+func (t *Throttler) allow() bool {
+	if t == nil {
+		return true
+	}
+
+	t.mu.Lock()
+
+	t.tokens = max(t.tokens-1, 0)
+	ok := t.tokens > t.thresh
+	t.mu.Unlock()
+
+	return ok
+}
+
+func (t *Throttler) success() {
+	if t == nil {
+		return
+	}
+
+	t.mu.Lock()
+	t.tokens = min(t.tokens+t.ratio, t.max)
+	t.mu.Unlock()
 }
