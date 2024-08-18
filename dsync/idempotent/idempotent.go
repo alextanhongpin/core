@@ -145,8 +145,7 @@ func (s *RedisStore) Do(ctx context.Context, key string, fn func(ctx context.Con
 	lockTTL := o.LockTTL
 	lock := s.lock
 
-	// TODO
-	token := uuid.New().String()
+	token := newFencingToken()
 	v, loaded, err := lock.LoadOrStore(ctx, key, token, lockTTL)
 	if err != nil {
 		return res, false, err
@@ -263,4 +262,8 @@ func (r result[T]) unwrap() (T, error) {
 
 func makeResult[T any](data T, err error) result[T] {
 	return result[T]{data: data, err: err}
+}
+
+func newFencingToken() string {
+	return uuid.Must(uuid.NewV7()).String()
 }
