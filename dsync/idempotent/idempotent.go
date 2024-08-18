@@ -144,7 +144,7 @@ func (s *RedisStore) Do(ctx context.Context, key string, fn func(ctx context.Con
 	b.Store(true)
 	res, err = s.group.DoAndForget(key, func() ([]byte, error) {
 		res, shared, err := s.do(ctx, key, fn, req, opts...)
-		if !shared {
+		if !shared || err != nil {
 			b.Store(shared)
 		}
 		return res, err
