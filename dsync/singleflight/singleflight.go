@@ -16,10 +16,7 @@ import (
 	redis "github.com/redis/go-redis/v9"
 )
 
-var (
-	ErrConflict        = errors.New("singleflight: lock expired or acquired by another process")
-	ErrLockWaitTimeout = errors.New("singleflight: failed to acquire lock within the wait duration")
-)
+var ErrWaitTimeout = errors.New("singleflight: timeout waiting for result")
 
 type Options struct {
 	KeepTTL time.Duration
@@ -82,15 +79,17 @@ func (g *Group[T]) Do(ctx context.Context, key string, fn func(context.Context) 
 	if err != nil {
 		return v, err, false
 	}
-	b := []byte(s)
 
 	if loaded {
-		// Completely loaded.
+		b := []byte(s)
+		// Fully loaded.
 		if !g.isPending(b) {
 			err = json.Unmarshal(b, &v)
 			return v, err, err == nil
 		}
 
+		// Another process is doing work.
+		// Wait for the cache to be populated.
 		v, err = g.group.DoAndForget(key, func() (T, error) {
 			return g.wait(ctx, key, waitTTL)
 		})
@@ -109,6 +108,7 @@ func (g *Group[T]) do(ctx context.Context, key, token string, fn func(context.Co
 	// Use a separate context to avoid cancellation.
 	defer lock.Unlock(context.WithoutCancel(ctx), key, token)
 
+	// This is necessary to cancel the goroutine.
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -150,7 +150,7 @@ func (g *Group[T]) do(ctx context.Context, key, token string, fn func(context.Co
 }
 
 func (g *Group[T]) wait(ctx context.Context, key string, ttl time.Duration) (v T, err error) {
-	ctx, cancel := context.WithTimeoutCause(ctx, ttl, ErrLockWaitTimeout)
+	ctx, cancel := context.WithTimeoutCause(ctx, ttl, ErrWaitTimeout)
 	defer cancel()
 
 	var i int
@@ -165,7 +165,6 @@ func (g *Group[T]) wait(ctx context.Context, key string, ttl time.Duration) (v T
 				return v, fmt.Errorf("wait: %w", err)
 			}
 
-			// Is pending.
 			if g.isPending(b) {
 				continue
 			}
