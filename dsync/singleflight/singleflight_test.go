@@ -6,6 +6,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/alextanhongpin/core/dsync/singleflight"
 	"github.com/alextanhongpin/core/storage/redis/redistest"
@@ -31,7 +32,7 @@ var john = &User{
 }
 
 func TestSingleflight(t *testing.T) {
-	sf := singleflight.New[*User](newClient(t))
+	sf := singleflight.New[*User](newClient(t), nil)
 	key := t.Name()
 
 	t.Run("first time", func(t *testing.T) {
@@ -55,7 +56,7 @@ func TestSingleflight(t *testing.T) {
 	})
 
 	t.Run("separate instance", func(t *testing.T) {
-		sf := singleflight.New[*User](newClient(t))
+		sf := singleflight.New[*User](newClient(t), nil)
 		v, err, shared := sf.Do(ctx, key, func(ctx context.Context) (*User, error) {
 			return john, nil
 		})
@@ -67,7 +68,7 @@ func TestSingleflight(t *testing.T) {
 }
 
 func TestSingleflightConcurrent(t *testing.T) {
-	sf := singleflight.New[*User](newClient(t))
+	sf := singleflight.New[*User](newClient(t), nil)
 	is := assert.New(t)
 
 	counter := new(atomic.Int64)
@@ -79,7 +80,9 @@ func TestSingleflightConcurrent(t *testing.T) {
 		go func() {
 			defer wg.Done()
 
-			v, err, shared := sf.DoSync(ctx, t.Name(), func(ctx context.Context) (*User, error) {
+			// Shared instance.
+			v, err, shared := sf.Do(ctx, t.Name(), func(ctx context.Context) (*User, error) {
+				time.Sleep(50 * time.Millisecond)
 				return john, nil
 			})
 			is.Nil(err)
@@ -92,8 +95,10 @@ func TestSingleflightConcurrent(t *testing.T) {
 		go func() {
 			defer wg.Done()
 
-			sf := singleflight.New[*User](newClient(t))
+			// Individual instances.
+			sf := singleflight.New[*User](newClient(t), nil)
 			v, err, shared := sf.Do(ctx, t.Name(), func(ctx context.Context) (*User, error) {
+				time.Sleep(50 * time.Millisecond)
 				return john, nil
 			})
 			is.Nil(err)

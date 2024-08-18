@@ -1,133 +1,152 @@
 package singleflight
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
 	"math/rand"
-	"sync"
 	"time"
 
+	"github.com/alextanhongpin/core/dsync/lock"
 	"github.com/alextanhongpin/core/sync/promise"
 	"github.com/google/uuid"
 	redis "github.com/redis/go-redis/v9"
-	"golang.org/x/sync/errgroup"
 )
 
 var (
-	ErrTokenMismatch   = errors.New("singleflight: token mismatch")
-	ErrLockWaitTimeout = errors.New("singleflight: lock wait timeout")
+	ErrConflict        = errors.New("singleflight: lock expired or acquired by another process")
+	ErrLockWaitTimeout = errors.New("singleflight: failed to acquire lock within the wait duration")
 )
 
+type Options struct {
+	KeepTTL time.Duration
+	LockTTL time.Duration
+	WaitTTL time.Duration
+}
+
+func NewOptions() *Options {
+	return &Options{
+		KeepTTL: 24 * time.Hour,
+		LockTTL: 1 * time.Minute,
+		WaitTTL: 30 * time.Second,
+	}
+}
+
+func (o *Options) Valid() error {
+	if o.LockTTL <= 0 {
+		return errors.New("singleflight: lock ttl must be greater than 0")
+	}
+	if o.KeepTTL <= 0 {
+		return errors.New("singleflight: keep ttl must be greater than 0")
+	}
+	if o.WaitTTL < 0 {
+		o.WaitTTL = 0
+	}
+
+	return nil
+}
+
 type Group[T any] struct {
-	mu       sync.Mutex
-	promises map[string]*promise.Promise[T]
-	client   *redis.Client
-	KeepTTL  time.Duration
-	LockTTL  time.Duration
-	WaitTTL  time.Duration
+	client *redis.Client
+	group  *promise.Group[T]
+	lock   *lock.Locker
+	opts   *Options
 }
 
-func New[T any](client *redis.Client) *Group[T] {
+func New[T any](client *redis.Client, opts *Options) *Group[T] {
+	opts = cmp.Or(opts, NewOptions())
+	if err := opts.Valid(); err != nil {
+		panic(err)
+	}
+
 	return &Group[T]{
-		promises: make(map[string]*promise.Promise[T]),
-		client:   client,
-		KeepTTL:  1 * time.Hour,
-		LockTTL:  10 * time.Second,
-		WaitTTL:  1 * time.Minute,
+		client: client,
+		group:  promise.NewGroup[T](),
+		opts:   opts,
+		lock: lock.New(client, &lock.Options{
+			LockTTL: opts.LockTTL,
+			WaitTTL: 0,
+		}),
 	}
-}
-
-// DoSync is like Do, except  that it is thread-safe locally.
-func (g *Group[T]) DoSync(ctx context.Context, key string, fn func(context.Context) (T, error)) (v T, err error, shared bool) {
-	g.mu.Lock()
-	p, ok := g.promises[key]
-	if ok {
-		g.mu.Unlock()
-
-		v, err = p.Await()
-		if err != nil {
-			return v, err, false
-		}
-
-		return v, nil, true
-	}
-
-	p = promise.Deferred[T]()
-	g.promises[key] = p
-	g.mu.Unlock()
-
-	defer func() {
-		g.mu.Lock()
-		delete(g.promises, key)
-		g.mu.Unlock()
-	}()
-
-	v, err, shared = g.Do(ctx, key, fn)
-	if err != nil {
-		p.Reject(err)
-	} else {
-		p.Resolve(v)
-	}
-
-	return
 }
 
 func (g *Group[T]) Do(ctx context.Context, key string, fn func(context.Context) (T, error)) (v T, err error, shared bool) {
-	token := []byte(uuid.New().String())
-	b, loaded, err := g.loadOrStore(ctx, key, token, g.LockTTL)
+	lockTTL := g.opts.LockTTL
+	waitTTL := g.opts.WaitTTL
+
+	token := newFencingToken()
+	s, loaded, err := g.lock.LoadOrStore(ctx, key, token, lockTTL)
 	if err != nil {
 		return v, err, false
 	}
+	b := []byte(s)
 
 	if loaded {
-		if !isUUID(b) {
+		// Completely loaded.
+		if !g.isPending(b) {
 			err = json.Unmarshal(b, &v)
-			if err != nil {
-				return v, err, false
-			}
-			return v, nil, true
+			return v, err, err == nil
 		}
 
-		v, err = g.wait(ctx, key, g.WaitTTL)
-		if err != nil {
-			// If all attempts failed, just fail fast without retrying.
-			// Let another process retry.
-			return v, err, false
-		}
-
-		return v, nil, true
+		v, err = g.group.DoAndForget(key, func() (T, error) {
+			return g.wait(ctx, key, waitTTL)
+		})
+		return v, err, err == nil
 	}
+
+	v, err = g.do(ctx, key, token, fn)
+	return
+}
+
+func (g *Group[T]) do(ctx context.Context, key, token string, fn func(context.Context) (T, error)) (v T, err error) {
+	lockTTL := g.opts.LockTTL
+	keepTTL := g.opts.KeepTTL
+	lock := g.lock
 
 	// Use a separate context to avoid cancellation.
-	defer g.unlock(context.WithoutCancel(ctx), key, token)
+	defer lock.Unlock(context.WithoutCancel(ctx), key, token)
 
-	ch := make(chan T)
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 
-	eg, ctx := errgroup.WithContext(ctx)
-	eg.Go(func() error {
-		return g.refresh(ctx, ch, key, token, g.LockTTL, g.KeepTTL)
-	})
-
-	eg.Go(func() error {
-		v, err = fn(ctx)
-		if err != nil {
-			return err
-		}
-
-		ch <- v
+	// Create a buffer of 1 to prevent goroutine leak.
+	ch := make(chan result[T], 1)
+	go func() {
+		ch <- makeResult(fn(ctx))
 		close(ch)
+	}()
 
-		return nil
-	})
+	t := time.NewTicker(lockTTL * 7 / 10)
+	defer t.Stop()
 
-	if err := eg.Wait(); err != nil {
-		return v, err, false
+	for {
+		select {
+		case <-ctx.Done():
+			return v, context.Cause(ctx)
+		case res := <-ch:
+			v, err := res.unwrap()
+			if err != nil {
+				return v, err
+			}
+
+			b, err := json.Marshal(v)
+			if err != nil {
+				return v, err
+			}
+			if err := lock.Replace(ctx, key, token, string(b), keepTTL); err != nil {
+				return v, err
+			}
+
+			return v, nil
+		case <-t.C:
+			if err := lock.Extend(ctx, key, token, lockTTL); err != nil {
+				return v, err
+			}
+		}
 	}
-
-	return v, nil, false
 }
 
 func (g *Group[T]) wait(ctx context.Context, key string, ttl time.Duration) (v T, err error) {
@@ -139,7 +158,6 @@ func (g *Group[T]) wait(ctx context.Context, key string, ttl time.Duration) (v T
 		select {
 		case <-ctx.Done():
 			return v, context.Cause(ctx)
-		// Retry at most 10 times.
 		case <-time.After(exponentialGrowthDecay(i)):
 			i++
 			b, err := g.client.Get(ctx, key).Bytes()
@@ -148,7 +166,7 @@ func (g *Group[T]) wait(ctx context.Context, key string, ttl time.Duration) (v T
 			}
 
 			// Is pending.
-			if isUUID(b) {
+			if g.isPending(b) {
 				continue
 			}
 
@@ -158,90 +176,8 @@ func (g *Group[T]) wait(ctx context.Context, key string, ttl time.Duration) (v T
 	}
 }
 
-func (g *Group[T]) refresh(ctx context.Context, ch chan T, key string, value []byte, lockTTL, keepTTL time.Duration) error {
-	t := time.NewTicker(lockTTL * 7 / 10)
-	defer t.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return context.Cause(ctx)
-		case v := <-ch:
-			b, err := json.Marshal(v)
-			if err != nil {
-				return err
-			}
-
-			return g.replace(ctx, key, value, b, keepTTL)
-		case <-t.C:
-			if err := g.extend(ctx, key, value, lockTTL); err != nil {
-				return err
-			}
-		}
-	}
-}
-
-func (g *Group[T]) lock(ctx context.Context, key string, value []byte, ttl time.Duration) (locked bool, err error) {
-	return g.client.SetNX(ctx, key, value, ttl).Result()
-}
-
-// unlock releases the lock on the specified key using the provided value.
-func (g *Group[T]) unlock(ctx context.Context, key string, value []byte) error {
-	keys := []string{key}
-	argv := []any{value}
-	err := unlock.Run(ctx, g.client, keys, argv...).Err()
-	if errors.Is(err, redis.Nil) {
-		return fmt.Errorf("unlock: %w", ErrTokenMismatch)
-	}
-	if err != nil {
-		return fmt.Errorf("unlock: %w", err)
-	}
-
-	return nil
-}
-
-func (g *Group[T]) extend(ctx context.Context, key string, val []byte, ttl time.Duration) error {
-	keys := []string{key}
-	argv := []any{val, ttl.Milliseconds()}
-	err := extend.Run(ctx, g.client, keys, argv...).Err()
-	if errors.Is(err, redis.Nil) {
-		return fmt.Errorf("extend: %w", ErrTokenMismatch)
-	}
-	if err != nil {
-		return fmt.Errorf("extend: %w", err)
-	}
-
-	return nil
-}
-
-// replace sets the value of the specified key to the provided new value, if
-// the existing value matches the old value.
-func (g *Group[T]) replace(ctx context.Context, key string, oldVal, newVal []byte, ttl time.Duration) error {
-	keys := []string{key}
-	argv := []any{oldVal, newVal, ttl.Milliseconds()}
-	err := replace.Run(ctx, g.client, keys, argv...).Err()
-	if errors.Is(err, redis.Nil) {
-		return fmt.Errorf("replace: %w", ErrTokenMismatch)
-	}
-	if err != nil {
-		return fmt.Errorf("replace: %w", err)
-	}
-
-	return nil
-}
-
-func (g *Group[T]) loadOrStore(ctx context.Context, key string, value []byte, ttl time.Duration) ([]byte, bool, error) {
-	v, err := g.client.Do(ctx, "SET", key, string(value), "NX", "GET", "PX", ttl.Milliseconds()).Result()
-	// If the previous value does not exist when GET, then it will be nil.
-	if errors.Is(err, redis.Nil) {
-		return value, false, nil
-	}
-
-	if err != nil {
-		return nil, false, err
-	}
-
-	return []byte(v.(string)), true, nil
+func (g *Group[T]) isPending(b []byte) bool {
+	return isUUID(b)
 }
 
 // isUUID checks if the provided byte slice represents a valid UUID.
@@ -262,4 +198,21 @@ func exponentialGrowthDecay(i int) time.Duration {
 	}
 
 	return time.Duration(base*100) * time.Millisecond
+}
+
+func newFencingToken() string {
+	return uuid.Must(uuid.NewV7()).String()
+}
+
+type result[T any] struct {
+	data T
+	err  error
+}
+
+func (r *result[T]) unwrap() (T, error) {
+	return r.data, r.err
+}
+
+func makeResult[T any](data T, err error) result[T] {
+	return result[T]{data: data, err: err}
 }
