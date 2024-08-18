@@ -83,8 +83,7 @@ func TestConcurrent(t *testing.T) {
 	}
 
 	client := newClient(t)
-	store := NewRedisStore(client, nil)
-	h := MakeHandler(store, fn)
+	h := MakeHandler(NewRedisStore(client, nil), fn)
 	n := 10
 
 	is := assert.New(t)
@@ -97,10 +96,6 @@ func TestConcurrent(t *testing.T) {
 			defer wg.Done()
 
 			res, shared, err := h.Do(ctx, t.Name(), Request{Msg: "hello"})
-			if errors.Is(err, ErrRequestInFlight) {
-				inFlight.Add(1)
-				return
-			}
 			is.Equal("HELLO", res.Msg)
 			is.Nil(err)
 			if shared {
@@ -111,7 +106,8 @@ func TestConcurrent(t *testing.T) {
 		go func() {
 			defer wg.Done()
 
-			h := MakeHandler(store, fn)
+			time.Sleep(50 * time.Millisecond)
+			h := MakeHandler(NewRedisStore(client, nil), fn)
 			res, shared, err := h.Do(ctx, t.Name(), Request{Msg: "hello"})
 			if errors.Is(err, ErrRequestInFlight) {
 				inFlight.Add(1)
@@ -128,7 +124,7 @@ func TestConcurrent(t *testing.T) {
 			defer wg.Done()
 			time.Sleep(150 * time.Millisecond)
 
-			h := MakeHandler(store, fn)
+			h := MakeHandler(NewRedisStore(client, nil), fn)
 			res, shared, err := h.Do(ctx, t.Name(), Request{Msg: "hello"})
 			if errors.Is(err, ErrRequestInFlight) {
 				inFlight.Add(1)
@@ -144,8 +140,8 @@ func TestConcurrent(t *testing.T) {
 
 	wg.Wait()
 	is.Equal(int64(1), invoked.Load())
-	is.Equal(int64(n), counter.Load())
-	is.Equal(int64(n*2-1), inFlight.Load())
+	is.Equal(int64(n*2-1), counter.Load())
+	is.Equal(int64(n), inFlight.Load())
 }
 
 // TestExtendLock test the scenario where the callback function takes a longer

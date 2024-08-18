@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"sync/atomic"
 	"time"
 
 	"github.com/alextanhongpin/core/dsync/lock"
@@ -136,14 +137,32 @@ func NewRedisStore(client *redis.Client, opts *Options) *RedisStore {
 	}
 }
 
+// Do executes the provided function idempotently, using the specified key and
+// request.
 func (s *RedisStore) Do(ctx context.Context, key string, fn func(ctx context.Context, req []byte) ([]byte, error), req []byte, opts ...Option) (res []byte, shared bool, err error) {
+	b := new(atomic.Bool)
+	b.Store(true)
+	res, err = s.group.DoAndForget(key, func() ([]byte, error) {
+		res, shared, err := s.do(ctx, key, fn, req, opts...)
+		if !shared {
+			b.Store(shared)
+		}
+		return res, err
+	})
+	shared = b.Load()
+
+	return
+}
+
+func (s *RedisStore) do(ctx context.Context, key string, fn func(ctx context.Context, req []byte) ([]byte, error), req []byte, opts ...Option) (res []byte, shared bool, err error) {
 	o := s.opts.Clone()
 	for _, opt := range opts {
 		opt(o)
 	}
 
-	lockTTL := o.LockTTL
+	keepTTL := o.KeepTTL
 	lock := s.lock
+	lockTTL := o.LockTTL
 
 	token := newFencingToken()
 	v, loaded, err := lock.LoadOrStore(ctx, key, token, lockTTL)
@@ -155,19 +174,6 @@ func (s *RedisStore) Do(ctx context.Context, key string, fn func(ctx context.Con
 		res, err := s.parse(req, []byte(v))
 		return res, err == nil, err
 	}
-
-	res, err = s.group.DoAndForget(key, func() ([]byte, error) {
-		return s.do(ctx, key, token, fn, req, o)
-	})
-	return
-}
-
-// Do executes the provided function idempotently, using the specified key and
-// request.
-func (s *RedisStore) do(ctx context.Context, key, token string, fn func(ctx context.Context, req []byte) ([]byte, error), req []byte, o *Options) (res []byte, err error) {
-	lock := s.lock
-	keepTTL := o.KeepTTL
-	lockTTL := o.LockTTL
 
 	// Any failure will just unlock the resource.
 	// context.WithoutCancel ensures that the unlock is always called.
@@ -193,26 +199,26 @@ func (s *RedisStore) do(ctx context.Context, key, token string, fn func(ctx cont
 	for {
 		select {
 		case <-ctx.Done():
-			return nil, context.Cause(ctx)
+			return nil, false, context.Cause(ctx)
 		case res := <-ch:
 			d, err := res.unwrap()
 			if err != nil {
-				return nil, err
+				return nil, false, err
 			}
 
 			b, err := json.Marshal(d)
 			if err != nil {
-				return nil, err
+				return nil, false, err
 			}
 
 			if err := lock.Replace(ctx, key, token, string(b), keepTTL); err != nil {
-				return nil, err
+				return nil, false, err
 			}
 
-			return []byte(d.Response), nil
+			return []byte(d.Response), false, nil
 		case <-t.C:
 			if err := lock.Extend(ctx, key, token, lockTTL); err != nil {
-				return nil, err
+				return nil, false, err
 			}
 		}
 	}

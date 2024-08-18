@@ -33,8 +33,6 @@ func ExampleMakeHandler() {
 
 	defer client.Close()
 
-	store := idempotent.NewRedisStore(client, nil)
-
 	// Create a request object with the required fields.
 	req := Request{
 		Age:  10,
@@ -57,6 +55,7 @@ func ExampleMakeHandler() {
 		}
 
 		// Execute the idempotent operation and handle the response
+		store := idempotent.NewRedisStore(client, nil)
 		h := idempotent.MakeHandler(store, fn)
 		v, shared, err := h.Do(ctx, "get-user", req)
 		if err != nil {
@@ -80,6 +79,7 @@ func ExampleMakeHandler() {
 		}
 
 		// Execute the idempotent operation and handle the response.
+		store := idempotent.NewRedisStore(client, nil)
 		h := idempotent.MakeHandler(store, fn)
 		_, _, err := h.Do(ctx, "get-user", req)
 		if err == nil {
@@ -107,6 +107,7 @@ func ExampleMakeHandler() {
 		}
 
 		// Execute the idempotent operation and handle the response.
+		store := idempotent.NewRedisStore(client, nil)
 		h := idempotent.MakeHandler(store, fn)
 		v, shared, err := h.Do(ctx, "get-user", req)
 		if err != nil {
