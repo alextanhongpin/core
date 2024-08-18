@@ -223,7 +223,7 @@ func (l *Locker) Replace(ctx context.Context, key, oldVal, newVal string, ttl ti
 // operation.
 // Returns true if the value is loaded, false if the value is stored.
 func (l *Locker) LoadOrStore(ctx context.Context, key, value string, ttl time.Duration) (string, bool, error) {
-	v, err := l.client.Do(ctx, "SET", key, string(value), "NX", "GET", "PX", ttl.Milliseconds()).Result()
+	v, err := l.client.Do(ctx, "SET", key, value, "NX", "GET", "PX", ttl.Milliseconds()).Result()
 	// If the previous value does not exist when GET, then it will be nil.
 	if errors.Is(err, redis.Nil) {
 		return value, false, nil
