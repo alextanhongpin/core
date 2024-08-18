@@ -29,12 +29,7 @@ func New[T any](fn func() (T, error)) *Promise[T] {
 	p := Deferred[T]()
 
 	go func() {
-		v, err := fn()
-		if err != nil {
-			p.Reject(err)
-		} else {
-			p.Resolve(v)
-		}
+		p.Wait(fn())
 	}()
 
 	return p
@@ -60,6 +55,16 @@ func (p *Promise[T]) Result() Result[T] {
 	p.wg.Wait()
 
 	return Result[T]{Data: p.data, Err: p.err}
+}
+
+func (p *Promise[T]) Wait(v T, err error) (T, error) {
+	if err != nil {
+		p.Reject(err)
+	} else {
+		p.Resolve(v)
+	}
+
+	return p.Await()
 }
 
 func (p *Promise[T]) Await() (T, error) {
