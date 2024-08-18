@@ -158,15 +158,14 @@ func (s *RedisStore) Do(ctx context.Context, key string, fn func(ctx context.Con
 	}
 
 	res, err = s.group.DoAndForget(key, func() ([]byte, error) {
-		res, _, err := s.do(ctx, key, token, fn, req, o)
-		return res, err
+		return s.do(ctx, key, token, fn, req, o)
 	})
 	return
 }
 
 // Do executes the provided function idempotently, using the specified key and
 // request.
-func (s *RedisStore) do(ctx context.Context, key, token string, fn func(ctx context.Context, req []byte) ([]byte, error), req []byte, o *Options) (res []byte, shared bool, err error) {
+func (s *RedisStore) do(ctx context.Context, key, token string, fn func(ctx context.Context, req []byte) ([]byte, error), req []byte, o *Options) (res []byte, err error) {
 	lock := s.lock
 	keepTTL := o.KeepTTL
 	lockTTL := o.LockTTL
@@ -195,27 +194,26 @@ func (s *RedisStore) do(ctx context.Context, key, token string, fn func(ctx cont
 	for {
 		select {
 		case <-ctx.Done():
-			return nil, false, context.Cause(ctx)
+			return nil, context.Cause(ctx)
 		case res := <-ch:
 			d, err := res.unwrap()
 			if err != nil {
-				return nil, false, err
+				return nil, err
 			}
 
 			b, err := json.Marshal(d)
 			if err != nil {
-				return nil, false, err
+				return nil, err
 			}
 
-			err = lock.Replace(ctx, key, token, string(b), keepTTL)
-			if err != nil {
-				return nil, false, err
+			if err := lock.Replace(ctx, key, token, string(b), keepTTL); err != nil {
+				return nil, err
 			}
 
-			return []byte(d.Response), false, nil
+			return []byte(d.Response), nil
 		case <-t.C:
 			if err := lock.Extend(ctx, key, token, lockTTL); err != nil {
-				return nil, false, err
+				return nil, err
 			}
 		}
 	}
