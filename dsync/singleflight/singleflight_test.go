@@ -6,6 +6,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/alextanhongpin/core/dsync/singleflight"
 	"github.com/alextanhongpin/core/storage/redis/redistest"
@@ -79,7 +80,9 @@ func TestSingleflightConcurrent(t *testing.T) {
 		go func() {
 			defer wg.Done()
 
+			// Shared instance.
 			v, err, shared := sf.Do(ctx, t.Name(), func(ctx context.Context) (*User, error) {
+				time.Sleep(50 * time.Millisecond)
 				return john, nil
 			})
 			is.Nil(err)
@@ -92,8 +95,10 @@ func TestSingleflightConcurrent(t *testing.T) {
 		go func() {
 			defer wg.Done()
 
+			// Individual instances.
 			sf := singleflight.New[*User](newClient(t), nil)
 			v, err, shared := sf.Do(ctx, t.Name(), func(ctx context.Context) (*User, error) {
+				time.Sleep(50 * time.Millisecond)
 				return john, nil
 			})
 			is.Nil(err)

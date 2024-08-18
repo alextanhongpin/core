@@ -3,9 +3,9 @@ module github.com/alextanhongpin/core/dsync/singleflight
 go 1.22.5
 
 require (
-	github.com/alextanhongpin/core/dsync/lock v0.0.0-20240817182837-65522cce4ec8
+	github.com/alextanhongpin/core/dsync/lock v0.0.0-20240818030455-13a562fa6f3d
 	github.com/alextanhongpin/core/storage/redis v0.0.0-20240804140435-6087db8c34b5
-	github.com/alextanhongpin/core/sync/promise v0.0.0-20240809085144-738b98e230f9
+	github.com/alextanhongpin/core/sync/promise v0.0.0-20240818033235-f8387d1fe2fc
 	github.com/google/uuid v1.6.0
 	github.com/redis/go-redis/v9 v9.6.1
 	github.com/stretchr/testify v1.9.0
