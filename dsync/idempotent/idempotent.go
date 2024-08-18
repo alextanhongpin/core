@@ -144,9 +144,10 @@ func (s *RedisStore) Do(ctx context.Context, key string, fn func(ctx context.Con
 	b.Store(true)
 	res, err = s.group.DoAndForget(key, func() ([]byte, error) {
 		res, shared, err := s.do(ctx, key, fn, req, opts...)
-		if !shared || err != nil {
+		if !shared {
 			b.Store(shared)
 		}
+
 		return res, err
 	})
 	shared = b.Load()
@@ -182,14 +183,10 @@ func (s *RedisStore) do(ctx context.Context, key string, fn func(ctx context.Con
 	ch := make(chan result[data], 1)
 	go func() {
 		res, err := fn(ctx, req)
-		if err != nil {
-			ch <- result[data]{err: err}
-		} else {
-			ch <- result[data]{data: data{
-				Request:  hash(req),
-				Response: string(res),
-			}}
-		}
+		ch <- makeResult(data{
+			Request:  hash(req),
+			Response: string(res),
+		}, err)
 		close(ch)
 	}()
 
