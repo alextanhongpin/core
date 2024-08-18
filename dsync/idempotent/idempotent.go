@@ -8,14 +8,12 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"fmt"
-	"sync"
 	"time"
 
+	"github.com/alextanhongpin/core/dsync/lock"
 	"github.com/alextanhongpin/core/sync/promise"
 	"github.com/google/uuid"
 	redis "github.com/redis/go-redis/v9"
-	"golang.org/x/sync/errgroup"
 )
 
 var (
@@ -26,10 +24,6 @@ var (
 	// ErrRequestMismatch indicates that the request does not match the stored
 	// request for the specified key.
 	ErrRequestMismatch = errors.New("idempotent: request mismatch")
-
-	// ErrLeaseInvalid indicates that the caller doesn't hold the correct token
-	// for the lease and failed to write.
-	ErrLeaseInvalid = errors.New("idempotent: lease invalid")
 )
 
 type data struct {
@@ -43,62 +37,26 @@ func (h Handler[K, V]) Do(ctx context.Context, key string, req K) (V, bool, erro
 	return h(ctx, key, req)
 }
 
-func MakeSyncHandler[K, V any](store SyncStore, h func(context.Context, K) (V, error), opts ...Option) Handler[K, V] {
-	return func(ctx context.Context, key string, req K) (res V, shared bool, err error) {
-		b, err := json.Marshal(req)
-		if err != nil {
-			return res, false, err
-		}
-
-		b, shared, err = store.DoSync(ctx, key, func(ctx context.Context, _ []byte) ([]byte, error) {
-			res, err = h(ctx, req)
-			if err != nil {
-				return nil, err
-			}
-
-			return json.Marshal(res)
-		}, b, opts...)
-		if err != nil {
-			return res, false, err
-		}
-		if !shared {
-			return res, false, nil
-		}
-
-		if err := json.Unmarshal(b, &res); err != nil {
-			return res, false, err
-		}
-
-		return res, shared, err
-	}
-}
-
 func MakeHandler[K, V any](store Store, h func(context.Context, K) (V, error), opts ...Option) Handler[K, V] {
 	return func(ctx context.Context, key string, req K) (res V, shared bool, err error) {
-		b, err := json.Marshal(req)
+		reqBytes, err := json.Marshal(req)
 		if err != nil {
 			return res, false, err
 		}
 
-		b, shared, err = store.Do(ctx, key, func(ctx context.Context, _ []byte) ([]byte, error) {
-			res, err = h(ctx, req)
+		resBytes, shared, err := store.Do(ctx, key, func(ctx context.Context, _ []byte) ([]byte, error) {
+			res, err := h(ctx, req)
 			if err != nil {
 				return nil, err
 			}
 
 			return json.Marshal(res)
-		}, b, opts...)
+		}, reqBytes, opts...)
 		if err != nil {
 			return res, false, err
 		}
-		if !shared {
-			return res, false, nil
-		}
 
-		if err := json.Unmarshal(b, &res); err != nil {
-			return res, false, err
-		}
-
+		err = json.Unmarshal(resBytes, &res)
 		return res, shared, err
 	}
 }
@@ -122,6 +80,18 @@ func NewOptions() *Options {
 	}
 }
 
+func (o *Options) Valid() error {
+	if o.KeepTTL <= 0 {
+		return errors.New("idempotent: keep ttl must be greater than 0")
+	}
+
+	if o.LockTTL <= 0 {
+		return errors.New("idempotent: lock ttl must be greater than 0")
+	}
+
+	return nil
+}
+
 type Option func(*Options)
 
 func WithKeepTTL(ttl time.Duration) Option {
@@ -136,167 +106,116 @@ func WithLockTTL(ttl time.Duration) Option {
 	}
 }
 
-type SyncStore interface {
-	DoSync(ctx context.Context, key string, fn func(ctx context.Context, req []byte) ([]byte, error), req []byte, opts ...Option) (res []byte, shared bool, err error)
-}
-
 type Store interface {
 	Do(ctx context.Context, key string, fn func(ctx context.Context, req []byte) ([]byte, error), req []byte, opts ...Option) (res []byte, shared bool, err error)
 }
 
 type RedisStore struct {
-	mu       sync.Mutex
-	promises map[string]*promise.Promise[[]byte]
-	client   *redis.Client
-	opts     *Options
+	client *redis.Client
+	group  *promise.Group[[]byte]
+	lock   *lock.Locker
+	opts   *Options
 }
 
 // NewRedisStore creates a new RedisStore instance with the specified Redis
 // client, lock TTL, and keep TTL.
 func NewRedisStore(client *redis.Client, opts *Options) *RedisStore {
+	opts = cmp.Or(opts, NewOptions())
+	if err := opts.Valid(); err != nil {
+		panic(err)
+	}
+
 	return &RedisStore{
-		promises: make(map[string]*promise.Promise[[]byte]),
-		client:   client,
-		opts:     cmp.Or(opts, NewOptions()),
+		client: client,
+		group:  promise.NewGroup[[]byte](),
+		lock: lock.New(client, &lock.Options{
+			LockTTL: opts.LockTTL,
+			WaitTTL: 0,
+		}),
+		opts: opts,
 	}
 }
 
-// DoSync is like Sync, except that it is thread-safe locally.
-// When multiple DoSync calls are made with the same key, only the first call
-// will execute the function, while the rest will wait for the result.
-// In contrast, Sync will execute the function for each call.
-func (s *RedisStore) DoSync(ctx context.Context, key string, fn func(ctx context.Context, req []byte) ([]byte, error), req []byte, opts ...Option) (res []byte, shared bool, err error) {
-	s.mu.Lock()
-	p, ok := s.promises[key]
-	if ok {
-		s.mu.Unlock()
-
-		res, err = p.Await()
-		return res, err == nil, err
-	}
-
-	p = promise.Deferred[[]byte]()
-	s.promises[key] = p
-	s.mu.Unlock()
-
-	defer func() {
-		s.mu.Lock()
-		delete(s.promises, key)
-		s.mu.Unlock()
-	}()
-
-	res, shared, err = s.Do(ctx, key, fn, req)
-	if err != nil {
-		p.Reject(err)
-	} else {
-		p.Resolve(res)
-	}
-
-	return
-}
-
-// Do executes the provided function idempotently, using the specified key and
-// request.
 func (s *RedisStore) Do(ctx context.Context, key string, fn func(ctx context.Context, req []byte) ([]byte, error), req []byte, opts ...Option) (res []byte, shared bool, err error) {
 	o := s.opts.Clone()
 	for _, opt := range opts {
 		opt(o)
 	}
 
-	token := uuid.New().String()
-	b, loaded, err := s.loadOrStore(ctx, key, token, o.LockTTL)
+	lockTTL := o.LockTTL
+	lock := s.lock
+
+	token := newFencingToken()
+	v, loaded, err := lock.LoadOrStore(ctx, key, token, lockTTL)
 	if err != nil {
 		return res, false, err
 	}
 	if loaded {
-		res, err := s.parse(req, b)
+		// This is the only place where `shared` can be true.
+		res, err := s.parse(req, []byte(v))
 		return res, err == nil, err
 	}
 
-	// Any failure will just unlock the resource.
-	// context.WithoutCancel ensures that the unlock is always called.
-	defer s.unlock(context.WithoutCancel(ctx), key, token)
-
-	ch := make(chan data)
-
-	g, ctx := errgroup.WithContext(ctx)
-	g.Go(func() error {
-		return s.refresh(ctx, ch, key, token, o.LockTTL, o.KeepTTL)
+	res, err = s.group.DoAndForget(key, func() ([]byte, error) {
+		return s.do(ctx, key, token, fn, req, o)
 	})
-
-	g.Go(func() error {
-		res, err = fn(ctx, req)
-		if err != nil {
-			return err
-		}
-
-		ch <- data{
-			Request:  hash(req),
-			Response: string(res),
-		}
-		close(ch)
-
-		return nil
-	})
-
-	if err := g.Wait(); err != nil {
-		return res, false, err
-	}
-
-	return res, false, nil
+	return
 }
 
-func (s *RedisStore) refresh(ctx context.Context, ch chan data, key, value string, lockTTL, keepTTL time.Duration) error {
+// Do executes the provided function idempotently, using the specified key and
+// request.
+func (s *RedisStore) do(ctx context.Context, key, token string, fn func(ctx context.Context, req []byte) ([]byte, error), req []byte, o *Options) (res []byte, err error) {
+	lock := s.lock
+	keepTTL := o.KeepTTL
+	lockTTL := o.LockTTL
+
+	// Any failure will just unlock the resource.
+	// context.WithoutCancel ensures that the unlock is always called.
+	defer lock.Unlock(context.WithoutCancel(ctx), key, token)
+
+	ch := make(chan result[data], 1)
+	go func() {
+		res, err := fn(ctx, req)
+		if err != nil {
+			ch <- result[data]{err: err}
+		} else {
+			ch <- result[data]{data: data{
+				Request:  hash(req),
+				Response: string(res),
+			}}
+		}
+		close(ch)
+	}()
+
 	t := time.NewTicker(lockTTL * 7 / 10)
 	defer t.Stop()
 
 	for {
 		select {
 		case <-ctx.Done():
-			return context.Cause(ctx)
-		case d := <-ch:
-			b, err := json.Marshal(d)
+			return nil, context.Cause(ctx)
+		case res := <-ch:
+			d, err := res.unwrap()
 			if err != nil {
-				return err
+				return nil, err
 			}
 
-			return s.replace(ctx, key, value, string(b), keepTTL)
+			b, err := json.Marshal(d)
+			if err != nil {
+				return nil, err
+			}
+
+			if err := lock.Replace(ctx, key, token, string(b), keepTTL); err != nil {
+				return nil, err
+			}
+
+			return []byte(d.Response), nil
 		case <-t.C:
-			if err := s.extend(ctx, key, value, lockTTL); err != nil {
-				return err
+			if err := lock.Extend(ctx, key, token, lockTTL); err != nil {
+				return nil, err
 			}
 		}
 	}
-}
-
-// replace sets the value of the specified key to the provided new value, if
-// the existing value matches the old value.
-func (s *RedisStore) replace(ctx context.Context, key string, oldVal, newVal string, ttl time.Duration) error {
-	keys := []string{key}
-	argv := []any{oldVal, newVal, ttl.Milliseconds()}
-	err := replace.Run(ctx, s.client, keys, argv...).Err()
-	if errors.Is(err, redis.Nil) {
-		return fmt.Errorf("replace: %w", ErrLeaseInvalid)
-	}
-	if err != nil {
-		return fmt.Errorf("replace: %w", err)
-	}
-
-	return nil
-}
-
-func (s *RedisStore) extend(ctx context.Context, key, value string, ttl time.Duration) error {
-	keys := []string{key}
-	argv := []any{value, ttl.Milliseconds()}
-	err := extend.Run(ctx, s.client, keys, argv...).Err()
-	if errors.Is(err, redis.Nil) {
-		return fmt.Errorf("extend: %w", ErrLeaseInvalid)
-	}
-	if err != nil {
-		return fmt.Errorf("extend: %w", err)
-	}
-
-	return nil
 }
 
 func (s *RedisStore) parse(req, b []byte) ([]byte, error) {
@@ -318,35 +237,6 @@ func (s *RedisStore) parse(req, b []byte) ([]byte, error) {
 	return []byte(d.Response), nil
 }
 
-func (s *RedisStore) loadOrStore(ctx context.Context, key, value string, ttl time.Duration) ([]byte, bool, error) {
-	v, err := s.client.Do(ctx, "SET", key, value, "NX", "GET", "PX", ttl.Milliseconds()).Result()
-	// If the previous value does not exist when GET, then it will be nil.
-	if errors.Is(err, redis.Nil) {
-		return []byte(value), false, nil
-	}
-
-	if err != nil {
-		return nil, false, err
-	}
-
-	return []byte(v.(string)), true, nil
-}
-
-// unlock releases the lock on the specified key using the provided value.
-func (s *RedisStore) unlock(ctx context.Context, key, value string) error {
-	keys := []string{key}
-	argv := []any{value}
-	err := unlock.Run(ctx, s.client, keys, argv...).Err()
-	if errors.Is(err, redis.Nil) {
-		return fmt.Errorf("unlock: %w", ErrLeaseInvalid)
-	}
-	if err != nil {
-		return fmt.Errorf("unlock: %w", err)
-	}
-
-	return nil
-}
-
 // hash generates a SHA-256 hash of the provided data.
 func hash(data []byte) string {
 	h := sha256.New()
@@ -361,50 +251,19 @@ func isUUID(b []byte) bool {
 	return err == nil
 }
 
-// unlock deletes the key only if the lease id matches.
-var unlock = redis.NewScript(`
-	-- KEYS[1]: The idempotency key
-	-- ARGV[1]: The value value for optimistic locking
-	local key = KEYS[1]
-	local val = ARGV[1]
+type result[T any] struct {
+	data T
+	err  error
+}
 
-	if redis.call('GET', key) == val then
-		return redis.call('DEL', key)
-	end
+func (r result[T]) unwrap() (T, error) {
+	return r.data, r.err
+}
 
-	return nil
-`)
+func makeResult[T any](data T, err error) result[T] {
+	return result[T]{data: data, err: err}
+}
 
-// replace sets the value to the key only if the existing lease id matches.
-var replace = redis.NewScript(`
-	-- KEYS[1]: The idempotency key
-	-- ARGV[1]: The old value for optimisic locking
-	-- ARGV[2]: The new value
-	-- ARGV[3]: How long to keep the idempotency key-value pair
-	local key = KEYS[1]
-	local old = ARGV[1]
-	local new = ARGV[2]
-	local ttl = ARGV[3]
-
-	if redis.call('GET', key) == old then
-		return redis.call('SET', key, new, 'XX', 'PX', ttl) 
-	end
-
-	return nil
-`)
-
-// extend extends the lock duration only if the lease id matches.
-var extend = redis.NewScript(`
-	-- KEYS[1]: key
-	-- ARGV[1]: value
-	-- ARGV[2]: lock duration in milliseconds
-	local key = KEYS[1]
-	local val = ARGV[1]
-	local ttl_ms = tonumber(ARGV[2]) or 60000 -- Default 60s
-
-	if redis.call('GET', key) == val then
-		return redis.call('PEXPIRE', key, ttl_ms, 'GT')
-	end
-
-	return nil
-`)
+func newFencingToken() string {
+	return uuid.Must(uuid.NewV7()).String()
+}
