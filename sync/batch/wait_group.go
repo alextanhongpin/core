@@ -9,7 +9,7 @@ import (
 )
 
 type loader[K comparable, V any] interface {
-	LoadManyResult(ctx context.Context, ks []K) ([]*Result[V], error)
+	LoadManyResult(ctx context.Context, ks []K) (map[K]*Result[V], error)
 }
 
 type WaitGroup[K comparable, V any] struct {
@@ -60,13 +60,13 @@ func (wg *WaitGroup[K, V]) LoadMany(keys []K) (v []V, err error) {
 
 func (wg *WaitGroup[K, V]) Wait(ctx context.Context) error {
 	defer clear(wg.keys)
-	res, err := wg.loader.LoadManyResult(ctx, wg.keys)
+	m, err := wg.loader.LoadManyResult(ctx, wg.keys)
 	if err != nil {
 		return err
 	}
 
-	for i, r := range res {
-		_, _ = wg.group.Do(fmt.Sprint(wg.keys[i]), r.Unwrap)
+	for k, v := range m {
+		_, _ = wg.group.Do(fmt.Sprint(k), v.Unwrap)
 	}
 
 	return nil

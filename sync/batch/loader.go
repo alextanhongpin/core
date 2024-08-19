@@ -12,8 +12,7 @@ var ErrKeyNotExist = errors.New("batch: key does not exist")
 
 type LoaderOptions[K comparable, V any] struct {
 	Cache   cache[K, *Result[V]]
-	BatchFn func([]K) ([]V, error)
-	KeyFn   func(V) (K, error)
+	BatchFn func([]K) (map[K]V, error)
 	TTL     time.Duration
 }
 
@@ -24,9 +23,6 @@ func (o *LoaderOptions[K, V]) Valid() error {
 	}
 	if o.BatchFn == nil {
 		return errors.New("batch: BatchFn is required")
-	}
-	if o.KeyFn == nil {
-		return errors.New("batch: KeyFn is required")
 	}
 
 	if o.Cache == nil {
@@ -51,87 +47,73 @@ func NewLoader[K comparable, V any](opts *LoaderOptions[K, V]) *Loader[K, V] {
 }
 
 func (l *Loader[K, V]) Load(ctx context.Context, k K) (v V, err error) {
-	s, err := l.LoadManyResult(ctx, []K{k})
+	m, err := l.LoadManyResult(ctx, []K{k})
 	if err != nil {
 		return v, err
 	}
 
-	return s[0].Unwrap()
+	return m[k].Unwrap()
 }
 
 func (l *Loader[K, V]) LoadMany(ctx context.Context, ks []K) ([]V, error) {
-	res, err := l.LoadManyResult(ctx, ks)
+	m, err := l.LoadManyResult(ctx, ks)
 	if err != nil {
 		return nil, err
 	}
-	vals := make([]V, 0, len(res))
-	for _, r := range res {
+	res := make([]V, 0, len(ks))
+	for _, k := range ks {
+		r, ok := m[k]
+		if !ok {
+			continue
+		}
 		v, err := r.Unwrap()
 		if errors.Is(err, ErrKeyNotExist) {
 			continue
 		}
-		if err != nil {
-			return nil, err
-		}
-		vals = append(vals, v)
+		res = append(res, v)
 	}
 
-	return vals, nil
+	return res, nil
 }
 
-func (l *Loader[K, V]) LoadManyResult(ctx context.Context, ks []K) ([]*Result[V], error) {
+func (l *Loader[K, V]) LoadManyResult(ctx context.Context, ks []K) (map[K]*Result[V], error) {
 	m, err := l.opts.Cache.LoadMany(ctx, ks...)
 	if err != nil {
 		return nil, err
 	}
 
 	pks := make([]K, 0, len(ks))
-	res := make([]*Result[V], len(ks))
-	for i, k := range ks {
+	res := make(map[K]*Result[V])
+	for _, k := range ks {
 		if v, ok := m[k]; ok {
-			res[i] = v
+			res[k] = v
 			continue
 		}
 		pks = append(pks, k)
 	}
-	if len(pks) == 0 {
+	// All keys found in cache, return.
+	if len(res) == len(ks) {
 		return res, nil
 	}
 
-	var vs []V
-	if len(pks) > 0 {
-		vs, err = l.opts.BatchFn(pks)
-		if err != nil {
-			return nil, err
-		}
+	// Fetch the pending keys.
+	b, err := l.opts.BatchFn(pks)
+	if err != nil {
+		return nil, err
 	}
 
+	// Stores the new keys in the cache.
 	n := make(map[K]*Result[V])
-	for _, v := range vs {
-		k, err := l.opts.KeyFn(v)
-		if err != nil {
-			continue
+	for _, k := range pks {
+		v, ok := b[k]
+		if ok {
+			n[k] = newResult(v, nil)
+		} else {
+			n[k] = newResult(v, newKeyError(fmt.Sprint(k), ErrKeyNotExist))
 		}
-		n[k] = newResult(v, err)
+		res[k] = n[k]
 	}
 
-	clear(res)
-	for i, k := range ks {
-		r, ok := m[k]
-		if ok {
-			res[i] = r
-			continue
-		}
-		r, ok = n[k]
-		if ok {
-			res[i] = r
-			continue
-		}
-
-		var v V
-		n[k] = newResult(v, newKeyError(fmt.Sprint(k), ErrKeyNotExist))
-		res[i] = n[k]
-	}
 	if err := l.opts.Cache.StoreMany(ctx, n, l.opts.TTL); err != nil {
 		return nil, err
 	}

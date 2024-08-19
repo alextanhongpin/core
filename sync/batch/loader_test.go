@@ -49,11 +49,18 @@ func TestLoader_LoadManyResult(t *testing.T) {
 		is := assert.New(t)
 		is.Nil(err)
 
-		want := []string{"1", "2", "3"}
-		for i, r := range rs {
-			v, err := r.Unwrap()
+		tc := []struct {
+			key int
+			val string
+		}{
+			{1, "1"},
+			{2, "2"},
+			{3, "3"},
+		}
+		for _, c := range tc {
+			v, err := rs[c.key].Unwrap()
 			is.Nil(err)
-			is.Equal(want[i], v)
+			is.Equal(c.val, v)
 		}
 	})
 
@@ -71,20 +78,17 @@ func TestLoader_LoadManyResult(t *testing.T) {
 
 func newBatchLoader() *batch.Loader[int, string] {
 	return batch.NewLoader(&batch.LoaderOptions[int, string]{
-		BatchFn: func(ks []int) ([]string, error) {
-			res := make([]string, 0, len(ks))
+		BatchFn: func(ks []int) (map[int]string, error) {
+			res := make(map[int]string)
 			for _, k := range ks {
 				// Only positive number is allowed.
 				if k <= 0 {
 					continue
 				}
-				res = append(res, strconv.Itoa(k))
+				res[k] = strconv.Itoa(k)
 			}
 
 			return res, nil
-		},
-		KeyFn: func(k string) (int, error) {
-			return strconv.Atoi(k)
 		},
 	})
 }
