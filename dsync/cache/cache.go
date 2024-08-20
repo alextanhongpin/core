@@ -20,6 +20,21 @@ func New(client *redis.Client) *Cacheable {
 	}
 }
 
+func (c *Cacheable) LoadMany(ctx context.Context, keys ...string) (map[string]string, error) {
+	vs, err := c.client.MGet(ctx, keys...).Result()
+	if err != nil {
+		return nil, err
+	}
+	res := make(map[string]string)
+	for i, v := range vs {
+		if v == nil {
+			continue
+		}
+		res[keys[i]] = v.(string)
+	}
+	return res, nil
+}
+
 func (c *Cacheable) Load(ctx context.Context, key string) (value string, err error) {
 	s, err := c.client.Get(ctx, key).Result()
 	if errors.Is(err, redis.Nil) {

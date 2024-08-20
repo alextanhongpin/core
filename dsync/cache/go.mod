@@ -4,7 +4,7 @@ go 1.22.4
 
 require (
 	github.com/alextanhongpin/core/storage/redis v0.0.0-20240720062443-58db8fdb9b1b
-	github.com/redis/go-redis/v9 v9.6.0
+	github.com/redis/go-redis/v9 v9.6.1
 	github.com/stretchr/testify v1.9.0
 )
 

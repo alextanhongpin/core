@@ -2,6 +2,7 @@ package cache_test
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"testing"
 	"time"
@@ -45,6 +46,29 @@ func TestCache(t *testing.T) {
 		loaded, err := c.Load(ctx, key)
 		is.Nil(err)
 		is.Equal(value, loaded)
+	})
+
+	t.Run("load many", func(t *testing.T) {
+		prefix := t.Name()
+		value := "hello"
+
+		is := assert.New(t)
+
+		var keys []string
+		for i := range 3 {
+			key := fmt.Sprintf("%s:%d", prefix, i)
+			keys = append(keys, key)
+			err := c.Store(ctx, key, value, time.Second)
+			is.Nil(err)
+		}
+		m, err := c.LoadMany(ctx, keys...)
+		is.Nil(err)
+		is.Len(m, 3)
+
+		for k, v := range m {
+			is.Equal(value, v)
+			is.Contains(keys, k)
+		}
 	})
 
 	t.Run("load or store empty", func(t *testing.T) {
