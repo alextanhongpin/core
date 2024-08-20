@@ -53,8 +53,8 @@ func New[T any](fn func() (T, error)) *Promise[T] {
 func (p *Promise[T]) Resolve(v T) *Promise[T] {
 	p.once.Do(func() {
 		p.data = v
-		p.wg.Done()
 		p.status.Store(Fulfilled.Int64())
+		p.wg.Done()
 	})
 	return p
 }
@@ -62,8 +62,8 @@ func (p *Promise[T]) Resolve(v T) *Promise[T] {
 func (p *Promise[T]) Reject(err error) *Promise[T] {
 	p.once.Do(func() {
 		p.err = err
-		p.wg.Done()
 		p.status.Store(Rejected.Int64())
+		p.wg.Done()
 	})
 	return p
 }

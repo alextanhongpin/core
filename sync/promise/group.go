@@ -40,33 +40,15 @@ func (g *Group[T]) Forget(key string) bool {
 // This allows the promise to be garbage collected.
 // Mimics singleflight behaviour.
 func (g *Group[T]) DoAndForget(key string, fn func() (T, error)) (T, error) {
-	g.mu.Lock()
-	p, ok := g.ps[key]
-	if ok {
-		g.mu.Unlock()
-		return p.Wait(fn)
-	}
-	p = New(fn)
-	g.ps[key] = p
-	g.mu.Unlock()
-
+	p, _ := g.LoadOrStore(key)
 	defer g.Forget(key)
 
-	return p.Await()
+	return p.Wait(fn)
 }
 
 func (g *Group[T]) Do(key string, fn func() (T, error)) (T, error) {
-	g.mu.Lock()
-	p, ok := g.ps[key]
-	if ok {
-		g.mu.Unlock()
-		return p.Wait(fn)
-	}
-	p = New(fn)
-	g.ps[key] = p
-	g.mu.Unlock()
-
-	return p.Await()
+	p, _ := g.LoadOrStore(key)
+	return p.Wait(fn)
 }
 
 func (g *Group[T]) Load(key string) (*Promise[T], bool) {
