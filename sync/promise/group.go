@@ -44,7 +44,7 @@ func (g *Group[T]) DoAndForget(key string, fn func() (T, error)) (T, error) {
 	p, ok := g.ps[key]
 	if ok {
 		g.mu.Unlock()
-		return p.Await()
+		return p.Wait(fn)
 	}
 	p = New(fn)
 	g.ps[key] = p
@@ -60,7 +60,7 @@ func (g *Group[T]) Do(key string, fn func() (T, error)) (T, error) {
 	p, ok := g.ps[key]
 	if ok {
 		g.mu.Unlock()
-		return p.Await()
+		return p.Wait(fn)
 	}
 	p = New(fn)
 	g.ps[key] = p
