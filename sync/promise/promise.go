@@ -1,9 +1,14 @@
 package promise
 
 import (
+	"context"
+	"errors"
 	"sync"
 	"sync/atomic"
+	"time"
 )
+
+var ErrTimeout = errors.New("promise: timeout")
 
 type Status int64
 
@@ -45,6 +50,25 @@ func New[T any](fn func() (T, error)) *Promise[T] {
 
 	go func() {
 		p.Wait(fn)
+	}()
+
+	return p
+}
+
+func WithTimeout[T any](t time.Duration) *Promise[T] {
+	return Deferred[T]().WithTimeout(t)
+}
+
+func (p *Promise[T]) WithTimeout(t time.Duration) *Promise[T] {
+	ctx, cancel := context.WithTimeoutCause(context.Background(), t, ErrTimeout)
+
+	go func() {
+		defer cancel()
+		select {
+		case <-ctx.Done():
+			p.Reject(context.Cause(ctx))
+		}
+
 	}()
 
 	return p
