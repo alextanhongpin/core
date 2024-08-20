@@ -61,7 +61,9 @@ func TestCache(t *testing.T) {
 			err := c.Store(ctx, key, value, time.Second)
 			is.Nil(err)
 		}
-		m, err := c.LoadMany(ctx, keys...)
+
+		unk := "not-exist"
+		m, err := c.LoadMany(ctx, append(keys, unk)...)
 		is.Nil(err)
 		is.Len(m, 3)
 
@@ -69,6 +71,9 @@ func TestCache(t *testing.T) {
 			is.Equal(value, v)
 			is.Contains(keys, k)
 		}
+
+		_, ok := m[unk]
+		is.False(ok)
 	})
 
 	t.Run("load or store empty", func(t *testing.T) {
