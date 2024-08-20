@@ -1,5 +1,5 @@
-github.com/alextanhongpin/core/sync/promise v0.0.0-20240818074443-3a45526a7065 h1:lNV55K+5cWJMZWcspXAen0eKV6U4QTLatw1UT9S9SKU=
-github.com/alextanhongpin/core/sync/promise v0.0.0-20240818074443-3a45526a7065/go.mod h1:G2fNDaZAAWe3LRvCa7U3aN9ql39ob8ojysw63Z/avaY=
+github.com/alextanhongpin/core/sync/promise v0.0.0-20240820123002-affc9fec4fec h1:q552p4UNShkwtNtnOM+w1S9w2MyjStNZCkxv7FDxE7c=
+github.com/alextanhongpin/core/sync/promise v0.0.0-20240820123002-affc9fec4fec/go.mod h1:AMzb5tn043T3lDg/C87EXKg4QcIeP1WaUiKM02SdvkQ=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZbAQM=

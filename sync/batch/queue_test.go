@@ -27,7 +27,7 @@ func TestQueue_Load(t *testing.T) {
 func TestQueue_LoadMany(t *testing.T) {
 	loader := newBatchLoader()
 	q := batch.NewQueue(loader)
-	q.AddMany(1, 2, 3)
+	q.Add(1, 2, 3)
 	q.Flush(ctx)
 
 	vs, err := q.LoadMany([]int{1, 2, 3})

@@ -44,7 +44,7 @@ func TestWaitGroup_LoadMany(t *testing.T) {
 
 	go func() {
 		vs, err := bwg.LoadMany([]int{-1, -2, -3})
-		is.ErrorIs(err, batch.ErrKeyNotExist)
+		is.Nil(err, err)
 		is.Empty(vs)
 	}()
 

@@ -3,7 +3,7 @@ module github.com/alextanhongpin/core/sync/batch
 go 1.22.5
 
 require (
-	github.com/alextanhongpin/core/sync/promise v0.0.0-20240818074443-3a45526a7065
+	github.com/alextanhongpin/core/sync/promise v0.0.0-20240820123002-affc9fec4fec
 	github.com/stretchr/testify v1.9.0
 )
 

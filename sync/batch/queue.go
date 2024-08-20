@@ -26,30 +26,12 @@ func NewQueue[K comparable, V any](l loader[K, V]) *Queue[K, V] {
 	}
 }
 
-func (q *Queue[K, V]) AddMany(keys ...K) {
+func (q *Queue[K, V]) Add(keys ...K) {
 	q.mu.Lock()
 	for _, key := range keys {
-		_, loaded := q.group.LoadOrStore(fmt.Sprint(key))
-		if loaded {
-			continue
-		}
-
 		q.keys[key] = struct{}{}
 	}
 	q.mu.Unlock()
-}
-
-func (q *Queue[K, V]) Add(key K) bool {
-	_, loaded := q.group.LoadOrStore(fmt.Sprint(key))
-	if loaded {
-		return false
-	}
-
-	q.mu.Lock()
-	q.keys[key] = struct{}{}
-	q.mu.Unlock()
-
-	return true
 }
 
 func (q *Queue[K, V]) Load(key K) (v V, err error) {
@@ -84,6 +66,7 @@ func (q *Queue[K, V]) LoadMany(keys []K) (v []V, err error) {
 func (q *Queue[K, V]) Flush(ctx context.Context) error {
 	q.mu.Lock()
 	defer q.mu.Unlock()
+
 	kv := maps.Clone(q.keys)
 	clear(q.keys)
 
@@ -97,10 +80,14 @@ func (q *Queue[K, V]) Flush(ctx context.Context) error {
 		return err
 	}
 
-	for k, v := range m {
-		p, ok := q.group.Load(fmt.Sprint(k))
+	for _, k := range keys {
+		v, ok := m[k]
 		if ok {
-			p.Wait(v.Unwrap())
+			q.group.Do(fmt.Sprint(k), v.Unwrap)
+		} else {
+			q.group.Do(fmt.Sprint(k), func() (v V, err error) {
+				return v, newKeyError(fmt.Sprint(k), ErrKeyNotExist)
+			})
 		}
 	}
 

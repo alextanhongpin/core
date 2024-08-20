@@ -85,10 +85,7 @@ func (wg *WaitGroup[K, V]) Wait(ctx context.Context) error {
 	}
 
 	for k, v := range m {
-		p, ok := wg.group.Load(fmt.Sprint(k))
-		if ok {
-			p.Wait(v.Unwrap())
-		}
+		_, _ = wg.group.Do(fmt.Sprint(k), v.Unwrap)
 	}
 
 	return nil
