@@ -40,8 +40,10 @@ func (g *Group[T]) Forget(key string) bool {
 // This allows the promise to be garbage collected.
 // Mimics singleflight behaviour.
 func (g *Group[T]) DoAndForget(key string, fn func() (T, error)) (T, error) {
-	p, _ := g.LoadOrStore(key)
-	defer g.Forget(key)
+	p, loaded := g.LoadOrStore(key)
+	if !loaded {
+		defer g.Forget(key)
+	}
 
 	return p.Wait(fn)
 }
