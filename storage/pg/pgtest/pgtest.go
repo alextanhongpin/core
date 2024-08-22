@@ -19,10 +19,10 @@ import (
 	"github.com/ory/dockertest/v3/docker"
 )
 
-var ids atomic.Int64
+var id atomic.Int64
 
 func nextID() int64 {
-	return ids.Add(1)
+	return id.Add(1)
 }
 
 var once sync.Once

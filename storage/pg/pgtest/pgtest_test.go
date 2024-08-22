@@ -27,7 +27,6 @@ func migrate(db *sql.DB) error {
 }
 
 func TestDB(t *testing.T) {
-	db := pgtest.DB(t)
 
 	n := 3
 	var wg sync.WaitGroup
@@ -56,6 +55,7 @@ func TestDB(t *testing.T) {
 	}
 
 	var got int64
+	db := pgtest.DB(t)
 	if err := db.QueryRow(`select count(*) from numbers`).Scan(&got); err != nil {
 		t.Fatal(err)
 	}
