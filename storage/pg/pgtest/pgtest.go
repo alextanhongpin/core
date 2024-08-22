@@ -89,11 +89,11 @@ func Hook(fn func(*sql.DB) error) func(*config) error {
 
 func Image(image string) func(*config) error {
 	return func(cfg *config) error {
-		image, tag, ok := strings.Cut(image, ":")
+		repo, tag, ok := strings.Cut(image, ":")
 		if !ok {
 			return fmt.Errorf("pgtest: invalid Image(%q) format", image)
 		}
-		cfg.Image = image
+		cfg.Repository = repo
 		cfg.Tag = tag
 
 		return nil
@@ -101,15 +101,15 @@ func Image(image string) func(*config) error {
 }
 
 type config struct {
-	Image string
-	Tag   string
-	Hook  func(*sql.DB) error
+	Repository string
+	Tag        string
+	Hook       func(*sql.DB) error
 }
 
 func newConfig() *config {
 	return &config{
-		Image: "postgres",
-		Tag:   "latest",
+		Repository: "postgres",
+		Tag:        "latest",
 	}
 }
 
@@ -141,9 +141,9 @@ func newClient(opts ...Option) (*client, error) {
 
 func (c *client) init() error {
 	var (
-		image = c.cfg.Image
-		tag   = c.cfg.Tag
-		fn    = c.cfg.Hook
+		repo = c.cfg.Repository
+		tag  = c.cfg.Tag
+		fn   = c.cfg.Hook
 	)
 
 	pool, err := dockertest.NewPool("")
@@ -158,7 +158,7 @@ func (c *client) init() error {
 
 	// Pulls an image, creates a container based on it and run it.
 	resource, err := pool.RunWithOptions(&dockertest.RunOptions{
-		Repository: image,
+		Repository: repo,
 		Tag:        tag,
 		Env: []string{
 			"POSTGRES_PASSWORD=123456",
