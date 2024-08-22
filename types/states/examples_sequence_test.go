@@ -6,51 +6,43 @@ import (
 	"github.com/alextanhongpin/core/types/states"
 )
 
-type Shipment struct {
-	FirstMile bool
-	MidMile   bool
-	LastMile  bool
-}
-
 func ExampleSequential() {
-	var s Shipment
+	status := []bool{false, false, false}
 
 	seq := states.NewSequence(
-		states.NewStepFunc("first_mile_completed", func() bool { return s.FirstMile }),
-		states.NewStepFunc("mid_mile_completed", func() bool { return s.MidMile }),
-		states.NewStepFunc("last_mile_completed", func() bool { return s.LastMile }),
+		states.NewStepFunc("first_mile_completed", func() bool { return status[0] }),
+		states.NewStepFunc("mid_mile_completed", func() bool { return status[1] }),
+		states.NewStepFunc("last_mile_completed", func() bool { return status[2] }),
 	)
 
-	fmt.Println(seq.None())
-	fmt.Println(seq.Pending())
-	fmt.Println(seq.Valid())
+	for i := range 4 {
+		step, ok := seq.Next()
+		fmt.Println(step.Name(), ok)
+		fmt.Printf("step %d: not_started=%t, pending=%t, done=%t valid=%t\n", i+1, seq.NotStarted(), seq.Pending(), seq.Done(), seq.Valid())
+		fmt.Println()
 
-	s.FirstMile = true
-	fmt.Println(seq.Pending())
+		status[i%len(status)] = true
+	}
 
-	s.MidMile = true
-	fmt.Println(seq.Pending())
+	status[1] = false
+	step, ok := seq.Next()
+	fmt.Println(step.Name(), ok)
+	fmt.Printf("invalid: not_started=%t, pending=%t, done=%t valid=%t\n", seq.NotStarted(), seq.Pending(), seq.Done(), seq.Valid())
+	fmt.Println()
 
-	s.LastMile = true
-	fmt.Println(seq.Pending())
-	fmt.Println(seq.All())
-	fmt.Println(seq.Valid())
-
-	// When the sequence is invalid.
-	s.FirstMile = false
-	s.MidMile = true
-	s.LastMile = false
-	fmt.Println(seq.Pending())
-	fmt.Println(seq.Valid())
 	// Output:
-	// true
-	// first_mile_completed
-	// true
-	// mid_mile_completed
-	// last_mile_completed
+	// first_mile_completed true
+	// step 1: not_started=true, pending=false, done=false valid=true
 	//
-	// true
-	// true
+	// mid_mile_completed true
+	// step 2: not_started=false, pending=true, done=false valid=true
 	//
-	// false
+	// last_mile_completed true
+	// step 3: not_started=false, pending=true, done=false valid=true
+	//
+	//  false
+	// step 4: not_started=false, pending=false, done=true valid=true
+	//
+	//  false
+	// invalid: not_started=false, pending=false, done=false valid=false
 }
