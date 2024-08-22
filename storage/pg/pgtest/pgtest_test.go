@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"os"
+	"sync"
 	"testing"
 
 	"github.com/alextanhongpin/core/storage/pg/pgtest"
@@ -28,13 +29,43 @@ func migrate(db *sql.DB) error {
 func TestDB(t *testing.T) {
 	db := pgtest.DB(t)
 
-	var got int
-	if err := db.QueryRow("select 1 + 1").Scan(&got); err != nil {
+	n := 3
+	var wg sync.WaitGroup
+	wg.Add(n)
+
+	errs := make([]error, n)
+
+	for i := range n {
+		go func() {
+			defer wg.Done()
+
+			db := pgtest.DB(t)
+			_, err := db.Exec(`insert into numbers(n) values ($1)`, i)
+			if err != nil {
+				errs[i] = err
+			}
+		}()
+	}
+
+	wg.Wait()
+
+	for _, err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	var got int64
+	if err := db.QueryRow(`select count(*) from numbers`).Scan(&got); err != nil {
 		t.Fatal(err)
 	}
 
-	if want := 2; want != got {
-		t.Fatalf("sum: want %d, got %d", want, got)
+	if want, got := int64(n), got; want != got {
+		t.Fatalf("want %d, got %d", want, got)
+	}
+	_, err := db.Exec(`truncate table numbers`)
+	if err != nil {
+		t.Fatal(err)
 	}
 }
 
