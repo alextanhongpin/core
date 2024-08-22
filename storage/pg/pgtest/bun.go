@@ -34,7 +34,7 @@ func BunTx(t *testing.T) *bun.DB {
 		}
 
 		// NOTE: We use `pg` driver, which bun uses instead of `postgres`.
-		txdb.Register("bun_txdb", "pg", dsn)
+		txdb.Register("bun_txdb", "pg", DSN())
 	})
 
 	// Create a unique transaction for each connection.
