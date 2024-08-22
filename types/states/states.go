@@ -39,16 +39,19 @@ func NewSequence(steps ...Step) *Sequence {
 	}
 }
 
-func (s *Sequence) NotStarted() bool {
-	return s.Valid() && s.next() == 0
-}
+func (s *Sequence) Status() Status {
+	if !s.Valid() {
+		return -1
+	}
 
-func (s *Sequence) Done() bool {
-	return s.Valid() && s.next() == len(s.steps)
-}
-
-func (s *Sequence) Pending() bool {
-	return s.Valid() && !s.NotStarted() && !s.Done()
+	switch s.next() {
+	case 0:
+		return NotStarted
+	case len(s.steps):
+		return Success
+	default:
+		return Pending
+	}
 }
 
 func (s *Sequence) Next() (Step, bool) {

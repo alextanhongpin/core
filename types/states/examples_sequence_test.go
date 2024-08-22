@@ -17,8 +17,8 @@ func ExampleSequential() {
 
 	for i := range 4 {
 		step, ok := seq.Next()
-		fmt.Println(step.Name(), ok)
-		fmt.Printf("step %d: not_started=%t, pending=%t, done=%t valid=%t\n", i+1, seq.NotStarted(), seq.Pending(), seq.Done(), seq.Valid())
+		fmt.Println("has next?", step.Name(), ok)
+		fmt.Printf("step %d: status=%s valid=%t\n", i+1, seq.Status(), seq.Valid())
 		fmt.Println()
 
 		status[i%len(status)] = true
@@ -26,23 +26,23 @@ func ExampleSequential() {
 
 	status[1] = false
 	step, ok := seq.Next()
-	fmt.Println(step.Name(), ok)
-	fmt.Printf("invalid: not_started=%t, pending=%t, done=%t valid=%t\n", seq.NotStarted(), seq.Pending(), seq.Done(), seq.Valid())
+	fmt.Println("has next?", step.Name(), ok)
+	fmt.Printf("invalid: status=%s valid=%t\n", seq.Status(), seq.Valid())
 	fmt.Println()
 
 	// Output:
-	// first_mile_completed true
-	// step 1: not_started=true, pending=false, done=false valid=true
+	// has next? first_mile_completed true
+	// step 1: status=not started valid=true
 	//
-	// mid_mile_completed true
-	// step 2: not_started=false, pending=true, done=false valid=true
+	// has next? mid_mile_completed true
+	// step 2: status=pending valid=true
 	//
-	// last_mile_completed true
-	// step 3: not_started=false, pending=true, done=false valid=true
+	// has next? last_mile_completed true
+	// step 3: status=pending valid=true
 	//
-	//  false
-	// step 4: not_started=false, pending=false, done=true valid=true
+	// has next?  false
+	// step 4: status=success valid=true
 	//
-	//  false
-	// invalid: not_started=false, pending=false, done=false valid=false
+	// has next?  false
+	// invalid: status=unknown valid=false
 }
