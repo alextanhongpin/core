@@ -113,12 +113,14 @@ func newConfig() *config {
 	}
 }
 
-func (c *config) apply(opts ...Option) *config {
+func (c *config) apply(opts ...Option) error {
 	for _, o := range opts {
-		o(c)
+		if err := o(c); err != nil {
+			return err
+		}
 	}
-	return c
 
+	return nil
 }
 
 type client struct {
@@ -130,7 +132,11 @@ type client struct {
 }
 
 func newClient(opts ...Option) (*client, error) {
-	cfg := newConfig().apply(opts...)
+	cfg := newConfig()
+	if err := cfg.apply(opts...); err != nil {
+		return nil, err
+	}
+
 	c := &client{cfg: cfg}
 	if err := c.init(); err != nil {
 		return nil, err
