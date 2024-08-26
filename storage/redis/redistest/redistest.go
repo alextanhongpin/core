@@ -30,11 +30,19 @@ func Init(opts ...Option) func() {
 }
 
 func Addr() string {
-	if c.addr == "" {
+	if c == nil || c.addr == "" {
 		panic("redistest: InitDB must be called at TestMain")
 	}
 
 	return c.addr
+}
+
+func Client(t *testing.T) *redis.Client {
+	if c == nil {
+		panic("redistest: InitDB must be called at TestMain")
+	}
+
+	return c.Client(t)
 }
 
 func New(t *testing.T, opts ...Option) *testClient {
@@ -101,10 +109,16 @@ func newClient(opts ...Option) (*client, error) {
 	return c, nil
 }
 
-func (c *client) Client() *redis.Client {
-	return redis.NewClient(&redis.Options{
+func (c *client) Client(t *testing.T) *redis.Client {
+	client := redis.NewClient(&redis.Options{
 		Addr: c.addr,
 	})
+
+	t.Cleanup(func() {
+		client.Close()
+	})
+
+	return client
 }
 
 func (c *client) init() error {
@@ -167,10 +181,5 @@ func (tc *testClient) Addr() string {
 }
 
 func (tc *testClient) Client() *redis.Client {
-	client := tc.c.Client()
-	tc.t.Cleanup(func() {
-		client.Close()
-	})
-
-	return client
+	return tc.c.Client(tc.t)
 }

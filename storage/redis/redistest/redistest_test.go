@@ -21,13 +21,22 @@ func TestMain(m *testing.M) {
 }
 
 func TestRedisPing(t *testing.T) {
-	db := redis.NewClient(&redis.Options{
-		Addr: redistest.Addr(),
+	t.Run("with addr", func(t *testing.T) {
+		db := redis.NewClient(&redis.Options{
+			Addr: redistest.Addr(),
+		})
+
+		if err := db.Ping(ctx).Err(); err != nil {
+			t.Fatal(err)
+		}
 	})
 
-	if err := db.Ping(ctx).Err(); err != nil {
-		t.Fatal(err)
-	}
+	t.Run("with client", func(t *testing.T) {
+		db := redistest.Client(t)
+		if err := db.Ping(ctx).Err(); err != nil {
+			t.Fatal(err)
+		}
+	})
 }
 
 func TestRedisNew(t *testing.T) {
