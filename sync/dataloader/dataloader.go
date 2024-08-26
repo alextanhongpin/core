@@ -30,11 +30,7 @@ type Options[K comparable, V any] struct {
 	BatchFn      batchFunc[K, V]
 	BatchMaxKeys int
 	BatchTimeout time.Duration
-	// KeyFn maps the result back to the key.
-	// This is necessary, because the results from the batch function may not be
-	// in the same order as the keys, or may not even exists.
-	KeyFn      keyFunc[K, V]
-	NoDebounce bool
+	NoDebounce   bool
 }
 
 func (o *Options[K, V]) Valid() error {
@@ -50,10 +46,6 @@ func (o *Options[K, V]) Valid() error {
 	o.BatchTimeout = cmp.Or(o.BatchTimeout, 16*time.Millisecond)
 	if o.BatchTimeout < 1 {
 		return errors.New("dataloader: BatchTimeout must be greater than zero")
-	}
-
-	if o.KeyFn == nil {
-		return errors.New("dataloader: KeyFn is required")
 	}
 
 	return nil
@@ -275,7 +267,7 @@ func (d *DataLoader[K, V]) loop(ctx context.Context) {
 }
 
 func (d *DataLoader[K, V]) batch(ctx context.Context, keys []K) {
-	vals, err := d.opts.BatchFn(ctx, keys)
+	kv, err := d.opts.BatchFn(ctx, keys)
 	if err != nil {
 		d.mu.Lock()
 		for _, k := range keys {
@@ -287,25 +279,18 @@ func (d *DataLoader[K, V]) batch(ctx context.Context, keys []K) {
 	}
 
 	d.mu.Lock()
-	for _, v := range vals {
-		k, err := d.opts.KeyFn(v)
-		if err != nil {
-			d.cache[k].Reject(err)
-		} else {
+	for _, k := range keys {
+		v, ok := kv[k]
+		if ok {
 			d.cache[k].Resolve(v)
+		} else {
+			d.cache[k].Reject(newKeyError(k, ErrNoResult))
 		}
 	}
-
-	for _, k := range keys {
-		d.cache[k].Reject(newKeyError(k, ErrNoResult))
-	}
-
 	d.mu.Unlock()
 }
 
-type keyFunc[K comparable, V any] func(v V) (K, error)
-
-type batchFunc[K comparable, V any] func(ctx context.Context, keys []K) ([]V, error)
+type batchFunc[K comparable, V any] func(ctx context.Context, keys []K) (map[K]V, error)
 
 func newKeyError(k any, err error) *KeyError {
 	return &KeyError{

@@ -17,23 +17,19 @@ func main() {
 	ctx := context.Background()
 	dl := dataloader.New(ctx, &dataloader.Options[int, User]{
 		//BatchTimeout: 15 * time.Millisecond,
-		BatchFn: func(ctx context.Context, keys []int) ([]User, error) {
+		BatchFn: func(ctx context.Context, keys []int) (map[int]User, error) {
 			fmt.Println("fetching...", keys)
 
-			res := make([]User, 0, len(keys))
+			res := make(map[int]User)
 			for _, k := range keys {
 				// Max ID 10.
 				if k > 10 {
 					continue
 				}
-
-				res = append(res, User{ID: k})
+				res[k] = User{ID: k}
 			}
 
 			return res, nil
-		},
-		KeyFn: func(u User) (int, error) {
-			return u.ID, nil
 		},
 	})
 
