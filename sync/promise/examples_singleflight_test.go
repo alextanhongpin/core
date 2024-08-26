@@ -10,38 +10,28 @@ import (
 )
 
 func ExamplePromiseNew() {
-	count := new(atomic.Int64)
-	var p *promise.Promise[int]
-
+	counter := new(atomic.Int64)
+	g := promise.NewGroup[int]()
 	n := 10
 
 	var wg sync.WaitGroup
 	wg.Add(n)
 
-	var mu sync.Mutex
-
 	for range n {
 		go func() {
 			defer wg.Done()
 
-			var local *promise.Promise[int]
-			mu.Lock()
-			if p == nil {
-				p = promise.New(func() (int, error) {
-					count.Add(1)
-					time.Sleep(100 * time.Millisecond)
-					return 42, nil
-				})
-			}
-			local = p
-			mu.Unlock()
-
-			fmt.Println(local.Await())
+			v, err := g.DoAndForget("key", func() (int, error) {
+				counter.Add(1)
+				time.Sleep(100 * time.Millisecond)
+				return 42, nil
+			})
+			fmt.Println(v, err)
 		}()
 	}
 
 	wg.Wait()
-	fmt.Println("called", count.Load())
+	fmt.Println("called", counter.Load())
 	// Output:
 	// 42 <nil>
 	// 42 <nil>

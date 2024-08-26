@@ -89,33 +89,135 @@ func TestGroupReject(t *testing.T) {
 
 // TestGroupDoForget tests that the cache is cleared on completion.
 func TestGroupDoForget(t *testing.T) {
-	n := 10
+	t.Run("singleflight", func(t *testing.T) {
+		n := 10
 
-	var wg sync.WaitGroup
-	wg.Add(n)
+		var wg sync.WaitGroup
+		wg.Add(n)
 
-	g := promise.NewGroup[int]()
+		g := promise.NewGroup[int]()
 
-	for range n {
-		go func() {
-			defer wg.Done()
+		for range n {
+			go func() {
+				defer wg.Done()
 
-			n, err := g.DoAndForget(t.Name(), func() (int, error) {
-				time.Sleep(50 * time.Millisecond)
-				return 42, nil
-			})
-			if err != nil {
-				t.Error(err)
-			}
-			if want, got := 42, n; want != got {
-				t.Errorf("want %d, got %d", want, got)
-			}
-		}()
-	}
+				n, err := g.DoAndForget(t.Name(), func() (int, error) {
+					time.Sleep(50 * time.Millisecond)
+					return 42, nil
+				})
+				if err != nil {
+					t.Error(err)
+				}
+				if want, got := 42, n; want != got {
+					t.Errorf("want %d, got %d", want, got)
+				}
+			}()
+		}
 
-	wg.Wait()
+		wg.Wait()
 
-	if want, got := 0, g.Len(); want != got {
-		t.Fatalf("Len: want %d, got %d", want, got)
-	}
+		if want, got := 0, g.Len(); want != got {
+			t.Fatalf("Len: want %d, got %d", want, got)
+		}
+	})
+
+	t.Run("has idle promise", func(t *testing.T) {
+		n := 10
+
+		var wg sync.WaitGroup
+		wg.Add(n)
+
+		g := promise.NewGroup[int]()
+		_, _ = g.LoadOrStore(t.Name())
+
+		for range n {
+			go func() {
+				defer wg.Done()
+
+				n, err := g.DoAndForget(t.Name(), func() (int, error) {
+					time.Sleep(50 * time.Millisecond)
+					return 42, nil
+				})
+				if err != nil {
+					t.Error(err)
+				}
+				if want, got := 42, n; want != got {
+					t.Errorf("want %d, got %d", want, got)
+				}
+			}()
+		}
+
+		wg.Wait()
+
+		if want, got := 0, g.Len(); want != got {
+			t.Fatalf("Len: want %d, got %d", want, got)
+		}
+	})
+
+	t.Run("has fulfilled promise", func(t *testing.T) {
+		n := 10
+
+		var wg sync.WaitGroup
+		wg.Add(n)
+
+		g := promise.NewGroup[int]()
+		p, _ := g.LoadOrStore(t.Name())
+		p.Resolve(42)
+
+		for range n {
+			go func() {
+				defer wg.Done()
+
+				n, err := g.DoAndForget(t.Name(), func() (int, error) {
+					time.Sleep(50 * time.Millisecond)
+					return 42, nil
+				})
+				if err != nil {
+					t.Error(err)
+				}
+				if want, got := 42, n; want != got {
+					t.Errorf("want %d, got %d", want, got)
+				}
+			}()
+		}
+
+		wg.Wait()
+
+		// NOTE: The key is not deleted if promise is not created by DoAndForget.
+		if want, got := 1, g.Len(); want != got {
+			t.Fatalf("Len: want %d, got %d", want, got)
+		}
+	})
+
+	t.Run("has rejected promise", func(t *testing.T) {
+		n := 10
+
+		var wg sync.WaitGroup
+		wg.Add(n)
+
+		g := promise.NewGroup[int]()
+		p, _ := g.LoadOrStore(t.Name())
+		p.Reject(wantErr)
+
+		for range n {
+			go func() {
+				defer wg.Done()
+
+				_, err := g.DoAndForget(t.Name(), func() (int, error) {
+					time.Sleep(50 * time.Millisecond)
+					return 42, nil
+				})
+				if !errors.Is(err, wantErr) {
+					t.Fatalf("want %v, got %v", wantErr, err)
+				}
+			}()
+		}
+
+		wg.Wait()
+
+		// NOTE: The key is not deleted if promise is not created by DoAndForget.
+		if want, got := 1, g.Len(); want != got {
+			t.Fatalf("Len: want %d, got %d", want, got)
+		}
+	})
 }

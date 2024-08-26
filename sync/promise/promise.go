@@ -13,7 +13,7 @@ var ErrTimeout = errors.New("promise: timeout")
 type Status int64
 
 const (
-	NotStarted Status = iota
+	Idle Status = iota
 	Pending
 	Fulfilled
 	Rejected
@@ -99,7 +99,7 @@ func (p *Promise[T]) Result() Result[T] {
 }
 
 func (p *Promise[T]) Wait(fn func() (T, error)) (T, error) {
-	if p.status.CompareAndSwap(NotStarted.Int64(), Pending.Int64()) {
+	if p.status.CompareAndSwap(Idle.Int64(), Pending.Int64()) {
 		v, err := fn()
 		if err != nil {
 			p.Reject(err)

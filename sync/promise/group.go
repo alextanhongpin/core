@@ -38,10 +38,12 @@ func (g *Group[T]) Forget(key string) bool {
 // DoAndForget is like Do, but it removes the promise from the group after the
 // promise is resolved or rejected.
 // This allows the promise to be garbage collected.
-// Mimics singleflight behaviour.
+// Mimics singleflight behaviour, unless the key is
+// already set and the promise is fulfilled or rejected,
+// then it behaves like Do.
 func (g *Group[T]) DoAndForget(key string, fn func() (T, error)) (T, error) {
 	p, loaded := g.LoadOrStore(key)
-	if !loaded {
+	if !loaded || p.Status() == Idle {
 		defer g.Forget(key)
 	}
 

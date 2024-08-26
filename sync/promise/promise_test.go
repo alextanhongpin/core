@@ -16,16 +16,16 @@ var ctx = context.Background()
 var wantErr = errors.New("test: want error")
 
 func TestStatus(t *testing.T) {
-	t.Run("not started", func(t *testing.T) {
+	t.Run("idle", func(t *testing.T) {
 		p := promise.Deferred[int]()
 		is := assert.New(t)
-		is.Equal(promise.NotStarted, p.Status())
+		is.Equal(promise.Idle, p.Status())
 	})
 
 	t.Run("fulfilled", func(t *testing.T) {
 		p := promise.Deferred[int]()
 		is := assert.New(t)
-		is.Equal(promise.NotStarted, p.Status())
+		is.Equal(promise.Idle, p.Status())
 		n, err := p.Wait(func() (int, error) {
 			is.Equal(promise.Pending, p.Status())
 			return 42, nil
@@ -38,7 +38,7 @@ func TestStatus(t *testing.T) {
 	t.Run("rejected", func(t *testing.T) {
 		p := promise.Deferred[int]()
 		is := assert.New(t)
-		is.Equal(promise.NotStarted, p.Status())
+		is.Equal(promise.Idle, p.Status())
 		n, err := p.Wait(func() (int, error) {
 			is.Equal(promise.Pending, p.Status())
 			return 0, wantErr
