@@ -127,6 +127,11 @@ func (g *Group[T]) do(ctx context.Context, key, token string, fn func(context.Co
 		case <-ctx.Done():
 			return v, context.Cause(ctx)
 		case res := <-ch:
+			// Extend once more to prevent token from expiring.
+			if err := lock.Extend(ctx, key, token, lockTTL); err != nil {
+				return v, err
+			}
+
 			v, err := res.unwrap()
 			if err != nil {
 				return v, err

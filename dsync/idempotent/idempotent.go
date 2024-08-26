@@ -198,6 +198,11 @@ func (s *RedisStore) do(ctx context.Context, key string, fn func(ctx context.Con
 		case <-ctx.Done():
 			return nil, false, context.Cause(ctx)
 		case res := <-ch:
+			// Extend once more to prevent token from expiring.
+			if err := lock.Extend(ctx, key, token, lockTTL); err != nil {
+				return nil, false, err
+			}
+
 			d, err := res.unwrap()
 			if err != nil {
 				return nil, false, err
