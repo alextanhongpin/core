@@ -24,8 +24,9 @@ func OrDone[T any](done chan struct{}, in <-chan T) <-chan T {
 	return ch
 }
 
-func Pipe[T any](done chan struct{}, in chan T, fn func(T) T) <-chan T {
-	ch := make(chan T)
+func Pipe[T, V any](done chan struct{}, in chan T, fn func(T) V) <-chan V {
+	// TODO: How to add buffer?
+	ch := make(chan V)
 
 	go func() {
 		defer close(ch)
@@ -38,7 +39,7 @@ func Pipe[T any](done chan struct{}, in chan T, fn func(T) T) <-chan T {
 	return ch
 }
 
-func Map[K, V any](done chan struct{}, in chan K, fn func(K) V) <-chan V {
+func Map[T, V any](done chan struct{}, in chan T, fn func(T) V) <-chan V {
 	ch := make(chan V)
 
 	go func() {
@@ -54,14 +55,15 @@ func Map[K, V any](done chan struct{}, in chan K, fn func(K) V) <-chan V {
 
 func Batch() {}
 
-func FanOut[T any](done chan struct{}, n int, in <-chan T, fn func(T) T) []chan T {
-	res := make([]chan T, n)
+func FanOut[T, V any](done chan struct{}, n int, in <-chan T, fn func(T) V) []chan V {
+	res := make([]chan V, n)
 
 	for i := range n {
-		res[i] = make(chan T)
+		res[i] = make(chan V)
 
 		go func() {
 			defer close(res[i])
+
 			for v := range OrDone(done, in) {
 				res[i] <- fn(v)
 			}
@@ -96,11 +98,53 @@ func FanIn[T any](done chan struct{}, cs ...chan T) <-chan T {
 
 }
 
-func Deduplicate()    {}
+// Transform.
+func Deduplicate()  {}
+func Cache()        {} // ReadThrough
+func Idempotent()   {}
+func Dataloader()   {}
+func Singleflight() {}
+func MaxInFlight()  {}
+func Semaphore()    {}
+
+// Resilience.
 func RateLimit()      {}
 func Throttle()       {}
 func Retry()          {}
 func CircuitBreaker() {}
 func Debounce()       {}
-func Tee()            {}
-func Bridge()         {}
+
+// Pipe.
+func Tee()      {}
+func Bridge()   {}
+func Take()     {}
+func Repeat()   {}
+func Generate() {}
+
+type Result[T any] struct {
+	Data T
+	Err  error
+}
+
+func makeResult[T any](data T, err error) Result[T] {
+	return Result[T]{Data: data, Err: err}
+}
+
+func ErrorHandler[T any](done chan struct{}, in <-chan Result[T], fn func(error)) <-chan T {
+	ch := make(chan T)
+
+	go func() {
+		defer close(ch)
+
+		for res := range OrDone(done, in) {
+			if res.Err != nil {
+				fn(res.Err)
+				continue
+			}
+
+			ch <- res.Data
+		}
+	}()
+
+	return ch
+}
