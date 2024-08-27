@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/alextanhongpin/core/sync/pipeline"
+	"golang.org/x/exp/rand"
 )
 
 func main() {
@@ -33,7 +34,22 @@ func main() {
 		time.Sleep(100 * time.Millisecond)
 		return v
 	})
-	stop := pipeline.Batch(3, time.Second, p3, func(in []string) {
+
+	p4 := pipeline.Map(p3, func(v string) pipeline.Result[string] {
+		if rand.Intn(10) < 7 {
+			return pipeline.Result[string]{Data: v}
+		}
+
+		return pipeline.Result[string]{Err: fmt.Errorf("error")}
+	})
+
+	p4 = pipeline.Throughput(time.Second, p4, func(t pipeline.ThroughputInfo) {
+		fmt.Println(t)
+	})
+
+	p5 := pipeline.FlatMap(p4)
+
+	stop := pipeline.Batch(3, time.Second, p5, func(in []string) {
 		fmt.Println(in)
 	})
 	defer stop()

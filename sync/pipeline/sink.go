@@ -77,7 +77,6 @@ func Batch[T comparable](limit int, period time.Duration, in <-chan T, fn func([
 	}()
 
 	return func() {
-
 		wg.Wait()
 	}
 }

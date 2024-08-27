@@ -130,7 +130,7 @@ func Throughput[T any](period time.Duration, in <-chan Result[T], fn func(Throug
 				Rate:          int64(math.Ceil(r.Throughput())),
 				Total:         total,
 				TotalFailures: totalFailures,
-				ErrorRate:     er.ErrorRate(),
+				ErrorRate:     er.Rate(),
 			})
 			out <- v
 		}
@@ -275,16 +275,8 @@ func FanIn[T any](cs ...chan T) <-chan T {
 	}()
 
 	return out
-
 }
 
-// Transform.
-func Deduplicate() {}
-func Cache()       {} // ReadThrough
-func Idempotent()  {}
-func Dataloader()  {}
-
-// func Singleflight() {}
 func Semaphore[T, V any](n int, in <-chan T, fn func(T) V) <-chan V {
 	out := make(chan V)
 
@@ -333,15 +325,6 @@ func RateLimit[T any](request int, period time.Duration, in <-chan T) <-chan T {
 
 	return ch
 }
-
-//func Throttle() {}
-//func Retry()    {}
-//func CircuitBreaker() {}
-//func Debounce()       {}
-
-// Pipe.
-func Bridge() {}
-func Take()   {}
 
 func Tee[T any](in chan T) (out1, out2 chan T) {
 	out1, out2 = make(chan T), make(chan T)
