@@ -41,6 +41,16 @@ func (r *Rate) Inc(n int64) int64 {
 	return int64(math.Ceil(f))
 }
 
+// Throughput returns the number of transactions per second.
+func (r *Rate) Throughput() float64 {
+	r.mu.Lock()
+	f := r.inc(0)
+	p := r.period
+	r.mu.Unlock()
+
+	return f * float64(time.Second) / float64(p)
+}
+
 func (r *Rate) inc(n int64) float64 {
 	f := dampFactor(r.Now().Sub(r.last), r.period)
 	r.count *= f
