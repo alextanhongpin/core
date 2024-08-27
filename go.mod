@@ -2,10 +2,12 @@ module github.com/alextanhongpin/core
 
 go 1.22.5
 
-require golang.org/x/exp v0.0.0-20240808152545-0cdaa3abc0fa
+require golang.org/x/exp v0.0.0-20240823005443-9b4947da3948
 
 require (
-	github.com/alextanhongpin/core/sync/promise v0.0.0-20240809154704-f08b92a14686
+	github.com/alextanhongpin/core/sync/batch v0.0.0-20240826174456-c35d7bfe61bd
+	github.com/alextanhongpin/core/sync/promise v0.0.0-20240820123002-affc9fec4fec
+	github.com/alextanhongpin/core/sync/rate v0.0.0-20240826174456-c35d7bfe61bd
 	github.com/alextanhongpin/errors v0.0.0-20230717124106-3e3c39edaa89
 	github.com/alextanhongpin/testdump/httpdump v0.0.0-20240617032328-5cdd37fc0156
 	github.com/go-playground/validator/v10 v10.22.0

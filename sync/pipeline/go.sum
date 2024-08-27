@@ -1,0 +1,4 @@
+github.com/alextanhongpin/core/sync/rate v0.0.0-20240826174456-c35d7bfe61bd h1:7M6O0aNmM8R+vlMu0gvWfXNMmUa9MsKNDmDVAVJPq/w=
+github.com/alextanhongpin/core/sync/rate v0.0.0-20240826174456-c35d7bfe61bd/go.mod h1:1x3Trxscyf8ovXWIcw7MfRWvrzH0hsNtybKoJAKFUvo=
+golang.org/x/exp v0.0.0-20240823005443-9b4947da3948 h1:kx6Ds3MlpiUHKj7syVnbp57++8WpuKPcR5yjLBjvLEA=
+golang.org/x/exp v0.0.0-20240823005443-9b4947da3948/go.mod h1:akd2r19cwCdwSwWeIdzYQGa/EZZyqcOdwWiwj5L5eKQ=
