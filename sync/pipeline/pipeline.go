@@ -111,7 +111,7 @@ func Count[T any](in chan T, fn func(int)) <-chan T {
 	return out
 }
 
-func Rate[T any](period time.Duration, in chan T, fn func(int)) <-chan T {
+func Rate[T any](period time.Duration, in chan T, fn func(int64)) <-chan T {
 	out := make(chan T)
 	r := rate.NewRate(period)
 
@@ -120,6 +120,52 @@ func Rate[T any](period time.Duration, in chan T, fn func(int)) <-chan T {
 
 		for v := range in {
 			fn(r.Inc(1))
+			out <- v
+		}
+	}()
+
+	return out
+}
+
+func ErrorCount[T any](in chan Result[T], fn func(failures, total int)) <-chan Result[T] {
+	out := make(chan Result[T])
+
+	var successes int
+	var failures int
+	go func() {
+		defer close(out)
+
+		for v := range in {
+			_, err := v.Unwrap()
+			if err != nil {
+				failures++
+			} else {
+				successes++
+			}
+			fn(failures, failures+successes)
+			out <- v
+		}
+	}()
+
+	return out
+}
+
+func ErrorRate[T any](period time.Duration, in chan Result[T], fn func(failures, total float64)) <-chan Result[T] {
+	out := make(chan Result[T])
+	r := rate.NewErrors(period)
+
+	go func() {
+		defer close(out)
+
+		for v := range in {
+			var successes, failures float64
+			_, err := v.Unwrap()
+			if err != nil {
+				successes, failures = r.Inc(-1)
+			} else {
+				successes, failures = r.Inc(1)
+			}
+			fn(failures, successes+failures)
 			out <- v
 		}
 	}()
@@ -282,10 +328,8 @@ func RateLimit[T any](request int, period time.Duration, in chan T) chan T {
 		defer close(ch)
 
 		for v := range in {
-			select {
-			case <-t.C:
-				ch <- v
-			}
+			<-t.C
+			ch <- v
 		}
 	}()
 
@@ -330,11 +374,15 @@ type Result[T any] struct {
 	Err  error
 }
 
+func (r Result[T]) Unwrap() (T, error) {
+	return r.Data, r.Err
+}
+
 func MakeResult[T any](data T, err error) Result[T] {
 	return Result[T]{Data: data, Err: err}
 }
 
-func Value[T any](in <-chan Result[T]) <-chan T {
+func FlatMap[T any](in <-chan Result[T]) <-chan T {
 	out := make(chan T)
 
 	go func() {
