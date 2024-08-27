@@ -93,8 +93,27 @@ func PassThrough[T any](in chan T, fn func(T)) <-chan T {
 	return out
 }
 
+func Progress[T any](period time.Duration, in <-chan T, fn func(total int, rate int64)) <-chan T {
+	out := make(chan T)
+
+	var i int
+	r := rate.NewRate(period)
+
+	go func() {
+		defer close(out)
+
+		for v := range in {
+			i++
+			fn(i, r.Inc(1))
+			out <- v
+		}
+	}()
+
+	return out
+}
+
 // Count reports the number of items passing through.
-func Count[T any](in chan T, fn func(int)) <-chan T {
+func Count[T any](in <-chan T, fn func(int)) <-chan T {
 	out := make(chan T)
 
 	var i int
@@ -111,7 +130,7 @@ func Count[T any](in chan T, fn func(int)) <-chan T {
 	return out
 }
 
-func Rate[T any](period time.Duration, in chan T, fn func(int64)) <-chan T {
+func Rate[T any](period time.Duration, in <-chan T, fn func(int64)) <-chan T {
 	out := make(chan T)
 	r := rate.NewRate(period)
 
@@ -187,7 +206,7 @@ func Pipe[T any](in chan T, fn func(T) T) <-chan T {
 	return out
 }
 
-func Map[T, V any](in chan T, fn func(T) V) <-chan V {
+func Map[T, V any](in <-chan T, fn func(T) V) <-chan V {
 	out := make(chan V)
 
 	go func() {
@@ -319,7 +338,7 @@ func Semaphore[T, V any](n int, in <-chan T, fn func(T) V) <-chan V {
 }
 
 // Resilience.
-func RateLimit[T any](request int, period time.Duration, in chan T) chan T {
+func RateLimit[T any](request int, period time.Duration, in <-chan T) <-chan T {
 	ch := make(chan T)
 	t := time.NewTicker(period / time.Duration(request))
 

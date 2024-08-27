@@ -2,7 +2,6 @@
 package pipeline
 
 import (
-	"context"
 	"sync"
 	"time"
 )
@@ -29,43 +28,7 @@ func Collect[T any](in chan T) []T {
 	return res
 }
 
-type BatchStopper interface {
-	Stop()
-}
-
-type BatchFlusher interface {
-	Flush()
-}
-
-type BatchStopFlusher interface {
-	BatchStopper
-	BatchFlusher
-}
-
-type batcher[T comparable] struct {
-	stop   func()
-	flush  func()
-	limit  int
-	period time.Duration
-}
-
-func newBatcher[T comparable](limit int, period time.Duration, in chan T, fn func([]T)) *batcher[T] {
-	b := &batcher[T]{
-		limit:  limit,
-		period: period,
-	}
-	b.init(in, fn)
-	return b
-}
-
-func (b *batcher[T]) init(in <-chan T, fn func([]T)) {
-	var (
-		limit  = b.limit
-		period = b.period
-	)
-
-	fl := make(chan struct{})
-
+func Batch[T comparable](limit int, period time.Duration, in <-chan T, fn func([]T)) func() {
 	cache := make(map[T]struct{})
 	flush := func() {
 		keys := make([]T, 0, len(cache))
@@ -81,7 +44,6 @@ func (b *batcher[T]) init(in <-chan T, fn func([]T)) {
 		fn(keys)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
 	var wg sync.WaitGroup
 	wg.Add(1)
 
@@ -94,50 +56,28 @@ func (b *batcher[T]) init(in <-chan T, fn func([]T)) {
 
 		for {
 			select {
-			case <-ctx.Done():
-				return
 			case k, ok := <-in:
 				if !ok {
 					return
 				}
 
-				_, ok = cache[k]
-				if ok {
+				if _, ok := cache[k]; ok {
 					continue
 				}
 				cache[k] = struct{}{}
-				t.Reset(period)
 
 				if len(cache) >= limit {
+					t.Reset(period)
 					flush()
 				}
-			case <-fl:
-				t.Reset(period)
-				flush()
 			case <-t.C:
 				flush()
 			}
 		}
 	}()
 
-	b.stop = func() {
-		cancel()
+	return func() {
+
 		wg.Wait()
 	}
-
-	b.flush = func() {
-		fl <- struct{}{}
-	}
-}
-
-func (b *batcher[T]) Stop() {
-	b.stop()
-}
-
-func (b *batcher[T]) Flush() {
-	b.flush()
-}
-
-func Batch[T comparable](n int, period time.Duration, in chan T, fn func([]T)) BatchStopFlusher {
-	return newBatcher[T](n, period, in, fn)
 }
