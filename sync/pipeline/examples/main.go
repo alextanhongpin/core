@@ -20,13 +20,12 @@ func main() {
 	}()
 
 	p1 := pipeline.RateLimit(60, time.Second, pipeline.Generator(ctx, 100))
-
 	p2 := pipeline.Map(p1, func(i int) string {
 		return strconv.Itoa(i)
 	})
-	p2 = pipeline.Progress(time.Second, p2, func(total int, rate int64) {
-		if total%10 == 0 {
-			fmt.Printf("Count: %d, %dreq/s\n", total, rate)
+	p2 = pipeline.Rate(time.Second, p2, func(rate pipeline.RateInfo) {
+		if rate.Total%10 == 0 {
+			fmt.Println(rate)
 		}
 	})
 	p2 = pipeline.Queue(100, p2)

@@ -2,6 +2,8 @@ package pipeline
 
 import (
 	"context"
+	"fmt"
+	"math"
 	"sync"
 	"time"
 
@@ -93,75 +95,43 @@ func PassThrough[T any](in chan T, fn func(T)) <-chan T {
 	return out
 }
 
-func Progress[T any](period time.Duration, in <-chan T, fn func(total int, rate int64)) <-chan T {
-	out := make(chan T)
-
-	var i int
-	r := rate.NewRate(period)
-
-	go func() {
-		defer close(out)
-
-		for v := range in {
-			i++
-			fn(i, r.Inc(1))
-			out <- v
-		}
-	}()
-
-	return out
+type ThroughputInfo struct {
+	Total         int
+	TotalFailures int
+	Rate          int64
+	ErrorRate     float64
 }
 
-// Count reports the number of items passing through.
-func Count[T any](in <-chan T, fn func(int)) <-chan T {
-	out := make(chan T)
-
-	var i int
-	go func() {
-		defer close(out)
-
-		for v := range in {
-			i++
-			fn(i)
-			out <- v
-		}
-	}()
-
-	return out
+func (t ThroughputInfo) String() string {
+	return fmt.Sprintf("total: %d, total_failures: %d, rate: %d req/s, error_rate: %f", t.Total, t.TotalFailures, t.Rate, t.ErrorRate)
 }
 
-func Rate[T any](period time.Duration, in <-chan T, fn func(int64)) <-chan T {
-	out := make(chan T)
-	r := rate.NewRate(period)
-
-	go func() {
-		defer close(out)
-
-		for v := range in {
-			fn(r.Inc(1))
-			out <- v
-		}
-	}()
-
-	return out
-}
-
-func ErrorCount[T any](in chan Result[T], fn func(failures, total int)) <-chan Result[T] {
+func Throughput[T any](period time.Duration, in <-chan Result[T], fn func(ThroughputInfo)) <-chan Result[T] {
 	out := make(chan Result[T])
 
-	var successes int
-	var failures int
+	var total, totalFailures int
+	r := rate.NewRate(period)
+	er := rate.NewErrors(period)
+
 	go func() {
 		defer close(out)
 
 		for v := range in {
 			_, err := v.Unwrap()
 			if err != nil {
-				failures++
+				totalFailures++
+				er.Inc(-1)
 			} else {
-				successes++
+				er.Inc(1)
 			}
-			fn(failures, failures+successes)
+			total++
+			r.Inc(1)
+			fn(ThroughputInfo{
+				Rate:          int64(math.Ceil(r.Throughput())),
+				Total:         total,
+				TotalFailures: totalFailures,
+				ErrorRate:     er.ErrorRate(),
+			})
 			out <- v
 		}
 	}()
@@ -169,22 +139,31 @@ func ErrorCount[T any](in chan Result[T], fn func(failures, total int)) <-chan R
 	return out
 }
 
-func ErrorRate[T any](period time.Duration, in chan Result[T], fn func(failures, total float64)) <-chan Result[T] {
-	out := make(chan Result[T])
-	r := rate.NewErrors(period)
+type RateInfo struct {
+	Total int
+	Rate  int64
+}
+
+func (r RateInfo) String() string {
+	return fmt.Sprintf("total: %d, throughput: %d req/s", r.Total, r.Rate)
+}
+
+func Rate[T any](period time.Duration, in <-chan T, fn func(RateInfo)) <-chan T {
+	out := make(chan T)
+
+	var total int
+	r := rate.NewRate(period)
 
 	go func() {
 		defer close(out)
 
 		for v := range in {
-			var successes, failures float64
-			_, err := v.Unwrap()
-			if err != nil {
-				successes, failures = r.Inc(-1)
-			} else {
-				successes, failures = r.Inc(1)
-			}
-			fn(failures, successes+failures)
+			total++
+			r.Inc(1)
+			fn(RateInfo{
+				Total: total,
+				Rate:  int64(math.Ceil(r.Throughput())),
+			})
 			out <- v
 		}
 	}()
