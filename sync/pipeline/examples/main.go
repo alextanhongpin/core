@@ -24,7 +24,7 @@ func main() {
 	p2 := pipeline.Map(p1, func(i int) string {
 		return strconv.Itoa(i)
 	})
-	p2 = pipeline.Rate(time.Second, p2, func(rate pipeline.RateInfo) {
+	p2 = pipeline.Rate(p2, func(rate pipeline.RateInfo) {
 		if rate.Total%10 == 0 {
 			fmt.Println(rate)
 		}
@@ -43,7 +43,7 @@ func main() {
 		return pipeline.Result[string]{Err: fmt.Errorf("error")}
 	})
 
-	p4 = pipeline.Throughput(time.Second, p4, func(t pipeline.ThroughputInfo) {
+	p4 = pipeline.Throughput(p4, func(t pipeline.ThroughputInfo) {
 		fmt.Println(t)
 	})
 
