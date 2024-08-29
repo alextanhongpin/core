@@ -103,15 +103,15 @@ type ThroughputInfo struct {
 }
 
 func (t ThroughputInfo) String() string {
-	return fmt.Sprintf("total: %d, total_failures: %d, rate: %d req/s, error_rate: %f", t.Total, t.TotalFailures, t.Rate, t.ErrorRate)
+	return fmt.Sprintf("total: %d, errors: %d (%.0f%%), rate: %d req/s", t.Total, t.TotalFailures, t.ErrorRate*100, t.Rate)
 }
 
-func Throughput[T any](period time.Duration, in <-chan Result[T], fn func(ThroughputInfo)) <-chan Result[T] {
+func Throughput[T any](in <-chan Result[T], fn func(ThroughputInfo)) <-chan Result[T] {
 	out := make(chan Result[T])
 
 	var total, totalFailures int
-	r := rate.NewRate(period)
-	er := rate.NewErrors(period)
+	r := rate.NewRate(time.Second)
+	er := rate.NewErrors(time.Second)
 
 	go func() {
 		defer close(out)
@@ -148,11 +148,11 @@ func (r RateInfo) String() string {
 	return fmt.Sprintf("total: %d, throughput: %d req/s", r.Total, r.Rate)
 }
 
-func Rate[T any](period time.Duration, in <-chan T, fn func(RateInfo)) <-chan T {
+func Rate[T any](in <-chan T, fn func(RateInfo)) <-chan T {
 	out := make(chan T)
 
 	var total int
-	r := rate.NewRate(period)
+	r := rate.NewRate(time.Second)
 
 	go func() {
 		defer close(out)
