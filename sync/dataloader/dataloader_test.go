@@ -92,6 +92,39 @@ func TestDataloader_BatchMaxKeys(t *testing.T) {
 	wg.Wait()
 }
 
+func TestDataloader_ErrNoResult(t *testing.T) {
+	is := assert.New(t)
+	dl := newDataloader(func(ctx context.Context, keys []string) (map[string]int, error) {
+		return newBatchFn(ctx, nil)
+	})
+	defer dl.Stop()
+
+	v, err := dl.Load("1")
+	is.Empty(v)
+	is.ErrorIs(err, dataloader.ErrNoResult)
+}
+
+func TestDataloader_ErrTerminated(t *testing.T) {
+	is := assert.New(t)
+	dl := newDataloader(newBatchFn)
+	dl.Stop()
+
+	v, err := dl.Load("1")
+	is.Empty(v)
+	is.ErrorIs(err, dataloader.ErrTerminated)
+}
+
+func TestDataloader_Error(t *testing.T) {
+	is := assert.New(t)
+	dl := newDataloader(newBatchFn)
+	defer dl.Stop()
+
+	v, err := dl.Load("abc")
+	is.Empty(v)
+	is.Error(err)
+	t.Log(err)
+}
+
 func newDataloader(batchFn func(context.Context, []string) (map[string]int, error)) *dataloader.DataLoader[string, int] {
 	return dataloader.New[string, int](ctx, &dataloader.Options[string, int]{
 		BatchFn:      batchFn,

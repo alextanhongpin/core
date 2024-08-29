@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/alextanhongpin/core/sync/pipeline"
 	"github.com/alextanhongpin/core/sync/promise"
 )
 
@@ -16,10 +17,6 @@ var (
 	// This might not necessarily be an error, for example, if the row is not
 	// found in the database when performing `SELECT ... IN (k1, k2, ... kn)`.
 	ErrNoResult = errors.New("dataloader: no result")
-
-	// ErrAborted is returned when the operation is cancelled or replaced with
-	// another running process.
-	ErrAborted = errors.New("dataloader: aborted")
 
 	// ErrTerminated is returned when the dataloader is terminated.
 	ErrTerminated = errors.New("dataloader: terminated")
@@ -63,7 +60,6 @@ type DataLoader[K comparable, V any] struct {
 	ch     chan K
 	ctx    context.Context
 	cancel func(error)
-	f      chan struct{}
 
 	// Options.
 	opts *Options[K, V]
@@ -124,10 +120,8 @@ func (d *DataLoader[K, V]) LoadMany(ks []K) ([]promise.Result[V], error) {
 	res := make(promise.Promises[V], len(ks))
 	for i, k := range ks {
 		p, loaded := d.pg.LoadOrStore(fmt.Sprint(k))
-		res[i] = p
-
 		if loaded {
-			continue
+			goto labels
 		}
 
 		select {
@@ -135,6 +129,8 @@ func (d *DataLoader[K, V]) LoadMany(ks []K) ([]promise.Result[V], error) {
 			p.Reject(newKeyError(k, context.Cause(ctx)))
 		case d.ch <- k:
 		}
+	labels:
+		res[i] = p
 	}
 
 	return res.AllSettled(), nil
@@ -161,64 +157,21 @@ func (d *DataLoader[K, V]) start(ctx context.Context) {
 }
 
 func (d *DataLoader[K, V]) loop(ctx context.Context) {
-	ch := make(chan []K, d.opts.BatchQueueSize)
-	cache := make(map[K]struct{})
+	p1 := pipeline.Context(d.ctx, d.ch)
+	p2 := pipeline.Batch(d.opts.BatchMaxKeys, d.opts.BatchTimeout, p1)
+	p3 := pipeline.Queue(d.opts.BatchQueueSize, p2)
 
-	// batch clears all existing keys by doing a final batch request.
-	batch := func() {
-		if len(cache) == 0 {
-			return
-		}
-
-		keys := make([]K, 0, len(cache))
-		for k := range cache {
-			keys = append(keys, k)
-		}
-		clear(cache)
-		ch <- keys
+	for vs := range p3 {
+		d.batch(d.ctx, vs)
 	}
-
-	d.wg.Add(2)
-
-	go func() {
-		defer d.wg.Done()
-
-		t := time.NewTicker(d.opts.BatchTimeout)
-		defer t.Stop()
-
-		defer close(ch)
-		defer batch()
-
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case k := <-d.ch:
-				cache[k] = struct{}{}
-				if len(cache) >= d.opts.BatchMaxKeys {
-					batch()
-					t.Reset(d.opts.BatchTimeout)
-				}
-			case <-t.C:
-				batch()
-			}
-		}
-	}()
-
-	go func() {
-		defer d.wg.Done()
-
-		for v := range ch {
-			d.batch(ctx, v)
-		}
-	}()
 }
 
 func (d *DataLoader[K, V]) batch(ctx context.Context, keys []K) {
 	kv, err := d.opts.BatchFn(ctx, keys)
 	if err != nil {
 		for _, k := range keys {
-			d.pg.Do(fmt.Sprint(k), func() (v V, err error) {
+			d.pg.Do(fmt.Sprint(k), func() (V, error) {
+				var v V
 				return v, newKeyError(k, err)
 			})
 		}
@@ -227,7 +180,7 @@ func (d *DataLoader[K, V]) batch(ctx context.Context, keys []K) {
 	}
 
 	for _, k := range keys {
-		d.pg.Do(fmt.Sprint(k), func() (v V, err error) {
+		d.pg.Do(fmt.Sprint(k), func() (V, error) {
 			v, ok := kv[k]
 			if ok {
 				return v, nil
