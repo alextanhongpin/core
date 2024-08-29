@@ -287,10 +287,10 @@ func Semaphore[T, V any](n int, in <-chan T, fn func(T) V) <-chan V {
 
 	go func() {
 		for v := range in {
+			sem <- struct{}{}
 			go func() {
 				defer wg.Done()
 
-				sem <- struct{}{}
 				defer func() {
 					<-sem
 				}()
