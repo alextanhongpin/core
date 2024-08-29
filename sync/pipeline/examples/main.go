@@ -49,8 +49,8 @@ func main() {
 
 	p5 := pipeline.FlatMap(p4)
 
-	stop := pipeline.Batch(3, time.Second, p5, func(in []string) {
-		fmt.Println(in)
-	})
-	defer stop()
+	p6 := pipeline.Batch(3, time.Second, p5)
+	for v := range p6 {
+		fmt.Println(v)
+	}
 }

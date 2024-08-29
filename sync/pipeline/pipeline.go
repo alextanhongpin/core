@@ -399,3 +399,52 @@ func ErrorHandler[T any](in <-chan Result[T], fn func(error)) <-chan T {
 
 	return out
 }
+
+func Batch[T comparable](limit int, period time.Duration, in <-chan T) <-chan []T {
+	out := make(chan []T)
+
+	cache := make(map[T]struct{})
+	batch := func() {
+		if len(cache) == 0 {
+			return
+		}
+
+		keys := make([]T, 0, len(cache))
+		for k := range cache {
+			keys = append(keys, k)
+		}
+		clear(cache)
+
+		out <- keys
+	}
+
+	go func() {
+		defer close(out)
+		defer batch()
+
+		t := time.NewTicker(period)
+		defer t.Stop()
+
+		for {
+			select {
+			case k, ok := <-in:
+				if !ok {
+					return
+				}
+
+				if _, ok := cache[k]; ok {
+					continue
+				}
+				cache[k] = struct{}{}
+
+				if len(cache) >= limit {
+					batch()
+				}
+			case <-t.C:
+				batch()
+			}
+		}
+	}()
+
+	return out
+}
