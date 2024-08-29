@@ -9,28 +9,27 @@ import (
 	"time"
 
 	"github.com/alextanhongpin/core/sync/promise"
-	"golang.org/x/exp/maps"
 )
 
 var (
 	// ErrNoResult is returned if the key does not have a value.
 	// This might not necessarily be an error, for example, if the row is not
 	// found in the database when performing `SELECT ... IN (k1, k2, ... kn)`.
-	ErrNoResult = errors.New("no result")
+	ErrNoResult = errors.New("dataloader: no result")
 
 	// ErrAborted is returned when the operation is cancelled or replaced with
 	// another running process.
-	ErrAborted = errors.New("aborted")
+	ErrAborted = errors.New("dataloader: aborted")
 
 	// ErrTerminated is returned when the dataloader is terminated.
-	ErrTerminated = errors.New("terminated")
+	ErrTerminated = errors.New("dataloader: terminated")
 )
 
 type Options[K comparable, V any] struct {
-	BatchFn      batchFunc[K, V]
-	BatchMaxKeys int
-	BatchTimeout time.Duration
-	NoDebounce   bool
+	BatchFn        func(ctx context.Context, keys []K) (map[K]V, error)
+	BatchMaxKeys   int
+	BatchTimeout   time.Duration
+	BatchQueueSize int
 }
 
 func (o *Options[K, V]) Valid() error {
@@ -57,11 +56,10 @@ type DataLoader[K comparable, V any] struct {
 	end   sync.Once
 
 	// Concurrency primitives.
-	mu sync.Mutex
 	wg sync.WaitGroup
 
 	// State.
-	cache  map[K]*promise.Promise[V]
+	pg     *promise.Group[V]
 	ch     chan K
 	ctx    context.Context
 	cancel func(error)
@@ -79,12 +77,11 @@ func New[K comparable, V any](ctx context.Context, opts *Options[K, V]) *DataLoa
 
 	ctx, cancel := context.WithCancelCause(ctx)
 	return &DataLoader[K, V]{
-		cache:  make(map[K]*promise.Promise[V]),
+		pg:     promise.NewGroup[V](),
 		ch:     make(chan K),
 		opts:   opts,
 		ctx:    ctx,
 		cancel: cancel,
-		f:      make(chan struct{}),
 	}
 }
 
@@ -92,48 +89,18 @@ func New[K comparable, V any](ctx context.Context, opts *Options[K, V]) *DataLoa
 // There is no use passing context as the first argument as it does not control
 // the lifecycle.
 func (d *DataLoader[K, V]) Set(k K, v V) {
-	d.mu.Lock()
-	e, ok := d.cache[k]
-	if ok {
-		// Reject the running promise so that the caller will stop waiting.
-		e.Reject(newKeyError(k, ErrAborted))
-	}
-
-	d.cache[k] = promise.Resolve(v)
-	d.mu.Unlock()
-}
-
-// SetNX sets the key-value, only if the entry does not exists.
-// This prevents issue with references.
-func (d *DataLoader[K, V]) SetNX(k K, v V) bool {
-	d.mu.Lock()
-	_, ok := d.cache[k]
-	if ok {
-		d.mu.Unlock()
-		return false
-	}
-
-	d.cache[k] = promise.Resolve(v)
-	d.mu.Unlock()
-
-	return true
+	p := promise.Resolve(v)
+	d.pg.DeleteAndStore(fmt.Sprint(k), p)
 }
 
 func (d *DataLoader[K, V]) Load(k K) (V, error) {
 	ctx := d.ctx
 	d.start(ctx)
 
-	d.mu.Lock()
-	v, ok := d.cache[k]
-	if ok {
-		d.mu.Unlock()
-
-		return v.Await()
+	p, loaded := d.pg.LoadOrStore(fmt.Sprint(k))
+	if loaded {
+		return p.Await()
 	}
-
-	p := promise.Deferred[V]()
-	d.cache[k] = p
-	d.mu.Unlock()
 
 	select {
 	case <-ctx.Done():
@@ -155,39 +122,22 @@ func (d *DataLoader[K, V]) LoadMany(ks []K) ([]promise.Result[V], error) {
 	d.start(ctx)
 
 	res := make(promise.Promises[V], len(ks))
-
-	d.mu.Lock()
-
 	for i, k := range ks {
-		v, ok := d.cache[k]
-		if ok {
-			res[i] = v
-		} else {
-			p := promise.Deferred[V]()
-			d.cache[k] = p
+		p, loaded := d.pg.LoadOrStore(fmt.Sprint(k))
+		res[i] = p
 
-			res[i] = p
+		if loaded {
+			continue
+		}
 
-			select {
-			case <-ctx.Done():
-				p.Reject(newKeyError(k, context.Cause(ctx)))
-			case d.ch <- k:
-			}
+		select {
+		case <-ctx.Done():
+			p.Reject(newKeyError(k, context.Cause(ctx)))
+		case d.ch <- k:
 		}
 	}
 
-	d.mu.Unlock()
-
 	return res.AllSettled(), nil
-}
-
-func (d *DataLoader[K, V]) Flush() bool {
-	select {
-	case <-d.ctx.Done():
-		return false
-	case d.f <- struct{}{}:
-		return true
-	}
 }
 
 func (d *DataLoader[K, V]) Stop() {
@@ -211,86 +161,82 @@ func (d *DataLoader[K, V]) start(ctx context.Context) {
 }
 
 func (d *DataLoader[K, V]) loop(ctx context.Context) {
-	t := time.NewTicker(d.opts.BatchTimeout)
-	defer t.Stop()
+	ch := make(chan []K, d.opts.BatchQueueSize)
+	cache := make(map[K]struct{})
 
-	keys := make(map[K]struct{})
-
-	// flush clears all existing keys by doing a final batch request.
-	flush := func() {
-		k := maps.Keys(keys)
-		clear(keys)
-
-		if len(k) == 0 {
+	// batch clears all existing keys by doing a final batch request.
+	batch := func() {
+		if len(cache) == 0 {
 			return
 		}
 
-		d.wg.Add(1)
-
-		go func() {
-			defer d.wg.Done()
-
-			d.batch(ctx, k)
-		}()
-	}
-
-	defer flush()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case k := <-d.ch:
-			// Two strategy for optimizing fetching data:
-			// 1. Batch: when the number of keys hits the threshold
-			// 2. Debounce: when no new keys after the timeout.
-			// 3. Manual: manually flush when you know there are no further keys to
-			// fetch, e.g at the end of the loop.
-			keys[k] = struct{}{}
-			// 1.
-			if len(keys) >= d.opts.BatchMaxKeys {
-				flush()
-			}
-
-			if !d.opts.NoDebounce {
-				// Keep debouncing until the max keys threshold is reached.
-				t.Reset(d.opts.BatchTimeout)
-			}
-		// 2.
-		case <-t.C:
-			flush()
-		// 3.
-		case <-d.f:
-			flush()
+		keys := make([]K, 0, len(cache))
+		for k := range cache {
+			keys = append(keys, k)
 		}
+		clear(cache)
+		ch <- keys
 	}
+
+	d.wg.Add(2)
+
+	go func() {
+		defer d.wg.Done()
+
+		t := time.NewTicker(d.opts.BatchTimeout)
+		defer t.Stop()
+
+		defer close(ch)
+		defer batch()
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case k := <-d.ch:
+				cache[k] = struct{}{}
+				if len(cache) >= d.opts.BatchMaxKeys {
+					batch()
+					t.Reset(d.opts.BatchTimeout)
+				}
+			case <-t.C:
+				batch()
+			}
+		}
+	}()
+
+	go func() {
+		defer d.wg.Done()
+
+		for v := range ch {
+			d.batch(ctx, v)
+		}
+	}()
 }
 
 func (d *DataLoader[K, V]) batch(ctx context.Context, keys []K) {
 	kv, err := d.opts.BatchFn(ctx, keys)
 	if err != nil {
-		d.mu.Lock()
 		for _, k := range keys {
-			d.cache[k].Reject(newKeyError(k, err))
+			d.pg.Do(fmt.Sprint(k), func() (v V, err error) {
+				return v, newKeyError(k, err)
+			})
 		}
-		d.mu.Unlock()
 
 		return
 	}
 
-	d.mu.Lock()
 	for _, k := range keys {
-		v, ok := kv[k]
-		if ok {
-			d.cache[k].Resolve(v)
-		} else {
-			d.cache[k].Reject(newKeyError(k, ErrNoResult))
-		}
-	}
-	d.mu.Unlock()
-}
+		d.pg.Do(fmt.Sprint(k), func() (v V, err error) {
+			v, ok := kv[k]
+			if ok {
+				return v, nil
+			}
 
-type batchFunc[K comparable, V any] func(ctx context.Context, keys []K) (map[K]V, error)
+			return v, newKeyError(k, ErrNoResult)
+		})
+	}
+}
 
 func newKeyError(k any, err error) *KeyError {
 	return &KeyError{
