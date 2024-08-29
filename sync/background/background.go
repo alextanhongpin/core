@@ -4,101 +4,98 @@ package background
 
 import (
 	"context"
+	"errors"
 	"runtime"
 	"sync"
-
-	"golang.org/x/exp/event"
-	"golang.org/x/sync/errgroup"
-	"golang.org/x/sync/semaphore"
 )
 
-var (
-	processedTotal = event.NewCounter("processed_total", &event.MetricOptions{
-		Description: "the number of processed async message",
-	})
-
-	workersCount = event.NewFloatGauge("workers_count", &event.MetricOptions{
-		Description: "the number of background workers running",
-	})
-)
+var ErrTerminated = errors.New("worker: terminated")
 
 type Worker[T any] struct {
-	sem     *semaphore.Weighted
-	wg      sync.WaitGroup
-	handler func(ctx context.Context, v T)
+	ctx context.Context
+	ch  chan T
+	fn  func(ctx context.Context, v T)
+	sem chan struct{}
 }
 
-type Option[T any] struct {
-	Handler    func(ctx context.Context, v T)
+type Config struct {
 	MaxWorkers int
 }
 
+func NewConfig() *Config {
+	return &Config{
+		MaxWorkers: runtime.GOMAXPROCS(0),
+	}
+}
+
 // New returns a new background manager.
-func New[T any](opt Option[T]) (*Worker[T], func()) {
-	if opt.MaxWorkers <= 0 {
-		opt.MaxWorkers = runtime.GOMAXPROCS(0)
+func New[T any](ctx context.Context, fn func(context.Context, T), cfg *Config) (*Worker[T], func()) {
+	if cfg == nil {
+		cfg = NewConfig()
+	}
+	if cfg.MaxWorkers <= 0 {
+		cfg.MaxWorkers = runtime.GOMAXPROCS(0)
+	}
+
+	sem := make(chan struct{}, cfg.MaxWorkers)
+	for range cfg.MaxWorkers {
+		sem <- struct{}{}
 	}
 
 	w := &Worker[T]{
-		sem:     semaphore.NewWeighted(int64(opt.MaxWorkers)),
-		handler: opt.Handler,
+		ch:  make(chan T),
+		fn:  fn,
+		sem: sem,
 	}
 
-	return w, w.stop
+	return w, w.init(ctx)
 }
 
-// Exec sends a new message to the channel.
-func (w *Worker[T]) Exec(ctx context.Context, v T) {
-	processedTotal.Record(ctx, 1)
-	w.exec(ctx, v)
-}
-
-func (w *Worker[T]) BatchExec(ctx context.Context, vs ...T) {
-	processedTotal.Record(ctx, int64(len(vs)))
-
+// Send sends a new message to the channel.
+func (w *Worker[T]) Send(vs ...T) error {
 	for _, v := range vs {
-		w.exec(ctx, v)
-	}
-}
-
-// stop stops the channel and waits for the channel messages to be flushed.
-func (w *Worker[T]) stop() {
-	w.wg.Wait()
-}
-
-func (w *Worker[T]) exec(ctx context.Context, v T) {
-	ctx = context.WithoutCancel(ctx)
-
-	if err := w.sem.Acquire(context.Background(), 1); err != nil {
-		// Execute the handler immediately if we fail to acquire semaphore.
-		w.handler(ctx, v)
-
-		return
+		select {
+		case <-w.ctx.Done():
+			return context.Cause(w.ctx)
+		case w.ch <- v:
+		}
 	}
 
-	w.wg.Add(1)
+	return nil
+}
+
+func (w *Worker[T]) init(ctx context.Context) func() {
+	ctx, cancel := context.WithCancelCause(ctx)
+	w.ctx = ctx
+
+	var wg sync.WaitGroup
+	wg.Add(1)
 
 	go func() {
-		defer w.wg.Done()
-		defer w.sem.Release(1)
+		defer wg.Done()
 
-		workersCount.Record(ctx, 1)
-		defer workersCount.Record(ctx, -1)
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case v := <-w.ch:
+				<-w.sem
 
-		w.handler(ctx, v)
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					defer func() {
+						w.sem <- struct{}{}
+					}()
+
+					w.fn(ctx, v)
+				}()
+			}
+		}
 	}()
-}
 
-func BatchExecN[T any](ctx context.Context, h func(ctx context.Context, v T) error, n int, vs ...T) error {
-	g, ctx := errgroup.WithContext(ctx)
-	g.SetLimit(n)
-
-	for _, v := range vs {
-		v := v
-		g.Go(func() error {
-			return h(ctx, v)
-		})
+	return func() {
+		cancel(ErrTerminated)
+		wg.Wait()
 	}
-
-	return g.Wait()
 }

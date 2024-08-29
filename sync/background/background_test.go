@@ -2,9 +2,7 @@ package background_test
 
 import (
 	"context"
-	"sync"
 	"testing"
-	"time"
 
 	"github.com/alextanhongpin/core/sync/background"
 	"github.com/stretchr/testify/assert"
@@ -14,79 +12,22 @@ var ctx = context.Background()
 
 func TestBackground(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
-		task := &numberTask{}
-
-		opt := background.Option[int]{
-			Handler: task.Exec,
-		}
-		bg, stop := background.New(opt)
+		is := assert.New(t)
+		bg, stop := background.New(ctx, func(ctx context.Context, n int) {
+			is.Equal(42, n)
+		}, nil)
 		defer stop()
 
-		assert := assert.New(t)
-		bg.Exec(ctx, 1)
-
-		stop()
-
-		assert.Equal([]int{1}, task.Numbers())
+		is.Nil(bg.Send(42))
 	})
 
 	t.Run("early stop", func(t *testing.T) {
-		task := &numberTask{}
-
-		opt := background.Option[int]{
-			Handler: task.Exec,
-		}
-		bg, stop := background.New(opt)
-
-		assert := assert.New(t)
-		bg.Exec(ctx, 1)
+		is := assert.New(t)
+		bg, stop := background.New(ctx, func(ctx context.Context, n int) {
+			is.Equal(42, n)
+		}, nil)
 		stop()
 
-		assert.Equal([]int{1}, task.Numbers())
-
-		bg.Exec(ctx, 2)
-		stop()
-
-		assert.Equal([]int{1, 2}, task.Numbers())
+		is.ErrorIs(bg.Send(1), background.ErrTerminated)
 	})
-
-	t.Run("send wait", func(t *testing.T) {
-		task := &numberTask{sleep: 50 * time.Millisecond}
-
-		opt := background.Option[int]{
-			Handler: task.Exec,
-		}
-
-		bg, stop := background.New(opt)
-		assert := assert.New(t)
-		bg.BatchExec(ctx, 1, 2, 3)
-		stop()
-
-		assert.ElementsMatch([]int{1, 2, 3}, task.Numbers())
-	})
-}
-
-type numberTask struct {
-	sleep time.Duration
-	nums  []int
-	mu    sync.RWMutex
-}
-
-func (t *numberTask) Exec(ctx context.Context, n int) {
-	// Pretend to do some work.
-	time.Sleep(t.sleep)
-
-	t.mu.Lock()
-	t.nums = append(t.nums, n)
-	t.mu.Unlock()
-}
-
-func (t *numberTask) Numbers() []int {
-	t.mu.RLock()
-
-	nums := make([]int, len(t.nums))
-	copy(nums, t.nums)
-
-	t.mu.RUnlock()
-	return nums
 }

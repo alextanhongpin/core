@@ -2,10 +2,12 @@ github.com/PuerkitoBio/goquery v1.9.2 h1:4/wZksC3KgkQw7SQgkKotmKljk0M6V8TUvA8Wb4
 github.com/PuerkitoBio/goquery v1.9.2/go.mod h1:GHPCaP0ODyyxqcNoFGYlAprUFH81NuRPd0GX3Zu2Mvk=
 github.com/alextanhongpin/core/sync/batch v0.0.0-20240826174456-c35d7bfe61bd h1:ZqQ0PtJSbM2YhJmsRtLB117Hp5lhiPavOKqJb5H2ejo=
 github.com/alextanhongpin/core/sync/batch v0.0.0-20240826174456-c35d7bfe61bd/go.mod h1:jgVoYlKx8XGAI5NMadshnOPYooQN0/2+6uRU8VWFBMM=
+github.com/alextanhongpin/core/sync/pipeline v0.0.0-20240829162940-d8e443b88fe7 h1:VAuhKsgmim7Qdkdn/2iMBxffu8GNMVVs4RDSXksOwdk=
+github.com/alextanhongpin/core/sync/pipeline v0.0.0-20240829162940-d8e443b88fe7/go.mod h1:BxxL8kCdWTnxmYSFYlTG4+1YlI7/JDMVrUp2lcptmGs=
 github.com/alextanhongpin/core/sync/promise v0.0.0-20240820123002-affc9fec4fec h1:q552p4UNShkwtNtnOM+w1S9w2MyjStNZCkxv7FDxE7c=
 github.com/alextanhongpin/core/sync/promise v0.0.0-20240820123002-affc9fec4fec/go.mod h1:AMzb5tn043T3lDg/C87EXKg4QcIeP1WaUiKM02SdvkQ=
-github.com/alextanhongpin/core/sync/rate v0.0.0-20240826174456-c35d7bfe61bd h1:7M6O0aNmM8R+vlMu0gvWfXNMmUa9MsKNDmDVAVJPq/w=
-github.com/alextanhongpin/core/sync/rate v0.0.0-20240826174456-c35d7bfe61bd/go.mod h1:1x3Trxscyf8ovXWIcw7MfRWvrzH0hsNtybKoJAKFUvo=
+github.com/alextanhongpin/core/sync/rate v0.0.0-20240827132545-a3c3f85a9182 h1:qdE3r9kO/bVDCg+o/1YkaVIRd1izFHKzq+xZIDg1Dl0=
+github.com/alextanhongpin/core/sync/rate v0.0.0-20240827132545-a3c3f85a9182/go.mod h1:1x3Trxscyf8ovXWIcw7MfRWvrzH0hsNtybKoJAKFUvo=
 github.com/alextanhongpin/errors v0.0.0-20230717124106-3e3c39edaa89 h1:9i0Ng9p8X+dhU+F26Cu4weVODtCRPamQcCVrv6xGPYY=
 github.com/alextanhongpin/errors v0.0.0-20230717124106-3e3c39edaa89/go.mod h1:5jPdqh1bzNfGBbyIYzKRqJ28RpPOjNtiW7u5ypWoAKc=
 github.com/alextanhongpin/testdump/httpdump v0.0.0-20240617032328-5cdd37fc0156 h1:eLsEs+VRCxTtoNldcTog8CyRjHtdfzgm23coJns+C9g=

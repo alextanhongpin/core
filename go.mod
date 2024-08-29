@@ -1,13 +1,13 @@
 module github.com/alextanhongpin/core
 
-go 1.22.5
+go 1.23.0
 
 require golang.org/x/exp v0.0.0-20240823005443-9b4947da3948
 
 require (
 	github.com/alextanhongpin/core/sync/batch v0.0.0-20240826174456-c35d7bfe61bd
+	github.com/alextanhongpin/core/sync/pipeline v0.0.0-20240829162940-d8e443b88fe7
 	github.com/alextanhongpin/core/sync/promise v0.0.0-20240820123002-affc9fec4fec
-	github.com/alextanhongpin/core/sync/rate v0.0.0-20240826174456-c35d7bfe61bd
 	github.com/alextanhongpin/errors v0.0.0-20230717124106-3e3c39edaa89
 	github.com/alextanhongpin/testdump/httpdump v0.0.0-20240617032328-5cdd37fc0156
 	github.com/go-playground/validator/v10 v10.22.0
@@ -26,6 +26,7 @@ require (
 )
 
 require (
+	github.com/alextanhongpin/core/sync/rate v0.0.0-20240827132545-a3c3f85a9182 // indirect
 	github.com/alextanhongpin/testdump/pkg/diff v0.0.0-20240617032328-5cdd37fc0156 // indirect
 	github.com/alextanhongpin/testdump/pkg/reviver v0.0.0-20240617032328-5cdd37fc0156 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
