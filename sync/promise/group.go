@@ -108,6 +108,20 @@ func (g *Group[T]) LoadOrStore(key string) (*Promise[T], bool) {
 	return p, false
 }
 
+func (g *Group[T]) LoadAndDelete(key string) (*Promise[T], bool) {
+	g.mu.Lock()
+	p, ok := g.ps[key]
+	if ok {
+		delete(g.ps, key)
+		g.mu.Unlock()
+
+		return p, true
+	}
+	g.mu.Unlock()
+
+	return p, false
+}
+
 func (g *Group[T]) Len() int {
 	g.mu.RLock()
 	n := len(g.ps)
