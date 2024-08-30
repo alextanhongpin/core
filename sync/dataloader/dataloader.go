@@ -90,47 +90,13 @@ func (d *DataLoader[K, V]) Set(k K, v V) {
 }
 
 func (d *DataLoader[K, V]) Load(k K) (V, error) {
-	ctx := d.ctx
-	d.start(ctx)
-
-	p, loaded := d.pg.LoadOrStore(fmt.Sprint(k))
-	if loaded {
-		return p.Await()
-	}
-
-	select {
-	case <-ctx.Done():
-		// Immediately rejects.
-		p.Reject(newKeyError(k, context.Cause(ctx)))
-	case d.ch <- k:
-	}
-
-	return p.Await()
+	return d.load(k).Await()
 }
 
 func (d *DataLoader[K, V]) LoadMany(ks []K) ([]promise.Result[V], error) {
-	// No keys to load.
-	if len(ks) == 0 {
-		return nil, nil
-	}
-
-	ctx := d.ctx
-	d.start(ctx)
-
 	res := make(promise.Promises[V], len(ks))
 	for i, k := range ks {
-		p, loaded := d.pg.LoadOrStore(fmt.Sprint(k))
-		if loaded {
-			goto labels
-		}
-
-		select {
-		case <-ctx.Done():
-			p.Reject(newKeyError(k, context.Cause(ctx)))
-		case d.ch <- k:
-		}
-	labels:
-		res[i] = p
+		res[i] = d.load(k)
 	}
 
 	return res.AllSettled(), nil
@@ -138,6 +104,8 @@ func (d *DataLoader[K, V]) LoadMany(ks []K) ([]promise.Result[V], error) {
 
 func (d *DataLoader[K, V]) Stop() {
 	d.end.Do(func() {
+		// Make sure the dataloader is started before stopping it.
+		d.begin.Do(func() {})
 		d.cancel(ErrTerminated)
 
 		d.wg.Wait()
@@ -156,6 +124,25 @@ func (d *DataLoader[K, V]) start(ctx context.Context) {
 	})
 }
 
+func (d *DataLoader[K, V]) load(k K) *promise.Promise[V] {
+	ctx := d.ctx
+	d.start(ctx)
+
+	p, loaded := d.pg.LoadOrStore(fmt.Sprint(k))
+	if loaded {
+		return p
+	}
+
+	select {
+	case <-ctx.Done():
+		// Immediately rejects.
+		p.Reject(newKeyError(k, context.Cause(ctx)))
+	case d.ch <- k:
+	}
+
+	return p
+}
+
 func (d *DataLoader[K, V]) loop(ctx context.Context) {
 	p1 := pipeline.Context(d.ctx, d.ch)
 	p2 := pipeline.Batch(d.opts.BatchMaxKeys, d.opts.BatchTimeout, p1)
@@ -168,19 +155,13 @@ func (d *DataLoader[K, V]) loop(ctx context.Context) {
 
 func (d *DataLoader[K, V]) batch(ctx context.Context, keys []K) {
 	kv, err := d.opts.BatchFn(ctx, keys)
-	if err != nil {
-		for _, k := range keys {
-			d.pg.Do(fmt.Sprint(k), func() (V, error) {
-				var v V
-				return v, newKeyError(k, err)
-			})
-		}
-
-		return
-	}
-
 	for _, k := range keys {
 		d.pg.Do(fmt.Sprint(k), func() (V, error) {
+			if err != nil {
+				var v V
+				return v, newKeyError(k, err)
+			}
+
 			v, ok := kv[k]
 			if ok {
 				return v, nil
