@@ -2,3 +2,5 @@ github.com/alextanhongpin/core/sync/rate v0.0.0-20240827132545-a3c3f85a9182 h1:q
 github.com/alextanhongpin/core/sync/rate v0.0.0-20240827132545-a3c3f85a9182/go.mod h1:1x3Trxscyf8ovXWIcw7MfRWvrzH0hsNtybKoJAKFUvo=
 golang.org/x/exp v0.0.0-20240823005443-9b4947da3948 h1:kx6Ds3MlpiUHKj7syVnbp57++8WpuKPcR5yjLBjvLEA=
 golang.org/x/exp v0.0.0-20240823005443-9b4947da3948/go.mod h1:akd2r19cwCdwSwWeIdzYQGa/EZZyqcOdwWiwj5L5eKQ=
+golang.org/x/sync v0.8.0 h1:3NFvSEYkUoMifnESzZl15y791HH1qU2xm6eCJU5ZPXQ=
+golang.org/x/sync v0.8.0/go.mod h1:Czt+wKu1gCyEFDUtn0jG5QVvpJ6rzVqr5aXyt9drQfk=

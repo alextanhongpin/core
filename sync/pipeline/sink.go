@@ -30,10 +30,26 @@ func Process[T any](in <-chan T, fn func(T)) func() {
 	wg.Add(1)
 
 	go func() {
+		defer wg.Done()
+
 		for v := range in {
 			fn(v)
 		}
 	}()
 
 	return wg.Wait
+}
+
+func Flush[T any](in <-chan T) {
+	for range in {
+	}
+}
+
+func Count[T any](in <-chan T) int {
+	var i int
+	for range in {
+		i++
+	}
+
+	return i
 }

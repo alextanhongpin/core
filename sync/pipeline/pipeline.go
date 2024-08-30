@@ -8,7 +8,21 @@ import (
 	"time"
 
 	"github.com/alextanhongpin/core/sync/rate"
+	"golang.org/x/sync/semaphore"
 )
+
+type Result[T any] struct {
+	Data T
+	Err  error
+}
+
+func (r Result[T]) Unwrap() (T, error) {
+	return r.Data, r.Err
+}
+
+func MakeResult[T any](data T, err error) Result[T] {
+	return Result[T]{Data: data, Err: err}
+}
 
 // Queue acts as an intermediary stage that queues results to a buffered channel.
 func Queue[T any](n int, in <-chan T) <-chan T {
@@ -280,29 +294,22 @@ func FanIn[T any](cs ...chan T) <-chan T {
 func Semaphore[T, V any](n int, in <-chan T, fn func(T) V) <-chan V {
 	out := make(chan V)
 
-	sem := make(chan struct{}, n)
-
-	var wg sync.WaitGroup
-	wg.Add(n)
+	ctx := context.Background()
+	sem := semaphore.NewWeighted(int64(n))
 
 	go func() {
-		for v := range in {
-			sem <- struct{}{}
-			go func() {
-				defer wg.Done()
+		defer close(out)
 
-				defer func() {
-					<-sem
-				}()
+		for v := range in {
+			sem.Acquire(ctx, 1)
+
+			go func() {
+				defer sem.Release(1)
 
 				out <- fn(v)
 			}()
 		}
-	}()
-
-	go func() {
-		wg.Wait()
-		close(out)
+		sem.Acquire(ctx, int64(n))
 	}()
 
 	return out
@@ -311,10 +318,11 @@ func Semaphore[T, V any](n int, in <-chan T, fn func(T) V) <-chan V {
 // Resilience.
 func RateLimit[T any](request int, period time.Duration, in <-chan T) <-chan T {
 	ch := make(chan T)
-	t := time.NewTicker(period / time.Duration(request))
 
 	go func() {
+		t := time.NewTicker(period / time.Duration(request))
 		defer t.Stop()
+
 		defer close(ch)
 
 		for v := range in {
@@ -350,19 +358,6 @@ func Tee[T any](in chan T) (out1, out2 chan T) {
 	return
 }
 
-type Result[T any] struct {
-	Data T
-	Err  error
-}
-
-func (r Result[T]) Unwrap() (T, error) {
-	return r.Data, r.Err
-}
-
-func MakeResult[T any](data T, err error) Result[T] {
-	return Result[T]{Data: data, Err: err}
-}
-
 func FlatMap[T any](in <-chan Result[T]) <-chan T {
 	out := make(chan T)
 
@@ -381,7 +376,7 @@ func FlatMap[T any](in <-chan Result[T]) <-chan T {
 	return out
 }
 
-func ErrorHandler[T any](in <-chan Result[T], fn func(error)) <-chan T {
+func Error[T any](in <-chan Result[T], fn func(error)) <-chan T {
 	out := make(chan T)
 
 	go func() {
@@ -432,11 +427,7 @@ func Batch[T comparable](limit int, period time.Duration, in <-chan T) <-chan []
 					return
 				}
 
-				if _, ok := cache[k]; ok {
-					continue
-				}
 				cache[k] = struct{}{}
-
 				if len(cache) >= limit {
 					batch()
 				}

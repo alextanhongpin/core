@@ -58,3 +58,23 @@ func Repeat[T any](ctx context.Context, vs ...T) <-chan T {
 
 	return out
 }
+
+func RepeatFunc[T any](ctx context.Context, fn func() []T) <-chan T {
+	out := make(chan T)
+
+	go func() {
+		defer close(out)
+
+		for {
+			for _, v := range fn() {
+				select {
+				case <-ctx.Done():
+					return
+				case out <- v:
+				}
+			}
+		}
+	}()
+
+	return out
+}
