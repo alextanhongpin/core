@@ -315,12 +315,11 @@ func Semaphore[T, V any](n int, in <-chan T, fn func(T) V) <-chan V {
 	return out
 }
 
-// Resilience.
-func RateLimit[T any](request int, period time.Duration, in <-chan T) <-chan T {
+func Every[T any](tick time.Duration, in <-chan T) <-chan T {
 	ch := make(chan T)
 
 	go func() {
-		t := time.NewTicker(period / time.Duration(request))
+		t := time.NewTicker(tick)
 		defer t.Stop()
 
 		defer close(ch)
@@ -332,6 +331,11 @@ func RateLimit[T any](request int, period time.Duration, in <-chan T) <-chan T {
 	}()
 
 	return ch
+}
+
+// Resilience.
+func RateLimit[T any](request int, period time.Duration, in <-chan T) <-chan T {
+	return Every[T](period/time.Duration(request), in)
 }
 
 func Tee[T any](in chan T) (out1, out2 chan T) {
