@@ -12,40 +12,22 @@ import (
 var ErrTerminated = errors.New("worker: terminated")
 
 type Worker[T any] struct {
-	ctx context.Context
 	ch  chan T
+	ctx context.Context
 	fn  func(ctx context.Context, v T)
-	sem chan struct{}
-}
-
-type Config struct {
-	MaxWorkers int
-}
-
-func NewConfig() *Config {
-	return &Config{
-		MaxWorkers: runtime.GOMAXPROCS(0),
-	}
+	n   int
 }
 
 // New returns a new background manager.
-func New[T any](ctx context.Context, fn func(context.Context, T), cfg *Config) (*Worker[T], func()) {
-	if cfg == nil {
-		cfg = NewConfig()
-	}
-	if cfg.MaxWorkers <= 0 {
-		cfg.MaxWorkers = runtime.GOMAXPROCS(0)
-	}
-
-	sem := make(chan struct{}, cfg.MaxWorkers)
-	for range cfg.MaxWorkers {
-		sem <- struct{}{}
+func New[T any](ctx context.Context, n int, fn func(context.Context, T)) (*Worker[T], func()) {
+	if n <= 0 {
+		n = runtime.GOMAXPROCS(0)
 	}
 
 	w := &Worker[T]{
-		ch:  make(chan T),
-		fn:  fn,
-		sem: sem,
+		ch: make(chan T),
+		fn: fn,
+		n:  n,
 	}
 
 	return w, w.init(ctx)
@@ -69,30 +51,22 @@ func (w *Worker[T]) init(ctx context.Context) func() {
 	w.ctx = ctx
 
 	var wg sync.WaitGroup
-	wg.Add(1)
+	wg.Add(w.n)
 
-	go func() {
-		defer wg.Done()
+	for range w.n {
+		go func() {
+			defer wg.Done()
 
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case v := <-w.ch:
-				<-w.sem
-
-				wg.Add(1)
-				go func() {
-					defer wg.Done()
-					defer func() {
-						w.sem <- struct{}{}
-					}()
-
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case v := <-w.ch:
 					w.fn(ctx, v)
-				}()
+				}
 			}
-		}
-	}()
+		}()
+	}
 
 	return func() {
 		cancel(ErrTerminated)
