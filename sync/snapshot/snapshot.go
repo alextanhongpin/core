@@ -3,137 +3,117 @@
 package snapshot
 
 import (
-	"cmp"
 	"context"
+	"errors"
 	"sync"
-	"sync/atomic"
 	"time"
-
-	"slices"
-
-	"github.com/alextanhongpin/core/internal"
-	"github.com/alextanhongpin/core/types/sliceutil"
 )
 
+var ErrTerminated = errors.New("snapshot: terminated")
+
+type Event struct {
+	Count  int
+	Policy Policy
+}
+
 type Policy struct {
-	Every    int64
+	Every    int
 	Interval time.Duration
 }
 
-func (p Policy) IntervalSeconds() int64 {
-	return p.Interval.Nanoseconds() / 1e9
-}
-
-type Manager struct {
-	unix     atomic.Int64
-	every    atomic.Int64
-	policies []Policy
-}
-
-func NewPolicy(every int64, interval time.Duration) Policy {
-	return Policy{
-		Every:    every,
-		Interval: interval,
+func NewOptions() []Policy {
+	return []Policy{
+		{Every: 1_000, Interval: time.Second},
+		{Every: 100, Interval: 10 * time.Second},
+		{Every: 10, Interval: time.Minute},
+		{Every: 1, Interval: time.Hour},
 	}
 }
 
-func New(policies []Policy) *Manager {
-	if len(policies) == 0 {
-		panic("snapshot: cannot instantiate new snapshot with no policies")
+type Background struct {
+	opts []Policy
+	ch   chan int
+	ctx  context.Context
+	fn   func(ctx context.Context, evt Event)
+}
+
+func New(ctx context.Context, fn func(context.Context, Event), opts ...Policy) (*Background, func()) {
+	bg := &Background{
+		opts: opts,
+		ch:   make(chan int),
+		fn:   fn,
 	}
+	ctx, cancel := context.WithCancelCause(ctx)
+	stop := bg.init(ctx)
+	bg.ctx = ctx
 
-	slices.SortFunc(policies, func(a, b Policy) int {
-		return cmp.Compare(a.IntervalSeconds(), b.IntervalSeconds())
-	})
-
-	return &Manager{
-		policies: policies,
+	return bg, func() {
+		cancel(ErrTerminated)
+		stop()
 	}
 }
 
-func (m *Manager) Inc(n int64) int64 {
-	return m.every.Add(n)
-}
-
-// Exec allows lazy execution.
-func (m *Manager) Exec(ctx context.Context, h func(ctx context.Context)) {
-	if !m.allow() {
-		return
+func (b *Background) Inc(n int) error {
+	select {
+	case <-b.ctx.Done():
+		return context.Cause(b.ctx)
+	case b.ch <- n:
+		return nil
 	}
-
-	h(ctx)
-	m.reset()
 }
 
-// Run executes whenever the condition is fulfilled. Returning an error will
-// cause the every and timer not to reset.
-// The client should be responsible for logging and handling the error.
-func (m *Manager) Run(ctx context.Context, h func(ctx context.Context)) func() {
+func (b *Background) init(ctx context.Context) func() {
+	var count int
+
 	var wg sync.WaitGroup
-	ctx, cancel := context.WithCancel(ctx)
-	wg.Add(1)
+	wg.Add(len(b.opts))
 
-	stop := func() {
-		cancel()
+	ch := make(chan Policy)
 
-		wg.Wait()
+	for _, p := range b.opts {
+		go func() {
+			defer wg.Done()
+
+			t := time.NewTicker(p.Interval)
+			defer t.Stop()
+
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-t.C:
+					select {
+					case ch <- p:
+					case <-ctx.Done():
+						return
+					}
+				}
+			}
+		}()
 	}
 
+	wg.Add(1)
 	go func() {
-		defer cancel()
 		defer wg.Done()
-
-		m.start(ctx, h)
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case n := <-b.ch:
+				count += n
+			case p := <-ch:
+				if count < p.Every {
+					continue
+				}
+				evt := Event{
+					Count:  count,
+					Policy: p,
+				}
+				count = 0
+				b.fn(ctx, evt)
+			}
+		}
 	}()
 
-	return stop
-}
-
-func (m *Manager) start(ctx context.Context, h func(ctx context.Context)) {
-	t := time.NewTicker(m.tick())
-	defer t.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-t.C:
-			m.Exec(ctx, h)
-		}
-	}
-}
-
-func (m *Manager) reset() {
-	m.every.Store(0)
-	m.unix.Store(time.Now().Unix())
-}
-
-func (m *Manager) allow() bool {
-	delta := time.Now().Unix() - m.unix.Load()
-	every := m.every.Load()
-
-	for _, p := range m.policies {
-		if delta < p.IntervalSeconds() {
-			return false
-		}
-
-		if every >= p.Every {
-			return true
-		}
-	}
-
-	return false
-}
-
-func (m *Manager) tick() time.Duration {
-	intervals := sliceutil.Map(m.policies, func(i int) int64 {
-		return m.policies[i].IntervalSeconds()
-	})
-
-	// Find the greatest common denominator to run the pooling.
-	// If the given policy interval is 3s, 6s, and 9s for example,
-	// the GCD will be 3s.
-	gcd := internal.GCD(intervals)
-
-	return time.Duration(gcd) * time.Second
+	return wg.Wait
 }
