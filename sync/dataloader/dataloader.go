@@ -27,6 +27,7 @@ type Options[K comparable, V any] struct {
 	BatchMaxKeys   int
 	BatchTimeout   time.Duration
 	BatchQueueSize int
+	Cache          cache[K, V]
 }
 
 func (o *Options[K, V]) Valid() error {
@@ -42,6 +43,10 @@ func (o *Options[K, V]) Valid() error {
 	o.BatchTimeout = cmp.Or(o.BatchTimeout, 16*time.Millisecond)
 	if o.BatchTimeout < 1 {
 		return errors.New("dataloader: BatchTimeout must be greater than zero")
+	}
+
+	if o.Cache == nil {
+		o.Cache = NewCache[K, V]()
 	}
 
 	return nil
@@ -85,8 +90,7 @@ func New[K comparable, V any](ctx context.Context, opts *Options[K, V]) *DataLoa
 // There is no use passing context as the first argument as it does not control
 // the lifecycle.
 func (d *DataLoader[K, V]) Set(k K, v V) {
-	p := promise.Resolve(v)
-	d.pg.DeleteAndStore(fmt.Sprint(k), p)
+	d.opts.Cache.Set(k, v, nil)
 }
 
 func (d *DataLoader[K, V]) Load(k K) (V, error) {
@@ -128,6 +132,19 @@ func (d *DataLoader[K, V]) load(k K) *promise.Promise[V] {
 	ctx := d.ctx
 	d.start(ctx)
 
+	v, err := d.opts.Cache.Get(k)
+	if err == nil {
+		return promise.Resolve(v)
+	}
+
+	// Only fetch from the db if the cache returns
+	// ErrNotExist.
+	// The cache can return ErrNoResult if the intended
+	// cached value is nil.
+	if !errors.Is(err, ErrNotExist) {
+		return promise.Reject[V](err)
+	}
+
 	p, loaded := d.pg.LoadOrStore(fmt.Sprint(k))
 	if loaded {
 		return p
@@ -135,8 +152,14 @@ func (d *DataLoader[K, V]) load(k K) *promise.Promise[V] {
 
 	select {
 	case <-ctx.Done():
-		// Immediately rejects.
-		p.Reject(newKeyError(k, context.Cause(ctx)))
+		err := newKeyError(k, context.Cause(ctx))
+		d.opts.Cache.Set(k, v, err)
+
+		// Remove the key.
+		d.pg.DoAndForget(fmt.Sprint(k), func() (V, error) {
+			var v V
+			return v, err
+		})
 	case d.ch <- k:
 	}
 
@@ -156,7 +179,7 @@ func (d *DataLoader[K, V]) loop(ctx context.Context) {
 func (d *DataLoader[K, V]) batch(ctx context.Context, keys []K) {
 	kv, err := d.opts.BatchFn(ctx, keys)
 	for _, k := range keys {
-		d.pg.Do(fmt.Sprint(k), func() (V, error) {
+		fn := func() (V, error) {
 			if err != nil {
 				var v V
 				return v, newKeyError(k, err)
@@ -168,6 +191,11 @@ func (d *DataLoader[K, V]) batch(ctx context.Context, keys []K) {
 			}
 
 			return v, newKeyError(k, ErrNoResult)
+		}
+		_, _ = d.pg.DoAndForget(fmt.Sprint(k), func() (V, error) {
+			v, err := fn()
+			d.opts.Cache.Set(k, v, err)
+			return v, err
 		})
 	}
 }
