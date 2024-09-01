@@ -2,8 +2,8 @@ package redistest
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"log"
 	"strings"
 	"sync"
 	"testing"
@@ -11,6 +11,8 @@ import (
 	dockertest "github.com/ory/dockertest/v3"
 	redis "github.com/redis/go-redis/v9"
 )
+
+var Error = errors.New("redistest")
 
 var c *client
 var once sync.Once
@@ -31,7 +33,7 @@ func Init(opts ...Option) func() {
 
 func Addr() string {
 	if c == nil || c.addr == "" {
-		panic("redistest: InitDB must be called at TestMain")
+		panic(newError("Init must be called at TestMain"))
 	}
 
 	return c.addr
@@ -39,7 +41,7 @@ func Addr() string {
 
 func Client(t *testing.T) *redis.Client {
 	if c == nil {
-		panic("redistest: InitDB must be called at TestMain")
+		panic(newError("Init must be called at TestMain"))
 	}
 
 	return c.Client(t)
@@ -77,7 +79,7 @@ func Image(image string) Option {
 	return func(c *config) error {
 		repo, tag, ok := strings.Cut(image, ":")
 		if !ok {
-			return fmt.Errorf("invalid image: %q", image)
+			return newError("invalid docker image format: %q", image)
 		}
 
 		c.Repository = repo
@@ -124,17 +126,17 @@ func (c *client) Client(t *testing.T) *redis.Client {
 func (c *client) init() error {
 	pool, err := dockertest.NewPool("")
 	if err != nil {
-		return fmt.Errorf("Could not construct pool: %s", err)
+		return newError("could not construct pool: %s", err)
 	}
 
 	err = pool.Client.Ping()
 	if err != nil {
-		return fmt.Errorf("Could not connect to Docker: %s", err)
+		return newError("could not connect to Docker: %s", err)
 	}
 
 	resource, err := pool.Run(c.cfg.Repository, c.cfg.Tag, nil)
 	if err != nil {
-		return fmt.Errorf("Could not start resource: %s", err)
+		return newError("could not start resource: %s", err)
 	}
 
 	addr := resource.GetHostPort("6379/tcp")
@@ -146,13 +148,13 @@ func (c *client) init() error {
 		ctx := context.Background()
 		return db.Ping(ctx).Err()
 	}); err != nil {
-		return fmt.Errorf("Could not connect to docker: %s", err)
+		return newError("could not connect to docker: %s", err)
 	}
 	c.addr = addr
 	c.close = func() {
 		// When you're done, kill and remove the container
 		if err := pool.Purge(resource); err != nil {
-			log.Fatalf("Could not purge resource: %s", err)
+			panic(newError("could not purge resource: %s", err))
 		}
 	}
 	return nil
@@ -164,6 +166,8 @@ type testClient struct {
 }
 
 func newTestClient(t *testing.T, opts ...Option) *testClient {
+	t.Helper()
+
 	c, err := newClient(opts...)
 	if err != nil {
 		t.Fatal(err)
@@ -182,4 +186,8 @@ func (tc *testClient) Addr() string {
 
 func (tc *testClient) Client() *redis.Client {
 	return tc.c.Client(tc.t)
+}
+
+func newError(msg string, args ...any) error {
+	return fmt.Errorf("%w: %s", Error, fmt.Sprintf(msg, args...))
 }

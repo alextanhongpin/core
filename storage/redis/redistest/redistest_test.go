@@ -3,7 +3,6 @@ package redistest_test
 import (
 	"context"
 	"errors"
-	"os"
 	"testing"
 	"time"
 
@@ -15,15 +14,19 @@ var ctx = context.Background()
 
 func TestMain(m *testing.M) {
 	stop := redistest.Init()
-	code := m.Run()
-	stop()
-	os.Exit(code)
+	defer stop()
+
+	m.Run()
 }
 
 func TestRedisPing(t *testing.T) {
 	t.Run("with addr", func(t *testing.T) {
 		db := redis.NewClient(&redis.Options{
 			Addr: redistest.Addr(),
+		})
+		// Close the connection.
+		t.Cleanup(func() {
+			_ = db.Close()
 		})
 
 		if err := db.Ping(ctx).Err(); err != nil {
@@ -32,6 +35,7 @@ func TestRedisPing(t *testing.T) {
 	})
 
 	t.Run("with client", func(t *testing.T) {
+		// Client is closed automatically at the end of the test.
 		db := redistest.Client(t)
 		if err := db.Ping(ctx).Err(); err != nil {
 			t.Fatal(err)
@@ -40,6 +44,8 @@ func TestRedisPing(t *testing.T) {
 }
 
 func TestRedisNew(t *testing.T) {
+	// Setup two separate redis instance.
+	// They do not share the same data.
 	db1 := redistest.New(t).Client()
 	db2 := redistest.New(t).Client()
 
