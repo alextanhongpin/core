@@ -32,7 +32,7 @@ func ExampleSequential() {
 
 	// Output:
 	// has next? first_mile_completed true
-	// step 1: status=not started valid=true
+	// step 1: status=idle valid=true
 	//
 	// has next? mid_mile_completed true
 	// step 2: status=pending valid=true

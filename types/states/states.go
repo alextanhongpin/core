@@ -46,7 +46,7 @@ func (s *Sequence) Status() Status {
 
 	switch s.next() {
 	case 0:
-		return NotStarted
+		return Idle
 	case len(s.steps):
 		return Success
 	default:

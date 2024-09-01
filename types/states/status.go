@@ -3,7 +3,7 @@ package states
 type Status int
 
 const (
-	NotStarted Status = iota
+	Idle Status = iota
 	Pending
 	Success
 	Failed
@@ -11,7 +11,7 @@ const (
 
 func (s Status) Valid() bool {
 	switch s {
-	case NotStarted, Pending, Success, Failed:
+	case Idle, Pending, Success, Failed:
 		return true
 	default:
 		return false
@@ -20,8 +20,8 @@ func (s Status) Valid() bool {
 
 func (s Status) String() string {
 	switch s {
-	case NotStarted:
-		return "not started"
+	case Idle:
+		return "idle"
 	case Pending:
 		return "pending"
 	case Success:
