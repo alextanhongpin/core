@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"log"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -18,6 +17,8 @@ import (
 	dockertest "github.com/ory/dockertest/v3"
 	"github.com/ory/dockertest/v3/docker"
 )
+
+var Error = errors.New("pgtest")
 
 var id atomic.Int64
 
@@ -52,12 +53,7 @@ func New(t *testing.T, opts ...Option) *testClient {
 // The operations will be rollbacked at the end, reducing the need to manually
 // create transactions and rollbacking.
 func Tx(t *testing.T) *sql.DB {
-	db := c.Tx()
-	t.Cleanup(func() {
-		db.Close()
-	})
-
-	return db
+	return c.Tx(t)
 }
 
 // DB returns a non-transaction *sql.DB.
@@ -65,12 +61,7 @@ func Tx(t *testing.T) *sql.DB {
 // same transactions, e.g. when generating current_timestamp, or locking in
 // different connection.
 func DB(t *testing.T) *sql.DB {
-	db := c.DB()
-	t.Cleanup(func() {
-		db.Close()
-	})
-
-	return db
+	return c.DB(t)
 }
 
 func DSN() string {
@@ -87,11 +78,20 @@ func Hook(fn func(*sql.DB) error) func(*config) error {
 	}
 }
 
+// Expire sets the duration for the docker to hard-kill the postgres image.
+func Expire(duration time.Duration) func(*config) error {
+	return func(cfg *config) error {
+		cfg.Expire = duration
+
+		return nil
+	}
+}
+
 func Image(image string) func(*config) error {
 	return func(cfg *config) error {
 		repo, tag, ok := strings.Cut(image, ":")
 		if !ok {
-			return fmt.Errorf("pgtest: invalid Image(%q) format", image)
+			return newError("invalid docker image format: %s", image)
 		}
 		cfg.Repository = repo
 		cfg.Tag = tag
@@ -103,6 +103,7 @@ func Image(image string) func(*config) error {
 type config struct {
 	Repository string
 	Tag        string
+	Expire     time.Duration
 	Hook       func(*sql.DB) error
 }
 
@@ -110,6 +111,10 @@ func newConfig() *config {
 	return &config{
 		Repository: "postgres",
 		Tag:        "latest",
+		Expire:     10 * time.Minute,
+		Hook: func(*sql.DB) error {
+			return nil
+		},
 	}
 }
 
@@ -154,12 +159,12 @@ func (c *client) init() error {
 
 	pool, err := dockertest.NewPool("")
 	if err != nil {
-		return fmt.Errorf("could not construct pool: %w", err)
+		return newError("could not construct pool: %s", err)
 	}
 
 	err = pool.Client.Ping()
 	if err != nil {
-		return fmt.Errorf("could not connect to docker: %w", err)
+		return newError("could not connect to docker: %s", err)
 	}
 
 	// Pulls an image, creates a container based on it and run it.
@@ -178,7 +183,7 @@ func (c *client) init() error {
 		config.RestartPolicy = docker.RestartPolicy{Name: "no"}
 	})
 	if err != nil {
-		return fmt.Errorf("could not start resources: %w", err)
+		return newError("could not start resources: %s", err)
 	}
 
 	// https://www.postgresql.org/docs/current/non-durability.html
@@ -196,13 +201,13 @@ func (c *client) init() error {
 		return err
 	}
 	if code != 1 {
-		return errors.New("exec code is not 1")
+		return newError("exec code is not 1")
 	}
 
 	hostAndPort := resource.GetHostPort("5432/tcp")
 	dsn := fmt.Sprintf("postgres://john:123456@%s/test?sslmode=disable", hostAndPort)
 
-	resource.Expire(120) // Tell docker to kill the container in 120 seconds.
+	resource.Expire(uint(c.cfg.Expire.Seconds())) // Tell docker to kill the container in 120 seconds.
 
 	// Exponential backoff-retry, because the application in the container might
 	// not be ready to accept connections yet.
@@ -210,11 +215,11 @@ func (c *client) init() error {
 	if err := pool.Retry(func() error {
 		db, err := sql.Open("postgres", dsn)
 		if err != nil {
-			return fmt.Errorf("failed to open: %w", err)
+			return newError("failed to open: %s", err)
 		}
 
 		if err := db.Ping(); err != nil {
-			return fmt.Errorf("failed to ping: %w", err)
+			return newError("failed to ping: %s", err)
 		}
 
 		// Run migrations, seed, fixtures etc.
@@ -223,18 +228,18 @@ func (c *client) init() error {
 		}
 
 		if err := db.Close(); err != nil {
-			return fmt.Errorf("failed to close db: %w", err)
+			return newError("failed to close db: %s", err)
 		}
 
 		return nil
 	}); err != nil {
-		return fmt.Errorf("could not connect to docker: %w", err)
+		return newError("could not connect to docker: %s", err)
 	}
 
 	c.dsn = dsn
 	c.close = func() {
 		if err := pool.Purge(resource); err != nil {
-			log.Fatal("could not purge resource:", err)
+			panic(newError("could not purge resource: %s", err))
 		}
 	}
 
@@ -245,11 +250,18 @@ func (c *client) DSN() string {
 	return c.dsn
 }
 
-func (c *client) DB() *sql.DB {
-	return pg.New(c.dsn)
+func (c *client) DB(t *testing.T) *sql.DB {
+	db := pg.New(c.dsn)
+	t.Cleanup(func() {
+		_ = db.Close()
+	})
+
+	return db
 }
 
-func (c *client) Tx() *sql.DB {
+func (c *client) Tx(t *testing.T) *sql.DB {
+	t.Helper()
+
 	// Lazily initialize the txdb.
 	c.once.Do(func() {
 		c.txdb = fmt.Sprintf("txdb%d", nextID())
@@ -259,8 +271,11 @@ func (c *client) Tx() *sql.DB {
 	// Returns a new identifier for every open connection.
 	db, err := sql.Open(c.txdb, uuid.New().String())
 	if err != nil {
-		panic(err)
+		t.Fatal(err)
 	}
+	t.Cleanup(func() {
+		_ = db.Close()
+	})
 
 	return db
 }
@@ -271,10 +286,13 @@ type testClient struct {
 }
 
 func newTestClient(t *testing.T, opts ...Option) *testClient {
+	t.Helper()
 	c, err := newClient(opts...)
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	t.Cleanup(c.close)
 
 	return &testClient{
 		t: t,
@@ -283,21 +301,17 @@ func newTestClient(t *testing.T, opts ...Option) *testClient {
 }
 
 func (tc *testClient) DB() *sql.DB {
-	db := tc.c.DB()
-	tc.t.Cleanup(func() {
-		db.Close()
-	})
-	return db
+	return tc.c.DB(tc.t)
 }
 
 func (tc *testClient) Tx() *sql.DB {
-	db := tc.c.Tx()
-	tc.t.Cleanup(func() {
-		db.Close()
-	})
-	return db
+	return tc.c.Tx(tc.t)
 }
 
 func (tc *testClient) DSN() string {
 	return tc.c.dsn
+}
+
+func newError(msg string, args ...any) error {
+	return fmt.Errorf("%w: %s", Error, fmt.Sprintf(msg, args...))
 }

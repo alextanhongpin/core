@@ -3,7 +3,6 @@ package pgtest_test
 import (
 	"database/sql"
 	"fmt"
-	"os"
 	"sync"
 	"testing"
 
@@ -11,23 +10,27 @@ import (
 	_ "github.com/lib/pq"
 )
 
-var opts = []pgtest.Option{pgtest.Image("postgres:15.1-alpine"), pgtest.Hook(migrate)}
+var opts = []pgtest.Option{
+	pgtest.Image("postgres:15.1-alpine"),
+	pgtest.Hook(migrate),
+}
 
 func TestMain(m *testing.M) {
 	// Start the container once.
 	stop := pgtest.Init(opts...)
-	code := m.Run() // Run tests.
-	stop()          // You can't defer this because os.Exit doesn't care for defer.
-	os.Exit(code)
+	defer stop()
+
+	m.Run() // Run tests.
 }
 
 func migrate(db *sql.DB) error {
+	// Alternatively, you can also usej pgtest.DSN() to get
+	// the connection string.
 	_, err := db.Exec(`create table numbers(n int)`)
 	return err
 }
 
 func TestDB(t *testing.T) {
-
 	n := 3
 	var wg sync.WaitGroup
 	wg.Add(n)
@@ -67,6 +70,7 @@ func TestDB(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Log(pgtest.DSN())
 }
 
 func TestTx(t *testing.T) {
