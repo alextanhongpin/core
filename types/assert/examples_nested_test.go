@@ -3,9 +3,14 @@ package assert_test
 import (
 	"encoding/json"
 	"fmt"
-	"strings"
 
 	"github.com/alextanhongpin/core/types/assert"
+)
+
+var (
+	optional = assert.Optional
+	required = assert.Required
+	check    = assert.Assert
 )
 
 func ExampleAssert() {
@@ -49,7 +54,7 @@ func (req *CreateOrderRequest) Valid() map[string]string {
 		}
 	}
 
-	return assert.NonZeroMap(res)
+	return assert.Map(res)
 }
 
 type LineItemRequest struct {
@@ -59,38 +64,26 @@ type LineItemRequest struct {
 }
 
 func (req *LineItemRequest) Valid() map[string]string {
-	return assert.NonZeroMap(map[string]string{
+	return assert.Map(map[string]string{
 		"price":     validatePrice(req.Price),
 		"productId": required(req.ProductID),
 		"quantity":  validateQuantity(req.Quantity),
 	})
 }
 
-func join(s []string) string {
-	return strings.Join(s, ", ")
-}
-
-func required[T comparable](v T, assertions ...string) string {
-	return join(assert.Required(v, assertions...))
-}
-
-func optional[T comparable](v T, assertions ...string) string {
-	return join(assert.Optional(v, assertions...))
-}
-
 func validatePrice(n int64) string {
 	return required(n,
-		assert.Assert(n > 0, "must be greater than 0"))
+		check(n > 0, "must be greater than 0"))
 }
 
 func validateDiscount(n int64) string {
 	return optional(n,
-		assert.Assert(n > 0, "must be greater than 0"),
-		assert.Assert(n <= 100, "maximum discount assert.Assert 100%"),
+		check(n > 0, "must be greater than 0"),
+		check(n <= 100, "maximum discount assert.Assert 100%"),
 	)
 }
 
 func validateQuantity(n int64) string {
 	return optional(n,
-		assert.Assert(n > 0, "must be greater than 0"))
+		check(n > 0, "must be greater than 0"))
 }

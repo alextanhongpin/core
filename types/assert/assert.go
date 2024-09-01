@@ -1,5 +1,10 @@
 package assert
 
+import (
+	"reflect"
+	"strings"
+)
+
 func Assert(is bool, msg string) string {
 	if is {
 		return ""
@@ -8,45 +13,45 @@ func Assert(is bool, msg string) string {
 	return msg
 }
 
-func Required[T comparable](v T, assertions ...string) []string {
-	var zero T
-	if v != zero {
-		return assertions
-	}
-	return NonZeroSlice(append([]string{"required"}, assertions...))
-}
+func Required(v any, assertions ...string) string {
+	var sb strings.Builder
 
-func Optional[T comparable](v T, assertions ...string) []string {
-	var zero T
-	if v == zero {
-		return nil
+	if isZero(v) {
+		sb.WriteString("required")
+		sb.WriteString(", ")
 	}
 
-	return NonZeroSlice(assertions)
-}
-
-func NonZeroSlice[T comparable](vs []T) []T {
-	var zero T
-	res := make([]T, 0, len(vs))
-	for _, v := range vs {
-		if v == zero {
+	for _, s := range assertions {
+		if s == "" {
 			continue
 		}
-		res = append(res, v)
+		sb.WriteString(s)
+		sb.WriteString(", ")
 	}
 
-	return res
+	return strings.TrimSuffix(sb.String(), ", ")
 }
 
-func NonZeroMap[K, V comparable](kv map[K]V) map[K]V {
-	var zero V
-	res := make(map[K]V)
+func Optional(v any, assertions ...string) string {
+	if isZero(v) {
+		return ""
+	}
+
+	return Required(v, assertions...)
+}
+
+func Map(kv map[string]string) map[string]string {
+	res := make(map[string]string)
 	for k, v := range kv {
-		if v == zero {
+		if v == "" {
 			continue
 		}
 		res[k] = v
 	}
 
 	return res
+}
+
+func isZero(v any) bool {
+	return v == nil || reflect.ValueOf(v).IsZero()
 }
