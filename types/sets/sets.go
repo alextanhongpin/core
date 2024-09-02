@@ -1,8 +1,9 @@
 package sets
 
 import (
+	"slices"
+
 	"golang.org/x/exp/constraints"
-	"golang.org/x/exp/slices"
 )
 
 type OrderedComparable interface {
