@@ -44,7 +44,7 @@ func NonZero(v any) error {
 		switch m := v.(type) {
 		case map[string]any:
 			if len(m) == 0 {
-				return newKeyError(key)
+				return newFieldError(key)
 			}
 			for k, v := range m {
 				if err := validate(join(key, k), v); err != nil {
@@ -53,7 +53,7 @@ func NonZero(v any) error {
 			}
 		case []any:
 			if len(m) == 0 {
-				return newKeyError(key)
+				return newFieldError(key)
 			}
 			for i, v := range m {
 				if err := validate(join(key, fmt.Sprintf("[%d]", i)), v); err != nil {
@@ -62,7 +62,7 @@ func NonZero(v any) error {
 			}
 		default:
 			if isEmpty(m) {
-				return newKeyError(key)
+				return newFieldError(key)
 			}
 		}
 
@@ -100,17 +100,17 @@ func toMap(v any) (any, error) {
 	return a, nil
 }
 
-type KeyError struct {
-	Path string
-	Key  string
+type FieldError struct {
+	Path  string
+	Field string
 }
 
-func newKeyError(path string) error {
+func newFieldError(path string) error {
 	parts := strings.Split(path, ".")
 	key := parts[len(parts)-1]
-	return &KeyError{Path: path, Key: key}
+	return &FieldError{Path: path, Field: key}
 }
 
-func (k *KeyError) Error() string {
-	return fmt.Sprintf("key %q is empty", k.Key)
+func (k *FieldError) Error() string {
+	return fmt.Sprintf("field %q is empty", k.Field)
 }

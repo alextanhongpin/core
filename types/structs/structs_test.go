@@ -10,7 +10,6 @@ import (
 )
 
 type Time struct {
-	now time.Time
 }
 
 func TestName(t *testing.T) {
@@ -34,10 +33,10 @@ func TestNonZero(t *testing.T) {
 	err := structs.NonZero(u)
 
 	is := assert.New(t)
-	var keyErr *structs.KeyError
-	is.True(errors.As(err, &keyErr))
-	is.Equal(keyErr.Path, "structs_test.User.Name")
-	is.Equal(keyErr.Key, "Name")
+	var fieldErr *structs.FieldError
+	is.True(errors.As(err, &fieldErr))
+	is.Equal(fieldErr.Path, "structs_test.User.Name")
+	is.Equal(fieldErr.Field, "Name")
 
 	u.Name = "John Appleseed"
 	err = structs.NonZero(u)
