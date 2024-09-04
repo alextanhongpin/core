@@ -9,7 +9,7 @@ Content-Type: application/json
 
 {
  "error": {
-  "code": "internal_server_error",
-  "message": "Oops, please try again later"
+  "code": "Internal Server Error",
+  "message": "An unexpected error occurred"
  }
 }

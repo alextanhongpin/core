@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	"github.com/alextanhongpin/core/http/response"
+	"github.com/alextanhongpin/errors/causes"
+	"github.com/alextanhongpin/errors/codes"
 	"github.com/alextanhongpin/testdump/httpdump"
 )
 
@@ -18,14 +20,17 @@ func TestJSONError(t *testing.T) {
 		wr := httptest.NewRecorder()
 		r := httptest.NewRequest("GET", "/user/1", nil)
 		h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			response.JSONError(w, err)
+			wr := response.NewJSONEncoder(w, r)
+			defer wr.Flush()
+
+			wr.SetError(err)
 		})
 		hd := httpdump.Handler(t, h)
 		hd.ServeHTTP(wr, r)
 	}
 
 	t.Run("known error", func(t *testing.T) {
-		dumpError(t, response.ErrBadRequest)
+		dumpError(t, causes.New(codes.BadRequest, "api/bad_request", "The request provided is invalid"))
 	})
 
 	t.Run("unknown error", func(t *testing.T) {
@@ -43,20 +48,13 @@ func TestJSON(t *testing.T) {
 		wr := httptest.NewRecorder()
 		r := httptest.NewRequest("GET", "/users", nil)
 		h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			payload := response.
-				OK([]user{
-					{ID: "user-1", Name: "Alice"},
-					{ID: "user-2", Name: "Bob"},
-				}).
-				WithLinks(&response.Links{
-					Prev: "prev-link",
-					Next: "next-link",
-				}).
-				WithMeta(&response.Meta{
-					"count": 2,
-				})
+			wr := response.NewJSONEncoder(w, r)
+			defer wr.Flush()
 
-			response.JSON(w, payload, http.StatusOK)
+			wr.SetData([]user{
+				{ID: "user-1", Name: "Alice"},
+				{ID: "user-2", Name: "Bob"},
+			})
 		})
 
 		hd := httpdump.Handler(t, h)
@@ -67,9 +65,15 @@ func TestJSON(t *testing.T) {
 		wr := httptest.NewRecorder()
 		r := httptest.NewRequest("GET", "/users", nil)
 		h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			response.JSON(w, map[string]any{
-				"bad_number": json.Number("1.5x"),
-			}, http.StatusOK)
+			wr := response.NewJSONEncoder(w, r)
+			defer wr.Flush()
+
+			wr.SetData(
+				map[string]any{
+					"bad_number": json.Number("1.5x"),
+				},
+				http.StatusCreated,
+			)
 		})
 
 		hd := httpdump.Handler(t, h)

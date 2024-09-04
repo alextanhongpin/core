@@ -17,12 +17,5 @@ Content-Type: application/json
    "id": "user-2",
    "Name": "Bob"
   }
- ],
- "meta": {
-  "count": 2
- },
- "links": {
-  "prev": "prev-link",
-  "next": "next-link"
- }
+ ]
 }

@@ -24,20 +24,18 @@ func TestParseAuthHeader(t *testing.T) {
 
 	for name, ts := range tests {
 		t.Run(name, func(t *testing.T) {
-			assert := assert.New(t)
 			r := httptest.NewRequest("POST", "/userinfo", nil)
 			r.Header.Set("Authorization", ts.auth)
 
 			token, ok := httputil.BearerAuth(r)
-			assert.Equal(ts.ok, ok)
-			assert.Equal(ts.want, token)
+			is := assert.New(t)
+			is.Equal(ts.ok, ok)
+			is.Equal(ts.want, token)
 		})
 	}
 }
 
 func TestSignAndVerifyJWT(t *testing.T) {
-	assert := assert.New(t)
-
 	secret := []byte("secret")
 	token, err := httputil.SignJWT(secret, jwt.MapClaims{
 		"sub": "john.appleseed@mail.com",
@@ -47,6 +45,7 @@ func TestSignAndVerifyJWT(t *testing.T) {
 	}
 
 	claims, err := httputil.VerifyJWT(secret, token)
-	assert.Nil(err)
-	assert.Equal("john.appleseed@mail.com", claims["sub"])
+	is := assert.New(t)
+	is.Nil(err)
+	is.Equal("john.appleseed@mail.com", claims["sub"])
 }

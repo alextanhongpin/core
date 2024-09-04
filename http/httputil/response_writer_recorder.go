@@ -6,32 +6,34 @@ import (
 
 type ResponseWriterRecorder struct {
 	http.ResponseWriter
-	statusCode    int
-	body          []byte
-	headerWritten bool
+	code        int
+	body        []byte
+	wroteHeader bool
 }
 
 func NewResponseWriterRecorder(w http.ResponseWriter) *ResponseWriterRecorder {
 	return &ResponseWriterRecorder{
 		ResponseWriter: w,
-		statusCode:     http.StatusOK,
+		code:           http.StatusOK,
 	}
 }
 
-func (w *ResponseWriterRecorder) WriteHeader(statusCode int) {
-	if w.headerWritten {
+func (w *ResponseWriterRecorder) WriteHeader(code int) {
+	if w.wroteHeader {
 		return
 	}
+	w.wroteHeader = true
 
-	w.statusCode = statusCode
-	w.ResponseWriter.WriteHeader(statusCode)
-	w.headerWritten = true
-
+	w.code = code
+	w.ResponseWriter.WriteHeader(code)
 }
 
 func (w *ResponseWriterRecorder) Write(b []byte) (int, error) {
-	w.headerWritten = true
+	if !w.wroteHeader {
+		w.WriteHeader(w.code)
+	}
 	w.body = b
+
 	return w.ResponseWriter.Write(b)
 }
 
@@ -44,5 +46,5 @@ func (w *ResponseWriterRecorder) Body() []byte {
 }
 
 func (w *ResponseWriterRecorder) StatusCode() int {
-	return w.statusCode
+	return w.code
 }

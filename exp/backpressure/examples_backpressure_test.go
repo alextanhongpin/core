@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/alextanhongpin/core/sync/backpressure"
+	"github.com/alextanhongpin/core/exp/backpressure"
 )
 
 func ExampleNew() {

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/alextanhongpin/core/sync/futures"
+	"github.com/alextanhongpin/core/exp/futures"
 )
 
 func ExampleFunc() {

@@ -3,7 +3,7 @@ package batch_test
 import (
 	"fmt"
 
-	"github.com/alextanhongpin/core/sync/batch"
+	"github.com/alextanhongpin/core/exp/batch"
 )
 
 // An Author has many Books.

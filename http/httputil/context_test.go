@@ -14,7 +14,7 @@ func TestContextKey(t *testing.T) {
 	ctx := context.Background()
 	ctx = userCtx.WithValue(ctx, 42)
 	n, ok := userCtx.Value(ctx)
-	assert := assert.New(t)
-	assert.True(ok)
-	assert.Equal(42, n)
+	is := assert.New(t)
+	is.True(ok)
+	is.Equal(42, n)
 }

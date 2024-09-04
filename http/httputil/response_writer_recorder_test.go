@@ -23,9 +23,9 @@ func TestResponseWriterRecorder(t *testing.T) {
 			rw := httputil.NewResponseWriterRecorder(w)
 			next.ServeHTTP(rw, r)
 
-			assert := assert.New(t)
-			assert.Equal(http.StatusAccepted, rw.StatusCode())
-			assert.Equal([]byte("ok"), rw.Body())
+			is := assert.New(t)
+			is.Equal(http.StatusAccepted, rw.StatusCode())
+			is.Equal([]byte("ok"), rw.Body())
 		}
 		return http.HandlerFunc(fn)
 	}

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/alextanhongpin/core/sync/batch"
+	"github.com/alextanhongpin/core/exp/batch"
 )
 
 type Order struct {

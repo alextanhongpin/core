@@ -9,7 +9,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/alextanhongpin/core/sync/expire"
+	"github.com/alextanhongpin/core/exp/expire"
 )
 
 func main() {

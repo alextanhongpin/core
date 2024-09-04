@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/alextanhongpin/core/sync/batch"
+	"github.com/alextanhongpin/core/exp/batch"
 )
 
 func TestLoad(t *testing.T) {
