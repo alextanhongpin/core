@@ -64,8 +64,10 @@ func DB(t *testing.T) *sql.DB {
 	return c.DB(t)
 }
 
+var dsn string
+
 func DSN() string {
-	return c.dsn
+	return dsn
 }
 
 type Option func(*config) error
@@ -205,7 +207,7 @@ func (c *client) init() error {
 	}
 
 	hostAndPort := resource.GetHostPort("5432/tcp")
-	dsn := fmt.Sprintf("postgres://john:123456@%s/test?sslmode=disable", hostAndPort)
+	dsn = fmt.Sprintf("postgres://john:123456@%s/test?sslmode=disable", hostAndPort)
 
 	resource.Expire(uint(c.cfg.Expire.Seconds())) // Tell docker to kill the container in 120 seconds.
 
