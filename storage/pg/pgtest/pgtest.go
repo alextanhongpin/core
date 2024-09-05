@@ -64,10 +64,8 @@ func DB(t *testing.T) *sql.DB {
 	return c.DB(t)
 }
 
-var dsn string
-
 func DSN() string {
-	return dsn
+	return c.dsn
 }
 
 type Option func(*config) error
@@ -207,7 +205,7 @@ func (c *client) init() error {
 	}
 
 	hostAndPort := resource.GetHostPort("5432/tcp")
-	dsn = fmt.Sprintf("postgres://john:123456@%s/test?sslmode=disable", hostAndPort)
+	c.dsn = fmt.Sprintf("postgres://john:123456@%s/test?sslmode=disable", hostAndPort)
 
 	resource.Expire(uint(c.cfg.Expire.Seconds())) // Tell docker to kill the container in 120 seconds.
 
@@ -215,7 +213,7 @@ func (c *client) init() error {
 	// not be ready to accept connections yet.
 	pool.MaxWait = 120 * time.Second
 	if err := pool.Retry(func() error {
-		db, err := sql.Open("postgres", dsn)
+		db, err := sql.Open("postgres", c.dsn)
 		if err != nil {
 			return newError("failed to open: %s", err)
 		}
@@ -238,7 +236,6 @@ func (c *client) init() error {
 		return newError("could not connect to docker: %s", err)
 	}
 
-	c.dsn = dsn
 	c.close = func() {
 		if err := pool.Purge(resource); err != nil {
 			panic(newError("could not purge resource: %s", err))
