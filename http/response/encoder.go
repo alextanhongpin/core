@@ -16,12 +16,16 @@ type JSONEncoder struct {
 	body *Body
 	err  error
 	code int
+
+	// Default message to show for unhandled error.
+	Message string
 }
 
 func NewJSONEncoder(w http.ResponseWriter, r *http.Request) *JSONEncoder {
 	return &JSONEncoder{
-		w: w,
-		r: r,
+		w:       w,
+		r:       r,
+		Message: "Something went wrong. Please try again later.",
 	}
 }
 
@@ -32,9 +36,8 @@ func (e *JSONEncoder) SetData(data any, codes ...int) {
 	e.code = cmp.Or(head(codes), http.StatusOK)
 }
 
-func (e *JSONEncoder) SetError(err error) {
+func (e *JSONEncoder) SetError(err error, codes ...int) {
 	e.err = err
-	e.code = http.StatusInternalServerError
 
 	var ve ValidationErrors
 	if errors.As(err, &ve) {
@@ -63,10 +66,23 @@ func (e *JSONEncoder) SetError(err error) {
 		return
 	}
 
+	if code := head(codes); code > 0 {
+		e.code = code
+		e.body = &Body{
+			Error: &Error{
+				Code:    http.StatusText(code),
+				Message: err.Error(),
+			},
+		}
+
+		return
+	}
+
+	e.code = http.StatusInternalServerError
 	e.body = &Body{
 		Error: &Error{
 			Code:    http.StatusText(http.StatusInternalServerError),
-			Message: "An unexpected error occurred",
+			Message: e.Message,
 		},
 	}
 }
