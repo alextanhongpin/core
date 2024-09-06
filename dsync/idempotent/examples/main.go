@@ -18,7 +18,8 @@ import (
 	"time"
 
 	"github.com/alextanhongpin/core/dsync/idempotent"
-	"github.com/redis/go-redis/v9"
+	"github.com/alextanhongpin/core/dsync/lock"
+	redis "github.com/redis/go-redis/v9"
 )
 
 var (
@@ -72,7 +73,7 @@ func main() {
 			if errors.Is(err, idempotent.ErrRequestMismatch) {
 				errRequestMismatch.Add(1)
 			}
-			if errors.Is(err, idempotent.ErrLeaseInvalid) {
+			if errors.Is(err, lock.ErrConflict) {
 				errKeyReleased.Add(1)
 			}
 			http.Error(w, "internal server error", http.StatusInternalServerError)

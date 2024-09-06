@@ -46,8 +46,6 @@ func main() {
 	}
 
 	// Manually flush since we know we are not loading any more keys.
-	fmt.Println("Flush:", dl.Flush())
-
 	time.Sleep(5 * time.Millisecond)
 
 	// When loading multiple keys, some keys may not return any results.
