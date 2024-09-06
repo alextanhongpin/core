@@ -29,16 +29,42 @@ func TestNonZero(t *testing.T) {
 		Name string
 	}
 
-	var u User
-	err := structs.NonZero(u)
+	t.Run("empty struct", func(t *testing.T) {
+		var u User
+		err := structs.NonZero(u)
 
-	is := assert.New(t)
-	var fieldErr *structs.FieldError
-	is.True(errors.As(err, &fieldErr))
-	is.Equal(fieldErr.Path, "structs_test.User.Name")
-	is.Equal(fieldErr.Field, "Name")
+		is := assert.New(t)
+		var fieldErr *structs.FieldError
+		is.True(errors.As(err, &fieldErr))
+		is.Equal(fieldErr.Path, "structs_test.User.Name")
+		is.Equal(fieldErr.Field, "Name")
+	})
 
-	u.Name = "John Appleseed"
-	err = structs.NonZero(u)
-	is.Nil(err)
+	t.Run("nil struct", func(t *testing.T) {
+		var u *User
+		err := structs.NonZero(u)
+
+		is := assert.New(t)
+		var fieldErr *structs.FieldError
+		is.True(errors.As(err, &fieldErr))
+		is.Equal(fieldErr.Path, "structs_test.User")
+		is.Equal(fieldErr.Field, "User")
+	})
+
+	t.Run("filled struct", func(t *testing.T) {
+		u := User{Name: "Jon Appleseed"}
+		is := assert.New(t)
+		is.Nil(structs.NonZero(u))
+	})
+
+	t.Run("nil", func(t *testing.T) {
+		err := structs.NonZero(nil)
+		is := assert.New(t)
+		is.Error(err)
+
+		var fieldErr *structs.FieldError
+		is.True(errors.As(err, &fieldErr))
+		is.Equal(fieldErr.Path, "nil")
+		is.Equal(fieldErr.Field, "nil")
+	})
 }
