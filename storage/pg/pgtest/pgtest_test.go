@@ -2,6 +2,7 @@ package pgtest_test
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"sync"
 	"testing"
@@ -24,6 +25,9 @@ func TestMain(m *testing.M) {
 }
 
 func migrate(db *sql.DB) error {
+	if pgtest.DSN() == "" {
+		return errors.New("pgtest.DSN() is empty")
+	}
 	// Alternatively, you can also usej pgtest.DSN() to get
 	// the connection string.
 	_, err := db.Exec(`create table numbers(n int)`)

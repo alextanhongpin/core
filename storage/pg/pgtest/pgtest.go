@@ -38,6 +38,9 @@ func Init(opts ...Option) func() {
 		if err != nil {
 			panic(err)
 		}
+		if err := c.hook(); err != nil {
+			panic(err)
+		}
 
 		fn = c.close
 	})
@@ -150,11 +153,14 @@ func newClient(opts ...Option) (*client, error) {
 	return c, nil
 }
 
+func (c *client) hook() error {
+	return c.cfg.Hook(pg.New(c.dsn))
+}
+
 func (c *client) init() error {
 	var (
 		repo = c.cfg.Repository
 		tag  = c.cfg.Tag
-		fn   = c.cfg.Hook
 	)
 
 	pool, err := dockertest.NewPool("")
@@ -222,11 +228,6 @@ func (c *client) init() error {
 			return newError("failed to ping: %s", err)
 		}
 
-		// Run migrations, seed, fixtures etc.
-		if err := fn(db); err != nil {
-			return err
-		}
-
 		if err := db.Close(); err != nil {
 			return newError("failed to close db: %s", err)
 		}
@@ -288,6 +289,10 @@ func newTestClient(t *testing.T, opts ...Option) *testClient {
 	t.Helper()
 	c, err := newClient(opts...)
 	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := c.hook(); err != nil {
 		t.Fatal(err)
 	}
 
