@@ -6,6 +6,8 @@ import (
 	"log"
 	"net/url"
 	"time"
+
+	_ "github.com/lib/pq"
 )
 
 type Params map[string]string
