@@ -2,6 +2,7 @@ package env_test
 
 import (
 	"testing"
+	"time"
 
 	"github.com/alextanhongpin/core/types/env"
 	"github.com/stretchr/testify/assert"
@@ -36,4 +37,13 @@ func TestLoadSlice(t *testing.T) {
 	is.Equal([]int{10, 20, 30}, env.LoadSlice[int]("INTS", " "))
 	is.Equal([]float64{1.1, 2.2, 3.3}, env.LoadSlice[float64]("FLOATS", " "))
 	is.Equal([]bool{true, false, true, false, true, false}, env.LoadSlice[bool]("BOOLS", " "))
+}
+
+func TestLoadDuration(t *testing.T) {
+	t.Setenv("DURATION_ZERO", "0")
+	t.Setenv("DURATION_SECONDS", "10s")
+
+	is := assert.New(t)
+	is.Equal(0*time.Second, env.LoadDuration("DURATION_ZERO"))
+	is.Equal(10*time.Second, env.LoadDuration("DURATION_SECONDS"))
 }

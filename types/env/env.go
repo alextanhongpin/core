@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 )
 
 var Error = fmt.Errorf("env")
@@ -22,6 +23,20 @@ func Parse[T Parseable](str string) (T, error) {
 	}
 
 	return v, nil
+}
+
+func LoadDuration(name string) time.Duration {
+	s, err := lookupEnv(name)
+	if err != nil {
+		panic(err)
+	}
+
+	d, err := time.ParseDuration(s)
+	if err != nil {
+		panic(err)
+	}
+
+	return d
 }
 
 func Load[T Parseable](name string) T {
