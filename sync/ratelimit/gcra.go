@@ -1,64 +1,58 @@
 package ratelimit
 
 import (
-	"math"
+	"sync"
 	"time"
 )
 
 type GCRA struct {
 	// State.
-	ts time.Time
+	mu sync.RWMutex
+	ts int64
 
 	// Option.
-	burst  int64
-	limit  int64
-	period time.Duration
+	offset   int64
+	interval int64
+	Now      func() time.Time
 }
 
 func NewGCRA(limit int64, period time.Duration, burst int64) *GCRA {
+	interval := period.Nanoseconds() / int64(limit)
+
 	return &GCRA{
-		limit:  limit,
-		period: period,
-		burst:  burst,
+		offset:   interval * int64(burst),
+		interval: interval,
 	}
 }
 
-func (g *GCRA) Allow() *Result {
+func (g *GCRA) Allow() bool {
 	return g.AllowN(1)
 }
 
-func (g *GCRA) AllowN(n int) *Result {
-	now := time.Now()
-	interval := g.period / time.Duration(g.limit)
-	burst := time.Duration(g.burst) * interval
-	token := time.Duration(n) * interval
+func (g *GCRA) AllowN(n int) bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
 
-	if lt(g.ts, now) {
+	now := g.Now().UnixNano()
+	if g.ts < now {
 		g.ts = now
 	}
 
-	allow := false
-	if lte(g.ts.Add(-burst), now) {
-		allow = true
-		g.ts = g.ts.Add(token)
+	if g.ts-g.offset <= now {
+		g.ts += int64(n) * g.interval
+
+		return true
 	}
 
-	resetAt := now.Truncate(g.period).Add(g.period)
-	remaining := int64(math.Floor(float64(resetAt.Sub(now)) / float64(interval)))
-
-	return &Result{
-		Allow:     allow,
-		Limit:     g.limit + g.burst,
-		Remaining: remaining,
-		ResetAt:   resetAt,
-		RetryAt:   g.ts,
-	}
+	return false
 }
 
-func lt(a, b time.Time) bool {
-	return a.Before(b)
-}
+func (g *GCRA) RetryAfter() time.Duration {
+	g.mu.RLock()
+	ts := g.ts
+	offset := g.offset
+	g.mu.RUnlock()
 
-func lte(a, b time.Time) bool {
-	return !a.After(b)
+	now := g.Now().UnixNano()
+	return time.Duration(max(0, ts-offset-now))
 }
