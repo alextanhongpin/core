@@ -33,21 +33,21 @@ func TestSlidingWindow_RateLimited(t *testing.T) {
 func TestSlidingWindow_RetryAt(t *testing.T) {
 	t.Run("per second", func(t *testing.T) {
 		rl := ratelimit.NewSlidingWindow(5, time.Second)
-		for i := 0; i < 6; i++ {
+		for range 6 {
 			rl.Allow()
 		}
 
 		is := assert.New(t)
-		is.True(rl.Allow().RetryAt.Sub(time.Now()) > 950*time.Millisecond)
+		is.True(rl.Allow().RetryAfter > 950*time.Millisecond)
 	})
 
 	t.Run("per hour", func(t *testing.T) {
 		rl := ratelimit.NewSlidingWindow(5, time.Hour)
-		for i := 0; i < 6; i++ {
+		for range 6 {
 			rl.Allow()
 		}
 
 		is := assert.New(t)
-		is.True(rl.Allow().RetryAt.Sub(time.Now()) > 59*time.Minute+50*time.Second)
+		is.True(rl.Allow().RetryAfter > 59*time.Minute+50*time.Second)
 	})
 }

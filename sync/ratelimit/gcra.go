@@ -20,8 +20,10 @@ func NewGCRA(limit int64, period time.Duration, burst int64) *GCRA {
 	interval := period.Nanoseconds() / int64(limit)
 
 	return &GCRA{
+		// NOTE: The burst is only applied once.
 		offset:   interval * int64(burst),
 		interval: interval,
+		Now:      time.Now,
 	}
 }
 

@@ -8,7 +8,7 @@ import (
 // FixedWindow acts as a counter for a given time period.
 type FixedWindow struct {
 	// State.
-	mu      sync.RWMutex
+	mu      sync.Mutex
 	count   int64
 	resetAt int64
 
@@ -42,17 +42,13 @@ func (rl *FixedWindow) AllowAt(t time.Time, n int64) bool {
 	return count+n <= limit
 }
 
-type FixedWindowResult struct {
-	Allow      bool
-	RetryAfter time.Duration
-	Remaining  int64
-}
-
 // AllowN checks if a request is allowed. Consumes n token
 // if allowed.
-func (rl *FixedWindow) AllowN(n int64) FixedWindowResult {
+func (rl *FixedWindow) AllowN(i int) *Result {
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
+
+	n := int64(i)
 
 	now := rl.Now().UnixNano()
 	if rl.resetAt <= now {
@@ -60,12 +56,13 @@ func (rl *FixedWindow) AllowN(n int64) FixedWindowResult {
 		rl.resetAt = now + rl.window
 	}
 
-	var res FixedWindowResult
-	allow := rl.count+n <= rl.limit
-	if allow {
+	res := &Result{
+		Limit: rl.limit,
+		Allow: rl.count+n <= rl.limit,
+	}
+	if res.Allow {
 		rl.count += n
 
-		res.Allow = true
 		res.Remaining = rl.limit - rl.count
 	}
 
@@ -78,6 +75,6 @@ func (rl *FixedWindow) AllowN(n int64) FixedWindowResult {
 
 // Allow checks if a request is allowed. Special case of AllowN that consumes
 // only 1 token.
-func (rl *FixedWindow) Allow() FixedWindowResult {
+func (rl *FixedWindow) Allow() *Result {
 	return rl.AllowN(1)
 }

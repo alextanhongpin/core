@@ -7,8 +7,8 @@ import (
 	"github.com/alextanhongpin/core/sync/ratelimit"
 )
 
-func TestTokenBucketFullRange(t *testing.T) {
-	rl := ratelimit.NewTokenBucket(5, time.Second, 0)
+func TestGCRAFullRange(t *testing.T) {
+	rl := ratelimit.NewGCRA(5, time.Second, 0)
 
 	periods := []time.Duration{
 		0,
@@ -38,20 +38,18 @@ func TestTokenBucketFullRange(t *testing.T) {
 		rl.Now = func() time.Time {
 			return now.Add(p)
 		}
-		dryRun := rl.AllowAt(now.Add(p), 1)
-		allow := p.Milliseconds()%2 == 0
-
-		result := rl.Allow()
-		if result.Allow != allow || dryRun != allow {
+		want := p.Milliseconds()%2 == 0
+		got := rl.Allow()
+		if want != got {
 			t.Fatalf("doesn't allow: %v", p)
 		}
 
-		t.Log(now.Add(p).Sub(now), result.Allow, result.Remaining, result.RetryAt.Sub(now), result.ResetAt.Sub(now))
+		t.Log(now.Add(p).Sub(now), got, rl.RetryAfter())
 	}
 }
 
-func TestTokenBucketPartial(t *testing.T) {
-	rl := ratelimit.NewTokenBucket(5, time.Second, 0)
+func TestGCRAPartial(t *testing.T) {
+	rl := ratelimit.NewGCRA(5, time.Second, 0)
 
 	periods := []time.Duration{
 		0,
@@ -74,20 +72,18 @@ func TestTokenBucketPartial(t *testing.T) {
 			return now.Add(p)
 		}
 
-		dryRun := rl.AllowAt(now.Add(p), 1)
-		allow := p.Milliseconds()%2 == 0
-
-		result := rl.Allow()
-		if result.Allow != allow || dryRun != allow {
+		want := p.Milliseconds()%2 == 0
+		got := rl.Allow()
+		if want != got {
 			t.Fatalf("doesn't allow: %v", p)
 		}
 
-		t.Log(now.Add(p).Sub(now), result.Allow, result.Remaining, result.RetryAt.Sub(now), result.ResetAt.Sub(now))
+		t.Log(now.Add(p).Sub(now), got, rl.RetryAfter())
 	}
 }
 
-func TestTokenBucketBurst(t *testing.T) {
-	rl := ratelimit.NewTokenBucket(5, time.Second, 1)
+func TestGCRABurst(t *testing.T) {
+	rl := ratelimit.NewGCRA(5, time.Second, 1)
 
 	periods := []time.Duration{
 		0,
@@ -110,7 +106,7 @@ func TestTokenBucketBurst(t *testing.T) {
 
 		999 * time.Millisecond,
 		1000 * time.Millisecond,
-		1010 * time.Millisecond,
+		1001 * time.Millisecond,
 	}
 
 	now := time.Now().Truncate(time.Second)
@@ -118,20 +114,18 @@ func TestTokenBucketBurst(t *testing.T) {
 		rl.Now = func() time.Time {
 			return now.Add(p)
 		}
-		dryRun := rl.AllowAt(now.Add(p), 1)
-		allow := p.Milliseconds()%2 == 0
-
-		result := rl.Allow()
-		if result.Allow != allow || dryRun != allow {
-			t.Fatalf("doesn't allow: %v", p)
+		want := p.Milliseconds()%2 == 0
+		got := rl.Allow()
+		if want != got {
+			t.Fatalf("want %t, got %t: %v", want, got, p)
 		}
 
-		t.Log(now.Add(p).Sub(now), result.Allow, result.Remaining, result.RetryAt.Sub(now), result.ResetAt.Sub(now))
+		t.Log(now.Add(p).Sub(now), got, rl.RetryAfter())
 	}
 }
 
-func TestTokenBucketBurstPartial(t *testing.T) {
-	rl := ratelimit.NewTokenBucket(5, time.Second, 1)
+func TestGCRABurstPartial(t *testing.T) {
+	rl := ratelimit.NewGCRA(5, time.Second, 1)
 
 	periods := []time.Duration{
 		0,
@@ -139,7 +133,7 @@ func TestTokenBucketBurstPartial(t *testing.T) {
 
 		// Bursts at the end
 		600 * time.Millisecond,
-		601 * time.Millisecond,
+		602 * time.Millisecond,
 
 		799 * time.Millisecond,
 		800 * time.Millisecond,
@@ -147,28 +141,33 @@ func TestTokenBucketBurstPartial(t *testing.T) {
 
 		999 * time.Millisecond,
 		1000 * time.Millisecond,
-		1010 * time.Millisecond,
+		1001 * time.Millisecond,
 	}
 
 	now := time.Now().Truncate(time.Second)
+	var count int
 	for _, p := range periods {
 		rl.Now = func() time.Time {
 			return now.Add(p)
 		}
-		dryRun := rl.AllowAt(now.Add(p), 1)
-		allow := p.Milliseconds()%2 == 0
-
-		result := rl.Allow()
-		if result.Allow != allow || dryRun != allow {
-			t.Fatalf("doesn't allow: %v", p)
+		want := p.Milliseconds()%2 == 0
+		got := rl.Allow()
+		if want != got {
+			t.Fatalf("want %t, got %t, %v", want, got, p)
+		}
+		if got {
+			count++
 		}
 
-		t.Log(now.Add(p).Sub(now), result.Allow, result.Remaining, result.RetryAt.Sub(now), result.ResetAt.Sub(now))
+		t.Log(now.Add(p).Sub(now), got, rl.RetryAfter())
+	}
+	if 6 != count {
+		t.Fatalf("want %d, got %d", 6, count)
 	}
 }
 
-func TestTokenBucketMultipleBurst(t *testing.T) {
-	rl := ratelimit.NewTokenBucket(5, time.Second, 5)
+func TestGCRAMultipleBurst(t *testing.T) {
+	rl := ratelimit.NewGCRA(5, time.Second, 5)
 
 	periods := []time.Duration{
 		0,
@@ -188,20 +187,17 @@ func TestTokenBucketMultipleBurst(t *testing.T) {
 		rl.Now = func() time.Time {
 			return now.Add(p)
 		}
-		dryRun := rl.AllowAt(now.Add(p), 1)
-		allow := true
-
-		result := rl.Allow()
-		if result.Allow != allow || dryRun != allow {
+		got := rl.Allow()
+		if !got {
 			t.Fatalf("doesn't allow: %v", p)
 		}
 
-		t.Log(now.Add(p).Sub(now), result.Allow, result.Remaining, result.RetryAt.Sub(now), result.ResetAt.Sub(now))
+		t.Log(now.Add(p).Sub(now), got, rl.RetryAfter())
 	}
 }
 
-func TestTokenBucketAllowN(t *testing.T) {
-	rl := ratelimit.NewTokenBucket(5, time.Second, 0)
+func TestGCRAAllowN(t *testing.T) {
+	rl := ratelimit.NewGCRA(5, time.Second, 0)
 
 	periods := []time.Duration{
 		0,
@@ -231,20 +227,18 @@ func TestTokenBucketAllowN(t *testing.T) {
 		rl.Now = func() time.Time {
 			return now.Add(p)
 		}
-
-		dryRun := rl.AllowAt(now.Add(p), 5)
-		allow := p == 0 || p == time.Second
-		result := rl.AllowN(5)
-		if result.Allow != allow || dryRun != allow {
+		want := p.Milliseconds()%2 == 0
+		got := rl.Allow()
+		if want != got {
 			t.Fatalf("doesn't allow: %v", p)
 		}
 
-		t.Log(now.Add(p).Sub(now), result.Allow, result.Remaining, result.RetryAt.Sub(now), result.ResetAt.Sub(now))
+		t.Log(now.Add(p).Sub(now), got, rl.RetryAfter())
 	}
 }
 
-func TestTokenBucketBurstTotal(t *testing.T) {
-	rl := ratelimit.NewTokenBucket(5, time.Second, 1)
+func TestGCRABurstTotal(t *testing.T) {
+	rl := ratelimit.NewGCRA(5, time.Second, 1)
 
 	now := time.Now().Truncate(time.Second)
 	var delay []time.Duration
@@ -255,8 +249,7 @@ func TestTokenBucketBurstTotal(t *testing.T) {
 			return now.Add(p)
 		}
 
-		result := rl.Allow()
-		if result.Allow {
+		if rl.Allow() {
 			delay = append(delay, p)
 			count++
 		}

@@ -7,19 +7,24 @@ import (
 )
 
 type SlidingWindow struct {
-	mu      sync.Mutex
-	windows map[int64]int64
-	limit   int64
-	period  time.Duration
-	Now     func() time.Time
+	// State.
+	mu     sync.Mutex
+	prev   int64
+	curr   int64
+	window int64
+
+	// Options.
+	limit  int64
+	period int64
+
+	Now func() time.Time
 }
 
 func NewSlidingWindow(limit int64, period time.Duration) *SlidingWindow {
 	return &SlidingWindow{
-		limit:   limit,
-		period:  period,
-		Now:     time.Now,
-		windows: make(map[int64]int64),
+		limit:  limit,
+		period: period.Nanoseconds(),
+		Now:    time.Now,
 	}
 }
 
@@ -31,59 +36,37 @@ func (rl *SlidingWindow) AllowN(n int64) *Result {
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
 
-	tnow := rl.Now()
+	now := int64(rl.Now().Nanosecond())
+	curr := now / rl.period * rl.period
+	prev := curr - rl.period
 
-	tcurr := tnow.Truncate(rl.period)
-	tprev := tcurr.Add(-rl.period)
-	tnext := tcurr.Add(rl.period)
-
-	// Clear old keys.
-	if len(rl.windows) > 2 {
-		for key := range rl.windows {
-			if key < tprev.Unix() {
-				delete(rl.windows, key)
-			}
-		}
+	if rl.window == prev {
+		rl.prev = rl.curr
+		rl.curr = 0
+		rl.window = curr
+	} else if rl.window != curr {
+		rl.prev = 0
+		rl.curr = 0
+		rl.window = curr
 	}
 
-	prev := rl.windows[tprev.Unix()]
-	curr := rl.windows[tcurr.Unix()]
+	ratio := float64(now-curr) / float64(rl.period)
+	count := int64(math.Round((1-ratio)*float64(rl.prev) + float64(rl.curr)))
 
-	ratio := float64(tnow.Sub(tcurr)) / float64(rl.period)
-
-	ratio = 1 - ratio
-	count := ratio*float64(prev) + float64(curr)
-
-	c := int64(math.Round(count))
-	if c+n <= rl.limit {
-		rl.windows[tcurr.Unix()] += n
-
-		return &Result{
-			Allow:     true,
-			Limit:     rl.limit,
-			Remaining: rl.limit - c - n,
-			RetryAt:   rl.Now(),
-			ResetAt:   tnext,
-		}
+	res := &Result{
+		Allow: count+n <= rl.limit,
+		Limit: rl.limit,
 	}
 
-	num := rl.limit - n - curr
-	den := prev
-	rat := float64(num) / float64(den)
-	rat = max(0, rat)
-	rat = min(1, rat)
-	rat = 1 - rat
-	sleep := time.Duration(rat*float64(rl.period)) - tnow.Sub(tcurr)
-	if num <= 0 {
-		sleep = rl.period
-	}
-	retryAt := tnow.Add(sleep)
+	if res.Allow {
+		rl.curr += n
 
-	return &Result{
-		Allow:     false,
-		Limit:     rl.limit,
-		Remaining: 0,
-		RetryAt:   retryAt,
-		ResetAt:   tnext,
+		res.Remaining = rl.limit - count - n
 	}
+
+	if res.Remaining == 0 {
+		res.RetryAfter = time.Duration(now + rl.period)
+	}
+
+	return res
 }
