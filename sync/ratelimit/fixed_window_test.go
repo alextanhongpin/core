@@ -11,24 +11,24 @@ import (
 func TestFixedWindow(t *testing.T) {
 	rl := ratelimit.NewFixedWindow(3, time.Second)
 
-	assert := assert.New(t)
+	is := assert.New(t)
 
 	// Succeed.
 	res := rl.Allow()
-	assert.True(res.Allow)
-	assert.Equal(int64(2), res.Remaining)
+	is.True(res.Allow)
+	is.Equal(int64(2), res.Remaining)
 
 	res = rl.Allow()
-	assert.True(res.Allow)
-	assert.Equal(int64(1), res.Remaining)
+	is.True(res.Allow)
+	is.Equal(int64(1), res.Remaining)
 
 	res = rl.Allow()
-	assert.True(res.Allow)
-	assert.Equal(int64(0), res.Remaining)
+	is.True(res.Allow)
+	is.Equal(int64(0), res.Remaining)
 
 	res = rl.Allow()
-	assert.False(res.Allow)
-	assert.Equal(int64(0), res.Remaining)
+	is.False(res.Allow)
+	is.Equal(int64(0), res.Remaining)
 
 	// Call after the next period succeeds.
 	rl.Now = func() time.Time {
@@ -36,6 +36,6 @@ func TestFixedWindow(t *testing.T) {
 	}
 
 	res = rl.Allow()
-	assert.True(res.Allow)
-	assert.Equal(int64(2), res.Remaining)
+	is.True(res.Allow)
+	is.Equal(int64(2), res.Remaining)
 }
