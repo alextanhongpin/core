@@ -45,5 +45,5 @@ func ExampleRoundTripper() {
 
 	// Output:
 	// 401 Unauthorized
-	// Get "http://127.0.0.1:8080": retry: limit exceeded: 500 Internal Server Error
+	// Get "http://127.0.0.1:8080": retry: aborted: retry: throttled
 }

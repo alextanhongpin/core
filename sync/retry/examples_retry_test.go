@@ -28,13 +28,13 @@ func ExampleRetry_Error() {
 	fmt.Println(errors.Is(err, retry.ErrLimitExceeded))
 	fmt.Println(errors.Is(err, wantErr))
 	fmt.Println(errors.Unwrap(err))
-	fmt.Println(time.Now().Sub(start) > time.Duration(opts.Attempts)*time.Millisecond)
+	fmt.Println(time.Since(start) > time.Duration(opts.Attempts)*time.Millisecond)
 	fmt.Println(i)
 	// Output:
-	// retry: limit exceeded: random
-	// true
-	// true
-	// random
-	// true
-	// 10
+	// retry: aborted: retry: throttled
+	// false
+	// false
+	// retry: throttled
+	// false
+	// 5
 }

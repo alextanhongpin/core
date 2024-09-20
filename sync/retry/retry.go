@@ -5,7 +5,6 @@ import (
 	"cmp"
 	"errors"
 	"fmt"
-	"math"
 	"math/rand"
 	"sync"
 	"time"
@@ -28,7 +27,7 @@ type Options struct {
 func NewOptions() *Options {
 	return &Options{
 		Attempts:  10,
-		Policy:    ExponentialBackoff(100*time.Millisecond, 1*time.Minute, true),
+		Policy:    ExponentialBackoff(100*time.Millisecond, 1*time.Minute),
 		Throttler: NewThrottler(NewThrottlerOptions()),
 	}
 }
@@ -158,23 +157,17 @@ func limitExceeded(err error) error {
 	}
 }
 
-func ExponentialBackoff(base, cap time.Duration, jitter bool) func(attempts int) time.Duration {
-	b := float64(base)
-	c := float64(cap)
+func ExponentialBackoff(base, cap time.Duration) func(attempts int) time.Duration {
+	b := int64(base)
+	c := int64(cap)
 
 	return func(attempts int) time.Duration {
 		if attempts <= 0 {
 			return 0
 		}
 
-		a := float64(attempts)
-		j := 1.0
-		if jitter {
-			j += rand.Float64()
-		}
-		e := math.Pow(2, a)
-
-		return time.Duration(min(c, j*b*e))
+		sleep := min(c, b*1<<attempts)
+		return time.Duration(rand.Int63n(sleep) + 1)
 	}
 }
 

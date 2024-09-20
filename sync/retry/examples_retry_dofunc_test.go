@@ -26,6 +26,6 @@ func ExampleRetry_DoFunc() {
 
 	fmt.Println(n, err)
 	// Output:
-	// retry: limit exceeded: random
+	// retry: aborted: retry: throttled
 	// 1234 <nil>
 }
