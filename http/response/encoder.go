@@ -112,6 +112,18 @@ func (e *JSONEncoder) Flush() {
 	}
 }
 
+func (e *JSONEncoder) Err() error {
+	return e.err
+}
+
+func (e *JSONEncoder) Code() int {
+	return e.code
+}
+
+func (e *JSONEncoder) Body() *Body {
+	return e.body
+}
+
 func head[T any](vs []T) (v T) {
 	if len(vs) > 0 {
 		return vs[0]
