@@ -2,11 +2,17 @@ package ratelimit
 
 import (
 	"context"
+	_ "embed"
 	"fmt"
 	"time"
 
 	redis "github.com/redis/go-redis/v9"
 )
+
+//go:embed fixed_window.lua
+var fixedWindowScript string
+
+var fixedWindow = redis.NewScript(fixedWindowScript)
 
 // FixedWindow implements the Fixed Window algorithm.
 type FixedWindow struct {
@@ -20,16 +26,25 @@ type FixedWindowOption struct {
 	Period time.Duration
 }
 
+func (opt *FixedWindowOption) Valid() error {
+	if opt.Limit <= 0 {
+		return fmt.Errorf("%w: limit must be greater than 0", Error)
+	}
+	if opt.Period <= 0 {
+		return fmt.Errorf("%w: period must be greater than 0", Error)
+	}
+
+	return nil
+}
+
 func NewFixedWindow(client *redis.Client, opt *FixedWindowOption) *FixedWindow {
 	if opt == nil {
 		panic("ratelimit: option is nil")
 	}
-	if opt.Limit <= 0 {
-		panic("ratelimit: limit is invalid")
+	if err := opt.Valid(); err != nil {
+		panic(err)
 	}
-	if opt.Period <= 0 {
-		panic("ratelimit: period is invalid")
-	}
+
 	return &FixedWindow{
 		client: client,
 		opt:    opt,
@@ -40,28 +55,35 @@ func NewFixedWindow(client *redis.Client, opt *FixedWindowOption) *FixedWindow {
 func (r *FixedWindow) AllowN(ctx context.Context, key string, n int64) (*Result, error) {
 	key = r.buildKey(r.Now(), key)
 	now := r.Now()
-	c, err := r.client.IncrBy(ctx, key, n).Result()
+	limit := r.opt.Limit
+	period := r.opt.Period
+
+	keys := []string{key}
+	argv := []any{
+		limit,
+		now.UnixMilli(),
+		period.Milliseconds(),
+		n,
+	}
+	res, err := fixedWindow.Run(ctx, r.client, keys, argv...).Int64Slice()
 	if err != nil {
 		return nil, err
 	}
+	allow := res[0] == 1
+	count := res[1]
+	remaining := limit - count
 
-	if c == n {
-		if err := r.client.PExpire(ctx, key, r.opt.Period).Err(); err != nil {
-			return nil, err
-		}
-	}
-	start := now.Truncate(r.opt.Period)
-	end := start.Add(r.opt.Period)
-
+	start := now.Truncate(period)
+	end := start.Add(period)
 	retryAt := now
-	if c+n <= r.opt.Limit {
+	if remaining == 0 {
 		retryAt = end
 	}
 
 	return &Result{
-		Allow:     c <= r.opt.Limit,
-		Remaining: max(0, r.opt.Limit-c),
-		Limit:     r.opt.Limit,
+		Allow:     allow,
+		Remaining: remaining,
+		Limit:     limit,
 		ResetAt:   end,
 		RetryAt:   retryAt,
 	}, nil

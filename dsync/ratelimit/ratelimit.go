@@ -2,8 +2,11 @@
 package ratelimit
 
 import (
+	"errors"
 	"time"
 )
+
+var Error = errors.New("ratelimit")
 
 type Result struct {
 	Allow     bool
