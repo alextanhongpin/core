@@ -9,7 +9,6 @@ import (
 )
 
 func ExampleRetry_Try() {
-
 	r := retry.New(retry.NewConstantBackOff(time.Millisecond))
 
 	ctx := context.Background()
