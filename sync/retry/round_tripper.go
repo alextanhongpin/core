@@ -2,6 +2,7 @@ package retry
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"slices"
 )
@@ -19,39 +20,45 @@ type transporter interface {
 	RoundTrip(r *http.Request) (*http.Response, error)
 }
 
-type retrier interface {
-	Do(func() error) error
-}
-
 type RoundTripper struct {
-	Transport transporter
-	retrier   retrier
+	Transport  transporter
+	MaxRetries int
+	StatusCode func(code int) error
+	retry      retry
 }
 
-func NewRoundTripper(t transporter, r retrier) *RoundTripper {
+func NewRoundTripper(t transporter, r retry) *RoundTripper {
 	return &RoundTripper{
-		Transport: t,
-		retrier:   r,
+		Transport:  t,
+		MaxRetries: 10,
+		StatusCode: func(code int) error {
+			if slices.Contains(retryableStatusCodes, code) {
+				return errors.New(fmt.Sprint(code))
+			}
+
+			return nil
+		},
+		retry: r,
 	}
 }
 
 func (t *RoundTripper) RoundTrip(r *http.Request) (resp *http.Response, err error) {
-	err = t.retrier.Do(func() error {
+	for _, err := range t.retry.Try(r.Context(), t.MaxRetries) {
+		if err != nil {
+			return nil, err
+		}
+
 		resp, err = t.Transport.RoundTrip(r)
 		if err != nil {
-			return err
+			return nil, err
 		}
 
-		if resp != nil && slices.Contains(retryableStatusCodes, resp.StatusCode) {
-			return errors.New(resp.Status)
+		if err := t.StatusCode(resp.StatusCode); err != nil {
+			return nil, err
 		}
 
-		return nil
-
-	})
-	if err != nil {
-		return nil, err
+		return resp, nil
 	}
 
-	return resp, err
+	return nil, errors.ErrUnsupported
 }

@@ -1,28 +1,23 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"math/rand/v2"
 	"sync"
-	"time"
 
 	"github.com/alextanhongpin/core/sync/retry"
 )
 
 func main() {
-	opts := retry.NewOptions()
-	//opts.Throttler = nil
+	r := retry.New(retry.NewConstantBackOff(0))
+	r.Throttler = retry.NewThrottler(retry.NewThrottlerOptions())
 
 	var mu sync.Mutex
 	counter := make(map[int]int)
-	opts.Policy = func(i int) time.Duration {
-		mu.Lock()
-		counter[i]++
-		mu.Unlock()
-		return 0
-	}
-	r := retry.New(opts)
+
+	ctx := context.Background()
 
 	var failed, success int64
 	var skipped int64
@@ -35,22 +30,35 @@ func main() {
 		go func() {
 			defer wg.Done()
 
-			i := rand.Float64()
-			err := r.Do(func() error {
-				if rand.Float64() < i {
+			ratio := int64(2)
+			fn := func() error {
+				if rand.Int64N(10) < ratio {
 					return errors.New("failed")
 				}
+
 				return nil
-			})
-			if err != nil {
-				if errors.Is(err, retry.ErrThrottled) {
-					skipped++
-					fmt.Println("skipped")
+			}
+
+			for i, err := range r.Try(ctx, 10) {
+				mu.Lock()
+				counter[i]++
+				mu.Unlock()
+
+				if err != nil {
+					if errors.Is(err, retry.ErrThrottled) {
+						skipped++
+					}
+					if errors.Is(err, retry.ErrLimitExceeded) {
+						failed++
+					}
+					break
 				}
-				failed++
-			} else {
-				success++
-				fmt.Println("ok")
+
+				if err := fn(); err == nil {
+					success++
+					break
+				}
+
 			}
 		}()
 	}

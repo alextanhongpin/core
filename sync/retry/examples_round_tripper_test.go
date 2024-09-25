@@ -17,11 +17,7 @@ func ExampleRoundTripper() {
 	}))
 	defer ts.Close()
 
-	opts := retry.NewOptions()
-	opts.Policy = func(n int) time.Duration {
-		return time.Millisecond
-	}
-	r := retry.New(opts)
+	r := retry.New(retry.NewConstantBackOff(time.Millisecond))
 
 	client := ts.Client()
 	client.Transport = retry.NewRoundTripper(client.Transport, r)
@@ -45,5 +41,5 @@ func ExampleRoundTripper() {
 
 	// Output:
 	// 401 Unauthorized
-	// Get "http://127.0.0.1:8080": retry: aborted: retry: throttled
+	// Get "http://127.0.0.1:8080": 500
 }

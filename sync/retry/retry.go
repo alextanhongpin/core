@@ -1,248 +1,75 @@
-// Package retry implements functions for DoFunc mechanism.
+// Package retry implements retry mechanism with throttler.
 package retry
 
 import (
-	"cmp"
+	"context"
 	"errors"
-	"fmt"
-	"math/rand"
-	"sync"
+	"iter"
 	"time"
 )
 
 var (
 	ErrLimitExceeded = errors.New("retry: limit exceeded")
-	ErrAborted       = errors.New("retry: aborted")
 	ErrThrottled     = errors.New("retry: throttled")
 )
 
-type PolicyFunc func(i int) time.Duration
-
-type Options struct {
-	Attempts  int
-	Policy    PolicyFunc
-	Throttler *Throttler
+type retry interface {
+	Try(ctx context.Context, limit int) iter.Seq2[int, error]
 }
 
-func NewOptions() *Options {
-	return &Options{
-		Attempts:  10,
-		Policy:    ExponentialBackoff(100*time.Millisecond, 1*time.Minute),
-		Throttler: NewThrottler(NewThrottlerOptions()),
+var _ retry = (*Retry)(nil)
+
+type Retry struct {
+	BackOffPolicy backOffPolicy
+	Throttler     throttler
+}
+
+func New(bop backOffPolicy) *Retry {
+	var t *Throttler
+
+	return &Retry{
+		BackOffPolicy: bop,
+		Throttler:     t,
 	}
 }
 
-func (o *Options) Valid() error {
-	if o.Attempts < 1 {
-		return errors.New("retry: attempts must be greater than 0")
-	}
-	if o.Policy == nil {
-		return errors.New("retry: policy must be set")
-	}
+func (r *Retry) Try(ctx context.Context, limit int) iter.Seq2[int, error] {
+	return func(yield func(int, error) bool) {
+		for i := range limit + 1 {
+			if i == limit {
+				yield(i, ErrLimitExceeded)
 
-	return nil
-}
+				break
+			}
 
-type Handler struct {
-	opts *Options
-}
+			// Throttle only applies to retries, skip the first call.
+			if i > 0 && !r.Throttler.Allow() {
+				yield(i, ErrThrottled)
 
-func New(opts *Options) *Handler {
-	opts = cmp.Or(opts, NewOptions())
-	if err := opts.Valid(); err != nil {
-		panic(err)
-	}
+				break
+			}
 
-	return &Handler{
-		opts: opts,
-	}
-}
+			if err := ctx.Err(); err != nil {
+				yield(i, err)
 
-func (r *Handler) Do(fn func() error) error {
-	return DoFunc(fn,
-		WithAttempts(r.opts.Attempts),
-		WithPolicy(r.opts.Policy),
-		WithThrottler(r.opts.Throttler),
-	)
-}
+				return
+			}
 
-type Option func(opts *Options)
+			if !yield(i, nil) {
+				// Breaking early is considered a success.
+				r.Throttler.Success()
 
-func WithAttempts(attempts int) Option {
-	return func(opts *Options) {
-		opts.Attempts = attempts
-	}
-}
+				break
+			}
 
-func WithPolicy(policy PolicyFunc) Option {
-	return func(opts *Options) {
-		opts.Policy = policy
-	}
-}
-
-func WithThrottler(t *Throttler) Option {
-	return func(opts *Options) {
-		opts.Throttler = t
-	}
-}
-
-func DoFunc(fn func() error, opts ...Option) (err error) {
-	o := NewOptions()
-	for _, opt := range opts {
-		opt(o)
-	}
-
-	for i := range o.Attempts {
-		t := o.Throttler
-
-		time.Sleep(o.Policy(i))
-		if i > 0 && !t.allow() {
-			return Abort(ErrThrottled)
-		}
-
-		err = fn()
-		if err == nil {
-			t.success()
-
-			return nil
-		}
-
-		if errors.Is(err, ErrAborted) {
-			return err
+			// Using time.Sleep blocks the operation and cannot be cancelled in case
+			// timeout becomes very long.
+			// Use time.After combined with context instead.
+			select {
+			case <-ctx.Done():
+				break
+			case <-time.After(r.BackOffPolicy.BackOff(i)):
+			}
 		}
 	}
-
-	return limitExceeded(err)
-}
-
-func DoFunc2[T any](fn func() (T, error), opts ...Option) (res T, err error) {
-	o := NewOptions()
-	for _, opt := range opts {
-		opt(o)
-	}
-
-	for i := range o.Attempts {
-		t := o.Throttler
-		time.Sleep(o.Policy(i))
-		if i > 0 && !t.allow() {
-			return res, Abort(ErrThrottled)
-		}
-
-		res, err = fn()
-		if err == nil {
-			t.success()
-
-			return res, nil
-		}
-
-		if errors.Is(err, ErrAborted) {
-			return res, err
-		}
-	}
-
-	return res, limitExceeded(err)
-}
-
-func Abort(err error) error {
-	return &retryError{
-		err: ErrAborted,
-		ori: err,
-	}
-}
-
-func limitExceeded(err error) error {
-	return &retryError{
-		err: ErrLimitExceeded,
-		ori: err,
-	}
-}
-
-func ExponentialBackoff(base, cap time.Duration) func(attempts int) time.Duration {
-	b := int64(base)
-	c := int64(cap)
-
-	return func(attempts int) time.Duration {
-		if attempts <= 0 {
-			return 0
-		}
-
-		sleep := min(c, b*1<<attempts)
-		return time.Duration(rand.Int63n(sleep) + 1)
-	}
-}
-
-type retryError struct {
-	err error
-	ori error
-}
-
-func (t *retryError) Error() string {
-	return fmt.Sprintf("%s: %s", t.err, t.ori)
-}
-
-func (t *retryError) Unwrap() error {
-	return t.ori
-}
-
-func (t *retryError) Is(err error) bool {
-	return errors.Is(t.err, err) || errors.Is(t.ori, err)
-}
-
-type Throttler struct {
-	ratio  float64
-	thresh float64 // max / 2
-	max    float64
-
-	mu     sync.Mutex
-	tokens float64
-}
-
-type ThrottlerOptions struct {
-	MaxTokens  float64
-	TokenRatio float64
-}
-
-func NewThrottlerOptions() *ThrottlerOptions {
-	return &ThrottlerOptions{
-		MaxTokens:  10,
-		TokenRatio: 0.1,
-	}
-}
-
-func NewThrottler(opts *ThrottlerOptions) *Throttler {
-	opts = cmp.Or(opts, NewThrottlerOptions())
-
-	ratio := opts.TokenRatio
-	maxTokens := opts.MaxTokens
-
-	return &Throttler{
-		ratio:  ratio,
-		max:    maxTokens,
-		tokens: maxTokens,
-		thresh: maxTokens / 2,
-	}
-}
-
-func (t *Throttler) allow() bool {
-	if t == nil {
-		return true
-	}
-
-	t.mu.Lock()
-
-	t.tokens = max(t.tokens-1, 0)
-	ok := t.tokens > t.thresh
-	t.mu.Unlock()
-
-	return ok
-}
-
-func (t *Throttler) success() {
-	if t == nil {
-		return
-	}
-
-	t.mu.Lock()
-	t.tokens = min(t.tokens+t.ratio, t.max)
-	t.mu.Unlock()
 }

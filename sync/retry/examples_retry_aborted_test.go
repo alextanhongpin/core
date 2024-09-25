@@ -2,37 +2,35 @@ package retry_test
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"time"
 
 	"github.com/alextanhongpin/core/sync/retry"
 )
 
-func ExampleRetry_Abort() {
+func ExampleRetry_Try() {
+
+	r := retry.New(retry.NewConstantBackOff(time.Millisecond))
+
 	ctx := context.Background()
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Millisecond)
 	defer cancel()
 
-	opts := retry.NewOptions()
-	opts.Policy = func(i int) time.Duration {
-		return time.Millisecond
-	}
-	r := retry.New(opts)
-
-	err := r.Do(func() error {
-		select {
-		case <-ctx.Done():
-			// Cancel retry when timeout.
-			return retry.Abort(context.Cause(ctx))
-		default:
-			return errors.New("random")
+	for i, err := range r.Try(ctx, 10) {
+		if err != nil {
+			fmt.Println(i, err)
+			break
 		}
-	})
+	}
 
-	fmt.Println(err)
-	fmt.Println(errors.Unwrap(err))
+	for i, err := range r.Try(context.Background(), 10) {
+		if err != nil {
+			fmt.Println(i, err)
+			break
+		}
+	}
+
 	// Output:
-	// retry: aborted: context deadline exceeded
-	// context deadline exceeded
+	// 5 context deadline exceeded
+	// 10 retry: limit exceeded
 }
