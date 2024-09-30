@@ -52,7 +52,51 @@ var (
 		},
 		[]string{},
 	)
+
+	RED = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "red",
+			Help:    "RED metrics",
+			Buckets: prometheus.DefBuckets,
+		},
+		[]string{"service", "action", "status"},
+	)
 )
+
+const (
+	OK  string = "ok"
+	Err string = "err"
+)
+
+type REDTracker struct {
+	service string
+	action  string
+	status  string
+	now     time.Time
+}
+
+func NewRED(service, action string) *REDTracker {
+	return &REDTracker{
+		service: service,
+		action:  action,
+		status:  OK,
+		now:     time.Now(),
+	}
+}
+
+func (r *REDTracker) Done() {
+	RED.
+		WithLabelValues(r.service, r.action, r.status).
+		Observe(float64(time.Since(r.now).Milliseconds()))
+}
+
+func (r *REDTracker) Fail() {
+	r.status = Err
+}
+
+func (r *REDTracker) SetStatus(status string) {
+	r.status = status
+}
 
 func RequestDurationHandler(version string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

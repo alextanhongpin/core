@@ -95,3 +95,56 @@ request_duration_seconds_count{method="GET",path="/{path}",status="200",version=
 `
 	is.Equal(want, string(b))
 }
+
+func TestRED(t *testing.T) {
+	prometheus.MustRegister(metrics.RED)
+
+	{
+		red := metrics.NewRED("user_service", "login")
+		red.Done()
+	}
+
+	{
+		red := metrics.NewRED("user_service", "login")
+		red.Fail()
+		red.Done()
+	}
+
+	is := assert.New(t)
+	is.Equal(2, testutil.CollectAndCount(metrics.RED, "red"))
+
+	b, err := testutil.CollectAndFormat(metrics.RED, expfmt.TypeTextPlain, "red")
+	is.Nil(err)
+	want := `# HELP red RED metrics
+# TYPE red histogram
+red_bucket{action="login",service="user_service",status="err",le="0.005"} 1
+red_bucket{action="login",service="user_service",status="err",le="0.01"} 1
+red_bucket{action="login",service="user_service",status="err",le="0.025"} 1
+red_bucket{action="login",service="user_service",status="err",le="0.05"} 1
+red_bucket{action="login",service="user_service",status="err",le="0.1"} 1
+red_bucket{action="login",service="user_service",status="err",le="0.25"} 1
+red_bucket{action="login",service="user_service",status="err",le="0.5"} 1
+red_bucket{action="login",service="user_service",status="err",le="1"} 1
+red_bucket{action="login",service="user_service",status="err",le="2.5"} 1
+red_bucket{action="login",service="user_service",status="err",le="5"} 1
+red_bucket{action="login",service="user_service",status="err",le="10"} 1
+red_bucket{action="login",service="user_service",status="err",le="+Inf"} 1
+red_sum{action="login",service="user_service",status="err"} 0
+red_count{action="login",service="user_service",status="err"} 1
+red_bucket{action="login",service="user_service",status="ok",le="0.005"} 1
+red_bucket{action="login",service="user_service",status="ok",le="0.01"} 1
+red_bucket{action="login",service="user_service",status="ok",le="0.025"} 1
+red_bucket{action="login",service="user_service",status="ok",le="0.05"} 1
+red_bucket{action="login",service="user_service",status="ok",le="0.1"} 1
+red_bucket{action="login",service="user_service",status="ok",le="0.25"} 1
+red_bucket{action="login",service="user_service",status="ok",le="0.5"} 1
+red_bucket{action="login",service="user_service",status="ok",le="1"} 1
+red_bucket{action="login",service="user_service",status="ok",le="2.5"} 1
+red_bucket{action="login",service="user_service",status="ok",le="5"} 1
+red_bucket{action="login",service="user_service",status="ok",le="10"} 1
+red_bucket{action="login",service="user_service",status="ok",le="+Inf"} 1
+red_sum{action="login",service="user_service",status="ok"} 0
+red_count{action="login",service="user_service",status="ok"} 1
+`
+	is.Equal(want, string(b))
+}
