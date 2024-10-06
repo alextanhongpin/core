@@ -19,6 +19,12 @@ type Unique struct {
 	client *redis.Client
 }
 
+func NewUnique(client *redis.Client) *Unique {
+	return &Unique{
+		client: client,
+	}
+}
+
 func (u *Unique) Store(ctx context.Context, key, val string) (bool, error) {
 	n, err := u.client.PFAdd(ctx, key, val).Result()
 	return n == 1, err
