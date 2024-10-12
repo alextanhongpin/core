@@ -7,6 +7,14 @@ type Error struct {
 }
 
 type Body struct {
-	Data  any    `json:"data,omitempty"`
-	Error *Error `json:"error,omitempty"`
+	Data     any       `json:"data,omitempty"`
+	Error    *Error    `json:"error,omitempty"`
+	PageInfo *PageInfo `json:"pageInfo,omitempty"`
+}
+
+type PageInfo struct {
+	HasPrevPage bool   `json:"hasPrevPage"`
+	HasNextPage bool   `json:"hasNextPage"`
+	StartCursor string `json:"startCursor"`
+	EndCursor   string `json:"endCursor"`
 }
