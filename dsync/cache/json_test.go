@@ -8,8 +8,27 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+type User struct {
+	Name    string `json:"name"`
+	Age     int    `json:"age"`
+	Married bool   `json:"married"`
+}
+
+var (
+	john = &User{
+		Name:    "John",
+		Age:     30,
+		Married: true,
+	}
+	jane = &User{
+		Name:    "Jane",
+		Age:     13,
+		Married: false,
+	}
+)
+
 func TestJSON(t *testing.T) {
-	c := cache.NewJSON(cache.New(newClient(t)))
+	c := cache.NewJSON(newClient(t))
 
 	t.Run("empty", func(t *testing.T) {
 		key := t.Name()

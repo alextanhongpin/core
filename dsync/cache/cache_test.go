@@ -2,7 +2,6 @@ package cache_test
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"testing"
 	"time"
@@ -36,7 +35,7 @@ func TestCache(t *testing.T) {
 
 	t.Run("exist", func(t *testing.T) {
 		key := t.Name()
-		value := "hello"
+		value := []byte("hello")
 
 		err := c.Store(ctx, key, value, time.Second)
 
@@ -48,37 +47,9 @@ func TestCache(t *testing.T) {
 		is.Equal(value, loaded)
 	})
 
-	t.Run("load many", func(t *testing.T) {
-		prefix := t.Name()
-		value := "hello"
-
-		is := assert.New(t)
-
-		var keys []string
-		for i := range 3 {
-			key := fmt.Sprintf("%s:%d", prefix, i)
-			keys = append(keys, key)
-			err := c.Store(ctx, key, value, time.Second)
-			is.Nil(err)
-		}
-
-		unk := "not-exist"
-		m, err := c.LoadMany(ctx, append(keys, unk)...)
-		is.Nil(err)
-		is.Len(m, 3)
-
-		for k, v := range m {
-			is.Equal(value, v)
-			is.Contains(keys, k)
-		}
-
-		_, ok := m[unk]
-		is.False(ok)
-	})
-
 	t.Run("load or store empty", func(t *testing.T) {
 		key := t.Name()
-		value := "hello"
+		value := []byte("hello")
 
 		old, loaded, err := c.LoadOrStore(ctx, key, value, time.Second)
 
@@ -95,7 +66,7 @@ func TestCache(t *testing.T) {
 
 	t.Run("load or store exist", func(t *testing.T) {
 		key := t.Name()
-		value := "hello"
+		value := []byte("hello")
 
 		err := c.Store(ctx, key, value, time.Second)
 		is := assert.New(t)
@@ -123,7 +94,7 @@ func TestCache(t *testing.T) {
 
 	t.Run("load and delete exist", func(t *testing.T) {
 		key := t.Name()
-		value := "hello"
+		value := []byte("hello")
 
 		err := c.Store(ctx, key, value, time.Second)
 		is := assert.New(t)
@@ -141,7 +112,7 @@ func TestCache(t *testing.T) {
 
 	t.Run("compare and delete empty", func(t *testing.T) {
 		key := t.Name()
-		old := "hello"
+		old := []byte("hello")
 		deleted, err := c.CompareAndDelete(ctx, key, old)
 
 		is := assert.New(t)
@@ -154,7 +125,7 @@ func TestCache(t *testing.T) {
 
 	t.Run("compare and delete exist", func(t *testing.T) {
 		key := t.Name()
-		value := "hello"
+		value := []byte("hello")
 
 		err := c.Store(ctx, key, value, time.Second)
 		is := assert.New(t)
@@ -171,8 +142,8 @@ func TestCache(t *testing.T) {
 
 	t.Run("compare and swap empty", func(t *testing.T) {
 		key := t.Name()
-		old := "hello"
-		value := "hello"
+		old := []byte("hello")
+		value := []byte("hello")
 		swapped, err := c.CompareAndSwap(ctx, key, old, value, time.Second)
 
 		is := assert.New(t)
@@ -185,13 +156,13 @@ func TestCache(t *testing.T) {
 
 	t.Run("compare and swap exist", func(t *testing.T) {
 		key := t.Name()
-		value := "hello"
+		value := []byte("hello")
 
 		err := c.Store(ctx, key, value, time.Second)
 		is := assert.New(t)
 		is.Nil(err)
 
-		newValue := "world"
+		newValue := []byte("world")
 		swapped, err := c.CompareAndSwap(ctx, key, value, newValue, time.Second)
 
 		is.Nil(err)

@@ -4,20 +4,22 @@ import (
 	"context"
 	"encoding/json"
 	"time"
+
+	redis "github.com/redis/go-redis/v9"
 )
 
 type JSON struct {
-	cache *Cacheable
+	Cache Cacheable
 }
 
-func NewJSON(cache *Cacheable) *JSON {
+func NewJSON(client *redis.Client) *JSON {
 	return &JSON{
-		cache: cache,
+		Cache: New(client),
 	}
 }
 
 func (s *JSON) Load(ctx context.Context, key string, v any) error {
-	str, err := s.cache.Load(ctx, key)
+	str, err := s.Cache.Load(ctx, key)
 	if err != nil {
 		return err
 	}
@@ -31,11 +33,11 @@ func (s *JSON) Store(ctx context.Context, key string, value any, ttl time.Durati
 		return err
 	}
 
-	return s.cache.Store(ctx, key, string(b), ttl)
+	return s.Cache.Store(ctx, key, b, ttl)
 }
 
 func (s *JSON) LoadAndDelete(ctx context.Context, key string, value any) (loaded bool, err error) {
-	str, loaded, err := s.cache.LoadAndDelete(ctx, key)
+	str, loaded, err := s.Cache.LoadAndDelete(ctx, key)
 	if err != nil {
 		return false, err
 	}
@@ -57,7 +59,7 @@ func (s *JSON) CompareAndDelete(ctx context.Context, key string, old any) (delet
 		return false, err
 	}
 
-	return s.cache.CompareAndDelete(ctx, key, string(b))
+	return s.Cache.CompareAndDelete(ctx, key, b)
 }
 
 func (s *JSON) CompareAndSwap(ctx context.Context, key string, old, value any, ttl time.Duration) (swapped bool, err error) {
@@ -70,5 +72,5 @@ func (s *JSON) CompareAndSwap(ctx context.Context, key string, old, value any, t
 		return false, err
 	}
 
-	return s.cache.CompareAndSwap(ctx, key, string(a), string(b), ttl)
+	return s.Cache.CompareAndSwap(ctx, key, a, b, ttl)
 }
