@@ -55,8 +55,8 @@ func ExampleMakeHandler() {
 		}
 
 		// Execute the idempotent operation and handle the response
-		store := idempotent.NewRedisStore(client, nil)
-		h := idempotent.MakeHandler(store, fn)
+		store := idempotent.NewRedisStore(client)
+		h := idempotent.NewClient(store, fn)
 		v, shared, err := h.Do(ctx, "get-user", req)
 		if err != nil {
 			panic(err)
@@ -79,8 +79,8 @@ func ExampleMakeHandler() {
 		}
 
 		// Execute the idempotent operation and handle the response.
-		store := idempotent.NewRedisStore(client, nil)
-		h := idempotent.MakeHandler(store, fn)
+		store := idempotent.NewRedisStore(client)
+		h := idempotent.NewClient(store, fn)
 		_, _, err := h.Do(ctx, "get-user", req)
 		if err == nil {
 			fmt.Println(err)
@@ -107,8 +107,8 @@ func ExampleMakeHandler() {
 		}
 
 		// Execute the idempotent operation and handle the response.
-		store := idempotent.NewRedisStore(client, nil)
-		h := idempotent.MakeHandler(store, fn)
+		store := idempotent.NewRedisStore(client)
+		h := idempotent.NewClient(store, fn)
 		v, shared, err := h.Do(ctx, "get-user", req)
 		if err != nil {
 			panic(err)

@@ -2,12 +2,12 @@
 package idempotent
 
 import (
-	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"sync/atomic"
 	"time"
 
@@ -25,6 +25,10 @@ var (
 	// ErrRequestMismatch indicates that the request does not match the stored
 	// request for the specified key.
 	ErrRequestMismatch = errors.New("idempotent: request mismatch")
+
+	// ErrHandlerNotFound indicates that the handler for the specified pattern
+	// is not found.
+	ErrHandlerNotFound = errors.New("idempoent: handler not found")
 )
 
 type data struct {
@@ -32,46 +36,9 @@ type data struct {
 	Response string `json:"response,omitempty"`
 }
 
-type Handler[K, V any] func(ctx context.Context, key string, req K) (V, bool, error)
-
-func (h Handler[K, V]) Do(ctx context.Context, key string, req K) (V, bool, error) {
-	return h(ctx, key, req)
-}
-
-func MakeHandler[K, V any](store Store, h func(context.Context, K) (V, error), opts ...Option) Handler[K, V] {
-	return func(ctx context.Context, key string, req K) (res V, shared bool, err error) {
-		reqBytes, err := json.Marshal(req)
-		if err != nil {
-			return res, false, err
-		}
-
-		resBytes, shared, err := store.Do(ctx, key, func(ctx context.Context, _ []byte) ([]byte, error) {
-			res, err := h(ctx, req)
-			if err != nil {
-				return nil, err
-			}
-
-			return json.Marshal(res)
-		}, reqBytes, opts...)
-		if err != nil {
-			return res, false, err
-		}
-
-		err = json.Unmarshal(resBytes, &res)
-		return res, shared, err
-	}
-}
-
 type Options struct {
 	KeepTTL time.Duration
 	LockTTL time.Duration
-}
-
-func (o *Options) Clone() *Options {
-	return &Options{
-		KeepTTL: o.KeepTTL,
-		LockTTL: o.LockTTL,
-	}
 }
 
 func NewOptions() *Options {
@@ -79,6 +46,14 @@ func NewOptions() *Options {
 		KeepTTL: 24 * time.Hour,
 		LockTTL: 10 * time.Second,
 	}
+}
+
+func (o *Options) Apply(opts ...Option) *Options {
+	for _, opt := range opts {
+		opt(o)
+	}
+
+	return o
 }
 
 func (o *Options) Valid() error {
@@ -108,38 +83,46 @@ func WithLockTTL(ttl time.Duration) Option {
 }
 
 type Store interface {
-	Do(ctx context.Context, key string, fn func(ctx context.Context, req []byte) ([]byte, error), req []byte, opts ...Option) (res []byte, shared bool, err error)
+	Do(ctx context.Context, pattern, key string, req []byte, opts ...Option) (res []byte, shared bool, err error)
+	HandleFunc(pattern string, fn func(ctx context.Context, req []byte) ([]byte, error))
+}
+
+type locker interface {
+	Extend(ctx context.Context, key, val string, ttl time.Duration) error
+	LoadOrStore(ctx context.Context, key, token string, lockTTL time.Duration) (string, bool, error)
+	Replace(ctx context.Context, key, oldVal, newVal string, ttl time.Duration) error
+	Unlock(ctx context.Context, key, token string) error
 }
 
 type RedisStore struct {
 	client *redis.Client
 	group  *promise.Group[[]byte]
-	lock   *lock.Locker
-	opts   *Options
+	Lock   locker
+	*Router
 }
 
 // NewRedisStore creates a new RedisStore instance with the specified Redis
 // client, lock TTL, and keep TTL.
-func NewRedisStore(client *redis.Client, opts *Options) *RedisStore {
-	opts = cmp.Or(opts, NewOptions())
-	if err := opts.Valid(); err != nil {
-		panic(err)
-	}
-
+func NewRedisStore(client *redis.Client) *RedisStore {
 	return &RedisStore{
 		client: client,
 		group:  promise.NewGroup[[]byte](),
-		lock: lock.New(client, &lock.Options{
-			LockTTL: opts.LockTTL,
+		Lock: lock.New(client, &lock.Options{
+			LockTTL: 10 * time.Second,
 			WaitTTL: 0,
 		}),
-		opts: opts,
+		Router: NewRouter(),
 	}
 }
 
 // Do executes the provided function idempotently, using the specified key and
 // request.
-func (s *RedisStore) Do(ctx context.Context, key string, fn func(ctx context.Context, req []byte) ([]byte, error), req []byte, opts ...Option) (res []byte, shared bool, err error) {
+func (s *RedisStore) Do(ctx context.Context, pattern, key string, req []byte, opts ...Option) (res []byte, shared bool, err error) {
+	fn, ok := s.Router.Handler(pattern)
+	if !ok {
+		return nil, false, fmt.Errorf("%w: %s", ErrHandlerNotFound, pattern)
+	}
+
 	b := new(atomic.Bool)
 	b.Store(true)
 	res, err = s.group.DoAndForget(key, func() ([]byte, error) {
@@ -155,17 +138,18 @@ func (s *RedisStore) Do(ctx context.Context, key string, fn func(ctx context.Con
 	return
 }
 
-func (s *RedisStore) do(ctx context.Context, key string, fn func(ctx context.Context, req []byte) ([]byte, error), req []byte, opts ...Option) (res []byte, shared bool, err error) {
-	o := s.opts.Clone()
-	for _, opt := range opts {
-		opt(o)
+func (s *RedisStore) do(ctx context.Context, key string, h Handler, req []byte, opts ...Option) (res []byte, shared bool, err error) {
+	o := NewOptions()
+	o.Apply(opts...)
+	if err := o.Valid(); err != nil {
+		return nil, false, err
 	}
 
 	keepTTL := o.KeepTTL
-	lock := s.lock
+	lock := s.Lock
 	lockTTL := o.LockTTL
 
-	token := newFencingToken()
+	token := newToken()
 	v, loaded, err := lock.LoadOrStore(ctx, key, token, lockTTL)
 	if err != nil {
 		return res, false, err
@@ -182,11 +166,19 @@ func (s *RedisStore) do(ctx context.Context, key string, fn func(ctx context.Con
 
 	ch := make(chan result[data], 1)
 	go func() {
-		res, err := fn(ctx, req)
-		ch <- makeResult(data{
-			Request:  hash(req),
-			Response: string(res),
-		}, err)
+		res, err := h.Handle(ctx, req)
+		if err != nil {
+			ch <- result[data]{
+				err: err,
+			}
+		} else {
+			ch <- result[data]{
+				data: data{
+					Request:  hash(req),
+					Response: string(res),
+				},
+			}
+		}
 		close(ch)
 	}()
 
@@ -268,10 +260,6 @@ func (r result[T]) unwrap() (T, error) {
 	return r.data, r.err
 }
 
-func makeResult[T any](data T, err error) result[T] {
-	return result[T]{data: data, err: err}
-}
-
-func newFencingToken() string {
+func newToken() string {
 	return uuid.Must(uuid.NewV7()).String()
 }
