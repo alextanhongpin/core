@@ -275,6 +275,7 @@ func (b *CircuitBreaker) closed(ctx context.Context, fn func() error) error {
 
 		go func() {
 			t := time.NewTicker(d)
+			defer t.Stop()
 
 			for {
 				select {
