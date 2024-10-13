@@ -1,4 +1,4 @@
-package circuit
+package circuitbreaker
 
 import (
 	"context"
@@ -38,40 +38,32 @@ func (s Status) String() string {
 	return statusText[s]
 }
 
-type Option struct {
-	BreakDuration    time.Duration
-	FailureRatio     float64
-	FailureThreshold int
-	SamplingDuration time.Duration
-	SuccessThreshold int
-}
-
-func NewOption() *Option {
-	return &Option{
-		BreakDuration:    breakDuration,
-		FailureRatio:     failureRatio,
-		FailureThreshold: failureThreshold,
-		SamplingDuration: samplingDuration,
-		SuccessThreshold: successThreshold,
-	}
+type counter interface {
+	Inc(successOrFailure int64) (successes, failures float64)
+	Reset()
 }
 
 type Breaker struct {
-	FailureCount  func(error) int
-	SlowCallCount func(time.Duration) int
-	counter       *rate.Errors
-	mu            sync.RWMutex
-	opt           *Option
-	status        Status
-	timer         *time.Timer
+	// Configuration.
+	BreakDuration    time.Duration
+	Counter          counter
+	FailureCount     func(error) int
+	FailureRatio     float64
+	FailureThreshold int
+	SamplingDuration time.Duration
+	SlowCallCount    func(time.Duration) int
+	SuccessThreshold int
+
+	// State.
+	mu     sync.RWMutex
+	status Status
+	timer  *time.Timer
 }
 
-func New(opt *Option) *Breaker {
-	if opt == nil {
-		opt = NewOption()
-	}
-
+func New() *Breaker {
 	return &Breaker{
+		BreakDuration: breakDuration,
+		Counter:       rate.NewErrors(samplingDuration),
 		FailureCount: func(err error) int {
 			// Ignore context cancellation.
 			if errors.Is(err, context.Canceled) {
@@ -85,12 +77,14 @@ func New(opt *Option) *Breaker {
 
 			return 1
 		},
+		FailureRatio:     failureRatio,
+		FailureThreshold: failureThreshold,
+		SamplingDuration: samplingDuration,
 		SlowCallCount: func(duration time.Duration) int {
 			// Every 5th second, penalty increases by 1.
 			return int(duration / (5 * time.Second))
 		},
-		counter: rate.NewErrors(opt.SamplingDuration),
-		opt:     opt,
+		SuccessThreshold: successThreshold,
 	}
 }
 
@@ -120,17 +114,17 @@ func (b *Breaker) canOpen(n int) bool {
 		return false
 	}
 
-	return b.isUnhealthy(b.counter.Inc(-int64(n)))
+	return b.isUnhealthy(b.Counter.Inc(-int64(n)))
 }
 
 func (b *Breaker) open() {
 	b.mu.Lock()
 	b.status = Open
-	b.counter.Reset()
+	b.Counter.Reset()
 	if b.timer != nil {
 		b.timer.Stop()
 	}
-	b.timer = time.AfterFunc(b.opt.BreakDuration, func() {
+	b.timer = time.AfterFunc(b.BreakDuration, func() {
 		b.halfOpen()
 	})
 	b.mu.Unlock()
@@ -141,13 +135,13 @@ func (b *Breaker) opened() error {
 }
 
 func (b *Breaker) canClose() bool {
-	return b.isHealthy(b.counter.Inc(1))
+	return b.isHealthy(b.Counter.Inc(1))
 }
 
 func (b *Breaker) close() {
 	b.mu.Lock()
 	b.status = Closed
-	b.counter.Reset()
+	b.Counter.Reset()
 	b.mu.Unlock()
 }
 
@@ -170,7 +164,7 @@ func (b *Breaker) closed(fn func() error) error {
 		return nil
 	}
 
-	b.counter.Inc(1)
+	b.Counter.Inc(1)
 
 	return nil
 }
@@ -178,7 +172,7 @@ func (b *Breaker) closed(fn func() error) error {
 func (b *Breaker) halfOpen() {
 	b.mu.Lock()
 	b.status = HalfOpen
-	b.counter.Reset()
+	b.Counter.Reset()
 	b.mu.Unlock()
 }
 
@@ -205,12 +199,12 @@ func (b *Breaker) halfOpened(fn func() error) error {
 }
 
 func (b *Breaker) isHealthy(successes, _ float64) bool {
-	return math.Ceil(successes) >= float64(b.opt.SuccessThreshold)
+	return math.Ceil(successes) >= float64(b.SuccessThreshold)
 }
 
 func (b *Breaker) isUnhealthy(successes, failures float64) bool {
-	isFailureRatioExceeded := failureRate(successes, failures) >= b.opt.FailureRatio
-	isFailureThresholdExceeded := math.Ceil(failures) >= float64(b.opt.FailureThreshold)
+	isFailureRatioExceeded := failureRate(successes, failures) >= b.FailureRatio
+	isFailureThresholdExceeded := math.Ceil(failures) >= float64(b.FailureThreshold)
 
 	return isFailureRatioExceeded && isFailureThresholdExceeded
 }

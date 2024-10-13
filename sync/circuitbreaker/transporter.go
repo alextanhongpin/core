@@ -1,4 +1,4 @@
-package circuit
+package circuitbreaker
 
 import (
 	"errors"
@@ -14,20 +14,20 @@ type circuitbreaker interface {
 }
 
 type Transporter struct {
-	t  transporter
-	cb circuitbreaker
+	Transport      transporter
+	CircuitBreaker circuitbreaker
 }
 
 func NewTransporter(t transporter, cb circuitbreaker) *Transporter {
 	return &Transporter{
-		t:  t,
-		cb: cb,
+		Transport:      t,
+		CircuitBreaker: cb,
 	}
 }
 
 func (t *Transporter) RoundTrip(r *http.Request) (resp *http.Response, err error) {
-	err = t.cb.Do(func() error {
-		resp, err = t.t.RoundTrip(r)
+	err = t.CircuitBreaker.Do(func() error {
+		resp, err = t.Transport.RoundTrip(r)
 		if err != nil {
 			return err
 		}

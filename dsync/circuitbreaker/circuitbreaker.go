@@ -1,8 +1,7 @@
-// package circuit is an alternative of the classic circuitbreaker.
-package circuit
+// package circuitbreaker is an alternative of the classic circuitbreaker.
+package circuitbreaker
 
 import (
-	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -62,30 +61,16 @@ const (
 )
 
 var (
-	ErrUnavailable = errors.New("circuit: unavailable")
-	ErrForcedOpen  = errors.New("circuit: forced open")
+	ErrUnavailable = errors.New("circuit-breaker: unavailable")
+	ErrForcedOpen  = errors.New("circuit-breaker: forced open")
 )
 
-type Options struct {
-	BreakDuration     time.Duration
-	FailureRatio      float64
-	FailureThreshold  int
-	HeartbeatDuration time.Duration
-	SamplingDuration  time.Duration
-	SuccessThreshold  int
+type counter interface {
+	Inc(successOrFailure int64) (successes, failures float64)
+	Reset()
 }
 
-func NewOptions() *Options {
-	return &Options{
-		BreakDuration:    breakDuration,
-		FailureRatio:     failureRatio,
-		FailureThreshold: failureThreshold,
-		SamplingDuration: samplingDuration,
-		SuccessThreshold: successThreshold,
-	}
-}
-
-type Breaker struct {
+type CircuitBreaker struct {
 	mu sync.RWMutex
 
 	// State.
@@ -93,19 +78,29 @@ type Breaker struct {
 	timer  *time.Timer
 
 	// Options.
-	FailureCount  func(error) int
-	Now           func() time.Time
-	SlowCallCount func(time.Duration) int
-	channel       string
-	client        *redis.Client
-	counter       *rate.Errors
-	opts          *Options
+	BreakDuration     time.Duration
+	FailureCount      func(error) int
+	FailureRatio      float64
+	FailureThreshold  int
+	HeartbeatDuration time.Duration
+	Now               func() time.Time
+	SamplingDuration  time.Duration
+	SlowCallCount     func(time.Duration) int
+	SuccessThreshold  int
+
+	// Dependencies.
+	Counter counter
+	channel string
+	client  *redis.Client
 }
 
-func New(client *redis.Client, channel string, opts *Options) (*Breaker, func()) {
-	opts = cmp.Or(opts, NewOptions())
-
-	b := &Breaker{
+func New(client *redis.Client, channel string) (*CircuitBreaker, func()) {
+	b := &CircuitBreaker{
+		BreakDuration:    breakDuration,
+		FailureRatio:     failureRatio,
+		FailureThreshold: failureThreshold,
+		SamplingDuration: samplingDuration,
+		SuccessThreshold: successThreshold,
 		FailureCount: func(err error) int {
 			// Ignore context cancellation.
 			if errors.Is(err, context.Canceled) {
@@ -126,13 +121,12 @@ func New(client *redis.Client, channel string, opts *Options) (*Breaker, func())
 		},
 		channel: channel,
 		client:  client,
-		counter: rate.NewErrors(opts.SamplingDuration),
-		opts:    opts,
+		Counter: rate.NewErrors(samplingDuration),
 	}
 	return b, b.init()
 }
 
-func (b *Breaker) init() func() {
+func (b *CircuitBreaker) init() func() {
 	ctx := context.Background()
 	status, _ := b.client.Get(ctx, b.channel).Result()
 	b.transition(NewStatus(status))
@@ -155,7 +149,7 @@ func (b *Breaker) init() func() {
 	}
 }
 
-func (b *Breaker) Do(ctx context.Context, fn func() error) error {
+func (b *CircuitBreaker) Do(ctx context.Context, fn func() error) error {
 	switch status := b.Status(); status {
 	case Open:
 		return b.opened()
@@ -172,7 +166,7 @@ func (b *Breaker) Do(ctx context.Context, fn func() error) error {
 	}
 }
 
-func (b *Breaker) Status() Status {
+func (b *CircuitBreaker) Status() Status {
 	b.mu.RLock()
 	status := b.status
 	b.mu.RUnlock()
@@ -180,7 +174,7 @@ func (b *Breaker) Status() Status {
 	return status
 }
 
-func (b *Breaker) transition(status Status) {
+func (b *CircuitBreaker) transition(status Status) {
 	if b.Status() == status {
 		return
 	}
@@ -199,23 +193,23 @@ func (b *Breaker) transition(status Status) {
 	}
 }
 
-func (b *Breaker) canOpen(n int) bool {
+func (b *CircuitBreaker) canOpen(n int) bool {
 	if n <= 0 {
 		return false
 	}
 
-	return b.isUnhealthy(b.counter.Inc(-int64(n)))
+	return b.isUnhealthy(b.Counter.Inc(-int64(n)))
 }
 
-func (b *Breaker) open() {
+func (b *CircuitBreaker) open() {
 	duration, _ := b.client.PTTL(context.Background(), b.channel).Result()
 	if duration <= 0 {
-		duration = b.opts.BreakDuration
+		duration = b.BreakDuration
 	}
 
 	b.mu.Lock()
 	b.status = Open
-	b.counter.Reset()
+	b.Counter.Reset()
 
 	if b.timer != nil {
 		b.timer.Stop()
@@ -227,19 +221,19 @@ func (b *Breaker) open() {
 	b.mu.Unlock()
 }
 
-func (b *Breaker) opened() error {
+func (b *CircuitBreaker) opened() error {
 	return ErrUnavailable
 }
 
-func (b *Breaker) halfOpen() {
+func (b *CircuitBreaker) halfOpen() {
 	b.mu.Lock()
 	b.status = HalfOpen
-	b.counter.Reset()
+	b.Counter.Reset()
 	b.timer = nil
 	b.mu.Unlock()
 }
 
-func (b *Breaker) halfOpened(ctx context.Context, fn func() error) error {
+func (b *CircuitBreaker) halfOpened(ctx context.Context, fn func() error) error {
 	start := b.Now()
 	if err := fn(); err != nil {
 		b.open()
@@ -261,21 +255,21 @@ func (b *Breaker) halfOpened(ctx context.Context, fn func() error) error {
 	return nil
 }
 
-func (b *Breaker) canClose() bool {
-	return b.isHealthy(b.counter.Inc(1))
+func (b *CircuitBreaker) canClose() bool {
+	return b.isHealthy(b.Counter.Inc(1))
 }
 
-func (b *Breaker) close() {
+func (b *CircuitBreaker) close() {
 	b.mu.Lock()
 	b.status = Closed
-	b.counter.Reset()
+	b.Counter.Reset()
 	b.mu.Unlock()
 }
 
-func (b *Breaker) closed(ctx context.Context, fn func() error) error {
+func (b *CircuitBreaker) closed(ctx context.Context, fn func() error) error {
 	start := time.Now()
 
-	if d := b.opts.HeartbeatDuration; d > 0 {
+	if d := b.HeartbeatDuration; d > 0 {
 		ctx, cancel := context.WithCancel(ctx)
 		defer cancel()
 
@@ -316,42 +310,42 @@ func (b *Breaker) closed(ctx context.Context, fn func() error) error {
 		return b.publish(ctx, Open)
 	}
 
-	b.counter.Inc(1)
+	b.Counter.Inc(1)
 
 	return nil
 }
 
-func (b *Breaker) forceOpen() {
+func (b *CircuitBreaker) forceOpen() {
 	b.mu.Lock()
 	b.status = ForcedOpen
-	b.counter.Reset()
+	b.Counter.Reset()
 	b.mu.Unlock()
 }
 
-func (b *Breaker) forcedOpen() error {
+func (b *CircuitBreaker) forcedOpen() error {
 	return ErrForcedOpen
 }
 
-func (b *Breaker) disable() {
+func (b *CircuitBreaker) disable() {
 	b.mu.Lock()
 	b.status = Disabled
-	b.counter.Reset()
+	b.Counter.Reset()
 	b.mu.Unlock()
 }
 
-func (b *Breaker) publish(ctx context.Context, status Status) error {
-	setErr := b.client.Set(ctx, b.channel, status.String(), b.opts.BreakDuration).Err()
+func (b *CircuitBreaker) publish(ctx context.Context, status Status) error {
+	setErr := b.client.Set(ctx, b.channel, status.String(), b.BreakDuration).Err()
 	pubErr := b.client.Publish(ctx, b.channel, status.String()).Err()
 	return errors.Join(setErr, pubErr)
 }
 
-func (b *Breaker) isHealthy(successes, _ float64) bool {
-	return math.Ceil(successes) >= float64(b.opts.SuccessThreshold)
+func (b *CircuitBreaker) isHealthy(successes, _ float64) bool {
+	return math.Ceil(successes) >= float64(b.SuccessThreshold)
 }
 
-func (b *Breaker) isUnhealthy(successes, failures float64) bool {
-	isFailureRatioExceeded := failureRate(successes, failures) >= b.opts.FailureRatio
-	isFailureThresholdExceeded := math.Ceil(failures) >= float64(b.opts.FailureThreshold)
+func (b *CircuitBreaker) isUnhealthy(successes, failures float64) bool {
+	isFailureRatioExceeded := failureRate(successes, failures) >= b.FailureRatio
+	isFailureThresholdExceeded := math.Ceil(failures) >= float64(b.FailureThreshold)
 
 	return isFailureRatioExceeded && isFailureThresholdExceeded
 }

@@ -1,4 +1,4 @@
-package circuit_test
+package circuitbreaker_test
 
 import (
 	"context"
@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alextanhongpin/core/dsync/circuit"
+	"github.com/alextanhongpin/core/dsync/circuitbreaker"
 	"github.com/alextanhongpin/core/storage/redis/redistest"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
@@ -26,18 +26,19 @@ func TestMain(m *testing.M) {
 }
 
 func TestCircuit(t *testing.T) {
-	opts := circuit.NewOptions()
-	opts.SamplingDuration = 1 * time.Second
-	opts.BreakDuration = 1 * time.Second
 
-	cb, stop1 := circuit.New(newClient(t), t.Name(), opts)
+	cb, stop1 := circuitbreaker.New(newClient(t), t.Name())
+	cb.SamplingDuration = 1 * time.Second
+	cb.BreakDuration = 1 * time.Second
 	defer stop1()
-	cb2, stop2 := circuit.New(newClient(t), t.Name(), opts)
+	cb2, stop2 := circuitbreaker.New(newClient(t), t.Name())
+	cb2.SamplingDuration = 1 * time.Second
+	cb2.BreakDuration = 1 * time.Second
 	defer stop2()
 
 	t.Run("open", func(t *testing.T) {
 		is := assert.New(t)
-		for range opts.FailureThreshold {
+		for range cb.FailureThreshold {
 			err := cb.Do(ctx, func() error {
 				return wantErr
 			})
@@ -49,17 +50,17 @@ func TestCircuit(t *testing.T) {
 			return wantErr
 		})
 
-		is.ErrorIs(err, circuit.ErrUnavailable)
-		is.Equal(circuit.Open, cb.Status())
+		is.ErrorIs(err, circuitbreaker.ErrUnavailable)
+		is.Equal(circuitbreaker.Open, cb.Status())
 
 		// Wait for message to be subscribed.
 		time.Sleep(100 * time.Millisecond)
-		is.Equal(circuit.Open, cb2.Status())
+		is.Equal(circuitbreaker.Open, cb2.Status())
 	})
 
 	t.Run("half-open", func(t *testing.T) {
 		// Because this is Redis TTL, we need to wait for it to expire.
-		time.Sleep(opts.BreakDuration + time.Millisecond)
+		time.Sleep(cb.BreakDuration + time.Millisecond)
 
 		err := cb.Do(ctx, func() error {
 			return nil
@@ -67,12 +68,12 @@ func TestCircuit(t *testing.T) {
 
 		is := assert.New(t)
 		is.ErrorIs(err, nil)
-		is.Equal(circuit.HalfOpen, cb.Status())
+		is.Equal(circuitbreaker.HalfOpen, cb.Status())
 	})
 
 	t.Run("closed", func(t *testing.T) {
 		is := assert.New(t)
-		for range opts.SuccessThreshold {
+		for range cb.SuccessThreshold {
 			err := cb.Do(ctx, func() error {
 				return nil
 			})
@@ -80,18 +81,17 @@ func TestCircuit(t *testing.T) {
 			is.Nil(err)
 		}
 
-		is.Equal(circuit.Closed, cb.Status())
+		is.Equal(circuitbreaker.Closed, cb.Status())
 	})
 }
 
 func TestSlowCall(t *testing.T) {
-	opts := circuit.NewOptions()
-	cb, stop := circuit.New(newClient(t), t.Name(), opts)
+	cb, stop := circuitbreaker.New(newClient(t), t.Name())
 	defer stop()
 
 	cb.SlowCallCount = func(time.Duration) int {
 		// Ignore duration, just return a constant value.
-		return opts.FailureThreshold
+		return cb.FailureThreshold
 	}
 
 	err := cb.Do(ctx, func() error {
@@ -101,7 +101,7 @@ func TestSlowCall(t *testing.T) {
 
 	is := assert.New(t)
 	is.Nil(err)
-	is.Equal(circuit.Open, cb.Status())
+	is.Equal(circuitbreaker.Open, cb.Status())
 }
 
 func newClient(t *testing.T) *redis.Client {
