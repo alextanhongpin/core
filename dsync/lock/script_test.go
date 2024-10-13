@@ -1,16 +1,13 @@
-package lock
+package lock_test
 
 import (
-	"context"
 	"testing"
 	"time"
 
-	"github.com/alextanhongpin/core/storage/redis/redistest"
+	"github.com/alextanhongpin/core/dsync/lock"
 	redis "github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 )
-
-var ctx = context.Background()
 
 func TestPrivateLockUnlock(t *testing.T) {
 	client := newClient(t)
@@ -22,16 +19,15 @@ func TestPrivateLockUnlock(t *testing.T) {
 		})
 	}
 
-	store := New(client, &Options{
-		LockTTL: 100 * time.Millisecond,
-		WaitTTL: 0,
-	})
+	store := lock.New(client)
+	store.LockTTL = 100 * time.Millisecond
+	store.WaitTTL = 0
 
 	t.Run("when lock success", func(t *testing.T) {
 		cleanup(t)
 
 		key := t.Name()
-		_, loaded, err := store.LoadOrStore(ctx, key, "world", store.opts.LockTTL)
+		_, loaded, err := store.LoadOrStore(ctx, key, "world", store.LockTTL)
 		assert.Nil(t, err, "expected error to be nil")
 		assert.False(t, loaded, "expected value to be stored")
 
@@ -40,7 +36,7 @@ func TestPrivateLockUnlock(t *testing.T) {
 		assert.True(t, 100*time.Millisecond-lockTTL < 10*time.Millisecond, "expected lock TTL to be close to 100ms")
 
 		t.Run("when lock second time", func(t *testing.T) {
-			lockValue, loaded, err := store.LoadOrStore(ctx, key, "world", store.opts.LockTTL)
+			lockValue, loaded, err := store.LoadOrStore(ctx, key, "world", store.LockTTL)
 			assert.Nil(t, err, "expected error to be nil")
 			assert.True(t, loaded, "then the value is loaded")
 			assert.Equal(t, "world", lockValue, "expected lock value to be 'world'")
@@ -48,7 +44,7 @@ func TestPrivateLockUnlock(t *testing.T) {
 
 		t.Run("when unlock failed with wrong key", func(t *testing.T) {
 			err := store.Unlock(ctx, key, "wrong-key")
-			assert.ErrorIs(t, err, ErrConflict, "expected error to be ErrConflict")
+			assert.ErrorIs(t, err, lock.ErrConflict, "expected error to be ErrConflict")
 
 			val, err := client.Get(ctx, key).Result()
 			assert.Nil(t, err, "expected error to be nil")
@@ -75,9 +71,8 @@ func TestPrivateReplace(t *testing.T) {
 		})
 	}
 
-	store := New(client, &Options{
-		LockTTL: 1 * time.Second,
-	})
+	store := lock.New(client)
+	store.LockTTL = time.Second
 
 	t.Run("when replace failed with invalid old value", func(t *testing.T) {
 		cleanup(t)
@@ -90,7 +85,7 @@ func TestPrivateReplace(t *testing.T) {
 
 		err := store.Replace(ctx, key, "invalid-old-value", "new-value", 2*time.Second)
 		// The key should be released.
-		a.ErrorIs(err, ErrConflict)
+		a.ErrorIs(err, lock.ErrConflict)
 
 		v, err := client.Get(ctx, key).Result()
 		a.Nil(err, "expected error to be nil")
@@ -117,18 +112,4 @@ func TestPrivateReplace(t *testing.T) {
 		updatedTTL := client.PTTL(ctx, key).Val()
 		a.True(200*time.Millisecond-updatedTTL < 10*time.Millisecond, "expected updated TTL to be close to 200ms")
 	})
-}
-
-func newClient(t *testing.T) *redis.Client {
-	client := redis.NewClient(&redis.Options{
-		Addr: redistest.Addr(),
-	})
-
-	t.Helper()
-	t.Cleanup(func() {
-		client.FlushAll(ctx).Err()
-		client.Close()
-	})
-
-	return client
 }

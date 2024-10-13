@@ -41,10 +41,9 @@ func TestLock_Success(t *testing.T) {
 	go func() {
 		defer wg.Done()
 
-		locker := lock.New(client, &lock.Options{
-			LockTTL: time.Second,
-			WaitTTL: time.Second,
-		})
+		locker := lock.New(client)
+		locker.LockTTL = time.Second
+		locker.WaitTTL = time.Second
 		err := locker.Do(ctx, key, func(ctx context.Context) error {
 			// Start the second goroutine.
 			events = append(events, "worker #1: lock acquired")
@@ -69,10 +68,9 @@ func TestLock_Success(t *testing.T) {
 		<-ch
 
 		// Lock for 1s minimum, wait for 200ms to acquire lock.
-		locker := lock.New(client, &lock.Options{
-			LockTTL: 1 * time.Second,
-			WaitTTL: 200 * time.Millisecond,
-		})
+		locker := lock.New(client)
+		locker.LockTTL = 1 * time.Second
+		locker.WaitTTL = 200 * time.Millisecond
 		err := locker.Do(ctx, key, func(ctx context.Context) error {
 			events = append(events, "worker #2: lock acquired")
 			return nil
@@ -131,10 +129,9 @@ func TestLock_WaitTimeout(t *testing.T) {
 	go func() {
 		defer wg.Done()
 
-		locker := lock.New(client, &lock.Options{
-			LockTTL: time.Second,
-			WaitTTL: time.Second,
-		})
+		locker := lock.New(client)
+		locker.LockTTL = time.Second
+		locker.WaitTTL = time.Second
 		err := locker.Do(ctx, key, func(ctx context.Context) error {
 			// Start the second goroutine.
 			events = append(events, "worker #1: lock acquired")
@@ -159,10 +156,9 @@ func TestLock_WaitTimeout(t *testing.T) {
 		<-ch
 
 		// Lock for 1s minimum, wait for 100ms to acquire lock.
-		locker := lock.New(client, &lock.Options{
-			LockTTL: time.Second,
-			WaitTTL: 100 * time.Millisecond,
-		})
+		locker := lock.New(client)
+		locker.LockTTL = time.Second
+		locker.WaitTTL = 100 * time.Millisecond
 		err := locker.Do(ctx, key, func(ctx context.Context) error {
 			events = append(events, "worker #2: lock acquired")
 			return nil
@@ -208,10 +204,9 @@ func TestLock_KeyReleased_Timeout(t *testing.T) {
 		defer close(errs)
 
 		// Goroutine 1 holds the lock for 200ms.
-		locker := lock.New(client, &lock.Options{
-			LockTTL: time.Second,
-			WaitTTL: time.Second,
-		})
+		locker := lock.New(client)
+		locker.LockTTL = time.Second
+		locker.WaitTTL = time.Second
 		errs <- locker.Do(ctx, key, func(ctx context.Context) error {
 			close(ch)
 			time.Sleep(200 * time.Millisecond)
@@ -220,10 +215,9 @@ func TestLock_KeyReleased_Timeout(t *testing.T) {
 	}()
 
 	<-ch
-	locker := lock.New(client, &lock.Options{
-		LockTTL: time.Second,
-		WaitTTL: 100 * time.Millisecond,
-	})
+	locker := lock.New(client)
+	locker.LockTTL = time.Second
+	locker.WaitTTL = 100 * time.Millisecond
 	err := locker.Do(ctx, key, func(ctx context.Context) error {
 		return nil
 	})
@@ -244,10 +238,9 @@ func TestLock_KeyReleased_ContextCancelled(t *testing.T) {
 	key := t.Name()
 
 	client := newClient(t)
-	locker := lock.New(client, &lock.Options{
-		LockTTL: time.Second,
-		WaitTTL: time.Second,
-	})
+	locker := lock.New(client)
+	locker.LockTTL = time.Second
+	locker.WaitTTL = time.Second
 
 	ctx, cancel := context.WithCancel(ctx)
 	err := locker.Do(ctx, key, func(ctx context.Context) error {
@@ -266,10 +259,9 @@ func TestLock_KeyReleased_Error(t *testing.T) {
 	key := t.Name()
 
 	client := newClient(t)
-	locker := lock.New(client, &lock.Options{
-		LockTTL: time.Second,
-		WaitTTL: time.Second,
-	})
+	locker := lock.New(client)
+	locker.LockTTL = time.Second
+	locker.WaitTTL = time.Second
 	var wantErr = errors.New("want error")
 	err := locker.Do(ctx, key, func(ctx context.Context) error {
 		return wantErr
@@ -293,10 +285,9 @@ func TestLock_Extend_Success(t *testing.T) {
 	go func() {
 		defer wg.Done()
 
-		locker := lock.New(client, &lock.Options{
-			LockTTL: 100 * time.Millisecond,
-			WaitTTL: 0,
-		})
+		locker := lock.New(client)
+		locker.LockTTL = 100 * time.Millisecond
+		locker.WaitTTL = 0
 		errs <- locker.Do(ctx, key, func(ctx context.Context) error {
 			// Signal the second goroutine to start.
 			close(ch)
@@ -312,10 +303,10 @@ func TestLock_Extend_Success(t *testing.T) {
 		// Wait for the signal from the first goroutine.
 		<-ch
 
-		locker := lock.New(client, &lock.Options{
-			LockTTL: 100 * time.Millisecond,
-			WaitTTL: 0,
-		})
+		locker := lock.New(client)
+		locker.LockTTL = 100 * time.Millisecond
+		locker.WaitTTL = 0
+
 		for i := 1; i < 10; i++ {
 			// Try to obtain the lock every 100ms. Because the lock is still held by
 			// the first goroutine, it is expected to fail.

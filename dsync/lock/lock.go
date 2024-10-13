@@ -1,7 +1,6 @@
 package lock
 
 import (
-	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -12,6 +11,9 @@ import (
 	"github.com/google/uuid"
 	redis "github.com/redis/go-redis/v9"
 )
+
+const lockTTL = 10 * time.Second
+const waitTTL = 1 * time.Minute
 
 var (
 	ErrLocked          = errors.New("lock: another process has acquired the lock")
@@ -30,20 +32,6 @@ func (o *Options) Apply(opts ...Option) *Options {
 	}
 
 	return o
-}
-
-func NewOptions() *Options {
-	return &Options{
-		LockTTL: 10 * time.Second,
-		WaitTTL: 1 * time.Minute,
-	}
-}
-
-func (o *Options) Clone() *Options {
-	return &Options{
-		LockTTL: o.LockTTL,
-		WaitTTL: o.WaitTTL,
-	}
 }
 
 type Option func(o *Options)
@@ -68,15 +56,17 @@ func WithWaitTTL(t time.Duration) Option {
 
 // Locker represents a distributed lock implementation using Redis.
 type Locker struct {
-	client *redis.Client
-	opts   *Options
+	client  *redis.Client
+	LockTTL time.Duration
+	WaitTTL time.Duration
 }
 
 // New returns a pointer to Locker.
-func New(client *redis.Client, opts *Options) *Locker {
+func New(client *redis.Client) *Locker {
 	return &Locker{
-		client: client,
-		opts:   cmp.Or(opts, NewOptions()),
+		client:  client,
+		LockTTL: lockTTL,
+		WaitTTL: waitTTL,
 	}
 }
 
@@ -84,7 +74,11 @@ func New(client *redis.Client, opts *Options) *Locker {
 // If the lock cannot be acquired within the given wait, it will error.
 // The lock is released after the function completes.
 func (l *Locker) Do(ctx context.Context, key string, fn func(ctx context.Context) error, opts ...Option) error {
-	o := l.opts.Clone().Apply(opts...)
+	o := &Options{
+		LockTTL: l.LockTTL,
+		WaitTTL: l.WaitTTL,
+	}
+	o.Apply(opts...)
 
 	// Generate a random uuid as the lock value.
 	token, err := l.TryLock(ctx, key, o.LockTTL, o.WaitTTL)
