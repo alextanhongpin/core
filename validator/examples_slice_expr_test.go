@@ -7,8 +7,8 @@ import (
 )
 
 var (
-	urlField   = validator.StringExpr("required,url,min=3")
-	linksField = validator.SliceExpr[Link]("required,min=2").EachFunc((Link).Valid)
+	urlField   = validator.StringExpr("url,min=3")
+	linksField = validator.SliceExpr[Link]("min=2").EachFunc((Link).Valid)
 )
 
 type Link struct {
@@ -50,6 +50,6 @@ func ExampleSliceExpr() {
 	fmt.Printf("%v => %v\n", valid.Links, valid.Valid())
 	// Output:
 	// [{http://localhost 8080} {456}] => links: url: invalid url
-	// [{http://localhost}] => links: min 2 items
+	// [{http://localhost}] => links: min items is 2
 	// [{http://localhost} {http://localhost:8080}] => <nil>
 }

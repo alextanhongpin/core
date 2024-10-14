@@ -6,7 +6,7 @@ import (
 	"github.com/alextanhongpin/core/validator"
 )
 
-var ageField = validator.NumberExpr[int]("required,min=13")
+var ageField = validator.NumberExpr[int]("min=13")
 
 type User struct {
 	Age int

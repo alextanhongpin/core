@@ -16,7 +16,7 @@ func adminOnly(email string) error {
 }
 
 var (
-	emailField         = validator.StringExpr("required,email,ends_with=@mail.com").Func(adminOnly)
+	emailField         = validator.StringExpr("email,ends_with=@mail.com").Func(adminOnly)
 	maritalStatusField = validator.StringExpr("optional,oneof=single married divorced")
 )
 
