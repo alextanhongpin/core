@@ -20,6 +20,7 @@ type PrometheusHandler struct {
 	// But since the only thing we need from the Meter is recording a value, we
 	// use a function for that that closes over the Meter itself.
 	recordFuncs map[event.Metric]recordFunc
+	collectors  map[string]prometheus.Collector
 }
 
 var _ event.Handler = (*PrometheusHandler)(nil)
@@ -29,6 +30,7 @@ func NewPrometheusHandler(client prometheus.Registerer) *PrometheusHandler {
 	return &PrometheusHandler{
 		client:      client,
 		recordFuncs: map[event.Metric]recordFunc{},
+		collectors:  make(map[string]prometheus.Collector),
 	}
 }
 
@@ -55,6 +57,10 @@ func (m *PrometheusHandler) Event(ctx context.Context, e *event.Event) context.C
 	}
 	rf(ctx, lval, e.Labels)
 	return ctx
+}
+
+func (m *PrometheusHandler) Collector(name string) prometheus.Collector {
+	return m.collectors[name]
 }
 
 func (m *PrometheusHandler) getRecordFunc(em event.Metric, labels []event.Label) recordFunc {
@@ -85,10 +91,12 @@ func (m *PrometheusHandler) newRecordFunc(em event.Metric, labels []event.Label)
 	switch em.(type) {
 	case *event.Counter:
 		c := prometheus.NewCounterVec(prometheus.CounterOpts{
-			Namespace: opts.Namespace,
-			Name:      name,
-			Help:      opts.Description,
+			// NOTE: This will use the github package name, which panics on registering.
+			//Namespace: opts.Namespace,
+			Name: name,
+			Help: opts.Description,
 		}, keys)
+		m.collectors[name] = c
 		m.client.MustRegister(c)
 
 		return func(ctx context.Context, l event.Label, labels []event.Label) {
@@ -98,9 +106,10 @@ func (m *PrometheusHandler) newRecordFunc(em event.Metric, labels []event.Label)
 
 	case *event.FloatGauge:
 		g := prometheus.NewGaugeVec(prometheus.GaugeOpts{
-			Namespace: opts.Namespace,
-			Name:      name,
-			Help:      opts.Description,
+			// NOTE: This will use the github package name, which panics on registering.
+			//Namespace: opts.Namespace,
+			Name: name,
+			Help: opts.Description,
 		}, keys)
 		m.client.MustRegister(g)
 
@@ -110,9 +119,10 @@ func (m *PrometheusHandler) newRecordFunc(em event.Metric, labels []event.Label)
 		}
 	case *event.DurationDistribution:
 		r := prometheus.NewHistogramVec(prometheus.HistogramOpts{
-			Namespace: opts.Namespace,
-			Name:      name,
-			Help:      opts.Description,
+			// NOTE: This will use the github package name, which panics on registering.
+			//Namespace: opts.Namespace,
+			Name: name,
+			Help: opts.Description,
 		}, keys)
 		m.client.MustRegister(r)
 
