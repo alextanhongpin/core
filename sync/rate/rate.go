@@ -8,6 +8,10 @@ import (
 	"golang.org/x/exp/constraints"
 )
 
+func New() *Rate {
+	return NewRate(time.Second)
+}
+
 func NewRate(period time.Duration) *Rate {
 	return &Rate{
 		period: period,
@@ -34,11 +38,16 @@ func (r *Rate) reset() {
 	r.last = time.Time{}
 }
 
-func (r *Rate) Inc(n int64) int64 {
+func (r *Rate) Value() float64 {
+	return r.Inc(0)
+}
+
+func (r *Rate) Inc(n int64) float64 {
 	r.mu.Lock()
 	f := r.inc(n)
 	r.mu.Unlock()
-	return int64(math.Ceil(f))
+
+	return math.Ceil(f)
 }
 
 // Throughput returns the number of transactions per second.

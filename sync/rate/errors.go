@@ -25,6 +25,14 @@ func (e *Errors) Reset() {
 	e.mu.Unlock()
 }
 
+func (e *Errors) Fail() float64 {
+	return ErrorRate(e.Inc(-1))
+}
+
+func (e *Errors) OK() float64 {
+	return ErrorRate(e.Inc(1))
+}
+
 func (e *Errors) Inc(n int64) (sucesses, failures float64) {
 	var s, f int64
 	switch {
@@ -42,18 +50,13 @@ func (e *Errors) Inc(n int64) (sucesses, failures float64) {
 	return
 }
 
-func (e *Errors) SetNow(now time.Time) {
-	f := func() time.Time {
-		return now
-	}
-
-	e.success.Now = f
-	e.failure.Now = f
+func (e *Errors) SetNow(now func() time.Time) {
+	e.success.Now = now
+	e.failure.Now = now
 }
 
 func (e *Errors) Rate() float64 {
-	successes, failures := e.Inc(0)
-	return ErrorRate(successes, failures)
+	return ErrorRate(e.Inc(0))
 }
 
 func ErrorRate(successes, failures float64) float64 {

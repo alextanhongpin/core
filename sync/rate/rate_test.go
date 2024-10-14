@@ -12,12 +12,12 @@ func TestRate(t *testing.T) {
 	period := 5 * time.Second
 
 	r := rate.NewRate(period)
-	f := func(name string, d time.Duration, exp int64) {
+	f := func(name string, d time.Duration, exp float64) {
 		t.Run(name, func(t *testing.T) {
 			r.Now = func() time.Time { return now.Add(d) }
 			got := r.Inc(1)
 			if exp != got {
-				t.Fatalf("expected %d, got %d", exp, got)
+				t.Fatalf("expected %f, got %f", exp, got)
 			}
 		})
 	}
@@ -34,10 +34,10 @@ func TestResetRate(t *testing.T) {
 	perSecond := rate.NewRate(time.Second)
 	perSecond.Inc(1)
 	perSecond.Reset()
-	got := perSecond.Inc(0)
-	exp := int64(0)
+	got := perSecond.Value()
+	exp := float64(0.0)
 	if exp != got {
-		t.Fatalf("expected %d, got %d,", exp, got)
+		t.Fatalf("expected %f, got %f,", exp, got)
 	}
 }
 
@@ -48,10 +48,12 @@ func TestErrors(t *testing.T) {
 	r := rate.NewErrors(period)
 	f := func(name string, d time.Duration, n int64, exp float64) {
 		t.Run(name, func(t *testing.T) {
-			r.SetNow(now.Add(d))
+			r.SetNow(func() time.Time {
+				return now.Add(d)
+			})
 
-			s, f := r.Inc(n)
-			got := errorRate(s, f)
+			r.Inc(n)
+			got := r.Rate()
 			if exp != got {
 				t.Fatalf("expected %f, got %f", exp, got)
 			}
@@ -64,23 +66,12 @@ func TestErrors(t *testing.T) {
 
 func TestResetErrors(t *testing.T) {
 	perSecond := rate.NewErrors(time.Second)
-	perSecond.Inc(-1)
-	perSecond.Inc(1)
+	perSecond.OK()
+	perSecond.Fail()
 	perSecond.Reset()
-	successes, failures := perSecond.Inc(0)
 	exp := 0.0
-	got := errorRate(successes, failures)
+	got := perSecond.Rate()
 	if exp != got {
 		t.Fatalf("expected %f, got %f", exp, got)
 	}
-}
-
-func errorRate(successes, failures float64) float64 {
-	num := failures
-	den := failures + successes
-	if den == 0 {
-		return 0
-	}
-
-	return num / den
 }
