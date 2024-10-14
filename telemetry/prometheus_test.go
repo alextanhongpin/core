@@ -3,6 +3,7 @@ package telemetry_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/alextanhongpin/core/telemetry"
 	"github.com/prometheus/client_golang/prometheus"
@@ -16,24 +17,104 @@ import (
 var ctx = context.Background()
 
 func TestPrometheus(t *testing.T) {
-	metric := telemetry.NewPrometheusHandler(prometheus.NewRegistry())
-	ctx = event.WithExporter(ctx, event.NewExporter(&telemetry.MultiHandler{
-		Metric: metric,
-	}, eventtest.ExporterOptions()))
-	c := event.NewCounter("hits", &event.MetricOptions{Description: "Earth meteorite hits"})
-	c.Record(ctx, 123, event.String("version", "stable"))
-	c.Record(ctx, 456, event.String("version", "canary"))
+	t.Run("counter", func(t *testing.T) {
+		metric := telemetry.NewPrometheusHandler(prometheus.NewRegistry())
+		ctx := event.WithExporter(ctx, event.NewExporter(metric, eventtest.ExporterOptions()))
+		c := event.NewCounter("hits", &event.MetricOptions{
+			Namespace:   "my_ns",
+			Description: "Earth meteorite hits"},
+		)
+		c.Record(ctx, 123, event.String("version", "stable"))
+		c.Record(ctx, 456, event.String("version", "canary"))
 
-	collector := metric.Collector("hits")
+		collector := metric.Collector("hits")
 
-	is := assert.New(t)
-	is.Equal(2, testutil.CollectAndCount(collector, "hits"))
-	b, err := testutil.CollectAndFormat(collector, expfmt.TypeTextPlain, "hits")
-	is.Nil(err)
-	want := `# HELP hits Earth meteorite hits
-# TYPE hits counter
-hits{version="canary"} 456
-hits{version="stable"} 123
+		is := assert.New(t)
+		is.Equal(2, testutil.CollectAndCount(collector, "my_ns_hits"))
+		b, err := testutil.CollectAndFormat(collector, expfmt.TypeTextPlain, "my_ns_hits")
+		is.Nil(err)
+		want := `# HELP my_ns_hits Earth meteorite hits
+# TYPE my_ns_hits counter
+my_ns_hits{version="canary"} 456
+my_ns_hits{version="stable"} 123
 `
-	is.Equal(want, string(b))
+		is.Equal(want, string(b))
+	})
+
+	t.Run("gauge", func(t *testing.T) {
+		metric := telemetry.NewPrometheusHandler(prometheus.NewRegistry())
+		ctx := event.WithExporter(ctx, event.NewExporter(metric, eventtest.ExporterOptions()))
+		g := event.NewFloatGauge("cpu", &event.MetricOptions{
+			Namespace:   "my_ns",
+			Description: "cpu usage"},
+		)
+		g.Record(ctx, 123, event.String("version", "canary"))
+		g.Record(ctx, 456, event.String("version", "canary"))
+		g.Record(ctx, 456, event.String("version", "stable"))
+		g.Record(ctx, 123, event.String("version", "stable"))
+
+		collector := metric.Collector("cpu")
+
+		is := assert.New(t)
+		is.Equal(2, testutil.CollectAndCount(collector, "my_ns_cpu"))
+		b, err := testutil.CollectAndFormat(collector, expfmt.TypeTextPlain, "my_ns_cpu")
+		is.Nil(err)
+		want := `# HELP my_ns_cpu cpu usage
+# TYPE my_ns_cpu gauge
+my_ns_cpu{version="canary"} 456
+my_ns_cpu{version="stable"} 123
+`
+		is.Equal(want, string(b))
+	})
+
+	t.Run("histogram", func(t *testing.T) {
+		metric := telemetry.NewPrometheusHandler(prometheus.NewRegistry())
+		ctx := event.WithExporter(ctx, event.NewExporter(metric, eventtest.ExporterOptions()))
+		h := event.NewDuration("request_duration", &event.MetricOptions{
+			Namespace:   "my_ns",
+			Description: "request per seconds",
+			Unit:        event.UnitMilliseconds,
+		})
+		h.Record(ctx, time.Second, event.String("version", "stable"))
+		h.Record(ctx, time.Minute, event.String("version", "canary"))
+
+		collector := metric.Collector("request_duration_milliseconds")
+
+		is := assert.New(t)
+		is.Equal(2, testutil.CollectAndCount(collector, "my_ns_request_duration_milliseconds"))
+		b, err := testutil.CollectAndFormat(collector, expfmt.TypeTextPlain, "my_ns_request_duration_milliseconds")
+		is.Nil(err)
+		want := `# HELP my_ns_request_duration_milliseconds request per seconds
+# TYPE my_ns_request_duration_milliseconds histogram
+my_ns_request_duration_milliseconds_bucket{version="canary",le="0.005"} 0
+my_ns_request_duration_milliseconds_bucket{version="canary",le="0.01"} 0
+my_ns_request_duration_milliseconds_bucket{version="canary",le="0.025"} 0
+my_ns_request_duration_milliseconds_bucket{version="canary",le="0.05"} 0
+my_ns_request_duration_milliseconds_bucket{version="canary",le="0.1"} 0
+my_ns_request_duration_milliseconds_bucket{version="canary",le="0.25"} 0
+my_ns_request_duration_milliseconds_bucket{version="canary",le="0.5"} 0
+my_ns_request_duration_milliseconds_bucket{version="canary",le="1"} 0
+my_ns_request_duration_milliseconds_bucket{version="canary",le="2.5"} 0
+my_ns_request_duration_milliseconds_bucket{version="canary",le="5"} 0
+my_ns_request_duration_milliseconds_bucket{version="canary",le="10"} 0
+my_ns_request_duration_milliseconds_bucket{version="canary",le="+Inf"} 1
+my_ns_request_duration_milliseconds_sum{version="canary"} 6e+10
+my_ns_request_duration_milliseconds_count{version="canary"} 1
+my_ns_request_duration_milliseconds_bucket{version="stable",le="0.005"} 0
+my_ns_request_duration_milliseconds_bucket{version="stable",le="0.01"} 0
+my_ns_request_duration_milliseconds_bucket{version="stable",le="0.025"} 0
+my_ns_request_duration_milliseconds_bucket{version="stable",le="0.05"} 0
+my_ns_request_duration_milliseconds_bucket{version="stable",le="0.1"} 0
+my_ns_request_duration_milliseconds_bucket{version="stable",le="0.25"} 0
+my_ns_request_duration_milliseconds_bucket{version="stable",le="0.5"} 0
+my_ns_request_duration_milliseconds_bucket{version="stable",le="1"} 0
+my_ns_request_duration_milliseconds_bucket{version="stable",le="2.5"} 0
+my_ns_request_duration_milliseconds_bucket{version="stable",le="5"} 0
+my_ns_request_duration_milliseconds_bucket{version="stable",le="10"} 0
+my_ns_request_duration_milliseconds_bucket{version="stable",le="+Inf"} 1
+my_ns_request_duration_milliseconds_sum{version="stable"} 1e+09
+my_ns_request_duration_milliseconds_count{version="stable"} 1
+`
+		is.Equal(want, string(b))
+	})
 }

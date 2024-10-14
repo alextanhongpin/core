@@ -91,10 +91,9 @@ func (m *PrometheusHandler) newRecordFunc(em event.Metric, labels []event.Label)
 	switch em.(type) {
 	case *event.Counter:
 		c := prometheus.NewCounterVec(prometheus.CounterOpts{
-			// NOTE: This will use the github package name, which panics on registering.
-			//Namespace: opts.Namespace,
-			Name: name,
-			Help: opts.Description,
+			Namespace: opts.Namespace,
+			Name:      name,
+			Help:      opts.Description,
 		}, keys)
 		m.collectors[name] = c
 		m.client.MustRegister(c)
@@ -106,24 +105,24 @@ func (m *PrometheusHandler) newRecordFunc(em event.Metric, labels []event.Label)
 
 	case *event.FloatGauge:
 		g := prometheus.NewGaugeVec(prometheus.GaugeOpts{
-			// NOTE: This will use the github package name, which panics on registering.
-			//Namespace: opts.Namespace,
-			Name: name,
-			Help: opts.Description,
+			Namespace: opts.Namespace,
+			Name:      name,
+			Help:      opts.Description,
 		}, keys)
+		m.collectors[name] = g
 		m.client.MustRegister(g)
 
 		return func(ctx context.Context, l event.Label, labels []event.Label) {
 			_, vals := labelsToKeyVals(labels)
-			g.WithLabelValues(vals...).Add(l.Float64())
+			g.WithLabelValues(vals...).Set(l.Float64())
 		}
 	case *event.DurationDistribution:
 		r := prometheus.NewHistogramVec(prometheus.HistogramOpts{
-			// NOTE: This will use the github package name, which panics on registering.
-			//Namespace: opts.Namespace,
-			Name: name,
-			Help: opts.Description,
+			Namespace: opts.Namespace,
+			Name:      name,
+			Help:      opts.Description,
 		}, keys)
+		m.collectors[name] = r
 		m.client.MustRegister(r)
 
 		return func(ctx context.Context, l event.Label, attrs []event.Label) {
