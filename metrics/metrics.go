@@ -35,7 +35,7 @@ var (
 	// buckets based on the expected request duration.
 	RequestDuration = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
-			Name:    "request_duration_seconds",
+			Name:    "request_duration_milliseconds",
 			Help:    "A histogram of latencies for requests.",
 			Buckets: prometheus.DefBuckets,
 		},
