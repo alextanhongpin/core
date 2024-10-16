@@ -22,9 +22,9 @@ type Body struct {
 	PageInfo *PageInfo `json:"pageInfo,omitempty"`
 }
 
-func NewData(data any) *Body {
+func NewData(data any, code int) *Body {
 	return &Body{
-		Code: http.StatusOK,
+		Code: code,
 		Data: data,
 	}
 }
