@@ -20,10 +20,7 @@ func TestJSONError(t *testing.T) {
 		wr := httptest.NewRecorder()
 		r := httptest.NewRequest("GET", "/user/1", nil)
 		h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			wr := response.NewJSONEncoder(w, r)
-			defer wr.Flush()
-
-			wr.SetError(err)
+			response.NewJSONEncoder(w).Error(err)
 		})
 		hd := httpdump.Handler(t, h)
 		hd.ServeHTTP(wr, r)
@@ -48,13 +45,12 @@ func TestJSON(t *testing.T) {
 		wr := httptest.NewRecorder()
 		r := httptest.NewRequest("GET", "/users", nil)
 		h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			wr := response.NewJSONEncoder(w, r)
-			defer wr.Flush()
-
-			wr.SetData([]user{
-				{ID: "user-1", Name: "Alice"},
-				{ID: "user-2", Name: "Bob"},
-			})
+			response.NewJSONEncoder(w).Data(
+				[]user{
+					{ID: "user-1", Name: "Alice"},
+					{ID: "user-2", Name: "Bob"},
+				},
+				http.StatusCreated)
 		})
 
 		hd := httpdump.Handler(t, h)
@@ -65,15 +61,52 @@ func TestJSON(t *testing.T) {
 		wr := httptest.NewRecorder()
 		r := httptest.NewRequest("GET", "/users", nil)
 		h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			wr := response.NewJSONEncoder(w, r)
-			defer wr.Flush()
 
-			wr.SetData(
+			response.NewJSONEncoder(w).Data(
 				map[string]any{
 					"bad_number": json.Number("1.5x"),
 				},
-				http.StatusCreated,
-			)
+				http.StatusOK)
+		})
+
+		hd := httpdump.Handler(t, h)
+		hd.ServeHTTP(wr, r)
+	})
+
+	t.Run("no content", func(t *testing.T) {
+		wr := httptest.NewRecorder()
+		r := httptest.NewRequest("GET", "/users", nil)
+		h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			response.NoContent(w)
+		})
+
+		hd := httpdump.Handler(t, h)
+		hd.ServeHTTP(wr, r)
+	})
+
+	t.Run("custom body", func(t *testing.T) {
+		wr := httptest.NewRecorder()
+		r := httptest.NewRequest("GET", "/users", nil)
+		h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			response.NewJSONEncoder(w).Body(&response.Body{
+				PageInfo: &response.PageInfo{
+					HasNextPage: true,
+				},
+			})
+		})
+
+		hd := httpdump.Handler(t, h)
+		hd.ServeHTTP(wr, r)
+	})
+
+	t.Run("encode", func(t *testing.T) {
+		wr := httptest.NewRecorder()
+		r := httptest.NewRequest("GET", "/users", nil)
+		h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			body := map[string]string{
+				"hello": "world",
+			}
+			response.NewJSONEncoder(w).Encode(body, http.StatusAccepted)
 		})
 
 		hd := httpdump.Handler(t, h)

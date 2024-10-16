@@ -3,8 +3,9 @@ GET /users HTTP/1.1
 Host: example.com
 
 -- response.http --
-HTTP/1.1 201 Created
+HTTP/1.1 500 Internal Server Error
 Connection: close
-Content-Type: application/json
+Content-Type: text/plain; charset=utf-8
+X-Content-Type-Options: nosniff
 
-json: invalid number literal "1.5x"
+Internal Server Error

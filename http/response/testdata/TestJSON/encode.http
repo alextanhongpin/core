@@ -3,19 +3,10 @@ GET /users HTTP/1.1
 Host: example.com
 
 -- response.http --
-HTTP/1.1 201 Created
+HTTP/1.1 202 Accepted
 Connection: close
 Content-Type: application/json; charset=utf-8
 
 {
- "data": [
-  {
-   "id": "user-1",
-   "Name": "Alice"
-  },
-  {
-   "id": "user-2",
-   "Name": "Bob"
-  }
- ]
+ "hello": "world"
 }

@@ -3,131 +3,58 @@ package response
 import (
 	"cmp"
 	"encoding/json"
-	"errors"
+	"log/slog"
 	"net/http"
-
-	"github.com/alextanhongpin/errors/causes"
-	codec "github.com/alextanhongpin/errors/codes"
 )
 
+func NoContent(w http.ResponseWriter) {
+	w.WriteHeader(http.StatusNoContent)
+}
+
 type JSONEncoder struct {
-	w    http.ResponseWriter
-	r    *http.Request
-	body *Body
-	err  error
-	code int
-
-	// Default message to show for unhandled error.
-	Message string
+	w      http.ResponseWriter
+	Logger *slog.Logger
 }
 
-func NewJSONEncoder(w http.ResponseWriter, r *http.Request) *JSONEncoder {
+func NewJSONEncoder(w http.ResponseWriter) *JSONEncoder {
 	return &JSONEncoder{
-		w:       w,
-		r:       r,
-		Message: "Something went wrong. Please try again later.",
+		w:      w,
+		Logger: slog.Default(),
 	}
 }
 
-func (e *JSONEncoder) SetData(data any, codes ...int) {
-	e.body = &Body{
-		Data: data,
-	}
-	e.code = cmp.Or(head(codes), http.StatusOK)
-}
-
-func (e *JSONEncoder) SetError(err error, codes ...int) {
-	e.err = err
-
-	var ve ValidationErrors
-	if errors.As(err, &ve) {
-		e.code = http.StatusBadRequest
-		e.body = &Body{
-			Error: &Error{
-				Code:             http.StatusText(e.code),
-				Message:          err.Error(),
-				ValidationErrors: ve,
-			},
-		}
-
-		return
-	}
-
-	var det causes.Detail
-	if errors.As(err, &det) {
-		e.code = codec.HTTP(det.Code())
-		e.body = &Body{
-			Error: &Error{
-				Code:    det.Kind(),
-				Message: det.Message(),
-			},
-		}
-
-		return
-	}
-
-	if code := head(codes); code > 0 {
-		e.code = code
-		e.body = &Body{
-			Error: &Error{
-				Code:    http.StatusText(code),
-				Message: err.Error(),
-			},
-		}
-
-		return
-	}
-
-	e.code = http.StatusInternalServerError
-	e.body = &Body{
-		Error: &Error{
-			Code:    http.StatusText(http.StatusInternalServerError),
-			Message: e.Message,
-		},
-	}
-}
-
-func (e *JSONEncoder) Pipe(v any, err error) {
+func (enc *JSONEncoder) Encode(body any, code int) {
+	// This must come before WriteHeader, otherwise the header will not be set correctly.
+	w := enc.w
+	logger := enc.Logger
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	b, err := json.Marshal(body)
 	if err != nil {
-		e.SetError(err)
-	} else {
-		e.SetData(v)
-	}
-}
-
-func (e *JSONEncoder) Flush() {
-	w := e.w
-	if e.body == nil && e.err == nil {
-		w.WriteHeader(http.StatusNoContent)
+		logger.Error(err.Error())
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(e.code)
-	if err := json.NewEncoder(w).Encode(e.body); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-
-		return
+	w.WriteHeader(cmp.Or(code, http.StatusOK))
+	_, err = w.Write(b)
+	if err != nil {
+		logger.Error(err.Error())
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 	}
 }
 
-func (e *JSONEncoder) Err() error {
-	return e.err
+func (enc *JSONEncoder) Body(body *Body) {
+	enc.Encode(body, body.Code)
 }
 
-func (e *JSONEncoder) Code() int {
-	return e.code
+func (enc *JSONEncoder) Data(data any, code int) {
+	body := NewData(data)
+	body.Code = code
+	enc.Body(body)
 }
 
-func (e *JSONEncoder) Body() *Body {
-	return e.body
-}
-
-func head[T any](vs []T) (v T) {
-	if len(vs) > 0 {
-		return vs[0]
-	}
-
-	return
+func (enc *JSONEncoder) Error(err error) {
+	body := NewError(err)
+	enc.Encode(body, body.Code)
 }
