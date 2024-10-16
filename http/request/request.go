@@ -6,9 +6,10 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"log/slog"
 	"net/http"
 )
+
+var ErrInvalidJSON = errors.New("request: invalid json")
 
 type BodyError struct {
 	Body []byte
@@ -27,42 +28,22 @@ type validatable interface {
 	Valid() error
 }
 
-type JSONDecoder struct {
-	r      *http.Request
-	Logger *slog.Logger
-}
-
-func NewJSONDecoder(r *http.Request) *JSONDecoder {
-	return &JSONDecoder{
-		r:      r,
-		Logger: slog.Default(),
-	}
-}
-
-func (dec *JSONDecoder) Decode(v validatable) error {
-	r := dec.r
-
+// DecodeJSON decodes the json to struct and performs validation.
+func DecodeJSON(r *http.Request, v validatable) error {
 	b, err := io.ReadAll(r.Body)
 	if err != nil {
-		return &BodyError{Body: bytes.Clone(b), err: err}
+		return err
 	}
+
+	r.Body = io.NopCloser(bytes.NewBuffer(bytes.Clone(b)))
 
 	if !json.Valid(b) {
-		return &BodyError{Body: bytes.Clone(b), err: errors.New("non-json payload")}
+		return &BodyError{Body: b, err: ErrInvalidJSON}
 	}
 
-	buf := bytes.NewBuffer(b)
-	r.Body = io.NopCloser(buf)
-
 	if err := json.Unmarshal(b, &v); err != nil {
-		return &BodyError{Body: bytes.Clone(b), err: err}
+		return &BodyError{Body: b, err: err}
 	}
 
 	return v.Valid()
-
-}
-
-// DecodeJSON decodes the json to struct and performs validation.
-func DecodeJSON(r *http.Request, v validatable) error {
-	return NewJSONDecoder(r).Decode(v)
 }
