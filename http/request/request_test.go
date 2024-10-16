@@ -42,4 +42,25 @@ func TestBody(t *testing.T) {
 	if diff := cmp.Diff(req, body); diff != "" {
 		t.Fatalf("want(+), got(-): %s", diff)
 	}
+	t.Log(req)
+}
+
+func TestBodyInvalid(t *testing.T) {
+	b := []byte(`<HTML>`)
+	r := httptest.NewRequest("POST", "/login", bytes.NewReader(b))
+	var req loginRequest
+	err := request.DecodeJSON(r, &req)
+	if err == nil {
+		t.Fatal("want error, got nil")
+	}
+
+	var bodyErr *request.BodyError
+	if !errors.As(err, &bodyErr) {
+		t.Fatalf("want body error, got %v", err)
+	}
+
+	if !bytes.Equal(b, bodyErr.Body) {
+		t.Fatalf("want %s, got %s", b, bodyErr.Body)
+	}
+	t.Log(string(bodyErr.Body))
 }

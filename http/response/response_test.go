@@ -20,7 +20,7 @@ func TestJSONError(t *testing.T) {
 		wr := httptest.NewRecorder()
 		r := httptest.NewRequest("GET", "/user/1", nil)
 		h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			response.NewJSONEncoder(w).Error(err)
+			response.EncodeError(w, err)
 		})
 		hd := httpdump.Handler(t, h)
 		hd.ServeHTTP(wr, r)
@@ -45,7 +45,7 @@ func TestJSON(t *testing.T) {
 		wr := httptest.NewRecorder()
 		r := httptest.NewRequest("GET", "/users", nil)
 		h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			response.NewJSONEncoder(w).Data(
+			response.EncodeData(w,
 				[]user{
 					{ID: "user-1", Name: "Alice"},
 					{ID: "user-2", Name: "Bob"},
@@ -62,7 +62,7 @@ func TestJSON(t *testing.T) {
 		r := httptest.NewRequest("GET", "/users", nil)
 		h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 
-			response.NewJSONEncoder(w).Data(
+			response.EncodeData(w,
 				map[string]any{
 					"bad_number": json.Number("1.5x"),
 				},
@@ -88,7 +88,7 @@ func TestJSON(t *testing.T) {
 		wr := httptest.NewRecorder()
 		r := httptest.NewRequest("GET", "/users", nil)
 		h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			response.NewJSONEncoder(w).Body(&response.Body{
+			response.EncodeBody(w, &response.Body{
 				PageInfo: &response.PageInfo{
 					HasNextPage: true,
 				},
@@ -106,7 +106,7 @@ func TestJSON(t *testing.T) {
 			body := map[string]string{
 				"hello": "world",
 			}
-			response.NewJSONEncoder(w).Encode(body, http.StatusAccepted)
+			response.EncodeJSON(w, body, http.StatusAccepted)
 		})
 
 		hd := httpdump.Handler(t, h)

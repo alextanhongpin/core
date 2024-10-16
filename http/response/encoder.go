@@ -7,6 +7,22 @@ import (
 	"net/http"
 )
 
+func EncodeJSON(w http.ResponseWriter, v any, code int) {
+	NewJSONEncoder(w).Encode(v, code)
+}
+
+func EncodeBody(w http.ResponseWriter, body *Body) {
+	NewJSONEncoder(w).Body(body)
+}
+
+func EncodeData(w http.ResponseWriter, data any, code int) {
+	NewJSONEncoder(w).Data(data, code)
+}
+
+func EncodeError(w http.ResponseWriter, err error) {
+	NewJSONEncoder(w).Error(err)
+}
+
 func NoContent(w http.ResponseWriter) {
 	w.WriteHeader(http.StatusNoContent)
 }
