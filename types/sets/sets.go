@@ -12,13 +12,13 @@ type OrderedComparable interface {
 }
 
 type Set[T OrderedComparable] struct {
-	values map[T]bool
+	values map[T]struct{}
 }
 
 func New[T constraints.Ordered](ts ...T) *Set[T] {
-	values := make(map[T]bool)
+	values := make(map[T]struct{})
 	for _, t := range ts {
-		values[t] = true
+		values[t] = struct{}{}
 	}
 
 	return &Set[T]{
@@ -28,12 +28,14 @@ func New[T constraints.Ordered](ts ...T) *Set[T] {
 
 func (s *Set[T]) Add(ts ...T) {
 	for _, t := range ts {
-		s.values[t] = true
+		s.values[t] = struct{}{}
 	}
 }
 
-func (s *Set[T]) Delete(t T) {
-	delete(s.values, t)
+func (s *Set[T]) Delete(ts ...T) {
+	for _, t := range ts {
+		delete(s.values, t)
+	}
 }
 
 func (s *Set[T]) Len() int {
@@ -41,7 +43,8 @@ func (s *Set[T]) Len() int {
 }
 
 func (s *Set[T]) Has(t T) bool {
-	return s.values[t]
+	_, ok := s.values[t]
+	return ok
 }
 
 func (s *Set[T]) All() []T {
@@ -78,20 +81,21 @@ func (s *Set[T]) Union(other *Set[T]) *Set[T] {
 
 func (s *Set[T]) Difference(other *Set[T]) *Set[T] {
 	set := New(s.All()...)
-
-	for _, t := range other.All() {
-		set.Delete(t)
-	}
+	set.Delete(other.All()...)
 
 	return set
 }
 
 func (s *Set[T]) Equal(other *Set[T]) bool {
+	if s.Len() != other.Len() {
+		return false
+	}
+
 	for t := range s.values {
 		if !other.Has(t) {
 			return false
 		}
 	}
 
-	return s.Len() == other.Len()
+	return true
 }
