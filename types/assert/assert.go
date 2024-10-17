@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-func Assert(is bool, msg string) string {
+func Is(is bool, msg string) string {
 	if is {
 		return ""
 	}

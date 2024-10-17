@@ -10,10 +10,10 @@ import (
 var (
 	optional = assert.Optional
 	required = assert.Required
-	check    = assert.Assert
+	is       = assert.Is
 )
 
-func ExampleAssert() {
+func ExampleIs() {
 	var req CreateOrderRequest
 	req.Discount = -1
 	req.LineItems = append(req.LineItems, LineItemRequest{Quantity: -1}, LineItemRequest{})
@@ -73,17 +73,17 @@ func (req *LineItemRequest) Valid() map[string]string {
 
 func validatePrice(n int64) string {
 	return required(n,
-		check(n > 0, "must be greater than 0"))
+		is(n > 0, "must be greater than 0"))
 }
 
 func validateDiscount(n int64) string {
 	return optional(n,
-		check(n > 0, "must be greater than 0"),
-		check(n <= 100, "maximum discount assert.Assert 100%"),
+		is(n > 0, "must be greater than 0"),
+		is(n <= 100, "maximum discount is 100%"),
 	)
 }
 
 func validateQuantity(n int64) string {
 	return optional(n,
-		check(n > 0, "must be greater than 0"))
+		is(n > 0, "must be greater than 0"))
 }
