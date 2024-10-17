@@ -27,10 +27,12 @@ func BearerAuth(r *http.Request) (string, bool) {
 	return token, ok && bearer == AuthBearer && len(token) > 0
 }
 
+type Claims = jwt.MapClaims
+
 // SignJWT signs a JWT with the given claims.
 // Panics if no subject is provided.
 // The expiration is added to the claims.
-func SignJWT(secret []byte, claims jwt.MapClaims, valid time.Duration) (string, error) {
+func SignJWT(secret []byte, claims Claims, valid time.Duration) (string, error) {
 	if subject, ok := claims["sub"]; !ok || subject == "" {
 		panic("subject required for jwt token")
 	}
@@ -42,7 +44,7 @@ func SignJWT(secret []byte, claims jwt.MapClaims, valid time.Duration) (string, 
 	return jwtToken, err
 }
 
-func VerifyJWT(secret []byte, bearerToken string) (jwt.MapClaims, error) {
+func VerifyJWT(secret []byte, bearerToken string) (Claims, error) {
 	token, err := jwt.Parse(bearerToken, func(token *jwt.Token) (any, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("unexpected signing method %s", token.Header["alg"])
@@ -54,7 +56,7 @@ func VerifyJWT(secret []byte, bearerToken string) (jwt.MapClaims, error) {
 		return nil, err
 	}
 
-	if claims, ok := token.Claims.(jwt.MapClaims); ok && token.Valid {
+	if claims, ok := token.Claims.(Claims); ok && token.Valid {
 		return claims, nil
 	}
 

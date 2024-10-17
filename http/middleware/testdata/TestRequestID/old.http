@@ -1,0 +1,12 @@
+-- request.http --
+GET / HTTP/1.1
+Host: example.com
+X-Request-Id: abc
+
+-- response.http --
+HTTP/1.1 200 OK
+Connection: close
+Content-Type: text/plain; charset=utf-8
+X-Request-Id: abc
+
+hello world
