@@ -1,43 +1,43 @@
-// package result wraps both data and error together. This is useful when
-// passing data through channels.
+// package result wraps both Data and error together. This is useful when
+// passing Data through channels.
 //
 // Ideally, each package that needs to have their own result type should define
 // their own result type.
 //
 // Another form of result is using interface, where instead of just wrapping
-// data, an entire struct can be returned that fulfils the result interface.
+// Data, an entire struct can be returned that fulfils the result interface.
 package result
 
 import "errors"
 
 var Zero = errors.New("result: no result")
 
-type Result[T any] interface {
-	Unwrap() (T, error)
+type Result[T any] struct {
+	Data T
+	Err  error
 }
 
-type result[T any] struct {
-	data T
-	err  error
+func (r *Result[T]) Unwrap() (T, error) {
+	return r.Data, r.Err
 }
 
-func (r *result[T]) Unwrap() (T, error) {
-	return r.data, r.err
+func New[T any]() *Result[T] {
+	return &Result[T]{}
 }
 
-func OK[T any](v T) Result[T] {
-	return &result[T]{
-		data: v,
+func OK[T any](v T) *Result[T] {
+	return &Result[T]{
+		Data: v,
 	}
 }
 
-func Err[T any](err error) Result[T] {
-	return &result[T]{
-		err: err,
+func Err[T any](err error) *Result[T] {
+	return &Result[T]{
+		Err: err,
 	}
 }
 
-func All[T any](rs ...result[T]) ([]T, error) {
+func All[T any](rs ...*Result[T]) ([]T, error) {
 	if len(rs) == 0 {
 		return nil, Zero
 	}
@@ -54,7 +54,7 @@ func All[T any](rs ...result[T]) ([]T, error) {
 	return res, nil
 }
 
-func Any[T any](rs ...result[T]) (T, error) {
+func Any[T any](rs ...*Result[T]) (T, error) {
 	if len(rs) == 0 {
 		var t T
 		return t, Zero
