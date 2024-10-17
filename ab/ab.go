@@ -15,21 +15,21 @@ func Rollout(key string, percentage uint64) bool {
 	return percentage > 0 && Hash(key, 100) <= percentage
 }
 
-type Unique struct {
+type Counter struct {
 	client *redis.Client
 }
 
-func NewUnique(client *redis.Client) *Unique {
-	return &Unique{
+func NewCounter(client *redis.Client) *Counter {
+	return &Counter{
 		client: client,
 	}
 }
 
-func (u *Unique) Store(ctx context.Context, key, val string) (bool, error) {
-	n, err := u.client.PFAdd(ctx, key, val).Result()
+func (c *Counter) Store(ctx context.Context, key, val string) (stored bool, err error) {
+	n, err := c.client.PFAdd(ctx, key, val).Result()
 	return n == 1, err
 }
 
-func (u *Unique) Load(ctx context.Context, key string) (card int64, err error) {
-	return u.client.PFCount(ctx, key).Result()
+func (c *Counter) Load(ctx context.Context, key string) (count int64, err error) {
+	return c.client.PFCount(ctx, key).Result()
 }

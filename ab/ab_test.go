@@ -19,17 +19,17 @@ func TestMain(m *testing.M) {
 }
 
 func TestUnique(t *testing.T) {
-	unique := ab.NewUnique(redistest.Client(t))
-	added, err := unique.Store(ctx, "key", "val")
+	counter := ab.NewCounter(redistest.Client(t))
+	added, err := counter.Store(ctx, "key", "val")
 	is := assert.New(t)
 	is.Nil(err)
 	is.True(added)
 
-	added, err = unique.Store(ctx, "key", "val")
+	added, err = counter.Store(ctx, "key", "val")
 	is.Nil(err)
 	is.False(added)
 
-	count, err := unique.Load(ctx, "key")
+	count, err := counter.Load(ctx, "key")
 	is.Nil(err)
 	is.Equal(int64(1), count)
 }

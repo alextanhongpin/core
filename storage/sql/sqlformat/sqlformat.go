@@ -11,10 +11,9 @@ import (
 var isPythonInstalled = checkPythonInstalled() == nil
 
 var (
-	ErrPythonNotInstalled   = errors.New("cmd: python not installed")
-	ErrInvalidPythonVersion = errors.New("cmd: python version not valid")
-
-	ErrPythonRequired = errors.New(`sqldump: sqlformat requires python3 to be installed. Run
+	ErrInvalidPythonVersion = errors.New("sqlformat: python version not valid")
+	ErrPythonNotInstalled   = errors.New("sqlformat: python not installed")
+	ErrPythonRequired       = errors.New(`sqlformat: python3 is required. Run
   $ pip install sqlparse`)
 )
 
@@ -29,6 +28,9 @@ func Format(stmt string) (string, error) {
 
 // equals to $ echo 'select 1' | python3 -m sqlparse -r -
 func sqlformat(stmt string) ([]byte, error) {
+	if !isPythonInstalled {
+		panic(ErrPythonRequired)
+	}
 	r, w := io.Pipe()
 	defer r.Close()
 
