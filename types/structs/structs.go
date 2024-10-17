@@ -7,6 +7,14 @@ import (
 	"strings"
 )
 
+func Type(v any) string {
+	if v == nil {
+		return "nil"
+	}
+
+	return reflect.TypeOf(v).String()
+}
+
 // PkgName returns the name of the type of the value.
 func PkgName(v any) string {
 	// Reflect will panic if there is no

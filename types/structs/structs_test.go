@@ -12,6 +12,20 @@ import (
 type Time struct {
 }
 
+func TestType(t *testing.T) {
+	now := time.Now()
+	is := assert.New(t)
+	is.Equal("time.Time", structs.Type(now))
+	is.Equal("*time.Time", structs.Type(&now))
+
+	var clock Time
+	is.Equal("structs_test.Time", structs.Type(clock))
+	is.Equal("*structs_test.Time", structs.Type(&clock))
+
+	is.Equal("nil", structs.Type(nil))
+	is.Equal("string", structs.Type(""))
+}
+
 func TestName(t *testing.T) {
 	now := time.Now()
 
