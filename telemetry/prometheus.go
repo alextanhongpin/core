@@ -82,8 +82,6 @@ func (m *PrometheusHandler) newRecordFunc(em event.Metric, labels []event.Label)
 	case event.UnitDimensionless:
 	case event.UnitBytes:
 		name += "_bytes"
-	case event.UnitMilliseconds:
-		name += "_milliseconds"
 	}
 
 	keys, _ := labelsToKeyVals(labels)
@@ -117,6 +115,13 @@ func (m *PrometheusHandler) newRecordFunc(em event.Metric, labels []event.Label)
 			g.WithLabelValues(vals...).Set(l.Float64())
 		}
 	case *event.DurationDistribution:
+		switch opts.Unit {
+		case event.UnitMilliseconds:
+			name += "_milliseconds"
+		default:
+			name += "_seconds"
+		}
+
 		r := prometheus.NewHistogramVec(prometheus.HistogramOpts{
 			Namespace: opts.Namespace,
 			Name:      name,
@@ -127,7 +132,12 @@ func (m *PrometheusHandler) newRecordFunc(em event.Metric, labels []event.Label)
 
 		return func(ctx context.Context, l event.Label, attrs []event.Label) {
 			_, vals := labelsToKeyVals(labels)
-			r.WithLabelValues(vals...).Observe(float64(l.Duration().Nanoseconds()))
+			duration := l.Duration().Seconds()
+			if opts.Unit == event.UnitMilliseconds {
+				duration = float64(l.Duration().Milliseconds())
+			}
+
+			r.WithLabelValues(vals...).Observe(duration)
 		}
 	default:
 		return nil

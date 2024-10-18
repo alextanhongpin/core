@@ -73,47 +73,47 @@ my_ns_cpu{version="stable"} 123
 		h := event.NewDuration("request_duration", &event.MetricOptions{
 			Namespace:   "my_ns",
 			Description: "request per seconds",
-			Unit:        event.UnitMilliseconds,
+			//Unit:        event.UnitMilliseconds,
 		})
 		h.Record(ctx, time.Second, event.String("version", "stable"))
 		h.Record(ctx, time.Minute, event.String("version", "canary"))
 
-		collector := metric.Collector("request_duration_milliseconds")
+		collector := metric.Collector("request_duration_seconds")
 
 		is := assert.New(t)
-		is.Equal(2, testutil.CollectAndCount(collector, "my_ns_request_duration_milliseconds"))
-		b, err := testutil.CollectAndFormat(collector, expfmt.TypeTextPlain, "my_ns_request_duration_milliseconds")
+		is.Equal(2, testutil.CollectAndCount(collector, "my_ns_request_duration_seconds"))
+		b, err := testutil.CollectAndFormat(collector, expfmt.TypeTextPlain, "my_ns_request_duration_seconds")
 		is.Nil(err)
-		want := `# HELP my_ns_request_duration_milliseconds request per seconds
-# TYPE my_ns_request_duration_milliseconds histogram
-my_ns_request_duration_milliseconds_bucket{version="canary",le="0.005"} 0
-my_ns_request_duration_milliseconds_bucket{version="canary",le="0.01"} 0
-my_ns_request_duration_milliseconds_bucket{version="canary",le="0.025"} 0
-my_ns_request_duration_milliseconds_bucket{version="canary",le="0.05"} 0
-my_ns_request_duration_milliseconds_bucket{version="canary",le="0.1"} 0
-my_ns_request_duration_milliseconds_bucket{version="canary",le="0.25"} 0
-my_ns_request_duration_milliseconds_bucket{version="canary",le="0.5"} 0
-my_ns_request_duration_milliseconds_bucket{version="canary",le="1"} 0
-my_ns_request_duration_milliseconds_bucket{version="canary",le="2.5"} 0
-my_ns_request_duration_milliseconds_bucket{version="canary",le="5"} 0
-my_ns_request_duration_milliseconds_bucket{version="canary",le="10"} 0
-my_ns_request_duration_milliseconds_bucket{version="canary",le="+Inf"} 1
-my_ns_request_duration_milliseconds_sum{version="canary"} 6e+10
-my_ns_request_duration_milliseconds_count{version="canary"} 1
-my_ns_request_duration_milliseconds_bucket{version="stable",le="0.005"} 0
-my_ns_request_duration_milliseconds_bucket{version="stable",le="0.01"} 0
-my_ns_request_duration_milliseconds_bucket{version="stable",le="0.025"} 0
-my_ns_request_duration_milliseconds_bucket{version="stable",le="0.05"} 0
-my_ns_request_duration_milliseconds_bucket{version="stable",le="0.1"} 0
-my_ns_request_duration_milliseconds_bucket{version="stable",le="0.25"} 0
-my_ns_request_duration_milliseconds_bucket{version="stable",le="0.5"} 0
-my_ns_request_duration_milliseconds_bucket{version="stable",le="1"} 0
-my_ns_request_duration_milliseconds_bucket{version="stable",le="2.5"} 0
-my_ns_request_duration_milliseconds_bucket{version="stable",le="5"} 0
-my_ns_request_duration_milliseconds_bucket{version="stable",le="10"} 0
-my_ns_request_duration_milliseconds_bucket{version="stable",le="+Inf"} 1
-my_ns_request_duration_milliseconds_sum{version="stable"} 1e+09
-my_ns_request_duration_milliseconds_count{version="stable"} 1
+		want := `# HELP my_ns_request_duration_seconds request per seconds
+# TYPE my_ns_request_duration_seconds histogram
+my_ns_request_duration_seconds_bucket{version="canary",le="0.005"} 0
+my_ns_request_duration_seconds_bucket{version="canary",le="0.01"} 0
+my_ns_request_duration_seconds_bucket{version="canary",le="0.025"} 0
+my_ns_request_duration_seconds_bucket{version="canary",le="0.05"} 0
+my_ns_request_duration_seconds_bucket{version="canary",le="0.1"} 0
+my_ns_request_duration_seconds_bucket{version="canary",le="0.25"} 0
+my_ns_request_duration_seconds_bucket{version="canary",le="0.5"} 0
+my_ns_request_duration_seconds_bucket{version="canary",le="1"} 0
+my_ns_request_duration_seconds_bucket{version="canary",le="2.5"} 0
+my_ns_request_duration_seconds_bucket{version="canary",le="5"} 0
+my_ns_request_duration_seconds_bucket{version="canary",le="10"} 0
+my_ns_request_duration_seconds_bucket{version="canary",le="+Inf"} 1
+my_ns_request_duration_seconds_sum{version="canary"} 60
+my_ns_request_duration_seconds_count{version="canary"} 1
+my_ns_request_duration_seconds_bucket{version="stable",le="0.005"} 0
+my_ns_request_duration_seconds_bucket{version="stable",le="0.01"} 0
+my_ns_request_duration_seconds_bucket{version="stable",le="0.025"} 0
+my_ns_request_duration_seconds_bucket{version="stable",le="0.05"} 0
+my_ns_request_duration_seconds_bucket{version="stable",le="0.1"} 0
+my_ns_request_duration_seconds_bucket{version="stable",le="0.25"} 0
+my_ns_request_duration_seconds_bucket{version="stable",le="0.5"} 0
+my_ns_request_duration_seconds_bucket{version="stable",le="1"} 1
+my_ns_request_duration_seconds_bucket{version="stable",le="2.5"} 1
+my_ns_request_duration_seconds_bucket{version="stable",le="5"} 1
+my_ns_request_duration_seconds_bucket{version="stable",le="10"} 1
+my_ns_request_duration_seconds_bucket{version="stable",le="+Inf"} 1
+my_ns_request_duration_seconds_sum{version="stable"} 1
+my_ns_request_duration_seconds_count{version="stable"} 1
 `
 		is.Equal(want, string(b))
 	})
