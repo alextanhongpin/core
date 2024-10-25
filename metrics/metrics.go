@@ -73,7 +73,7 @@ type REDTracker struct {
 	service string
 	action  string
 	status  string
-	now     time.Time
+	Now     time.Time
 }
 
 func NewRED(service, action string) *REDTracker {
@@ -81,14 +81,14 @@ func NewRED(service, action string) *REDTracker {
 		service: service,
 		action:  action,
 		status:  OK,
-		now:     time.Now(),
+		Now:     time.Now(),
 	}
 }
 
 func (r *REDTracker) Done() {
 	RED.
 		WithLabelValues(r.service, r.action, r.status).
-		Observe(float64(time.Since(r.now).Milliseconds()))
+		Observe(float64(time.Since(r.Now).Milliseconds()))
 }
 
 func (r *REDTracker) Fail() {

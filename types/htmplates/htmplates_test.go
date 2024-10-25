@@ -5,6 +5,7 @@ import (
 	"embed"
 	"fmt"
 	"html/template"
+	"os"
 	"testing"
 
 	"github.com/alextanhongpin/core/types/htmplates"
@@ -15,6 +16,27 @@ import (
 var templates embed.FS
 
 func TestRender(t *testing.T) {
+	t.Run("local dir", func(t *testing.T) {
+		html5 := htmplates.Engine{
+			BaseDir: "testdata",
+			FS:      os.DirFS("."),
+			Funcs: template.FuncMap{
+				"Greet": func(msg string) string {
+					return fmt.Sprintf("Hello, %s!", msg)
+				},
+			},
+		}
+
+		tf := html5.Compile("function.html")
+
+		var b bytes.Buffer
+		err := tf().Execute(&b, nil)
+
+		is := assert.New(t)
+		is.Nil(err)
+		is.Equal("Hello, world!\n", b.String())
+	})
+
 	t.Run("no hot-reload", func(t *testing.T) {
 		html5 := htmplates.Engine{
 			BaseDir: "testdata",
