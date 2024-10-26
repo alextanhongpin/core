@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/alextanhongpin/core/http/httputil"
-	jwt "github.com/golang-jwt/jwt/v5"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -36,16 +35,32 @@ func TestParseAuthHeader(t *testing.T) {
 }
 
 func TestSignAndVerifyJWT(t *testing.T) {
-	secret := []byte("secret")
-	token, err := httputil.SignJWT(secret, jwt.MapClaims{
-		"sub": "john.appleseed@mail.com",
-	}, 1*time.Hour)
-	if err != nil {
-		t.Fatal(err)
-	}
+	t.Run("valid", func(t *testing.T) {
+		secret := []byte("secret")
+		token, err := httputil.SignJWT(secret, httputil.Claims{
+			Subject: "john.appleseed@mail.com",
+		}, 1*time.Hour)
+		if err != nil {
+			t.Fatal(err)
+		}
 
-	claims, err := httputil.VerifyJWT(secret, token)
-	is := assert.New(t)
-	is.Nil(err)
-	is.Equal("john.appleseed@mail.com", claims["sub"])
+		claims, err := httputil.VerifyJWT(secret, token)
+		is := assert.New(t)
+		is.Nil(err)
+		is.Equal("john.appleseed@mail.com", claims.Subject)
+	})
+
+	t.Run("expired", func(t *testing.T) {
+		secret := []byte("secret")
+		token, err := httputil.SignJWT(secret, httputil.Claims{
+			Subject: "john.appleseed@mail.com",
+		}, -1*time.Hour)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		_, err = httputil.VerifyJWT(secret, token)
+		is := assert.New(t)
+		is.ErrorIs(err, httputil.ErrTokenInvalid)
+	})
 }

@@ -12,9 +12,7 @@ import (
 
 const AuthBearer = "Bearer"
 
-var (
-	ErrTokenInvalid = errors.New("invalid token")
-)
+var ErrTokenInvalid = errors.New("httputil: invalid token")
 
 // BearerAuth extracts the token from the authorization
 // header.
@@ -27,25 +25,25 @@ func BearerAuth(r *http.Request) (string, bool) {
 	return token, ok && bearer == AuthBearer && len(token) > 0
 }
 
-type Claims = jwt.MapClaims
+type Claims = jwt.RegisteredClaims
 
 // SignJWT signs a JWT with the given claims.
 // Panics if no subject is provided.
 // The expiration is added to the claims.
 func SignJWT(secret []byte, claims Claims, valid time.Duration) (string, error) {
-	if subject, ok := claims["sub"]; !ok || subject == "" {
-		panic("subject required for jwt token")
+	if claims.Subject == "" {
+		panic("httputil: subject is required")
 	}
 
-	claims["exp"] = time.Now().Add(valid).Unix()
+	claims.ExpiresAt = jwt.NewNumericDate(time.Now().Add(valid))
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 
 	jwtToken, err := token.SignedString(secret)
 	return jwtToken, err
 }
 
-func VerifyJWT(secret []byte, bearerToken string) (Claims, error) {
-	token, err := jwt.Parse(bearerToken, func(token *jwt.Token) (any, error) {
+func VerifyJWT(secret []byte, bearerToken string) (*Claims, error) {
+	token, err := jwt.ParseWithClaims(bearerToken, &Claims{}, func(token *jwt.Token) (any, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("unexpected signing method %s", token.Header["alg"])
 		}
@@ -53,12 +51,16 @@ func VerifyJWT(secret []byte, bearerToken string) (Claims, error) {
 		return secret, nil
 	})
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: %w", ErrTokenInvalid, err)
+	}
+	if !token.Valid {
+		return nil, ErrTokenInvalid
 	}
 
-	if claims, ok := token.Claims.(Claims); ok && token.Valid {
-		return claims, nil
+	claims, ok := token.Claims.(*Claims)
+	if !ok {
+		return nil, fmt.Errorf("%w: cannot cast claims", ErrTokenInvalid)
 	}
 
-	return nil, ErrTokenInvalid
+	return claims, nil
 }

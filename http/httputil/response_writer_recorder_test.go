@@ -10,13 +10,6 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-type handler struct {
-}
-
-func (h *handler) ServeHTTP() {
-
-}
-
 func TestResponseWriterRecorder(t *testing.T) {
 	mw := func(next http.Handler) http.Handler {
 		fn := func(w http.ResponseWriter, r *http.Request) {

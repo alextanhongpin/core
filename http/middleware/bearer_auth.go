@@ -6,14 +6,14 @@ import (
 	"github.com/alextanhongpin/core/http/httputil"
 )
 
-var UserIDContext httputil.Context[httputil.Claims] = "user_id_ctx"
+var ClaimsContext httputil.Context[*httputil.Claims] = "claims_ctx"
 
 func BearerAuthHandler(h http.Handler, secret []byte, strict bool) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		token, ok := httputil.BearerAuth(r)
 		if !ok {
 			if strict {
-				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
 
 				return
 			}
@@ -30,6 +30,6 @@ func BearerAuthHandler(h http.Handler, secret []byte, strict bool) http.Handler 
 			return
 		}
 
-		h.ServeHTTP(w, r.WithContext(UserIDContext.WithValue(r.Context(), claims)))
+		h.ServeHTTP(w, r.WithContext(ClaimsContext.WithValue(r.Context(), claims)))
 	})
 }

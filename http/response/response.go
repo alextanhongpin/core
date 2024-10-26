@@ -63,10 +63,8 @@ func NewError(err error) *Body {
 
 	var det causes.Detail
 	if errors.As(err, &det) {
-		code := codes.HTTP(det.Code())
-
 		return &Body{
-			Code: code,
+			Code: codes.HTTP(det.Code()),
 			Error: &Error{
 				Code:    det.Kind(),
 				Message: det.Message(),
