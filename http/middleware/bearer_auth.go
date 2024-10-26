@@ -26,7 +26,7 @@ func BearerAuthHandler(h http.Handler, secret []byte) http.Handler {
 	})
 }
 
-func RequireAuth(h http.Handler) http.Handler {
+func RequireAuthHandler(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if _, ok := ClaimsContext.Value(r.Context()); ok {
 			h.ServeHTTP(w, r)

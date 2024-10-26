@@ -55,6 +55,6 @@ func TestBearerAuth(t *testing.T) {
 		w := httptest.NewRecorder()
 		r := httptest.NewRequest(http.MethodGet, "/", nil)
 
-		httpdump.Handler(t, middleware.RequireAuth(h)).ServeHTTP(w, r)
+		httpdump.Handler(t, middleware.RequireAuthHandler(h)).ServeHTTP(w, r)
 	})
 }
