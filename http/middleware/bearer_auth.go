@@ -6,7 +6,9 @@ import (
 	"github.com/alextanhongpin/core/http/httputil"
 )
 
-var ClaimsContext httputil.Context[*httputil.Claims] = "claims_ctx"
+type Claims = httputil.Claims
+
+var ClaimsContext httputil.Context[*Claims] = "claims_ctx"
 
 func BearerAuthHandler(h http.Handler, secret []byte) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
