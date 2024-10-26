@@ -16,47 +16,29 @@ type PageInfo struct {
 }
 
 type Body struct {
-	Code     int       `json:"-"`
-	Data     any       `json:"data,omitempty"`
-	Error    *Error    `json:"error,omitempty"`
-	PageInfo *PageInfo `json:"pageInfo,omitempty"`
+	Code     int        `json:"-"`
+	Data     any        `json:"data,omitempty"`
+	Error    *JSONError `json:"error,omitempty"`
+	PageInfo *PageInfo  `json:"pageInfo,omitempty"`
 }
 
-func NewData(data any, code int) *Body {
-	return &Body{
-		Code: code,
-		Data: data,
-	}
+type JSONError struct {
+	Code    string           `json:"code"`
+	Message string           `json:"message"`
+	Errors  ValidationErrors `json:"errors,omitempty"`
 }
 
-func NewBody(data any, err error) *Body {
-	if err != nil {
-		return NewError(err)
-	}
-
-	return &Body{
-		Code: http.StatusOK,
-		Data: data,
-	}
-}
-
-type Error struct {
-	Code             string           `json:"code"`
-	Message          string           `json:"message"`
-	ValidationErrors ValidationErrors `json:"validationErrors,omitempty"`
-}
-
-func NewError(err error) *Body {
+func NewJSONError(err error) *Body {
 	var ve ValidationErrors
 	if errors.As(err, &ve) {
 		code := http.StatusBadRequest
 
 		return &Body{
 			Code: code,
-			Error: &Error{
-				Code:             http.StatusText(code),
-				Message:          err.Error(),
-				ValidationErrors: ve,
+			Error: &JSONError{
+				Code:    http.StatusText(code),
+				Message: err.Error(),
+				Errors:  ve,
 			},
 		}
 	}
@@ -65,7 +47,7 @@ func NewError(err error) *Body {
 	if errors.As(err, &det) {
 		return &Body{
 			Code: codes.HTTP(det.Code()),
-			Error: &Error{
+			Error: &JSONError{
 				Code:    det.Kind(),
 				Message: det.Message(),
 			},
@@ -76,7 +58,7 @@ func NewError(err error) *Body {
 
 	return &Body{
 		Code: code,
-		Error: &Error{
+		Error: &JSONError{
 			Code:    http.StatusText(code),
 			Message: "An unexpected error has occured. Please try again later",
 		},

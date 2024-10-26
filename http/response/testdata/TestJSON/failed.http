@@ -5,7 +5,11 @@ Host: example.com
 -- response.http --
 HTTP/1.1 500 Internal Server Error
 Connection: close
-Content-Type: text/plain; charset=utf-8
-X-Content-Type-Options: nosniff
+Content-Type: application/json; charset=utf-8
 
-Internal Server Error
+{
+ "error": {
+  "code": "Internal Server Error",
+  "message": "An unexpected error has occured. Please try again later"
+ }
+}
