@@ -25,8 +25,8 @@ func BearerAuthHandler(h http.Handler, secret []byte, strict bool) http.Handler 
 
 		claims, err := httputil.VerifyJWT(secret, token)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusUnauthorized)
-
+                        http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
+			
 			return
 		}
 
