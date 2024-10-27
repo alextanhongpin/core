@@ -10,6 +10,7 @@ import (
 )
 
 var (
+	StatusTotal   = expvar.NewMap("status_total")
 	RequestsTotal = expvar.NewMap("requests_total")
 	ErrorsTotal   = expvar.NewMap("errors_total")
 )
@@ -25,6 +26,7 @@ func CounterHandler(h http.Handler) http.Handler {
 		path := fmt.Sprintf("%s - %d", cmp.Or(r.Pattern, r.URL.Path), wr.StatusCode())
 		RequestsTotal.Add("ALL", 1)
 		RequestsTotal.Add(path, 1)
+		StatusTotal.Add(fmt.Sprint(wr.StatusCode()), 1)
 
 		// Treat HTTP status code 2XX as success.
 		code := wr.StatusCode()
