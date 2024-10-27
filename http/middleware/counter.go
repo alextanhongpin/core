@@ -22,7 +22,7 @@ func CounterHandler(h http.Handler) http.Handler {
 		wr := httputil.NewResponseWriterRecorder(w)
 		h.ServeHTTP(wr, r)
 
-		path := fmt.Sprintf("%s %s - %d", r.Method, cmp.Or(r.Pattern, r.URL.Path), wr.StatusCode())
+		path := fmt.Sprintf("%s - %d", cmp.Or(r.Pattern, r.URL.Path), wr.StatusCode())
 		RequestsTotal.Add("ALL", 1)
 		RequestsTotal.Add(path, 1)
 
