@@ -51,15 +51,22 @@ func (u *UniqueCounter) Handler(h http.Handler, key string, fn func(r *http.Requ
 }
 
 // Of count-min-sketch, hyperloglog, top-k, t-digest
-func BloomFilterCounterHandler(h http.Handler, fn func(r *http.Request) string) http.Handler {
+func RedisCounterHandler(h http.Handler, fn func(r *http.Request) string) http.Handler {
 	// var bf BloomFilter
 	//var g singleflight.Group
+
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		wr := httputil.NewResponseWriterRecorder(w)
 		h.ServeHTTP(wr, r)
 
 		path := fmt.Sprintf("%s - %d", cmp.Or(r.Pattern, r.URL.Path), wr.StatusCode())
 		key := fn(r)
+
+		// hyperloglog.add(path, user) - measure unique api calls
+		// cms add(path, count) - track total api calls
+		// t-digest add (path) - measure api latency
+		// top-k add (path) - find top api calls
+
 		if len(key) > 0 {
 			// Check if exists.
 			RequestsTotal.Add("ALL", 1)

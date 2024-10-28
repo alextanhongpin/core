@@ -6,7 +6,8 @@ import (
 	redis "github.com/redis/go-redis/v9"
 )
 
-// app:data_type:key:value:key:value
+// app:data_type:key:value:key:value:time:range
+// app:hll:pageviews:2024-05-01 page
 
 type HyperLogLog struct {
 	Client *redis.Client
