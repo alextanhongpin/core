@@ -28,8 +28,6 @@ func (e *Engine) Compile(files ...string) func() *template.Template {
 }
 
 func (e *Engine) compile(files ...string) *template.Template {
-	t := template.Must(template.New("").Funcs(e.Funcs).Parse(""))
-
 	if e.BaseDir != "" {
 		for i := range files {
 			files[i] = filepath.Join(e.BaseDir, files[i])
@@ -37,5 +35,5 @@ func (e *Engine) compile(files ...string) *template.Template {
 	}
 	// ParseFS will designate the template name as the first base path of the
 	// first file.
-	return template.Must(t.ParseFS(e.FS, files...)).Lookup(filepath.Base(files[0]))
+	return template.Must(template.New("").Funcs(e.Funcs).ParseFS(e.FS, files...)).Lookup(filepath.Base(files[0]))
 }
