@@ -2,11 +2,14 @@ package metrics
 
 import (
 	"cmp"
+	"context"
 	"expvar"
 	"fmt"
 	"log/slog"
 	"net/http"
+	"time"
 
+	"github.com/alextanhongpin/core/dsync/probs"
 	"github.com/alextanhongpin/core/http/httputil"
 	redis "github.com/redis/go-redis/v9"
 )
@@ -50,10 +53,27 @@ func (u *UniqueCounter) Handler(h http.Handler, key string, fn func(r *http.Requ
 	})
 }
 
+// counters
+// top-k
+// rate-limits
+
 // Of count-min-sketch, hyperloglog, top-k, t-digest
-func RedisCounterHandler(h http.Handler, fn func(r *http.Request) string) http.Handler {
+func RedisCounterHandler(h http.Handler, client *redis.Client, fn func(r *http.Request) string) http.Handler {
 	// var bf BloomFilter
 	//var g singleflight.Group
+	ctx := context.Background()
+	topK := probs.NewTopK(client)
+	_, err := topK.Reserve(ctx, "top_k:requests_total", 10)
+	if err != nil {
+		panic(err)
+	}
+	td := probs.NewTDigest(client)
+
+	cms := probs.NewCountMinSketch(ctx)
+	_, err = cms.InitByProb(ctx, "count_min_sketch:requests_total", 0.01, 0.002)
+	if err != nil {
+		panic(err)
+	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		wr := httputil.NewResponseWriterRecorder(w)
@@ -61,6 +81,25 @@ func RedisCounterHandler(h http.Handler, fn func(r *http.Request) string) http.H
 
 		path := fmt.Sprintf("%s - %d", cmp.Or(r.Pattern, r.URL.Path), wr.StatusCode())
 		key := fn(r)
+		ctx := r.Context()
+
+		// TopK api calls.
+		topK.Add(ctx, "top_k:requests_total", path)
+
+		_, err = td.CreateWithCompression(ctx, "t_digest:requests_total:"+path, 100)
+		if err != nil {
+			panic(err)
+		}
+		defer func(start time.Time) {
+			td.Add(ctx, "t_digest:requests_total:"+path, time.Since(start).Milliseconds())
+		}(time.Now())
+		_, err := cms.IncrBy(ctx, "count_min_sketch:requests_total", probs.Tuple[any, int]{
+			K: path,
+			V: 1,
+		})
+		if err != nil {
+			panic(err)
+		}
 
 		// hyperloglog.add(path, user) - measure unique api calls
 		// cms add(path, count) - track total api calls
