@@ -16,10 +16,8 @@ func TestCountMinSketch(t *testing.T) {
 	t.Run("merge", func(t *testing.T) {})
 	t.Run("merge with weight", func(t *testing.T) {})
 	t.Run("query", func(t *testing.T) {
-
-		evt := new(probs.Event)
-		evt.Add("key", 1)
-		evt.Add("key", 20)
-		cms.IncrBy(ctx, key, evt)
+		cms.IncrBy(ctx, key, map[any]int{
+			"key": 1,
+		})
 	})
 }

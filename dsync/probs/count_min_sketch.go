@@ -27,8 +27,13 @@ func (cms *CountMinSketch) InitByDim(ctx context.Context, key string, width, dep
 	return cms.Client.CMSInitByDim(ctx, key, width, depth).Result()
 }
 
-func (cms *CountMinSketch) IncrBy(ctx context.Context, key string, value *Event) ([]int64, error) {
-	return cms.Client.CMSIncrBy(ctx, key, value.Data()...).Result()
+func (cms *CountMinSketch) IncrBy(ctx context.Context, key string, kvs map[any]int) ([]int64, error) {
+	args := make([]any, 0, len(kvs)*2)
+	for k, v := range kvs {
+		args = append(args, k, v)
+	}
+
+	return cms.Client.CMSIncrBy(ctx, key, args...).Result()
 }
 
 func (cms *CountMinSketch) Merge(ctx context.Context, destKey string, sourceKeys ...string) (string, error) {

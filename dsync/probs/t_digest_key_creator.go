@@ -11,7 +11,7 @@ type TDigestKeyCreator struct {
 	*TDigest
 	Compression int64
 	keys        map[string]struct{}
-	mu          sync.Mutex
+	mu          sync.RWMutex
 }
 
 func NewTDigestKeyCreator(client *redis.Client, compression int64) *TDigestKeyCreator {
@@ -42,4 +42,15 @@ func (t *TDigestKeyCreator) Add(ctx context.Context, key string, values ...float
 	t.keys[key] = struct{}{}
 
 	return t.TDigest.Add(ctx, key, values...)
+}
+
+func (t *TDigestKeyCreator) Keys() []any {
+	t.mu.RLock()
+	res := make([]any, 0, len(t.keys))
+	for k := range t.keys {
+		res = append(res, k)
+	}
+	t.mu.RUnlock()
+
+	return res
 }
