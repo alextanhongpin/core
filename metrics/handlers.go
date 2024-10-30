@@ -73,7 +73,7 @@ func TrackerHandler(h http.Handler, tracker *Tracker, userFn func(r *http.Reques
 type Tracker struct {
 	name string
 	// t-digest add (path) - measure api latency
-	td *probs.TDigestKeyCreator
+	td *probs.TDigest
 	// cms add(path, count) - track total api calls
 	cms *probs.CountMinSketch
 	// hyperloglog.add(path, user) - measure unique api calls
@@ -89,35 +89,30 @@ type Tracker struct {
 	}
 }
 
-func NewTracker(ctx context.Context, name string, client *redis.Client) (*Tracker, error) {
-	// TODO: Move to init method
+func NewTracker(name string, client *redis.Client) *Tracker {
+	t := &Tracker{
+		name: name,
+		// Track frequency of API calls.
+		cms: probs.NewCountMinSketch(client),
 
-	// Track API latency
-	td := probs.NewTDigestKeyCreator(client)
+		// Track unique page views by user
+		hll: probs.NewHyperLogLog(client),
 
-	// Track frequency of API calls.
-	cms := probs.NewCountMinSketch(ctx)
-	_, err := cms.InitByProb(ctx, "cms:api", 0.01, 0.002)
-	if err != nil {
-		return nil, err
+		// Track API latency
+		td: probs.NewTDigest(client),
+
+		// Track top-10 requests.
+		topK: probs.NewTopK(client),
 	}
+	t.init()
+	return t
+}
 
-	// Track unique page views by user
-	hll := probs.NewHyperLogLog(client)
-
-	// Track top-10 requests.
-	topK := probs.NewTopK(client)
-	_, err = topK.Reserve(ctx, "top_k:api", 10)
-	if err != nil {
-		return nil, err
-	}
-
-	return &Tracker{
-		hll:  hll,
-		topK: topK,
-		cms:  cms,
-		td:   td,
-	}, nil
+func (t *Tracker) init() {
+	t.keys.cms = fmt.Sprintf("%s:cms:api", t.name)
+	t.keys.hll = fmt.Sprintf("%s:hll:api", t.name)
+	t.keys.td = fmt.Sprintf("%s:td:api", t.name)
+	t.keys.topK = fmt.Sprintf("%s:top_k:api", t.name)
 }
 
 func (t *Tracker) Record(ctx context.Context, path, userID string, start time.Time) error {
@@ -130,11 +125,12 @@ func (t *Tracker) Record(ctx context.Context, path, userID string, start time.Ti
 }
 
 func (t *Tracker) latency(ctx context.Context, path string, start time.Time) error {
-	return t.td.Add(ctx, t.keys.td+":"+path, time.Since(start).Milliseconds())
+	_, err := t.td.Add(ctx, t.keys.td+":"+path, time.Since(start).Seconds())
+	return err
 }
 
 func (t *Tracker) countUnique(ctx context.Context, path string) error {
-	_, err := t.cms.IncrBy(ctx, t.keys.cms, map[any]int{
+	_, err := t.cms.IncrBy(ctx, t.keys.cms, map[string]int64{
 		path: 1,
 	})
 	return err
@@ -147,11 +143,11 @@ func (t *Tracker) countOccurences(ctx context.Context, page, userID string) erro
 	year := now.Format("2006")
 
 	key := Prefix(t.keys.hll + ":%s:ts:%s")
-	return errors.Join(
-		t.hll.Add(ctx, key.Format(page, day), userID),
-		t.hll.Add(ctx, key.Format(page, month), userID),
-		t.hll.Add(ctx, key.Format(page, year), userID),
-	)
+
+	_, err1 := t.hll.Add(ctx, key.Format(page, day), userID)
+	_, err2 := t.hll.Add(ctx, key.Format(page, month), userID)
+	_, err3 := t.hll.Add(ctx, key.Format(page, year), userID)
+	return errors.Join(err1, err2, err3)
 }
 
 func (t *Tracker) top(ctx context.Context, path string) error {
@@ -161,15 +157,15 @@ func (t *Tracker) top(ctx context.Context, path string) error {
 
 // TODO:
 func (t *Tracker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	stats, err := t.stats(r.Context())
+	stats, err := t.Stats(r.Context())
 	if err != nil {
 		panic(err)
 	}
 	_ = stats
 }
 
-func (t *Tracker) stats(ctx context.Context) ([]Stats, error) {
-	top10, err := t.topK.List(ctx)
+func (t *Tracker) Stats(ctx context.Context) ([]Stats, error) {
+	top10, err := t.topK.List(ctx, t.keys.topK)
 	if err != nil {
 		return nil, err
 	}
@@ -194,7 +190,7 @@ func (t *Tracker) stats(ctx context.Context) ([]Stats, error) {
 		if err != nil {
 			return nil, err
 		}
-		vals, err := t.td.Quantile(ctx, t.keys.td, 0.5, 0.9, 0.95)
+		vals, err := t.td.Quantile(ctx, t.keys.td+":"+path, 0.5, 0.9, 0.95)
 		if err != nil {
 			return nil, err
 		}
@@ -224,15 +220,14 @@ func (t *Tracker) stats(ctx context.Context) ([]Stats, error) {
 }
 
 type Stats struct {
-	Rank    int
 	Path    string
 	P50     float64
 	P90     float64
 	P95     float64
-	Daily   int
-	Monthly int
-	Yearly  int
-	Total   int
+	Daily   int64
+	Monthly int64
+	Yearly  int64
+	Total   int64
 }
 
 func (s *Stats) String() string {

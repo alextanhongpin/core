@@ -30,6 +30,7 @@ func TestTDigest(t *testing.T) {
 		is.Equal(0.5, cdf[1])
 		is.GreaterOrEqual(0.8333333333333334, cdf[2])
 	})
+	// TODO: Test quantile
 
 	t.Run("min", func(t *testing.T) {
 		td := probs.NewTDigest(redistest.Client(t))
