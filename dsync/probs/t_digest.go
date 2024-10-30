@@ -2,7 +2,6 @@ package probs
 
 import (
 	"context"
-	"sync"
 
 	redis "github.com/redis/go-redis/v9"
 )
@@ -10,17 +9,12 @@ import (
 // Use this to track latency of the server for sql operations, api requests etc.
 // We use this together with top-k to see the top performing api requests.
 type TDigest struct {
-	mu          sync.Mutex
-	keys        map[string]struct{}
-	Client      *redis.Client
-	Compression int64
+	Client *redis.Client
 }
 
-func NewTDigest(client *redis.Client, compression int64) *TDigest {
+func NewTDigest(client *redis.Client) *TDigest {
 	return &TDigest{
-		keys:        make(map[string]struct{}),
-		Client:      client,
-		Compression: compression,
+		Client: client,
 	}
 }
 
@@ -31,28 +25,6 @@ func (t *TDigest) CreateWithCompression(ctx context.Context, key string, compres
 
 func (t *TDigest) Create(ctx context.Context, key string) (string, error) {
 	return t.Client.TDigestCreate(ctx, key).Result()
-}
-
-// CreateAndAdd automatically creates the key if it doesn't exist.
-func (t *TDigest) CreateAndAdd(ctx context.Context, key string, values ...float64) (string, error) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
-	_, ok := t.keys[key]
-	if ok {
-		return t.Add(ctx, key, values...)
-	}
-
-	_, err := t.CreateWithCompression(ctx, key, t.Compression)
-	if err != nil {
-		// ERR T-Digest: key already exists
-		if !ErrTDigestKeyExists(err) {
-			return "", err
-		}
-	}
-	t.keys[key] = struct{}{}
-
-	return t.Add(ctx, key, values...)
 }
 
 func (t *TDigest) Add(ctx context.Context, key string, values ...float64) (string, error) {

@@ -9,8 +9,8 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestTDigest(t *testing.T) {
-	td := probs.NewTDigest(redistest.Client(t), 100)
+func TestTDigestKeyCreator(t *testing.T) {
+	td := probs.NewTDigestKeyCreator(redistest.Client(t), 100)
 
 	ms := func(d time.Duration) float64 {
 		return float64(d.Milliseconds())
@@ -19,9 +19,11 @@ func TestTDigest(t *testing.T) {
 	// Measure API latency.
 	key := t.Name() + ":t_digest:GET /healthz"
 	is := assert.New(t)
-	is.Nil(td.CreateAndAdd(ctx, key,
+	status, err := td.Add(ctx, key,
 		ms(10*time.Millisecond),
 		ms(100*time.Millisecond),
 		ms(1000*time.Millisecond),
-	))
+	)
+	is.Nil(err)
+	is.Equal("OK", status)
 }

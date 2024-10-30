@@ -41,6 +41,7 @@ func (t *TopK) ListWithCount(ctx context.Context, key string) (map[string]int64,
 	return t.Client.TopKListWithCount(ctx, key).Result()
 }
 
+// Query returns if the values exists in the top list.
 func (t *TopK) Query(ctx context.Context, key string, values ...any) ([]bool, error) {
 	return t.Client.TopKQuery(ctx, key, values...).Result()
 }
