@@ -29,7 +29,7 @@ func (t *TopK) Count(ctx context.Context, key string, values ...any) ([]int64, e
 	return t.Client.TopKCount(ctx, key, values...).Result()
 }
 
-func (t *TopK) IncrBy(ctx context.Context, key string, kvs map[any]int64) ([]string, error) {
+func (t *TopK) IncrBy(ctx context.Context, key string, kvs map[any]int) ([]string, error) {
 	args := make([]any, 0, len(kvs)*2)
 	for k, v := range kvs {
 		args = append(args, k, v)

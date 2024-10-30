@@ -4,12 +4,14 @@ import (
 	"context"
 
 	redis "github.com/redis/go-redis/v9"
+	"golang.org/x/sync/singleflight"
 )
 
 // Use this to track latency of the server for sql operations, api requests etc.
 // We use this together with top-k to see the top performing api requests.
 type TDigest struct {
 	Client *redis.Client
+	group  singleflight.Group
 }
 
 func NewTDigest(client *redis.Client) *TDigest {
@@ -20,14 +22,45 @@ func NewTDigest(client *redis.Client) *TDigest {
 
 // Create needs to be called.
 func (t *TDigest) CreateWithCompression(ctx context.Context, key string, compression int64) (string, error) {
-	return t.Client.TDigestCreateWithCompression(ctx, key, compression).Result()
+	status, err := t.Client.TDigestCreateWithCompression(ctx, key, compression).Result()
+	if TDigestKeyAlreadyExistsError(err) {
+		return "OK", nil
+	}
+
+	return status, err
 }
 
 func (t *TDigest) Create(ctx context.Context, key string) (string, error) {
-	return t.Client.TDigestCreate(ctx, key).Result()
+	status, err := t.Client.TDigestCreate(ctx, key).Result()
+	if TDigestKeyAlreadyExistsError(err) {
+		return "OK", nil
+	}
+
+	return status, err
 }
 
 func (t *TDigest) Add(ctx context.Context, key string, values ...float64) (string, error) {
+	status, err := t.Client.TDigestAdd(ctx, key, values...).Result()
+	if err == nil {
+		return status, nil
+	}
+
+	if create := TDigestKeyDoesNotExistsError(err); !create {
+		return "", err
+	}
+
+	_, err, shared := t.group.Do(key, func() (any, error) {
+		return t.Create(ctx, key)
+	})
+	if err != nil {
+		return "", err
+	}
+
+	if !shared {
+		// Clear key after created.
+		t.group.Forget(key)
+	}
+
 	return t.Client.TDigestAdd(ctx, key, values...).Result()
 }
 
@@ -67,6 +100,10 @@ func (t *TDigest) TrimmedMean(ctx context.Context, key string, lo, hi float64) (
 	return t.Client.TDigestTrimmedMean(ctx, key, lo, hi).Result()
 }
 
-func ErrTDigestKeyExists(err error) bool {
+func TDigestKeyAlreadyExistsError(err error) bool {
 	return redis.HasErrorPrefix(err, "T-Digest: key already exists")
+}
+
+func TDigestKeyDoesNotExistsError(err error) bool {
+	return redis.HasErrorPrefix(err, "T-Digest: key does not exist")
 }

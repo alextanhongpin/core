@@ -9,8 +9,8 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestTDigestKeyCreator(t *testing.T) {
-	td := probs.NewTDigestKeyCreator(redistest.Client(t), 100)
+func TestTDigest(t *testing.T) {
+	td := probs.NewTDigest(redistest.Client(t))
 
 	ms := func(d time.Duration) float64 {
 		return float64(d.Milliseconds())

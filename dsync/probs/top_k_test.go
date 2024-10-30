@@ -37,11 +37,10 @@ func TestTopK(t *testing.T) {
 	})
 
 	t.Run("incr by", func(t *testing.T) {
-		evt := new(probs.Event)
-		evt.Add("go", 10)
-		evt.Add("ts", 10)
-
-		_, err := topK.IncrBy(ctx, key, evt)
+		_, err := topK.IncrBy(ctx, key, map[any]int{
+			"go": 10,
+			"ts": 10,
+		})
 		is := assert.New(t)
 		is.Nil(err)
 	})
