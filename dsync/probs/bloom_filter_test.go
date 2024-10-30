@@ -19,7 +19,7 @@ func TestBloomFilter(t *testing.T) {
 		is.True(ok)
 	})
 
-	t.Run("add multiple", func(t *testing.T) {
+	t.Run("add again", func(t *testing.T) {
 		is := assert.New(t)
 		ok, err := bf.Add(ctx, key, t.Name())
 		is.Nil(err)

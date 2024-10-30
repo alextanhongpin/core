@@ -2,6 +2,7 @@ package probs
 
 import (
 	"context"
+	"slices"
 
 	redis "github.com/redis/go-redis/v9"
 	"golang.org/x/sync/singleflight"
@@ -48,10 +49,17 @@ func (cms *CountMinSketch) InitByDim(ctx context.Context, key string, width, dep
 	return status, err
 }
 
-func (cms *CountMinSketch) IncrBy(ctx context.Context, key string, kvs map[any]int) ([]int64, error) {
-	args := make([]any, 0, len(kvs)*2)
-	for k, v := range kvs {
-		args = append(args, k, v)
+func (cms *CountMinSketch) IncrBy(ctx context.Context, key string, kvs map[string]int64) ([]int64, error) {
+	keys := make([]string, 0, len(kvs))
+	for k := range kvs {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+
+	args := make([]any, len(kvs)*2)
+	for i, k := range keys {
+		args[i*2] = k
+		args[i*2+1] = kvs[k]
 	}
 
 	counts, err := cms.Client.CMSIncrBy(ctx, key, args...).Result()
@@ -59,15 +67,51 @@ func (cms *CountMinSketch) IncrBy(ctx context.Context, key string, kvs map[any]i
 		return counts, nil
 	}
 
-	if create := CountMinSketchKeyDoesNotExistError(err); !create {
+	if err := cms.create(ctx, key, err); err != nil {
 		return nil, err
+	}
+
+	return cms.Client.CMSIncrBy(ctx, key, args...).Result()
+}
+
+func (cms *CountMinSketch) Merge(ctx context.Context, destKey string, sourceKeys ...string) (string, error) {
+	status, err := cms.Client.CMSMerge(ctx, destKey, sourceKeys...).Result()
+	if err == nil {
+		return status, nil
+	}
+	if err := cms.create(ctx, destKey, err); err != nil {
+		return "", err
+	}
+
+	return cms.Client.CMSMerge(ctx, destKey, sourceKeys...).Result()
+}
+
+func (cms *CountMinSketch) MergeWithWeight(ctx context.Context, destKey string, sourceKeys map[string]int64) (string, error) {
+	status, err := cms.Client.CMSMergeWithWeight(ctx, destKey, sourceKeys).Result()
+	if err == nil {
+		return status, nil
+	}
+	if err := cms.create(ctx, destKey, err); err != nil {
+		return "", err
+	}
+
+	return cms.Client.CMSMergeWithWeight(ctx, destKey, sourceKeys).Result()
+}
+
+func (cms *CountMinSketch) Query(ctx context.Context, key string, values ...any) ([]int64, error) {
+	return cms.Client.CMSQuery(ctx, key, values...).Result()
+}
+
+func (cms *CountMinSketch) create(ctx context.Context, key string, err error) error {
+	if create := CountMinSketchKeyDoesNotExistError(err); !create {
+		return err
 	}
 
 	_, err, shared := cms.group.Do(key, func() (any, error) {
 		return cms.Init(ctx, key)
 	})
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	if !shared {
@@ -75,7 +119,7 @@ func (cms *CountMinSketch) IncrBy(ctx context.Context, key string, kvs map[any]i
 		cms.group.Forget(key)
 	}
 
-	return cms.Client.CMSIncrBy(ctx, key, args...).Result()
+	return nil
 }
 
 func CountMinSketchKeyAlreadyExistsError(err error) bool {
@@ -84,16 +128,4 @@ func CountMinSketchKeyAlreadyExistsError(err error) bool {
 
 func CountMinSketchKeyDoesNotExistError(err error) bool {
 	return redis.HasErrorPrefix(err, "CMS: key does not exist")
-}
-
-func (cms *CountMinSketch) Merge(ctx context.Context, destKey string, sourceKeys ...string) (string, error) {
-	return cms.Client.CMSMerge(ctx, destKey, sourceKeys...).Result()
-}
-
-func (cms *CountMinSketch) MergeWithWeight(ctx context.Context, destKey string, sourceKeys map[string]int64) (string, error) {
-	return cms.Client.CMSMergeWithWeight(ctx, destKey, sourceKeys).Result()
-}
-
-func (cms *CountMinSketch) Query(ctx context.Context, key string, values ...any) ([]int64, error) {
-	return cms.Client.CMSQuery(ctx, key, values...).Result()
 }

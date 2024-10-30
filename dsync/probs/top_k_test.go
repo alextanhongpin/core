@@ -14,19 +14,21 @@ func TestTopK(t *testing.T) {
 	topK := probs.NewTopK(client)
 	key := t.Name() + ":top_k:hashtag"
 
-	is := assert.New(t)
-	status, err := topK.Create(ctx, key, 5)
-	is.Nil(err)
-	is.Equal("OK", status)
-	_, err = topK.Add(ctx, key,
-		"ai",
-		"ml", "ml",
-		"js", "js",
-		"python", "python",
-		"ts", "ts", "ts",
-		"go", "go", "go", "go", "go", "go",
-	)
-	is.Nil(err)
+	t.Run("create", func(t *testing.T) {
+		is := assert.New(t)
+		status, err := topK.Create(ctx, key, 5)
+		is.Nil(err)
+		is.Equal("OK", status)
+		_, err = topK.Add(ctx, key,
+			"ai",
+			"ml", "ml",
+			"js", "js",
+			"python", "python",
+			"ts", "ts", "ts",
+			"go", "go", "go", "go", "go", "go",
+		)
+		is.Nil(err)
+	})
 
 	t.Run("count", func(t *testing.T) {
 		counts, err := topK.Count(ctx, key, "go", "ts", "ai")
@@ -37,7 +39,7 @@ func TestTopK(t *testing.T) {
 	})
 
 	t.Run("incr by", func(t *testing.T) {
-		_, err := topK.IncrBy(ctx, key, map[any]int{
+		_, err := topK.IncrBy(ctx, key, map[string]int64{
 			"go": 10,
 			"ts": 10,
 		})
@@ -71,4 +73,18 @@ func TestTopK(t *testing.T) {
 		is.Nil(err)
 		is.Equal(list, []bool{true, false})
 	})
+
+	t.Run("create", func(t *testing.T) {
+		is := assert.New(t)
+		_, err := topK.Add(ctx, t.Name(),
+			"ai",
+			"ml", "ml",
+			"js", "js",
+			"python", "python",
+			"ts", "ts", "ts",
+			"go", "go", "go", "go", "go", "go",
+		)
+		is.Nil(err)
+	})
+
 }
