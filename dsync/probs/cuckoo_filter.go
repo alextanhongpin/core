@@ -11,6 +11,12 @@ type CuckooFilter struct {
 	Client *redis.Client
 }
 
+func NewCuckooFilter(client *redis.Client) *CuckooFilter {
+	return &CuckooFilter{
+		Client: client,
+	}
+}
+
 func (cf *CuckooFilter) Add(ctx context.Context, key, value string) (bool, error) {
 	return cf.Client.CFAdd(ctx, key, value).Result()
 }

@@ -2,6 +2,7 @@ package probs
 
 import (
 	"context"
+	"math"
 
 	redis "github.com/redis/go-redis/v9"
 )
@@ -28,14 +29,8 @@ func (t *TopK) Count(ctx context.Context, key string, values ...any) ([]int64, e
 	return t.Client.TopKCount(ctx, key, values...).Result()
 }
 
-func (t *TopK) IncrBy(ctx context.Context, key string, values ...Tuple[any, int]) ([]string, error) {
-	args := make([]any, len(values)*2)
-	for i, v := range values {
-		args[i*2] = v.K
-		args[i*2+1] = v.V
-	}
-
-	return t.Client.TopKIncrBy(ctx, key, args...).Result()
+func (t *TopK) IncrBy(ctx context.Context, key string, evt *Event) ([]string, error) {
+	return t.Client.TopKIncrBy(ctx, key, evt.Data()...).Result()
 }
 
 func (t *TopK) List(ctx context.Context, key string) ([]string, error) {
@@ -55,5 +50,14 @@ func (t *TopK) Reserve(ctx context.Context, key string, k int64) (string, error)
 }
 
 func (t *TopK) ReserveWithOptions(ctx context.Context, key string, k, width, depth int64, decay float64) (string, error) {
+	return t.Client.TopKReserveWithOptions(ctx, key, k, width, depth, decay).Result()
+}
+
+// needs to be created?
+func (t *TopK) Create(ctx context.Context, key string, k int64) (string, error) {
+	logK := math.Log(float64(k))
+	width := int64(float64(k) * logK)
+	depth := int64(max(logK, 5))
+	decay := 0.9
 	return t.Client.TopKReserveWithOptions(ctx, key, k, width, depth, decay).Result()
 }

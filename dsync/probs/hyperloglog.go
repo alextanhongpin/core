@@ -6,11 +6,13 @@ import (
 	redis "github.com/redis/go-redis/v9"
 )
 
+// HyperLogLog is used to track unique occurences (e.g. page views).
+// If we want to track the non-unique occurences (e.g. number of API calls),
+// use count-min-sketch instead.
 type HyperLogLog struct {
 	Client *redis.Client
 }
 
-// use this to track unique page views.
 func NewHyperLogLog(client *redis.Client) *HyperLogLog {
 	return &HyperLogLog{
 		Client: client,

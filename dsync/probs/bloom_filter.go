@@ -6,9 +6,17 @@ import (
 	redis "github.com/redis/go-redis/v9"
 )
 
-// Use this to track unique page views/actions. For unique count, use hyperloglog
+// BloomFilter is used to track unique entries, up to an acceptable error rate.
+// Use bloom filter to check for existence. To track count of unique entries
+// (e.g. page views), use hyperloglog instead.
 type BloomFilter struct {
 	Client *redis.Client
+}
+
+func NewBloomFilter(client *redis.Client) *BloomFilter {
+	return &BloomFilter{
+		Client: client,
+	}
 }
 
 func (bf *BloomFilter) Add(ctx context.Context, key string, value any) (bool, error) {
