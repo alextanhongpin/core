@@ -3,10 +3,10 @@ package metrics
 import (
 	"cmp"
 	"context"
+	"encoding/json"
 	"errors"
 	"expvar"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"time"
 
@@ -36,29 +36,6 @@ func CounterHandler(h http.Handler) http.Handler {
 	})
 }
 
-type UniqueCounter struct {
-	Client *redis.Client
-	Logger *slog.Logger
-}
-
-func (u *UniqueCounter) Handler(h http.Handler, key string, fn func(r *http.Request) string) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		val := fn(r)
-		err := u.Client.PFAdd(r.Context(), key, val).Err()
-		if err != nil {
-			u.Logger.Error("failed to increment unique counter",
-				slog.String("key", key),
-				slog.String("val", val),
-			)
-		}
-	})
-}
-
-// counters
-// top-k
-// rate-limits
-
-// Of count-min-sketch, hyperloglog, top-k, t-digest
 func TrackerHandler(h http.Handler, tracker *Tracker, userFn func(r *http.Request) string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
@@ -80,17 +57,10 @@ type Tracker struct {
 	hll *probs.HyperLogLog
 	// top-k add (path) - find top api calls
 	topK *probs.TopK
-
-	keys struct {
-		td   string
-		cms  string
-		hll  string
-		topK string
-	}
 }
 
 func NewTracker(name string, client *redis.Client) *Tracker {
-	t := &Tracker{
+	return &Tracker{
 		name: name,
 		// Track frequency of API calls.
 		cms: probs.NewCountMinSketch(client),
@@ -104,97 +74,61 @@ func NewTracker(name string, client *redis.Client) *Tracker {
 		// Track top-10 requests.
 		topK: probs.NewTopK(client),
 	}
-	t.init()
-	return t
-}
-
-func (t *Tracker) init() {
-	t.keys.cms = fmt.Sprintf("%s:cms:api", t.name)
-	t.keys.hll = fmt.Sprintf("%s:hll:api", t.name)
-	t.keys.td = fmt.Sprintf("%s:td:api", t.name)
-	t.keys.topK = fmt.Sprintf("%s:top_k:api", t.name)
 }
 
 func (t *Tracker) Record(ctx context.Context, path, userID string, start time.Time) error {
+	cms := fmt.Sprintf("%s:cms:api", t.name)
+	hll := fmt.Sprintf("%s:hll:api", t.name)
+	td := fmt.Sprintf("%s:td:api", t.name)
+	topK := fmt.Sprintf("%s:top_k:api", t.name)
+
 	return errors.Join(
-		t.latency(ctx, path, start),
-		t.countUnique(ctx, path),
-		t.countOccurences(ctx, path, userID),
-		t.top(ctx, path),
+		t.countUnique(ctx, cms, path, userID, time.Now()),
+		t.countOccurences(ctx, hll, path),
+		t.rank(ctx, topK, path),
+		t.recordLatency(ctx, td, path, start),
 	)
 }
 
-func (t *Tracker) latency(ctx context.Context, path string, start time.Time) error {
-	_, err := t.td.Add(ctx, t.keys.td+":"+path, time.Since(start).Seconds())
-	return err
-}
+func (t *Tracker) Handler(at time.Time) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		stats, err := t.Stats(r.Context(), at)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
 
-func (t *Tracker) countUnique(ctx context.Context, path string) error {
-	_, err := t.cms.IncrBy(ctx, t.keys.cms, map[string]int64{
-		path: 1,
+			return
+		}
+
+		if err := json.NewEncoder(w).Encode(stats); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		}
 	})
-	return err
 }
 
-func (t *Tracker) countOccurences(ctx context.Context, page, userID string) error {
-	now := time.Now()
-	day := now.Format("2006-01-02")
-	month := now.Format("2006-01")
-	year := now.Format("2006")
+func (t *Tracker) Stats(ctx context.Context, at time.Time) ([]Stats, error) {
+	cms := fmt.Sprintf("%s:cms:api", t.name)
+	hll := fmt.Sprintf("%s:hll:api", t.name)
+	td := fmt.Sprintf("%s:td:api", t.name)
+	topK := fmt.Sprintf("%s:top_k:api", t.name)
 
-	key := Prefix(t.keys.hll + ":%s:ts:%s")
-
-	_, err1 := t.hll.Add(ctx, key.Format(page, day), userID)
-	_, err2 := t.hll.Add(ctx, key.Format(page, month), userID)
-	_, err3 := t.hll.Add(ctx, key.Format(page, year), userID)
-	return errors.Join(err1, err2, err3)
-}
-
-func (t *Tracker) top(ctx context.Context, path string) error {
-	_, err := t.topK.Add(ctx, t.keys.topK, path)
-	return err
-}
-
-// TODO:
-func (t *Tracker) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	stats, err := t.Stats(r.Context())
-	if err != nil {
-		panic(err)
-	}
-	_ = stats
-}
-
-func (t *Tracker) Stats(ctx context.Context) ([]Stats, error) {
-	top10, err := t.topK.List(ctx, t.keys.topK)
+	paths, err := t.rankings(ctx, topK)
 	if err != nil {
 		return nil, err
 	}
 
-	now := time.Now()
-	day := now.Format("2006-01-02")
-	month := now.Format("2006-01")
-	year := now.Format("2006")
-	key := Prefix(t.keys.hll + ":%s:ts:%s")
+	stats := make([]Stats, len(paths))
+	for i, path := range paths {
+		daily, monthly, yearly, err := t.totalUnique(ctx, cms, path, at)
+		if err != nil {
+			return nil, err
+		}
 
-	stats := make([]Stats, len(top10))
-	for i, path := range top10 {
-		daily, err := t.hll.Count(ctx, key.Format(path, day))
+		vals, err := t.latency(ctx, td, path)
 		if err != nil {
 			return nil, err
 		}
-		monthly, err := t.hll.Count(ctx, key.Format(path, month))
-		if err != nil {
-			return nil, err
-		}
-		yearly, err := t.hll.Count(ctx, key.Format(path, year))
-		if err != nil {
-			return nil, err
-		}
-		vals, err := t.td.Quantile(ctx, t.keys.td+":"+path, 0.5, 0.9, 0.95)
-		if err != nil {
-			return nil, err
-		}
-		counts, err := t.cms.Query(ctx, t.keys.cms, path)
+
+		total, err := t.totalOccurences(ctx, hll, path)
 		if err != nil {
 			return nil, err
 		}
@@ -204,19 +138,66 @@ func (t *Tracker) Stats(ctx context.Context) ([]Stats, error) {
 			P50:     vals[0],
 			P90:     vals[1],
 			P95:     vals[2],
-			Total:   counts[0],
+			Total:   total,
 			Daily:   daily,
 			Monthly: monthly,
 			Yearly:  yearly,
 		}
 	}
-	// List top10
-	// for each top10 (or all)
-	//   list page view (hll) day, weekly, monthly
-	//   list latency (tdigest), 50, 95, 99%
-	//   list number of calls (cms)
 
 	return stats, nil
+}
+
+func (t *Tracker) recordLatency(ctx context.Context, key, path string, start time.Time) error {
+	_, err := t.td.Add(ctx, fmt.Sprintf("%s:%s", key, path), time.Since(start).Seconds())
+	return err
+}
+
+func (t *Tracker) latency(ctx context.Context, key, path string) ([]float64, error) {
+	return t.td.Quantile(ctx, fmt.Sprintf("%s:%s", key, path), 0.5, 0.9, 0.95)
+}
+
+func (t *Tracker) countOccurences(ctx context.Context, key, path string) error {
+	_, err := t.cms.IncrBy(ctx, key, map[string]int64{
+		path: 1,
+	})
+	return err
+}
+
+func (t *Tracker) totalOccurences(ctx context.Context, key, path string) (int64, error) {
+	counts, err := t.cms.Query(ctx, key, path)
+	if err != nil {
+		return 0, err
+	}
+
+	return counts[0], nil
+}
+
+func (t *Tracker) countUnique(ctx context.Context, prefix, page, userID string, at time.Time) error {
+	key := Prefix(prefix + ":%s:ts:%s")
+
+	_, err1 := t.hll.Add(ctx, key.Format(page, at.Format("2006-01-02")), userID)
+	_, err2 := t.hll.Add(ctx, key.Format(page, at.Format("2006-01")), userID)
+	_, err3 := t.hll.Add(ctx, key.Format(page, at.Format("2006")), userID)
+	return errors.Join(err1, err2, err3)
+}
+
+func (t *Tracker) totalUnique(ctx context.Context, prefix, page string, at time.Time) (day, month, year int64, err error) {
+	key := Prefix(prefix + ":%s:ts:%s")
+
+	day, err1 := t.hll.Count(ctx, key.Format(page, at.Format("2006-01-02")))
+	month, err2 := t.hll.Count(ctx, key.Format(page, at.Format("2006-01")))
+	year, err3 := t.hll.Count(ctx, key.Format(page, at.Format("2006")))
+	return day, month, year, errors.Join(err1, err2, err3)
+}
+
+func (t *Tracker) rank(ctx context.Context, key, path string) error {
+	_, err := t.topK.Add(ctx, key, path)
+	return err
+}
+
+func (t *Tracker) rankings(ctx context.Context, key string) ([]string, error) {
+	return t.topK.List(ctx, key)
 }
 
 type Stats struct {

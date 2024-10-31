@@ -3,6 +3,7 @@ module github.com/alextanhongpin/core/metrics
 go 1.23.2
 
 require (
+	github.com/alextanhongpin/core/dsync/probs v0.0.0-00010101000000-000000000000
 	github.com/alextanhongpin/core/http v0.0.0-20240905053732-bcbe64b2dd73
 	github.com/alextanhongpin/core/storage/redis v0.0.0-20241028033631-6d88609c62b1
 	github.com/prometheus/client_golang v1.20.2
@@ -53,3 +54,5 @@ require (
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
+
+replace github.com/alextanhongpin/core/dsync/probs => ../dsync/probs

@@ -28,7 +28,7 @@ func TestTracker(t *testing.T) {
 		is.Nil(tracker.Record(ctx, "GET /foo", userID, time.Now().Add(-time.Duration(rand.Int64N(10_000))*time.Millisecond)))
 		is.Nil(tracker.Record(ctx, "GET /bar", userID, time.Now().Add(-time.Duration(rand.Int64N(5_000))*time.Millisecond)))
 	}
-	stats, err := tracker.Stats(ctx)
+	stats, err := tracker.Stats(ctx, time.Now())
 	is.Nil(err)
 	for _, s := range stats {
 		t.Log(s.String())
