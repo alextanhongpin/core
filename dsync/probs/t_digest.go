@@ -23,7 +23,7 @@ func NewTDigest(client *redis.Client) *TDigest {
 // Create needs to be called.
 func (t *TDigest) CreateWithCompression(ctx context.Context, key string, compression int64) (string, error) {
 	status, err := t.Client.TDigestCreateWithCompression(ctx, key, compression).Result()
-	if TDigestKeyAlreadyExistsError(err) {
+	if KeyAlreadyExistsError(err) {
 		return "OK", nil
 	}
 
@@ -32,7 +32,7 @@ func (t *TDigest) CreateWithCompression(ctx context.Context, key string, compres
 
 func (t *TDigest) Create(ctx context.Context, key string) (string, error) {
 	status, err := t.Client.TDigestCreate(ctx, key).Result()
-	if TDigestKeyAlreadyExistsError(err) {
+	if KeyAlreadyExistsError(err) {
 		return "OK", nil
 	}
 
@@ -45,7 +45,7 @@ func (t *TDigest) Add(ctx context.Context, key string, values ...float64) (strin
 		return status, nil
 	}
 
-	if create := TDigestKeyDoesNotExistsError(err); !create {
+	if create := KeyDoesNotExistError(err); !create {
 		return "", err
 	}
 
@@ -98,12 +98,4 @@ func (t *TDigest) ByRevRank(ctx context.Context, key string, values ...uint64) (
 
 func (t *TDigest) TrimmedMean(ctx context.Context, key string, lo, hi float64) (float64, error) {
 	return t.Client.TDigestTrimmedMean(ctx, key, lo, hi).Result()
-}
-
-func TDigestKeyAlreadyExistsError(err error) bool {
-	return redis.HasErrorPrefix(err, "T-Digest: key already exists")
-}
-
-func TDigestKeyDoesNotExistsError(err error) bool {
-	return redis.HasErrorPrefix(err, "T-Digest: key does not exist")
 }

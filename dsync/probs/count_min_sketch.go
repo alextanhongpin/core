@@ -33,7 +33,7 @@ func (cms *CountMinSketch) InitByProb(ctx context.Context, key string, errorRate
 	// error rate of 0.1%, errorRate = 0.001
 	// probability of 99.8%, error probability of 0.02%, errorProbability = 0.002
 	status, err := cms.Client.CMSInitByProb(ctx, key, errorRate, errorProbability).Result()
-	if CountMinSketchKeyAlreadyExistsError(err) {
+	if KeyAlreadyExistsError(err) {
 		return "OK", nil
 	}
 
@@ -42,7 +42,7 @@ func (cms *CountMinSketch) InitByProb(ctx context.Context, key string, errorRate
 
 func (cms *CountMinSketch) InitByDim(ctx context.Context, key string, width, depth int64) (string, error) {
 	status, err := cms.Client.CMSInitByDim(ctx, key, width, depth).Result()
-	if CountMinSketchKeyAlreadyExistsError(err) {
+	if KeyAlreadyExistsError(err) {
 		return "OK", nil
 	}
 
@@ -103,7 +103,7 @@ func (cms *CountMinSketch) Query(ctx context.Context, key string, values ...any)
 }
 
 func (cms *CountMinSketch) create(ctx context.Context, key string, err error) error {
-	if create := CountMinSketchKeyDoesNotExistError(err); !create {
+	if create := KeyDoesNotExistError(err); !create {
 		return err
 	}
 
@@ -120,12 +120,4 @@ func (cms *CountMinSketch) create(ctx context.Context, key string, err error) er
 	}
 
 	return nil
-}
-
-func CountMinSketchKeyAlreadyExistsError(err error) bool {
-	return redis.HasErrorPrefix(err, "CMS: key already exists")
-}
-
-func CountMinSketchKeyDoesNotExistError(err error) bool {
-	return redis.HasErrorPrefix(err, "CMS: key does not exist")
 }

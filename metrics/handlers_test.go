@@ -25,10 +25,10 @@ func TestTracker(t *testing.T) {
 	is := assert.New(t)
 	for range 100 {
 		userID := strconv.Itoa(rand.IntN(10))
-		is.Nil(tracker.Record(ctx, "GET /foo", userID, time.Now().Add(-time.Duration(rand.Int64N(10_000))*time.Millisecond)))
-		is.Nil(tracker.Record(ctx, "GET /bar", userID, time.Now().Add(-time.Duration(rand.Int64N(5_000))*time.Millisecond)))
+		is.Nil(tracker.Record(ctx, "GET /foo", userID, -time.Duration(rand.Int64N(10_000))*time.Millisecond, "now"))
+		is.Nil(tracker.Record(ctx, "GET /bar", userID, -time.Duration(rand.Int64N(5_000))*time.Millisecond, "now"))
 	}
-	stats, err := tracker.Stats(ctx, time.Now())
+	stats, err := tracker.Stats(ctx, "now")
 	is.Nil(err)
 	for _, s := range stats {
 		t.Log(s.String())
