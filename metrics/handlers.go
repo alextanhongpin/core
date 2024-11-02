@@ -1,7 +1,6 @@
 package metrics
 
 import (
-	"cmp"
 	"context"
 	"errors"
 	"expvar"
@@ -29,26 +28,27 @@ func CounterHandler(h http.Handler) http.Handler {
 		wr := httputil.NewResponseWriterRecorder(w)
 		h.ServeHTTP(wr, r)
 
-		path := fmt.Sprintf("%s - %d", cmp.Or(r.Pattern, r.URL.Path), wr.StatusCode())
+		path := fmt.Sprintf("%s - %d", r.Pattern, wr.StatusCode())
 		RequestsTotal.Add("ALL", 1)
 		RequestsTotal.Add(path, 1)
 		StatusTotal.Add(fmt.Sprint(wr.StatusCode()), 1)
 	})
 }
 
-func TrackerHandler(h http.Handler, tracker *Tracker, userFn func(r *http.Request) string, timeFn func(time.Time) string) http.Handler {
+func TrackerHandler(h http.Handler, keyFn func() []string, tracker *Tracker, userFn func(r *http.Request) string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		wr := httputil.NewResponseWriterRecorder(w)
 		h.ServeHTTP(wr, r)
 
-		path := fmt.Sprintf("%s - %d", cmp.Or(r.Pattern, r.URL.Path), wr.StatusCode())
-		tracker.Record(r.Context(), path, userFn(r), time.Since(start), timeFn(start))
+		path := fmt.Sprintf("%s - %d", r.Pattern, wr.StatusCode())
+		for _, key := range keyFn() {
+			tracker.Record(r.Context(), key, path, userFn(r), time.Since(start))
+		}
 	})
 }
 
 type Tracker struct {
-	name string
 	// t-digest add (path) - measure api latency
 	td *probs.TDigest
 	// cms add(path, count) - track total api calls
@@ -59,9 +59,8 @@ type Tracker struct {
 	topK *probs.TopK
 }
 
-func NewTracker(name string, client *redis.Client) *Tracker {
+func NewTracker(client *redis.Client) *Tracker {
 	return &Tracker{
-		name: name,
 		// Track frequency of API calls.
 		cms: probs.NewCountMinSketch(client),
 
@@ -76,34 +75,34 @@ func NewTracker(name string, client *redis.Client) *Tracker {
 	}
 }
 
-func (t *Tracker) Record(ctx context.Context, path, userID string, duration time.Duration, when string) error {
+func (t *Tracker) Record(ctx context.Context, key, path, userID string, duration time.Duration) error {
 	return errors.Join(
-		t.countUnique(ctx, join(t.name, "hll", path, when), userID),
-		t.countOccurences(ctx, join(t.name, "cms", when), path),
-		t.rank(ctx, join(t.name, "top_k", when), path),
-		t.recordLatency(ctx, join(t.name, "td", path, when), duration),
+		t.countUnique(ctx, join(key, "cms", path), userID),
+		t.countOccurences(ctx, join(key, "hll"), path),
+		t.rank(ctx, join(key, "top_k"), path),
+		t.recordLatency(ctx, join(key, "td", path), duration),
 	)
 }
 
-func (t *Tracker) Stats(ctx context.Context, when string) ([]Stats, error) {
-	paths, err := t.rankings(ctx, join(t.name, "top_k", when))
+func (t *Tracker) Stats(ctx context.Context, key string) ([]Stats, error) {
+	paths, err := t.rankings(ctx, join(key, "top_k"))
 	if err != nil {
 		return nil, err
 	}
 
 	stats := make([]Stats, len(paths))
 	for i, path := range paths {
-		unique, err := t.totalUnique(ctx, join(t.name, "hll", path, when))
+		unique, err := t.totalUnique(ctx, join(key, "cms", path))
 		if err != nil {
 			return nil, err
 		}
 
-		vals, err := t.latency(ctx, join(t.name, "td", path, when))
+		vals, err := t.latency(ctx, join(key, "td", path))
 		if err != nil {
 			return nil, err
 		}
 
-		total, err := t.totalOccurences(ctx, join(t.name, "cms", when), path)
+		total, err := t.totalOccurences(ctx, join(key, "hll"), path)
 		if err != nil {
 			return nil, err
 		}
