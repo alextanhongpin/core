@@ -184,10 +184,13 @@ type Stats struct {
 func (s *Stats) String() string {
 	return fmt.Sprintf(`%s
 unique/total: %d/%d
-p50/p90/p95 (in seconds): %f, %f, %f`,
+p50/p90/p95 (in seconds): %v, %s, %s`,
 		s.Path,
-		s.Unique, s.Total,
-		s.P50, s.P90, s.P95,
+		s.Unique,
+		s.Total,
+		seconds(s.P50),
+		seconds(s.P90),
+		seconds(s.P95),
 	)
 }
 
@@ -199,4 +202,8 @@ func (p Prefix) Format(args ...any) string {
 
 func join(s ...string) string {
 	return strings.Join(s, ":")
+}
+
+func seconds(f float64) time.Duration {
+	return time.Duration(f * float64(time.Second))
 }
