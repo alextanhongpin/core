@@ -77,8 +77,8 @@ func NewTracker(client *redis.Client) *Tracker {
 
 func (t *Tracker) Record(ctx context.Context, key, path, userID string, duration time.Duration) error {
 	return errors.Join(
-		t.countUnique(ctx, join(key, "hll", path), userID),
 		t.countOccurences(ctx, join(key, "cms"), path),
+		t.countUnique(ctx, join(key, "hll", path), userID),
 		t.rank(ctx, join(key, "top_k"), path),
 		t.recordLatency(ctx, join(key, "td", path), duration),
 	)
@@ -92,6 +92,11 @@ func (t *Tracker) Stats(ctx context.Context, key string) ([]Stats, error) {
 
 	stats := make([]Stats, len(paths))
 	for i, path := range paths {
+		occurences, err := t.totalOccurences(ctx, join(key, "cms"), path)
+		if err != nil {
+			return nil, err
+		}
+
 		unique, err := t.totalUnique(ctx, join(key, "hll", path))
 		if err != nil {
 			return nil, err
@@ -102,17 +107,12 @@ func (t *Tracker) Stats(ctx context.Context, key string) ([]Stats, error) {
 			return nil, err
 		}
 
-		total, err := t.totalOccurences(ctx, join(key, "cms"), path)
-		if err != nil {
-			return nil, err
-		}
-
 		stats[i] = Stats{
 			Path:   path,
 			P50:    vals[0],
 			P90:    vals[1],
 			P95:    vals[2],
-			Total:  total,
+			Total:  occurences,
 			Unique: unique,
 		}
 	}
