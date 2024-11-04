@@ -48,6 +48,31 @@ func TrackerHandler(h http.Handler, keyFn func() []string, tracker *Tracker, use
 	})
 }
 
+func TrackerStatsHandler(keyFn func() []string, tracker *Tracker, userFn func(r *http.Request) string) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var sb strings.Builder
+		ctx := r.Context()
+		for _, key := range keyFn() {
+			stats, err := tracker.Stats(ctx, key)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+
+				return
+			}
+			for _, stat := range stats {
+				_, err = sb.WriteString(fmt.Sprintf("key: %s\n%s\n\n", key, stat.String()))
+				if err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+
+					return
+				}
+			}
+		}
+
+		fmt.Fprint(w, sb.String())
+	})
+}
+
 type Tracker struct {
 	// t-digest add (path) - measure api latency
 	td *probs.TDigest

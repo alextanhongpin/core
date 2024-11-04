@@ -3,6 +3,7 @@ package metrics_test
 import (
 	"context"
 	"fmt"
+	"io"
 	"math/rand/v2"
 	"net/http"
 	"net/http/httptest"
@@ -50,13 +51,15 @@ func TestTrackerHandler(t *testing.T) {
 	month := now.Format("2006-01")
 	date := now.Format("2006-01-02")
 	keys := []string{year, month, date}
+	keyFn := func() []string {
+		return keys
+	}
+	userFn := func(r *http.Request) string {
+		return "user-id"
+	}
 
 	tracker := metrics.NewTracker(redistest.Client(t))
-	h = metrics.TrackerHandler(h, func() []string {
-		return keys
-	}, tracker, func(r *http.Request) string {
-		return "user-id"
-	})
+	h = metrics.TrackerHandler(h, keyFn, tracker, userFn)
 	mux := http.NewServeMux()
 	mux.Handle("GET /", h)
 	srv := httptest.NewServer(mux)
@@ -69,14 +72,16 @@ func TestTrackerHandler(t *testing.T) {
 		is.Nil(err)
 	}
 
-	ctx := context.Background()
-	for _, key := range keys {
-		stats, err := tracker.Stats(ctx, key)
+	{
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+		h := metrics.TrackerStatsHandler(keyFn, tracker, userFn)
+		h.ServeHTTP(w, r)
+		res := w.Result()
+		is.Equal(200, res.StatusCode)
+		b, err := io.ReadAll(res.Body)
 		is.Nil(err)
-		for _, s := range stats {
-			t.Log(s.String())
-			t.Log()
-		}
+		t.Log(string(b))
 	}
 }
 
