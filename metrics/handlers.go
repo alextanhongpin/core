@@ -74,28 +74,17 @@ func TrackerStatsHandler(keyFn func() []string, tracker *Tracker, userFn func(r 
 }
 
 type Tracker struct {
-	// t-digest add (path) - measure api latency
-	td *probs.TDigest
-	// cms add(path, count) - track total api calls
-	cms *probs.CountMinSketch
-	// hyperloglog.add(path, user) - measure unique api calls
-	hll *probs.HyperLogLog
-	// top-k add (path) - find top api calls
-	topK *probs.TopK
+	cms  *probs.CountMinSketch // Track frequency of API calls.
+	hll  *probs.HyperLogLog    // Track unique page views by user.
+	td   *probs.TDigest        // Track API latency.
+	topK *probs.TopK           // Track top-10 requests.
 }
 
 func NewTracker(client *redis.Client) *Tracker {
 	return &Tracker{
-		// Track frequency of API calls.
-		cms: probs.NewCountMinSketch(client),
-
-		// Track unique page views by user
-		hll: probs.NewHyperLogLog(client),
-
-		// Track API latency
-		td: probs.NewTDigest(client),
-
-		// Track top-10 requests.
+		cms:  probs.NewCountMinSketch(client),
+		hll:  probs.NewHyperLogLog(client),
+		td:   probs.NewTDigest(client),
 		topK: probs.NewTopK(client),
 	}
 }
