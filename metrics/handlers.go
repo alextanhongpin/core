@@ -44,8 +44,9 @@ func TrackerHandler(h http.Handler, tracker *Tracker, keyFn func() []string, use
 
 		path := fmt.Sprintf("%s - %d", r.Pattern, wr.StatusCode())
 		user := userFn(r)
+		took := time.Since(start)
 		for _, key := range keyFn() {
-			err := tracker.Record(r.Context(), key, path, user, time.Since(start))
+			err := tracker.Record(r.Context(), key, path, user, took)
 			if err != nil {
 				logger.Error(err.Error())
 			}
