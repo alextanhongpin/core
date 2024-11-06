@@ -5,6 +5,7 @@ import (
 	"errors"
 	"expvar"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -35,20 +36,24 @@ func CounterHandler(h http.Handler) http.Handler {
 	})
 }
 
-func TrackerHandler(h http.Handler, keyFn func() []string, tracker *Tracker, userFn func(r *http.Request) string) http.Handler {
+func TrackerHandler(h http.Handler, tracker *Tracker, keyFn func() []string, userFn func(r *http.Request) string, logger *slog.Logger) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		wr := httputil.NewResponseWriterRecorder(w)
 		h.ServeHTTP(wr, r)
 
 		path := fmt.Sprintf("%s - %d", r.Pattern, wr.StatusCode())
+		user := userFn(r)
 		for _, key := range keyFn() {
-			tracker.Record(r.Context(), key, path, userFn(r), time.Since(start))
+			err := tracker.Record(r.Context(), key, path, user, time.Since(start))
+			if err != nil {
+				logger.Error(err.Error())
+			}
 		}
 	})
 }
 
-func TrackerStatsHandler(keyFn func() []string, tracker *Tracker, userFn func(r *http.Request) string) http.Handler {
+func TrackerStatsHandler(tracker *Tracker, keyFn func() []string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var sb strings.Builder
 		ctx := r.Context()

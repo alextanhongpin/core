@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"math/rand/v2"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strconv"
 	"testing"
 	"time"
@@ -47,10 +49,11 @@ func TestTrackerHandler(t *testing.T) {
 	})
 
 	now := time.Now()
-	year := now.Format("2006")
-	month := now.Format("2006-01")
-	date := now.Format("2006-01-02")
-	keys := []string{year, month, date}
+	keys := []string{
+		now.Format("2006"),
+		now.Format("2006-01"),
+		now.Format("2006-01-02"),
+	}
 	keyFn := func() []string {
 		return keys
 	}
@@ -59,7 +62,8 @@ func TestTrackerHandler(t *testing.T) {
 	}
 
 	tracker := metrics.NewTracker(redistest.Client(t))
-	h = metrics.TrackerHandler(h, keyFn, tracker, userFn)
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	h = metrics.TrackerHandler(h, tracker, keyFn, userFn, logger)
 	mux := http.NewServeMux()
 	mux.Handle("GET /", h)
 	srv := httptest.NewServer(mux)
@@ -75,7 +79,7 @@ func TestTrackerHandler(t *testing.T) {
 	{
 		w := httptest.NewRecorder()
 		r := httptest.NewRequest(http.MethodGet, "/", nil)
-		h := metrics.TrackerStatsHandler(keyFn, tracker, userFn)
+		h := metrics.TrackerStatsHandler(tracker, keyFn)
 		h.ServeHTTP(w, r)
 		res := w.Result()
 		is.Equal(200, res.StatusCode)
