@@ -182,15 +182,6 @@ func (t *Tracker) rankings(ctx context.Context, key string) ([]string, error) {
 	return t.topK.List(ctx, key)
 }
 
-func (t *Tracker) hdmy(at time.Time) (h, d, m, y string) {
-	h = at.Format("2006-01-02T15")
-	d = at.Format("2006-01-02")
-	m = at.Format("2006-01")
-	y = at.Format("2006")
-
-	return
-}
-
 type Stats struct {
 	Path   string
 	P50    float64
