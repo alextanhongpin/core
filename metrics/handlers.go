@@ -36,7 +36,7 @@ func CounterHandler(h http.Handler) http.Handler {
 	})
 }
 
-func TrackerHandler(h http.Handler, tracker *Tracker, keyFn func() []string, userFn func(r *http.Request) string, logger *slog.Logger) http.Handler {
+func TrackerHandler(h http.Handler, tracker *Tracker, userFn func(r *http.Request) string, logger *slog.Logger) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		wr := httputil.NewResponseWriterRecorder(w)
@@ -45,33 +45,40 @@ func TrackerHandler(h http.Handler, tracker *Tracker, keyFn func() []string, use
 		path := fmt.Sprintf("%s - %d", r.Pattern, wr.StatusCode())
 		user := userFn(r)
 		took := time.Since(start)
-		for _, key := range keyFn() {
-			err := tracker.Record(r.Context(), key, path, user, took)
-			if err != nil {
-				logger.Error(err.Error())
-			}
+		err := tracker.Record(r.Context(), path, user, took)
+		if err != nil {
+			logger.Error(err.Error())
 		}
 	})
 }
 
-func TrackerStatsHandler(tracker *Tracker, keyFn func() []string) http.Handler {
+func TrackerStatsHandler(tracker *Tracker) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		now := time.Now()
+		if at := r.URL.Query().Get("at"); at != "" {
+			t, err := time.Parse(time.DateOnly, at)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+
+				return
+			}
+			now = t
+		}
+
 		var sb strings.Builder
 		ctx := r.Context()
-		for _, key := range keyFn() {
-			stats, err := tracker.Stats(ctx, key)
+		stats, err := tracker.Stats(ctx, now)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+
+			return
+		}
+		for _, stat := range stats {
+			_, err = sb.WriteString(fmt.Sprintf("at: %s\n%s\n\n", now, stat.String()))
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 
 				return
-			}
-			for _, stat := range stats {
-				_, err = sb.WriteString(fmt.Sprintf("key: %s\n%s\n\n", key, stat.String()))
-				if err != nil {
-					http.Error(w, err.Error(), http.StatusInternalServerError)
-
-					return
-				}
 			}
 		}
 
@@ -80,14 +87,18 @@ func TrackerStatsHandler(tracker *Tracker, keyFn func() []string) http.Handler {
 }
 
 type Tracker struct {
+	Name string
+	Now  func() time.Time
 	cms  *probs.CountMinSketch // Track frequency of API calls.
 	hll  *probs.HyperLogLog    // Track unique page views by user.
 	td   *probs.TDigest        // Track API latency.
 	topK *probs.TopK           // Track top-10 requests.
 }
 
-func NewTracker(client *redis.Client) *Tracker {
+func NewTracker(name string, client *redis.Client) *Tracker {
 	return &Tracker{
+		Name: name,
+		Now:  time.Now,
 		cms:  probs.NewCountMinSketch(client),
 		hll:  probs.NewHyperLogLog(client),
 		td:   probs.NewTDigest(client),
@@ -95,16 +106,22 @@ func NewTracker(client *redis.Client) *Tracker {
 	}
 }
 
-func (t *Tracker) Record(ctx context.Context, key, path, userID string, duration time.Duration) error {
+func (t *Tracker) Record(ctx context.Context, path, userID string, duration time.Duration) error {
+	day := t.Now().Format(time.DateOnly)
+	key := t.Name
+
 	return errors.Join(
-		t.countOccurences(ctx, join(key, "cms"), path),
-		t.countUnique(ctx, join(key, "hll", path), userID),
+		// We calculate the all-time rank.
 		t.rank(ctx, join(key, "top_k"), path),
-		t.recordLatency(ctx, join(key, "td", path), duration),
+		t.countOccurences(ctx, join(key, "cms", day), path),
+		t.countUnique(ctx, join(key, "hll", day, path), userID),
+		t.recordLatency(ctx, join(key, "td", day, path), duration),
 	)
 }
 
-func (t *Tracker) Stats(ctx context.Context, key string) ([]Stats, error) {
+func (t *Tracker) Stats(ctx context.Context, at time.Time) ([]Stats, error) {
+	key := t.Name
+	day := at.Format(time.DateOnly)
 	paths, err := t.rankings(ctx, join(key, "top_k"))
 	if err != nil {
 		return nil, err
@@ -112,17 +129,17 @@ func (t *Tracker) Stats(ctx context.Context, key string) ([]Stats, error) {
 
 	stats := make([]Stats, len(paths))
 	for i, path := range paths {
-		occurences, err := t.totalOccurences(ctx, join(key, "cms"), path)
+		occurences, err := t.totalOccurences(ctx, join(key, "cms", day), path)
 		if err != nil {
 			return nil, err
 		}
 
-		unique, err := t.totalUnique(ctx, join(key, "hll", path))
+		unique, err := t.totalUnique(ctx, join(key, "hll", day, path))
 		if err != nil {
 			return nil, err
 		}
 
-		vals, err := t.latency(ctx, join(key, "td", path))
+		vals, err := t.latency(ctx, join(key, "td", day, path))
 		if err != nil {
 			return nil, err
 		}
@@ -150,7 +167,7 @@ func (t *Tracker) latency(ctx context.Context, path string) ([]float64, error) {
 }
 
 func (t *Tracker) countOccurences(ctx context.Context, key, path string) error {
-	_, err := t.cms.IncrBy(ctx, key, map[string]int64{
+	_, _, err := t.cms.IncrBy(ctx, key, map[string]int64{
 		path: 1,
 	})
 	return err

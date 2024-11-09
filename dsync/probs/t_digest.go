@@ -21,22 +21,22 @@ func NewTDigest(client *redis.Client) *TDigest {
 }
 
 // Create needs to be called.
-func (t *TDigest) CreateWithCompression(ctx context.Context, key string, compression int64) (string, error) {
-	status, err := t.Client.TDigestCreateWithCompression(ctx, key, compression).Result()
+func (t *TDigest) CreateWithCompression(ctx context.Context, key string, compression int64) (status string, exists bool, err error) {
+	status, err = t.Client.TDigestCreateWithCompression(ctx, key, compression).Result()
 	if KeyAlreadyExistsError(err) {
-		return "OK", nil
+		return OK, true, nil
 	}
 
-	return status, err
+	return status, false, err
 }
 
-func (t *TDigest) Create(ctx context.Context, key string) (string, error) {
-	status, err := t.Client.TDigestCreate(ctx, key).Result()
+func (t *TDigest) Create(ctx context.Context, key string) (status string, exists bool, err error) {
+	status, err = t.Client.TDigestCreate(ctx, key).Result()
 	if KeyAlreadyExistsError(err) {
-		return "OK", nil
+		return OK, true, nil
 	}
 
-	return status, err
+	return status, false, err
 }
 
 func (t *TDigest) Add(ctx context.Context, key string, values ...float64) (string, error) {
@@ -49,19 +49,15 @@ func (t *TDigest) Add(ctx context.Context, key string, values ...float64) (strin
 		return "", err
 	}
 
-	_, err, shared := t.group.Do(key, func() (any, error) {
-		return t.Create(ctx, key)
+	_, err, _ = t.group.Do(key, func() (any, error) {
+		_, _, err := t.Create(ctx, key)
+		return nil, err
 	})
 	if err != nil {
 		return "", err
 	}
 
-	if !shared {
-		// Clear key after created.
-		t.group.Forget(key)
-	}
-
-	return t.Client.TDigestAdd(ctx, key, values...).Result()
+	return t.Add(ctx, key, values...)
 }
 
 func (t *TDigest) CDF(ctx context.Context, key string, values ...float64) ([]float64, error) {

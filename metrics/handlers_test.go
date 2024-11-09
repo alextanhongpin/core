@@ -26,16 +26,16 @@ func TestMain(m *testing.M) {
 }
 
 func TestTracker(t *testing.T) {
-	tracker := metrics.NewTracker(redistest.Client(t))
+	tracker := metrics.NewTracker(t.Name(), redistest.Client(t))
 	ctx := context.Background()
 
 	is := assert.New(t)
 	for range 100 {
 		userID := strconv.Itoa(rand.IntN(10))
-		is.Nil(tracker.Record(ctx, t.Name(), "GET /foo", userID, randDuration(10*time.Second)))
-		is.Nil(tracker.Record(ctx, t.Name(), "GET /bar", userID, randDuration(5*time.Second)))
+		is.Nil(tracker.Record(ctx, "GET /foo", userID, randDuration(10*time.Second)))
+		is.Nil(tracker.Record(ctx, "GET /bar", userID, randDuration(5*time.Second)))
 	}
-	stats, err := tracker.Stats(ctx, t.Name())
+	stats, err := tracker.Stats(ctx, time.Now())
 	is.Nil(err)
 	for _, s := range stats {
 		t.Log(s.String())
@@ -48,22 +48,13 @@ func TestTrackerHandler(t *testing.T) {
 		fmt.Fprint(w, "hello world")
 	})
 
-	now := time.Now()
-	keys := []string{
-		now.Format("2006"),
-		now.Format("2006-01"),
-		now.Format("2006-01-02"),
-	}
-	keyFn := func() []string {
-		return keys
-	}
 	userFn := func(r *http.Request) string {
 		return "user-id"
 	}
 
-	tracker := metrics.NewTracker(redistest.Client(t))
+	tracker := metrics.NewTracker(t.Name(), redistest.Client(t))
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-	h = metrics.TrackerHandler(h, tracker, keyFn, userFn, logger)
+	h = metrics.TrackerHandler(h, tracker, userFn, logger)
 	mux := http.NewServeMux()
 	mux.Handle("GET /", h)
 	srv := httptest.NewServer(mux)
@@ -79,7 +70,7 @@ func TestTrackerHandler(t *testing.T) {
 	{
 		w := httptest.NewRecorder()
 		r := httptest.NewRequest(http.MethodGet, "/", nil)
-		h := metrics.TrackerStatsHandler(tracker, keyFn)
+		h := metrics.TrackerStatsHandler(tracker)
 		h.ServeHTTP(w, r)
 		res := w.Result()
 		is.Equal(200, res.StatusCode)

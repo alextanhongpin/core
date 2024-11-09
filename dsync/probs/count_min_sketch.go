@@ -21,35 +21,35 @@ func NewCountMinSketch(client *redis.Client) *CountMinSketch {
 	}
 }
 
-func (cms *CountMinSketch) Init(ctx context.Context, key string) (string, error) {
+func (cms *CountMinSketch) Init(ctx context.Context, key string) (status string, exists bool, err error) {
 	errorRate := 0.001
 	errorProb := 0.002
 	return cms.InitByProb(ctx, key, errorRate, errorProb)
 }
 
 // needs to be created?
-func (cms *CountMinSketch) InitByProb(ctx context.Context, key string, errorRate, errorProbability float64) (string, error) {
+func (cms *CountMinSketch) InitByProb(ctx context.Context, key string, errorRate, errorProbability float64) (status string, exists bool, err error) {
 	// E.g.
 	// error rate of 0.1%, errorRate = 0.001
 	// probability of 99.8%, error probability of 0.02%, errorProbability = 0.002
-	status, err := cms.Client.CMSInitByProb(ctx, key, errorRate, errorProbability).Result()
+	status, err = cms.Client.CMSInitByProb(ctx, key, errorRate, errorProbability).Result()
 	if KeyAlreadyExistsError(err) {
-		return "OK", nil
+		return OK, true, nil
 	}
 
-	return status, err
+	return status, false, err
 }
 
-func (cms *CountMinSketch) InitByDim(ctx context.Context, key string, width, depth int64) (string, error) {
-	status, err := cms.Client.CMSInitByDim(ctx, key, width, depth).Result()
+func (cms *CountMinSketch) InitByDim(ctx context.Context, key string, width, depth int64) (status string, exists bool, err error) {
+	status, err = cms.Client.CMSInitByDim(ctx, key, width, depth).Result()
 	if KeyAlreadyExistsError(err) {
-		return "OK", nil
+		return OK, true, nil
 	}
 
-	return status, err
+	return status, false, err
 }
 
-func (cms *CountMinSketch) IncrBy(ctx context.Context, key string, kvs map[string]int64) ([]int64, error) {
+func (cms *CountMinSketch) IncrBy(ctx context.Context, key string, kvs map[string]int64) ([]int64, bool, error) {
 	keys := make([]string, 0, len(kvs))
 	for k := range kvs {
 		keys = append(keys, k)
@@ -64,14 +64,16 @@ func (cms *CountMinSketch) IncrBy(ctx context.Context, key string, kvs map[strin
 
 	counts, err := cms.Client.CMSIncrBy(ctx, key, args...).Result()
 	if err == nil {
-		return counts, nil
+		return counts, false, nil
 	}
 
-	if err := cms.create(ctx, key, err); err != nil {
-		return nil, err
+	created, err := cms.create(ctx, key, err)
+	if err != nil {
+		return nil, false, err
 	}
 
-	return cms.Client.CMSIncrBy(ctx, key, args...).Result()
+	counts, err = cms.Client.CMSIncrBy(ctx, key, args...).Result()
+	return counts, created, err
 }
 
 func (cms *CountMinSketch) Merge(ctx context.Context, destKey string, sourceKeys ...string) (string, error) {
@@ -79,11 +81,12 @@ func (cms *CountMinSketch) Merge(ctx context.Context, destKey string, sourceKeys
 	if err == nil {
 		return status, nil
 	}
-	if err := cms.create(ctx, destKey, err); err != nil {
+
+	if _, err := cms.create(ctx, destKey, err); err != nil {
 		return "", err
 	}
 
-	return cms.Client.CMSMerge(ctx, destKey, sourceKeys...).Result()
+	return cms.Merge(ctx, destKey, sourceKeys...)
 }
 
 func (cms *CountMinSketch) MergeWithWeight(ctx context.Context, destKey string, sourceKeys map[string]int64) (string, error) {
@@ -91,33 +94,31 @@ func (cms *CountMinSketch) MergeWithWeight(ctx context.Context, destKey string, 
 	if err == nil {
 		return status, nil
 	}
-	if err := cms.create(ctx, destKey, err); err != nil {
+	if _, err := cms.create(ctx, destKey, err); err != nil {
 		return "", err
 	}
 
-	return cms.Client.CMSMergeWithWeight(ctx, destKey, sourceKeys).Result()
+	return cms.MergeWithWeight(ctx, destKey, sourceKeys)
 }
 
 func (cms *CountMinSketch) Query(ctx context.Context, key string, values ...any) ([]int64, error) {
 	return cms.Client.CMSQuery(ctx, key, values...).Result()
 }
 
-func (cms *CountMinSketch) create(ctx context.Context, key string, err error) error {
+func (cms *CountMinSketch) create(ctx context.Context, key string, err error) (bool, error) {
 	if create := KeyDoesNotExistError(err); !create {
-		return err
+		return false, err
 	}
 
-	_, err, shared := cms.group.Do(key, func() (any, error) {
-		return cms.Init(ctx, key)
+	resp, err, _ := cms.group.Do(key, func() (any, error) {
+		_, exists, err := cms.Init(ctx, key)
+		return exists, err
 	})
 	if err != nil {
-		return err
+		return false, err
 	}
+	exists, ok := resp.(bool)
+	created := ok && !exists
 
-	if !shared {
-		// Clear key after created.
-		cms.group.Forget(key)
-	}
-
-	return nil
+	return created, nil
 }

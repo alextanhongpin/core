@@ -91,15 +91,15 @@ func (t *TopK) Create(ctx context.Context, key string, k int64) (string, error) 
 	depth := int64(max(logK, 5))
 	decay := 0.9
 	status, err := t.Client.TopKReserveWithOptions(ctx, key, k, width, depth, decay).Result()
-	if TopKKeyAlreadyExistsError(err) {
-		return "OK", nil
+	if KeyAlreadyExistsError(err) {
+		return OK, nil
 	}
 
 	return status, err
 }
 
 func (t *TopK) create(ctx context.Context, key string, err error) error {
-	if create := TopKKeyDoesNotExistError(err); !create {
+	if create := KeyDoesNotExistError(err); !create {
 		return err
 	}
 
@@ -116,12 +116,4 @@ func (t *TopK) create(ctx context.Context, key string, err error) error {
 	}
 
 	return nil
-}
-
-func TopKKeyAlreadyExistsError(err error) bool {
-	return redis.HasErrorPrefix(err, "TopK: key already exists")
-}
-
-func TopKKeyDoesNotExistError(err error) bool {
-	return redis.HasErrorPrefix(err, "TopK: key does not exist")
 }

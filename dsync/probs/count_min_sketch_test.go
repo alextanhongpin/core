@@ -14,23 +14,34 @@ func TestCountMinSketch(t *testing.T) {
 		key := t.Name()
 
 		cms := probs.NewCountMinSketch(redistest.Client(t))
-		_, err := cms.Init(ctx, key)
+		_, exists, err := cms.Init(ctx, key)
 		is := assert.New(t)
 		is.Nil(err)
+		is.False(exists)
 
-		_, err = cms.Init(ctx, key)
+		_, exists, err = cms.Init(ctx, key)
 		is.Nil(err)
+		is.True(exists)
 	})
 
 	t.Run("incr by", func(t *testing.T) {
 		cms := probs.NewCountMinSketch(redistest.Client(t))
-		counts, err := cms.IncrBy(ctx, t.Name(), map[string]int64{
+		counts, created, err := cms.IncrBy(ctx, t.Name(), map[string]int64{
 			"bar": 2,
 			"foo": 1,
 		})
 		is := assert.New(t)
 		is.Nil(err)
+		is.True(created)
 		is.Equal([]int64{2, 1}, counts)
+
+		counts, created, err = cms.IncrBy(ctx, t.Name(), map[string]int64{
+			"bar": 2,
+			"foo": 1,
+		})
+		is.Nil(err)
+		is.False(created)
+		is.Equal([]int64{4, 2}, counts)
 	})
 	t.Run("merge", func(t *testing.T) {
 		cms := probs.NewCountMinSketch(redistest.Client(t))
@@ -38,18 +49,20 @@ func TestCountMinSketch(t *testing.T) {
 		key2 := t.Name() + ":2"
 		key3 := t.Name() + ":3"
 
-		_, err := cms.IncrBy(ctx, key1, map[string]int64{
+		_, created, err := cms.IncrBy(ctx, key1, map[string]int64{
 			"bar": 2,
 			"foo": 1,
 		})
 		is := assert.New(t)
 		is.Nil(err)
+		is.True(created)
 
-		_, err = cms.IncrBy(ctx, key2, map[string]int64{
+		_, created, err = cms.IncrBy(ctx, key2, map[string]int64{
 			"bar": 1,
 			"foo": 2,
 		})
 		is.Nil(err)
+		is.True(created)
 
 		status, err := cms.Merge(ctx, key3, key2, key1)
 		is.Nil(err)
@@ -66,18 +79,20 @@ func TestCountMinSketch(t *testing.T) {
 		key2 := t.Name() + ":2"
 		key3 := t.Name() + ":3"
 
-		_, err := cms.IncrBy(ctx, key1, map[string]int64{
+		_, created, err := cms.IncrBy(ctx, key1, map[string]int64{
 			"foo": 1,
 			"bar": 2,
 		})
 		is := assert.New(t)
 		is.Nil(err)
+		is.True(created)
 
-		_, err = cms.IncrBy(ctx, key2, map[string]int64{
+		_, created, err = cms.IncrBy(ctx, key2, map[string]int64{
 			"foo": 2,
 			"bar": 1,
 		})
 		is.Nil(err)
+		is.True(created)
 
 		status, err := cms.MergeWithWeight(ctx, key3, map[string]int64{
 			key1: 2,
@@ -93,12 +108,13 @@ func TestCountMinSketch(t *testing.T) {
 
 	t.Run("query", func(t *testing.T) {
 		cms := probs.NewCountMinSketch(redistest.Client(t))
-		_, err := cms.IncrBy(ctx, t.Name(), map[string]int64{
+		_, created, err := cms.IncrBy(ctx, t.Name(), map[string]int64{
 			"foo": 2,
 			"bar": 1,
 		})
 		is := assert.New(t)
 		is.Nil(err)
+		is.True(created)
 
 		counts, err := cms.Query(ctx, t.Name(), "foo", "bar", "baz")
 		is.Nil(err)
