@@ -111,7 +111,7 @@ func RequestDurationHandler(version string, next http.Handler) http.Handler {
 
 			RequestDuration.
 				WithLabelValues(method, path, code, version).
-				Observe(float64(time.Since(start).Milliseconds()))
+				Observe(float64(time.Since(start).Seconds()))
 		}(time.Now())
 
 		next.ServeHTTP(wr, r)
