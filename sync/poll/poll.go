@@ -8,7 +8,6 @@ import (
 	"math"
 	"runtime"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"golang.org/x/sync/errgroup"
@@ -50,8 +49,6 @@ func (p *Poll) Poll(fn func(context.Context) error) func() {
 			return EOQ
 		}
 
-		var failures atomic.Int64
-
 		g, ctx := errgroup.WithContext(ctx)
 		g.SetLimit(maxConcurrency)
 
@@ -59,6 +56,8 @@ func (p *Poll) Poll(fn func(context.Context) error) func() {
 			slog.String("event", "init"),
 			slog.Int("batch_size", batchSize),
 		)
+
+		ce := newConsecutiveError(failureThreshold, 50)
 	loop:
 		for i := range batchSize {
 			select {
@@ -84,40 +83,24 @@ func (p *Poll) Poll(fn func(context.Context) error) func() {
 
 						return EOQ
 					}
-					if err == nil {
-						logger.Info("batch",
-							slog.String("event", "success"),
-							slog.Int("i", i))
 
-						// Decrement for every success after failure.
-						if failures.Load() > 0 {
-							failures.Add(-1)
-						}
-
-						return nil
-					}
-
-					// Increment for every unhandled error.
-					// Consecutive errors will result in termination.
-					failureCount := failures.Add(1)
-					if failureCount > failureThreshold {
-						logger.Info("batch",
-							slog.String("event", "terminate"),
-							slog.Int64("count", failureCount),
-							slog.String("err", err.Error()),
-							slog.Int("i", i))
+					err = ce.Do(func() error {
+						return err
+					})
+					if errors.Is(err, ErrThresholdExceeded) {
 						return err
 					}
-
-					logger.Info("batch",
-						slog.String("event", "error"),
-						slog.String("err", err.Error()),
-						slog.Int("i", i))
 
 					return nil
 				})
 			}
 		}
+
+		logger.Info("batch",
+			slog.String("event", "end"),
+			slog.Int64("success", ce.success),
+			slog.Int64("failures", ce.failure),
+		)
 
 		return g.Wait()
 	}
