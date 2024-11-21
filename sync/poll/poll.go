@@ -3,8 +3,10 @@ package poll
 import (
 	"context"
 	"errors"
+	"io"
 	"log/slog"
 	"math"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -22,23 +24,38 @@ type Poll struct {
 	MaxConcurrency   int
 }
 
-func (p *Poll) Poll(fn func() error) func() {
+func New() *Poll {
+	return &Poll{
+		BatchSize:        1_000,
+		FailureThreshold: 25,
+		Interval:         ExponentialInterval,
+		Logger:           slog.New(slog.NewTextHandler(io.Discard, nil)),
+		MaxConcurrency:   MaxConcurrency(),
+	}
+}
+
+func (p *Poll) Poll(fn func(context.Context) error) func() {
 	var (
 		batchSize        = p.BatchSize
 		done             = make(chan struct{})
 		failureThreshold = p.FailureThreshold
 		idle             = 0
 		interval         = p.Interval
+		logger           = p.Logger
 		maxConcurrency   = p.MaxConcurrency
 	)
 
-	poll := func() error {
+	poll := func(ctx context.Context) error {
+		if errors.Is(fn(ctx), EOQ) {
+			return EOQ
+		}
+
 		var failures atomic.Int64
 
-		g, ctx := errgroup.WithContext(context.Background())
+		g, ctx := errgroup.WithContext(ctx)
 		g.SetLimit(maxConcurrency)
 
-		p.Logger.Info("poll",
+		logger.Info("batch",
 			slog.String("event", "init"),
 			slog.Int("batch_size", batchSize),
 		)
@@ -46,29 +63,29 @@ func (p *Poll) Poll(fn func() error) func() {
 		for i := range batchSize {
 			select {
 			case <-done:
-				p.Logger.Info("poll",
+				logger.Info("batch",
 					slog.String("event", "done"),
 					slog.Int("i", i))
 
 				break loop
 			case <-ctx.Done():
-				p.Logger.Info("poll",
+				logger.Info("batch",
 					slog.String("event", "ctx.done"),
 					slog.Int("i", i))
 
 				break loop
 			default:
 				g.Go(func() error {
-					err := fn()
+					err := fn(ctx)
 					if errors.Is(err, EOQ) {
-						p.Logger.Info("poll",
+						logger.Info("batch",
 							slog.String("event", "eoq"),
 							slog.Int("i", i))
 
 						return EOQ
 					}
 					if err == nil {
-						p.Logger.Info("poll",
+						logger.Info("batch",
 							slog.String("event", "success"),
 							slog.Int("i", i))
 
@@ -84,7 +101,7 @@ func (p *Poll) Poll(fn func() error) func() {
 					// Consecutive errors will result in termination.
 					failureCount := failures.Add(1)
 					if failureCount > failureThreshold {
-						p.Logger.Info("poll",
+						logger.Info("batch",
 							slog.String("event", "terminate"),
 							slog.Int64("count", failureCount),
 							slog.String("err", err.Error()),
@@ -92,7 +109,7 @@ func (p *Poll) Poll(fn func() error) func() {
 						return err
 					}
 
-					p.Logger.Info("poll",
+					logger.Info("batch",
 						slog.String("event", "error"),
 						slog.String("err", err.Error()),
 						slog.Int("i", i))
@@ -112,7 +129,7 @@ func (p *Poll) Poll(fn func() error) func() {
 		defer wg.Done()
 
 		sleep := interval(idle)
-		p.Logger.Info("batch",
+		logger.Info("poll",
 			slog.String("event", "sleep"),
 			slog.Duration("sleep", sleep))
 		for {
@@ -120,18 +137,18 @@ func (p *Poll) Poll(fn func() error) func() {
 			case <-done:
 				return
 			case <-time.After(sleep):
-				if err := poll(); err != nil {
+				if err := poll(context.Background()); err != nil {
 					if errors.Is(err, EOQ) {
 						idle++
 
-						p.Logger.Info("batch",
+						logger.Info("poll",
 							slog.String("event", "idle"),
 							slog.Int("idle", idle))
 
 						continue
 					}
 
-					p.Logger.Info("batch",
+					logger.Info("poll",
 						slog.String("event", "error"),
 						slog.String("err", err.Error()))
 
@@ -139,7 +156,7 @@ func (p *Poll) Poll(fn func() error) func() {
 					return
 				}
 
-				p.Logger.Info("batch",
+				logger.Info("poll",
 					slog.String("event", "success"))
 
 				idle = 0
@@ -153,8 +170,15 @@ func (p *Poll) Poll(fn func() error) func() {
 	})
 }
 
+// ExponentialInterval returns the duration to sleep before the next poll.
+// Idle will be zero if there are items in the queue. Otherwise, it will
+// increment.
 func ExponentialInterval(idle int) time.Duration {
 	idle = min(idle, 6) // Up to 2^6 = 64
 	seconds := math.Pow(2, float64(idle))
 	return time.Duration(seconds) * time.Second
+}
+
+func MaxConcurrency() int {
+	return min(runtime.GOMAXPROCS(0), runtime.NumCPU())
 }
