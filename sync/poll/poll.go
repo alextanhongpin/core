@@ -3,8 +3,6 @@ package poll
 import (
 	"context"
 	"errors"
-	"io"
-	"log/slog"
 	"math"
 	"runtime"
 	"sync"
@@ -13,13 +11,12 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-var EOQ = errors.New("poll: end of queue")
+var EOQ = errors.New("batch: end of queue")
 
 type Poll struct {
 	BatchSize        int
-	FailureThreshold int64
+	FailureThreshold int
 	Interval         func(idle int) time.Duration
-	Logger           *slog.Logger
 	MaxConcurrency   int
 }
 
@@ -28,66 +25,60 @@ func New() *Poll {
 		BatchSize:        1_000,
 		FailureThreshold: 25,
 		Interval:         ExponentialInterval,
-		Logger:           slog.New(slog.NewTextHandler(io.Discard, nil)),
 		MaxConcurrency:   MaxConcurrency(),
 	}
 }
 
-func (p *Poll) Poll(fn func(context.Context) error) func() {
+func (p *Poll) Poll(fn func(context.Context) error) (<-chan Event, func()) {
 	var (
 		batchSize        = p.BatchSize
+		ch               = make(chan Event)
 		done             = make(chan struct{})
 		failureThreshold = p.FailureThreshold
 		idle             = 0
 		interval         = p.Interval
-		logger           = p.Logger
 		maxConcurrency   = p.MaxConcurrency
 	)
 
-	poll := func(ctx context.Context) error {
-		if errors.Is(fn(ctx), EOQ) {
-			return EOQ
+	batch := func(ctx context.Context) (err error) {
+		limiter := NewLimiter(failureThreshold)
+
+		defer func(start time.Time) {
+			ch <- Event{
+				Name: "batch",
+				Data: map[string]any{
+					"success":  limiter.SuccessCount(),
+					"failures": limiter.FailureCount(),
+					"total":    limiter.SuccessCount() + limiter.FailureCount(),
+					"took":     time.Since(start).Seconds(),
+				},
+				Err: err,
+			}
+		}(time.Now())
+
+		err = limiter.Do(func() error {
+			return fn(ctx)
+		})
+		if errors.Is(err, EOQ) || errors.Is(err, ErrLimitExceeded) {
+			return err
 		}
 
 		g, ctx := errgroup.WithContext(ctx)
 		g.SetLimit(maxConcurrency)
 
-		logger.Info("batch",
-			slog.String("event", "init"),
-			slog.Int("batch_size", batchSize),
-		)
-
-		ce := newConsecutiveError(failureThreshold, 50)
 	loop:
-		for i := range batchSize {
+		for range batchSize - 1 {
 			select {
 			case <-done:
-				logger.Info("batch",
-					slog.String("event", "done"),
-					slog.Int("i", i))
-
 				break loop
 			case <-ctx.Done():
-				logger.Info("batch",
-					slog.String("event", "ctx.done"),
-					slog.Int("i", i))
-
 				break loop
 			default:
 				g.Go(func() error {
-					err := fn(ctx)
-					if errors.Is(err, EOQ) {
-						logger.Info("batch",
-							slog.String("event", "eoq"),
-							slog.Int("i", i))
-
-						return EOQ
-					}
-
-					err = ce.Do(func() error {
-						return err
+					err := limiter.Do(func() error {
+						return fn(ctx)
 					})
-					if errors.Is(err, ErrThresholdExceeded) {
+					if errors.Is(err, EOQ) || errors.Is(err, ErrLimitExceeded) {
 						return err
 					}
 
@@ -95,12 +86,6 @@ func (p *Poll) Poll(fn func(context.Context) error) func() {
 				})
 			}
 		}
-
-		logger.Info("batch",
-			slog.String("event", "end"),
-			slog.Int64("success", ce.success),
-			slog.Int64("failures", ce.failure),
-		)
 
 		return g.Wait()
 	}
@@ -112,48 +97,42 @@ func (p *Poll) Poll(fn func(context.Context) error) func() {
 		defer wg.Done()
 
 		sleep := interval(idle)
-		logger.Info("poll",
-			slog.String("event", "sleep"),
-			slog.Duration("sleep", sleep))
+		ch <- Event{
+			Name: "poll",
+			Data: map[string]any{
+				"sleep": sleep.Seconds(),
+				"idle":  idle,
+			},
+		}
+
 		for {
 			select {
 			case <-done:
 				return
 			case <-time.After(sleep):
-				if err := poll(context.Background()); err != nil {
+				if err := batch(context.Background()); err != nil {
 					if errors.Is(err, EOQ) {
 						idle++
-
-						logger.Info("poll",
-							slog.String("event", "idle"),
-							slog.Int("idle", idle))
 
 						continue
 					}
 
-					logger.Info("poll",
-						slog.String("event", "error"),
-						slog.String("err", err.Error()))
-
-					// Terminate.
 					return
 				}
-
-				logger.Info("poll",
-					slog.String("event", "success"))
 
 				idle = 0
 			}
 		}
 	}()
 
-	return sync.OnceFunc(func() {
+	return ch, sync.OnceFunc(func() {
 		close(done)
 		wg.Wait()
+		close(ch)
 	})
 }
 
-// ExponentialInterval returns the duration to sleep before the next poll.
+// ExponentialInterval returns the duration to sleep before the next batch.
 // Idle will be zero if there are items in the queue. Otherwise, it will
 // increment.
 func ExponentialInterval(idle int) time.Duration {
@@ -164,4 +143,10 @@ func ExponentialInterval(idle int) time.Duration {
 
 func MaxConcurrency() int {
 	return min(runtime.GOMAXPROCS(0), runtime.NumCPU())
+}
+
+type Event struct {
+	Name string
+	Data map[string]any
+	Err  error
 }

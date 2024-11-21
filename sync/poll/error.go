@@ -2,60 +2,71 @@ package poll
 
 import (
 	"errors"
-	"fmt"
 	"sync"
 )
 
-var ErrThresholdExceeded = errors.New("poll: threshold exceeded")
+var ErrLimitExceeded = errors.New("poll: limit exceeded")
 
-type consecutiveError struct {
-	mu                        sync.Mutex
-	limit                     int64
-	pending, success, failure int64
-	percentageError           int64
+type Limiter struct {
+	mu           sync.RWMutex
+	limit        int
+	totalCount   float64
+	successCount int
+	failureCount int
 }
 
-func newConsecutiveError(limit, percentageError int64) *consecutiveError {
-	return &consecutiveError{
-		limit:           limit,
-		percentageError: percentageError,
+func NewLimiter(limit int) *Limiter {
+	return &Limiter{
+		limit:      limit,
+		totalCount: float64(limit),
 	}
 }
 
-func (e *consecutiveError) Ok() {
-	e.mu.Lock()
-	e.success++
-	e.mu.Unlock()
+func (l *Limiter) SuccessCount() int {
+	l.mu.RLock()
+	n := l.successCount
+	l.mu.RUnlock()
+	return n
 }
 
-func (e *consecutiveError) Err() {
-	e.mu.Lock()
-	e.failure++
-	e.mu.Unlock()
+func (l *Limiter) FailureCount() int {
+	l.mu.RLock()
+	n := l.failureCount
+	l.mu.RUnlock()
+	return n
 }
 
-func (e *consecutiveError) Allow() bool {
-	e.mu.Lock()
-	e.pending++
-	lhs := e.pending * 100
-	rhs := e.success*100 + e.failure*e.percentageError
-	allow := lhs-rhs < e.limit*100
-	fmt.Println(lhs - rhs)
-	e.mu.Unlock()
-
-	return allow
+func (l *Limiter) Err() {
+	l.mu.Lock()
+	l.totalCount--
+	l.failureCount++
+	l.mu.Unlock()
 }
 
-func (e *consecutiveError) Do(fn func() error) error {
-	if !e.Allow() {
-		return ErrThresholdExceeded
+func (l *Limiter) Ok() {
+	l.mu.Lock()
+	l.totalCount = min(l.totalCount+0.5, float64(l.limit))
+	l.successCount++
+	l.mu.Unlock()
+}
+
+func (l *Limiter) Allow() bool {
+	l.mu.RLock()
+	ok := l.totalCount > 0
+	l.mu.RUnlock()
+	return ok
+}
+
+func (l *Limiter) Do(fn func() error) error {
+	if !l.Allow() {
+		return ErrLimitExceeded
 	}
+
 	if err := fn(); err != nil {
-		e.Err()
-
+		l.Err()
 		return err
 	}
 
-	e.Ok()
+	l.Ok()
 	return nil
 }

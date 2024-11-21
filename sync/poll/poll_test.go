@@ -2,9 +2,8 @@ package poll_test
 
 import (
 	"context"
-	"log/slog"
-	"os"
-	"sync"
+	"errors"
+	"sync/atomic"
 	"testing"
 
 	"github.com/alextanhongpin/core/sync/poll"
@@ -12,14 +11,53 @@ import (
 
 func TestPoll(t *testing.T) {
 	p := poll.New()
-	p.Logger = slog.New(slog.NewTextHandler(os.Stdout, nil))
-	var wg sync.WaitGroup
-	wg.Add(1)
-	stop := p.Poll(func(ctx context.Context) error {
-		defer wg.Done()
+
+	ch, stop := p.Poll(func(ctx context.Context) error {
 		return poll.EOQ
 	})
 
-	wg.Wait()
-	stop()
+	for msg := range ch {
+		t.Logf("%+v\n", msg)
+		if msg.Name == "batch" {
+			stop()
+		}
+	}
+}
+
+func TestFailure(t *testing.T) {
+	p := poll.New()
+	p.FailureThreshold = 3
+
+	ch, stop := p.Poll(func(ctx context.Context) error {
+		return errors.New("bad request")
+	})
+
+	for msg := range ch {
+		t.Logf("%+v\n", msg)
+		if msg.Name == "batch" {
+			stop()
+		}
+	}
+}
+
+func TestChannel(t *testing.T) {
+	p := poll.New()
+	p.BatchSize = 3
+	p.MaxConcurrency = 3
+
+	var count atomic.Int64
+	ch, stop := p.Poll(func(ctx context.Context) error {
+		if count.Add(1) >= 10 {
+			return poll.EOQ
+		}
+
+		return nil
+	})
+
+	for msg := range ch {
+		t.Logf("%+v\n", msg)
+		if errors.Is(msg.Err, poll.EOQ) {
+			stop()
+		}
+	}
 }
