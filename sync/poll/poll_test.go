@@ -31,12 +31,10 @@ func TestFailure(t *testing.T) {
 	ch, stop := p.Poll(func(ctx context.Context) error {
 		return errors.New("bad request")
 	})
+	defer stop()
 
 	for msg := range ch {
 		t.Logf("%+v\n", msg)
-		if errors.Is(msg.Err, poll.ErrLimitExceeded) {
-			stop()
-		}
 	}
 }
 

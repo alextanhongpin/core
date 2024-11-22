@@ -94,6 +94,7 @@ func (p *Poll) Poll(fn func(context.Context) error) (<-chan Event, func()) {
 
 	go func() {
 		defer wg.Done()
+		defer close(ch)
 		var idle int
 
 		for {
@@ -133,7 +134,6 @@ func (p *Poll) Poll(fn func(context.Context) error) (<-chan Event, func()) {
 	return ch, sync.OnceFunc(func() {
 		close(done)
 		wg.Wait()
-		close(ch)
 	})
 }
 
