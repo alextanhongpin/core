@@ -59,9 +59,11 @@ func (p *Poll) Poll(fn func(context.Context) error) (<-chan Event, func()) {
 					"success":  limiter.SuccessCount(),
 					"failures": limiter.FailureCount(),
 					"total":    limiter.TotalCount(),
+					"start":    start,
 					"took":     time.Since(start).Seconds(),
 				},
-				Err: err,
+				Err:  err,
+				Time: time.Now(),
 			}
 		}(time.Now())
 
@@ -102,9 +104,10 @@ func (p *Poll) Poll(fn func(context.Context) error) (<-chan Event, func()) {
 			case ch <- Event{
 				Name: "poll",
 				Data: map[string]any{
-					"sleep": sleep.Seconds(),
 					"idle":  idle,
+					"sleep": sleep.Seconds(),
 				},
+				Time: time.Now(),
 			}:
 			}
 
@@ -151,4 +154,5 @@ type Event struct {
 	Name string
 	Data map[string]any
 	Err  error
+	Time time.Time
 }
