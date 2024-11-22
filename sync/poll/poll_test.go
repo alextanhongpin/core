@@ -34,7 +34,7 @@ func TestFailure(t *testing.T) {
 
 	for msg := range ch {
 		t.Logf("%+v\n", msg)
-		if msg.Name == "batch" {
+		if errors.Is(msg.Err, poll.ErrLimitExceeded) {
 			stop()
 		}
 	}
