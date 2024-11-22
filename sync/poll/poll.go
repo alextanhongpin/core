@@ -58,7 +58,7 @@ func (p *Poll) Poll(fn func(context.Context) error) (<-chan Event, func()) {
 				Data: map[string]any{
 					"success":  limiter.SuccessCount(),
 					"failures": limiter.FailureCount(),
-					"total":    limiter.SuccessCount() + limiter.FailureCount(),
+					"total":    limiter.TotalCount(),
 					"took":     time.Since(start).Seconds(),
 				},
 				Err: err,

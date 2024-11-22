@@ -29,6 +29,13 @@ func (l *Limiter) SuccessCount() int {
 	return n
 }
 
+func (l *Limiter) TotalCount() int {
+	l.mu.RLock()
+	n := l.failureCount + l.successCount
+	l.mu.RUnlock()
+	return n
+}
+
 func (l *Limiter) FailureCount() int {
 	l.mu.RLock()
 	n := l.failureCount
@@ -38,7 +45,7 @@ func (l *Limiter) FailureCount() int {
 
 func (l *Limiter) Err() {
 	l.mu.Lock()
-	l.totalCount--
+	l.totalCount = max(l.totalCount-1.0, 0)
 	l.failureCount++
 	l.mu.Unlock()
 }
