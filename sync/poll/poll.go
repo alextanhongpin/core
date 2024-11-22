@@ -35,13 +35,22 @@ func (p *Poll) Poll(fn func(context.Context) error) (<-chan Event, func()) {
 		ch               = make(chan Event)
 		done             = make(chan struct{})
 		failureThreshold = p.FailureThreshold
-		idle             = 0
 		interval         = p.Interval
 		maxConcurrency   = p.MaxConcurrency
 	)
 
 	batch := func(ctx context.Context) (err error) {
 		limiter := NewLimiter(failureThreshold)
+		work := func() error {
+			err := limiter.Do(func() error {
+				return fn(ctx)
+			})
+			if errors.Is(err, EOQ) || errors.Is(err, ErrLimitExceeded) {
+				return err
+			}
+
+			return nil
+		}
 
 		defer func(start time.Time) {
 			ch <- Event{
@@ -56,10 +65,7 @@ func (p *Poll) Poll(fn func(context.Context) error) (<-chan Event, func()) {
 			}
 		}(time.Now())
 
-		err = limiter.Do(func() error {
-			return fn(ctx)
-		})
-		if errors.Is(err, EOQ) || errors.Is(err, ErrLimitExceeded) {
+		if err := work(); err != nil {
 			return err
 		}
 
@@ -74,16 +80,7 @@ func (p *Poll) Poll(fn func(context.Context) error) (<-chan Event, func()) {
 			case <-ctx.Done():
 				break loop
 			default:
-				g.Go(func() error {
-					err := limiter.Do(func() error {
-						return fn(ctx)
-					})
-					if errors.Is(err, EOQ) || errors.Is(err, ErrLimitExceeded) {
-						return err
-					}
-
-					return nil
-				})
+				g.Go(work)
 			}
 		}
 
@@ -95,17 +92,22 @@ func (p *Poll) Poll(fn func(context.Context) error) (<-chan Event, func()) {
 
 	go func() {
 		defer wg.Done()
-
-		sleep := interval(idle)
-		ch <- Event{
-			Name: "poll",
-			Data: map[string]any{
-				"sleep": sleep.Seconds(),
-				"idle":  idle,
-			},
-		}
+		var idle int
 
 		for {
+			sleep := interval(idle)
+			select {
+			case <-done:
+				return
+			case ch <- Event{
+				Name: "poll",
+				Data: map[string]any{
+					"sleep": sleep.Seconds(),
+					"idle":  idle,
+				},
+			}:
+			}
+
 			select {
 			case <-done:
 				return
