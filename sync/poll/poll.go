@@ -45,8 +45,20 @@ func (p *Poll) Poll(fn func(context.Context) error) (<-chan Event, func()) {
 			err := limiter.Do(func() error {
 				return fn(ctx)
 			})
+
 			if errors.Is(err, EOQ) || errors.Is(err, ErrLimitExceeded) {
 				return err
+			}
+
+			if err != nil {
+				select {
+				case <-done:
+				case ch <- Event{
+					Name: "error",
+					Err:  err,
+					Time: time.Now(),
+				}:
+				}
 			}
 
 			return nil
