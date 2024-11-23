@@ -61,6 +61,7 @@ func (p *Poll) Poll(fn func(context.Context) error) (<-chan Event, func()) {
 				}
 			}
 
+			// Failure in one batch should not stop the entire process.
 			return nil
 		}
 
@@ -79,6 +80,10 @@ func (p *Poll) Poll(fn func(context.Context) error) (<-chan Event, func()) {
 			}
 		}(time.Now())
 
+		// Do one work before starting the batch.
+		// This allows us to check if the queue is empty.
+		// An alternative is to check the queue size before
+		// starting the batch.
 		if err := work(); err != nil {
 			return err
 		}
@@ -87,6 +92,7 @@ func (p *Poll) Poll(fn func(context.Context) error) (<-chan Event, func()) {
 		g.SetLimit(maxConcurrency)
 
 	loop:
+		// Minus one work done earlier.
 		for range batchSize - 1 {
 			select {
 			case <-done:
@@ -107,10 +113,12 @@ func (p *Poll) Poll(fn func(context.Context) error) (<-chan Event, func()) {
 	go func() {
 		defer wg.Done()
 		defer close(ch)
-		var idle int
 
+		var idle int
 		for {
+			// When the process is idle, we can sleep for a longer duration.
 			sleep := interval(idle)
+
 			select {
 			case <-done:
 				return
@@ -129,15 +137,18 @@ func (p *Poll) Poll(fn func(context.Context) error) (<-chan Event, func()) {
 				return
 			case <-time.After(sleep):
 				if err := batch(context.Background()); err != nil {
+					// End of queue, sleep for a while.
 					if errors.Is(err, EOQ) {
 						idle++
 
 						continue
 					}
 
+					// Too many failures, stop the process.
 					return
 				}
 
+				// No errors, reset the idle counter.
 				idle = 0
 			}
 		}
