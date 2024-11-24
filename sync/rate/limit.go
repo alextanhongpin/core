@@ -5,7 +5,7 @@ import (
 	"sync"
 )
 
-var ErrLimitExceeded = errors.New("poll: limit exceeded")
+var ErrLimitExceeded = errors.New("rate: limit exceeded")
 
 type Limiter struct {
 	mu           sync.RWMutex
