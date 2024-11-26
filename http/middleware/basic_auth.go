@@ -6,7 +6,9 @@ func BasicAuthHandler(h http.Handler, credentials map[string]string) http.Handle
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		username, password, ok := r.BasicAuth()
 		if !ok || credentials[username] != password {
-			http.Error(w, http.StatusText(http.StatusForbidden), http.StatusForbidden)
+
+			w.Header().Set("WWW-Authenticate", `Basic realm="User Visible Realm"`)
+			w.WriteHeader(http.StatusUnauthorized)
 
 			return
 		}
