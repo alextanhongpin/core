@@ -7,6 +7,7 @@ require (
 	github.com/alextanhongpin/testdump/httpdump v0.0.0-20240815130218-4368114cac78
 	github.com/golang-jwt/jwt/v5 v5.2.1
 	github.com/google/go-cmp v0.6.0
+	github.com/google/uuid v1.3.0
 	github.com/stretchr/testify v1.9.0
 	golang.org/x/sys v0.21.0
 )
