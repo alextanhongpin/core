@@ -1,0 +1,11 @@
+-- request.http --
+GET / HTTP/1.1
+Host: example.com
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJqb2huLmFwcGxlc2VlZEBtYWlsLmNvbSIsImV4cCI6MTczMjcyMTkzNX0.PM8k1Rt_4VFAOOP422RZiBRpQkYRzyTl_syf4gPfOzw
+
+-- response.http --
+HTTP/1.1 200 OK
+Connection: close
+Content-Type: text/plain; charset=utf-8
+
+hello world

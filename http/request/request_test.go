@@ -10,6 +10,7 @@ import (
 
 	"github.com/alextanhongpin/core/http/request"
 	"github.com/google/go-cmp/cmp"
+	"github.com/stretchr/testify/assert"
 )
 
 type loginRequest struct {
@@ -29,38 +30,25 @@ func TestBody(t *testing.T) {
 		Email: "john.appleseed@mail.com",
 	}
 	b, err := json.Marshal(body)
-	if err != nil {
-		t.Error(err)
-	}
+	is := assert.New(t)
+	is.Nil(err)
 
 	r := httptest.NewRequest("POST", "/login", bytes.NewReader(b))
 	var req loginRequest
-	err = request.DecodeJSON(r, &req)
-	if err != nil {
-		t.Error(err)
-	}
-	if diff := cmp.Diff(req, body); diff != "" {
-		t.Fatalf("want(+), got(-): %s", diff)
-	}
-	t.Log(req)
+	is.Nil(request.DecodeJSON(r, &req))
+	is.Empty(cmp.Diff(req, body))
 }
 
 func TestBodyInvalid(t *testing.T) {
 	b := []byte(`<HTML>`)
 	r := httptest.NewRequest("POST", "/login", bytes.NewReader(b))
+
 	var req loginRequest
 	err := request.DecodeJSON(r, &req)
-	if err == nil {
-		t.Fatal("want error, got nil")
-	}
+	is := assert.New(t)
 
 	var bodyErr *request.BodyError
-	if !errors.As(err, &bodyErr) {
-		t.Fatalf("want body error, got %v", err)
-	}
-
-	if !bytes.Equal(b, bodyErr.Body) {
-		t.Fatalf("want %s, got %s", b, bodyErr.Body)
-	}
+	is.ErrorAs(err, &bodyErr)
+	is.True(bytes.Equal(b, bodyErr.Body))
 	t.Log(string(bodyErr.Body))
 }

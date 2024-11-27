@@ -1,0 +1,16 @@
+-- request.http --
+GET / HTTP/1.1
+Host: example.com
+Content-Length: 25
+X-Webhook-Id: 151e8414-8991-4752-a920-7035c48a28da
+X-Webhook-Signature: r_OJ3RGDIgCCYmOIyVLn_WBi9TxPmjlAHYl2g_vpAzI=
+X-Webhook-Signature: U2xTSqtkctqNXHh9Vi1tTbrAOyD6-YKlC35vqwTDfGM=
+X-Webhook-Timestamp: 1732718860048777000
+
+{
+ "message": "hello"
+}
+-- response.http --
+HTTP/1.1 200 OK
+Connection: close
+
