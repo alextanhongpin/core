@@ -1,9 +1,15 @@
 github.com/alextanhongpin/core/sync/pipeline v0.0.0-20241127060213-4cbccb0b24b8 h1:1ZSdtFUhhgnz9lfCHOMgfRXcQ+hfN9Nu6+7VY2+x3R8=
 github.com/alextanhongpin/core/sync/pipeline v0.0.0-20241127060213-4cbccb0b24b8/go.mod h1:M4pwq7ThoLwy2KBdcau5R+ywi3aNUm67jaoGhyejHHI=
+github.com/alextanhongpin/core/sync/pipeline v0.0.0-20241127144803-1fc1b0b39236 h1:ntsdcZbk7qYVzPxh7C62ve1Hmsf1S2KQh/+Ep+yHqJ8=
+github.com/alextanhongpin/core/sync/pipeline v0.0.0-20241127144803-1fc1b0b39236/go.mod h1:M4pwq7ThoLwy2KBdcau5R+ywi3aNUm67jaoGhyejHHI=
 github.com/alextanhongpin/core/sync/promise v0.0.0-20241127060213-4cbccb0b24b8 h1:MRnUXnsCYtVa0R7yxQp7zn2P4SzMtlrBhqO4820feZA=
 github.com/alextanhongpin/core/sync/promise v0.0.0-20241127060213-4cbccb0b24b8/go.mod h1:AMzb5tn043T3lDg/C87EXKg4QcIeP1WaUiKM02SdvkQ=
+github.com/alextanhongpin/core/sync/promise v0.0.0-20241127144803-1fc1b0b39236 h1:kOTw3ZwLkoA0iD1f+jsB8j5+zne4jnA70yzX/Nt/mW8=
+github.com/alextanhongpin/core/sync/promise v0.0.0-20241127144803-1fc1b0b39236/go.mod h1:AMzb5tn043T3lDg/C87EXKg4QcIeP1WaUiKM02SdvkQ=
 github.com/alextanhongpin/core/sync/rate v0.0.0-20241127060213-4cbccb0b24b8 h1:ag7LQOvRDQpN324iSkppML/GXPtP40N0Ydw+0T+Qlck=
 github.com/alextanhongpin/core/sync/rate v0.0.0-20241127060213-4cbccb0b24b8/go.mod h1:RmCJ2HHmdrAZacSuYVdZZl3mQn4thZLFfsZgntVJjtc=
+github.com/alextanhongpin/core/sync/rate v0.0.0-20241127144803-1fc1b0b39236 h1:/F2IBtgCvX4kVfGKXOfdlpsEYpuPL5pV06VnqiL8JuY=
+github.com/alextanhongpin/core/sync/rate v0.0.0-20241127144803-1fc1b0b39236/go.mod h1:RmCJ2HHmdrAZacSuYVdZZl3mQn4thZLFfsZgntVJjtc=
 github.com/beorn7/perks v1.0.1 h1:VlbKKnNfV8bJzeqoa4cOKqO6bYr3WgKZxO8Z16+hsOM=
 github.com/beorn7/perks v1.0.1/go.mod h1:G2ZrVWU2WbWT9wwq4/hrbKbnv/1ERSJQ0ibhJ6rlkpw=
 github.com/cespare/xxhash/v2 v2.3.0 h1:UL815xU9SqsFlibzuggzjXhog7bL6oX9BbNZnL2UFvs=

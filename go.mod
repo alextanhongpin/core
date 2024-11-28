@@ -5,8 +5,8 @@ go 1.23.0
 require golang.org/x/exp v0.0.0-20241108190413-2d47ceb2692f
 
 require (
-	github.com/alextanhongpin/core/sync/pipeline v0.0.0-20241127060213-4cbccb0b24b8
-	github.com/alextanhongpin/core/sync/promise v0.0.0-20241127060213-4cbccb0b24b8
+	github.com/alextanhongpin/core/sync/pipeline v0.0.0-20241127144803-1fc1b0b39236
+	github.com/alextanhongpin/core/sync/promise v0.0.0-20241127144803-1fc1b0b39236
 	github.com/prometheus/client_golang v1.20.5
 	github.com/prometheus/common v0.60.1
 	github.com/segmentio/kafka-go v0.4.47
@@ -18,7 +18,7 @@ require (
 )
 
 require (
-	github.com/alextanhongpin/core/sync/rate v0.0.0-20241127060213-4cbccb0b24b8 // indirect
+	github.com/alextanhongpin/core/sync/rate v0.0.0-20241127144803-1fc1b0b39236 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
