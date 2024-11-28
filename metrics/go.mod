@@ -3,11 +3,11 @@ module github.com/alextanhongpin/core/metrics
 go 1.23.2
 
 require (
-	github.com/alextanhongpin/core/dsync/probs v0.0.0-00010101000000-000000000000
+	github.com/alextanhongpin/core/dsync/probs v0.0.0-20241127144803-1fc1b0b39236
 	github.com/alextanhongpin/core/http v0.0.0-20240905053732-bcbe64b2dd73
 	github.com/alextanhongpin/core/storage/redis v0.0.0-20241028033631-6d88609c62b1
-	github.com/prometheus/client_golang v1.20.2
-	github.com/prometheus/common v0.58.0
+	github.com/prometheus/client_golang v1.20.5
+	github.com/prometheus/common v0.60.1
 	github.com/redis/go-redis/v9 v9.7.0
 	github.com/stretchr/testify v1.9.0
 )
@@ -48,9 +48,9 @@ require (
 	github.com/xeipuuv/gojsonpointer v0.0.0-20190905194746-02993c407bfb // indirect
 	github.com/xeipuuv/gojsonreference v0.0.0-20180127040603-bd5ef7bd5415 // indirect
 	github.com/xeipuuv/gojsonschema v1.2.0 // indirect
-	golang.org/x/sync v0.7.0 // indirect
-	golang.org/x/sys v0.24.0 // indirect
-	google.golang.org/protobuf v1.34.2 // indirect
+	golang.org/x/sync v0.9.0 // indirect
+	golang.org/x/sys v0.27.0 // indirect
+	google.golang.org/protobuf v1.35.2 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
