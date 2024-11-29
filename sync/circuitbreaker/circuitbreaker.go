@@ -109,8 +109,9 @@ func (b *Breaker) canOpen(n int) bool {
 		return false
 	}
 
-	res := b.Counter.AddFailure(float64(n))
-	return b.isUnhealthy(res.Success, res.Failure)
+	_ = b.Counter.Failure().Add(float64(n))
+	r := b.Counter.Rate()
+	return b.isUnhealthy(r.Success(), r.Failure())
 }
 
 func (b *Breaker) open() {
@@ -131,8 +132,9 @@ func (b *Breaker) opened() error {
 }
 
 func (b *Breaker) canClose() bool {
-	res := b.Counter.IncSuccess()
-	return b.isHealthy(res.Success, res.Failure)
+	_ = b.Counter.Success().Inc()
+	r := b.Counter.Rate()
+	return b.isHealthy(r.Success(), r.Failure())
 }
 
 func (b *Breaker) close() {
@@ -161,7 +163,7 @@ func (b *Breaker) closed(fn func() error) error {
 		return nil
 	}
 
-	b.Counter.IncSuccess()
+	b.Counter.Success().Inc()
 
 	return nil
 }

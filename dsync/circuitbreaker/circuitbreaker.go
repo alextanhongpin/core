@@ -193,8 +193,9 @@ func (b *CircuitBreaker) canOpen(n int) bool {
 		return false
 	}
 
-	res := b.Counter.AddFailure(float64(n))
-	return b.isUnhealthy(res.Success, res.Failure)
+	_ = b.Counter.Failure().Add(float64(n))
+	r := b.Counter.Rate()
+	return b.isUnhealthy(r.Success(), r.Failure())
 }
 
 func (b *CircuitBreaker) open() {
@@ -252,8 +253,9 @@ func (b *CircuitBreaker) halfOpened(ctx context.Context, fn func() error) error 
 }
 
 func (b *CircuitBreaker) canClose() bool {
-	res := b.Counter.IncSuccess()
-	return b.isHealthy(res.Success, res.Failure)
+	_ = b.Counter.Success().Inc()
+	r := b.Counter.Rate()
+	return b.isHealthy(r.Success(), r.Failure())
 }
 
 func (b *CircuitBreaker) close() {
@@ -308,7 +310,7 @@ func (b *CircuitBreaker) closed(ctx context.Context, fn func() error) error {
 		return b.publish(ctx, Open)
 	}
 
-	b.Counter.IncSuccess()
+	b.Counter.Success().Inc()
 
 	return nil
 }

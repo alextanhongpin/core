@@ -1,5 +1,7 @@
 github.com/alextanhongpin/core/sync/rate v0.0.0-20241128031114-87de390c779e h1:ZI2khdkrWpIfgn+090hdabq8B8XombvLNL26zCwHXjQ=
 github.com/alextanhongpin/core/sync/rate v0.0.0-20241128031114-87de390c779e/go.mod h1:RmCJ2HHmdrAZacSuYVdZZl3mQn4thZLFfsZgntVJjtc=
+github.com/alextanhongpin/core/sync/rate v0.0.0-20241129045434-84469bdbd179 h1:pJgWDj3CJxDgYc5ZSRqQIgBq3Hdr8nmycanLMzUl+GA=
+github.com/alextanhongpin/core/sync/rate v0.0.0-20241129045434-84469bdbd179/go.mod h1:RmCJ2HHmdrAZacSuYVdZZl3mQn4thZLFfsZgntVJjtc=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZbAQM=

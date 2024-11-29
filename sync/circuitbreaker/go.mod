@@ -3,7 +3,7 @@ module github.com/alextanhongpin/core/sync/circuitbreaker
 go 1.23.1
 
 require (
-	github.com/alextanhongpin/core/sync/rate v0.0.0-20241128031114-87de390c779e
+	github.com/alextanhongpin/core/sync/rate v0.0.0-20241129045434-84469bdbd179
 	github.com/stretchr/testify v1.10.0
 )
 

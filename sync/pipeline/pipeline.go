@@ -109,10 +109,10 @@ func PassThrough[T any](in chan T, fn func(T)) <-chan T {
 }
 
 type ThroughputInfo struct {
+	ErrorRate     float64
+	Rate          float64
 	Total         int
 	TotalFailures int
-	Rate          float64
-	ErrorRate     float64
 }
 
 func (t ThroughputInfo) String() string {
@@ -132,18 +132,18 @@ func Throughput[T any](in <-chan Result[T], fn func(ThroughputInfo)) <-chan Resu
 			_, err := v.Unwrap()
 			if err != nil {
 				totalFailures++
-				er.IncFailure()
+				er.Failure().Inc()
 			} else {
-				er.IncSuccess()
+				er.Success().Inc()
 			}
 			total++
 
-			res := er.Result()
+			r := er.Rate()
 			fn(ThroughputInfo{
-				Rate:          res.Total(),
+				ErrorRate:     r.Ratio(),
+				Rate:          r.Total(),
 				Total:         total,
 				TotalFailures: totalFailures,
-				ErrorRate:     res.ErrorRate(),
 			})
 			out <- v
 		}
@@ -158,7 +158,7 @@ type RateInfo struct {
 }
 
 func (r RateInfo) String() string {
-	return fmt.Sprintf("total: %d, throughput: %.2f req/s", r.Total, r.Rate)
+	return fmt.Sprintf("total: %d, rate: %.2f req/s", r.Total, r.Rate)
 }
 
 func Rate[T any](in <-chan T, fn func(RateInfo)) <-chan T {
