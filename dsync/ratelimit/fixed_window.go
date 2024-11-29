@@ -3,7 +3,7 @@ package ratelimit
 import (
 	"context"
 	_ "embed"
-	"fmt"
+	"errors"
 	"time"
 
 	redis "github.com/redis/go-redis/v9"
@@ -17,87 +17,60 @@ var fixedWindow = redis.NewScript(fixedWindowScript)
 // FixedWindow implements the Fixed Window algorithm.
 type FixedWindow struct {
 	client *redis.Client
-	opt    *FixedWindowOption
-	Now    func() time.Time
+	limit  int
+	period int64
 }
 
-type FixedWindowOption struct {
-	Limit  int64
-	Period time.Duration
-}
-
-func (opt *FixedWindowOption) Valid() error {
-	if opt.Limit <= 0 {
-		return fmt.Errorf("%w: limit must be greater than 0", Error)
-	}
-	if opt.Period <= 0 {
-		return fmt.Errorf("%w: period must be greater than 0", Error)
-	}
-
-	return nil
-}
-
-func NewFixedWindow(client *redis.Client, opt *FixedWindowOption) *FixedWindow {
-	if opt == nil {
-		panic("ratelimit: option is nil")
-	}
-	if err := opt.Valid(); err != nil {
-		panic(err)
-	}
-
+func NewFixedWindow(client *redis.Client, limit int, period time.Duration) *FixedWindow {
 	return &FixedWindow{
 		client: client,
-		opt:    opt,
-		Now:    time.Now,
+		limit:  limit,
+		period: period.Milliseconds(),
 	}
 }
 
-func (r *FixedWindow) AllowN(ctx context.Context, key string, n int64) (*Result, error) {
-	key = r.buildKey(r.Now(), key)
-	now := r.Now()
-	limit := r.opt.Limit
-	period := r.opt.Period
-
+func (r *FixedWindow) AllowN(ctx context.Context, key string, n int) (bool, error) {
 	keys := []string{key}
 	argv := []any{
-		limit,
-		now.UnixMilli(),
-		period.Milliseconds(),
+		r.limit,
+		r.period,
 		n,
 	}
-	res, err := fixedWindow.Run(ctx, r.client, keys, argv...).Int64Slice()
+	ok, err := fixedWindow.Run(ctx, r.client, keys, argv...).Int()
 	if err != nil {
-		return nil, err
+		return false, err
 	}
-	allow := res[0] == 1
-	count := res[1]
-	remaining := limit - count
-
-	start := now.Truncate(period)
-	end := start.Add(period)
-	retryAt := now
-	if remaining == 0 {
-		retryAt = end
-	}
-
-	return &Result{
-		Allow:     allow,
-		Remaining: remaining,
-		Limit:     limit,
-		ResetAt:   end,
-		RetryAt:   retryAt,
-	}, nil
+	return ok == 1, nil
 }
 
-func (r *FixedWindow) Allow(ctx context.Context, key string) (*Result, error) {
+func (r *FixedWindow) Allow(ctx context.Context, key string) (bool, error) {
 	return r.AllowN(ctx, key, 1)
 }
 
-func (r *FixedWindow) buildKey(now time.Time, key string) string {
-	t := now.Truncate(r.opt.Period).Format(time.RFC3339Nano)
-	// Set the key first to allow users to search their key by prefix.
-	// The ratelimit:fixed_window is used to identify the
-	// algorithm used, in case users switched the
-	// implementation.
-	return fmt.Sprintf("%s:ratelimit:fixed_window:%s", key, t)
+func (r *FixedWindow) Remaining(ctx context.Context, key string) (int, error) {
+	n, err := r.client.Get(ctx, key).Int()
+	if errors.Is(err, redis.Nil) {
+		return r.limit, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+
+	return r.limit - n, nil
+}
+
+func (r *FixedWindow) ResetAfter(ctx context.Context, key string) (time.Duration, error) {
+	remaining, err := r.Remaining(ctx, key)
+	if err != nil {
+		return 0, err
+	}
+	if remaining > 0 {
+		return 0, nil
+	}
+
+	d, err := r.client.PTTL(ctx, key).Result()
+	if errors.Is(err, redis.Nil) {
+		return 0, nil
+	}
+	return d, err
 }

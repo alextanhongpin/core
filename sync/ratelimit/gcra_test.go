@@ -44,7 +44,7 @@ func TestGCRAFullRange(t *testing.T) {
 			t.Fatalf("doesn't allow: %v", p)
 		}
 
-		t.Log(now.Add(p).Sub(now), got, rl.RetryAfter())
+		t.Log(now.Add(p).Sub(now), got, rl.RetryAt())
 	}
 }
 
@@ -78,7 +78,7 @@ func TestGCRAPartial(t *testing.T) {
 			t.Fatalf("doesn't allow: %v", p)
 		}
 
-		t.Log(now.Add(p).Sub(now), got, rl.RetryAfter())
+		t.Log(now.Add(p).Sub(now), got, rl.RetryAt())
 	}
 }
 
@@ -120,7 +120,7 @@ func TestGCRABurst(t *testing.T) {
 			t.Fatalf("want %t, got %t: %v", want, got, p)
 		}
 
-		t.Log(now.Add(p).Sub(now), got, rl.RetryAfter())
+		t.Log(now.Add(p).Sub(now), got, rl.RetryAt())
 	}
 }
 
@@ -159,7 +159,7 @@ func TestGCRABurstPartial(t *testing.T) {
 			count++
 		}
 
-		t.Log(now.Add(p).Sub(now), got, rl.RetryAfter())
+		t.Log(now.Add(p).Sub(now), got, rl.RetryAt())
 	}
 	if 6 != count {
 		t.Fatalf("want %d, got %d", 6, count)
@@ -192,7 +192,7 @@ func TestGCRAMultipleBurst(t *testing.T) {
 			t.Fatalf("doesn't allow: %v", p)
 		}
 
-		t.Log(now.Add(p).Sub(now), got, rl.RetryAfter())
+		t.Log(now.Add(p).Sub(now), got, rl.RetryAt())
 	}
 }
 
@@ -233,7 +233,7 @@ func TestGCRAAllowN(t *testing.T) {
 			t.Fatalf("doesn't allow: %v", p)
 		}
 
-		t.Log(now.Add(p).Sub(now), got, rl.RetryAfter())
+		t.Log(now.Add(p).Sub(now), got, rl.RetryAt())
 	}
 }
 

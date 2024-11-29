@@ -10,10 +10,12 @@ import (
 	"github.com/alextanhongpin/core/sync/ratelimit"
 )
 
-func ExampleFixedWindow() {
+func ExampleSlidingWindow() {
+	// We need to truncate the time to the nearest second, as the sliding window
+	// is based on the window.
 	now := time.Now()
 
-	rl := ratelimit.NewFixedWindow(5, time.Second)
+	rl := ratelimit.NewSlidingWindow(5, time.Second)
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 1, ' ', tabwriter.AlignRight|tabwriter.Debug)
 	fmt.Fprintf(w, "%s\t%s\t\n", "t", "allow")
 	call := func(duration time.Duration, allow bool) {
@@ -37,19 +39,19 @@ func ExampleFixedWindow() {
 	call(100*time.Millisecond, false)
 	call(101*time.Millisecond, false)
 	call(999*time.Millisecond, false)
-	call(1000*time.Millisecond, true)
-	call(1100*time.Millisecond, true)
+	call(1000*time.Millisecond, false)
+	call(1100*time.Millisecond, false)
 	call(1200*time.Millisecond, true)
-	call(1300*time.Millisecond, true)
+	call(1300*time.Millisecond, false)
 	call(1400*time.Millisecond, true)
 	call(1500*time.Millisecond, false)
-	call(1999*time.Millisecond, false)
+	call(1999*time.Millisecond, true)
 
-	fmt.Println("fixed window")
+	fmt.Println("sliding window")
 	w.Flush()
 
 	// Output:
-	// fixed window
+	// sliding window
 	//       t| allow|
 	//      0s|  true|
 	//     1ms|  true|
@@ -60,11 +62,11 @@ func ExampleFixedWindow() {
 	//   100ms| false|
 	//   101ms| false|
 	//   999ms| false|
-	//      1s|  true|
-	//    1.1s|  true|
+	//      1s| false|
+	//    1.1s| false|
 	//    1.2s|  true|
-	//    1.3s|  true|
+	//    1.3s| false|
 	//    1.4s|  true|
 	//    1.5s| false|
-	//  1.999s| false|
+	//  1.999s|  true|
 }

@@ -2,138 +2,77 @@ package ratelimit_test
 
 import (
 	"context"
-	"fmt"
 	"testing"
 	"time"
 
 	"github.com/alextanhongpin/core/dsync/ratelimit"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestFixedWindow(t *testing.T) {
 	ctx := context.Background()
 
 	client := newClient(t)
-
-	rl := ratelimit.NewFixedWindow(client, &ratelimit.FixedWindowOption{
-		Limit:  5,
-		Period: 1 * time.Second,
-	})
-
+	rl := ratelimit.NewFixedWindow(client, 5, time.Second)
 	key := t.Name()
-	periods := []time.Duration{
-		0,
-		1 * time.Millisecond,
-		2 * time.Millisecond,
-		3 * time.Millisecond,
-		4 * time.Millisecond,
+	is := assert.New(t)
+	var count int
 
-		199 * time.Millisecond,
-		200 * time.Millisecond,
-		201 * time.Millisecond,
+	for range 10 {
+		allow, err := rl.Allow(ctx, key)
+		is.Nil(err)
+		if allow {
+			count++
+		}
 
-		399 * time.Millisecond,
-		400 * time.Millisecond,
-		401 * time.Millisecond,
+		remaining, err := rl.Remaining(ctx, key)
+		is.Nil(err)
 
-		599 * time.Millisecond,
-		600 * time.Millisecond,
-		601 * time.Millisecond,
+		resetAfter, err := rl.ResetAfter(ctx, key)
+		is.Nil(err)
 
-		799 * time.Millisecond,
-		800 * time.Millisecond,
-		801 * time.Millisecond,
-
-		999 * time.Millisecond,
-		1000 * time.Millisecond,
-		1001 * time.Millisecond,
+		t.Log(allow, remaining, resetAfter)
 	}
-
-	now := time.Now().Truncate(time.Second)
-	for _, p := range periods {
-		rl.Now = func() time.Time {
-			return now.Add(p)
-		}
-
-		allow := p < 5*time.Millisecond || p >= 1*time.Second
-		result, err := rl.Allow(ctx, key)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		if want, got := allow, result.Allow; want != got {
-			t.Fatalf("allow: want %t, got %t", want, got)
-		}
-
-		t.Log(now.Add(p).Sub(now), result.Allow, result.Remaining, result.RetryIn(), result.ResetIn())
-	}
+	is.Equal(5, count)
 }
 
 func TestFixedWindow_Interval(t *testing.T) {
 	ctx := context.Background()
 
 	client := newClient(t)
-	rl := ratelimit.NewFixedWindow(client, &ratelimit.FixedWindowOption{
-		Limit:  5,
-		Period: 1 * time.Second,
-	})
+	rl := ratelimit.NewFixedWindow(client, 5, time.Second)
 
+	is := assert.New(t)
 	key := t.Name()
-
-	now := time.Now().Truncate(time.Second).Add(time.Second)
-	time.Sleep(now.Sub(time.Now()))
-
 	var count int
 	for i := 0; i < 1000; i++ {
-		rl.Now = func() time.Time {
-			p := time.Duration(i) * time.Millisecond
-			return now.Add(p)
-		}
-
-		result, err := rl.Allow(ctx, key)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if result.Allow {
+		allow, err := rl.Allow(ctx, key)
+		is.Nil(err)
+		if allow {
 			count++
 		}
 	}
-	if want, got := 5, count; want != got {
-		t.Fatalf("want %d, got %d", want, got)
-	}
+	is.Equal(5, count)
 }
 
 func TestFixedWindow_AllowN(t *testing.T) {
 	ctx := context.Background()
 
 	client := newClient(t)
-	rl := ratelimit.NewFixedWindow(client, &ratelimit.FixedWindowOption{
-		Limit:  5,
-		Period: 1 * time.Second,
-	})
+	rl := ratelimit.NewFixedWindow(client, 5, time.Second)
 
 	key := t.Name()
 
-	now := time.Now().Truncate(time.Second).Add(time.Second)
-	time.Sleep(now.Sub(time.Now()))
-
+	is := assert.New(t)
 	var count int
 	for i := 0; i < 1000; i++ {
-		rl.Now = func() time.Time {
-			p := time.Duration(i) * time.Millisecond
-			return now.Add(p)
-		}
-
-		result, err := rl.AllowN(ctx, key, 5)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if result.Allow {
+		allow, err := rl.AllowN(ctx, key, 5)
+		is.Nil(err)
+		if allow {
 			count++
 		}
 	}
-	if want, got := 1, count; want != got {
-		t.Fatalf("want %d, got %d", want, got)
-	}
+	is.Equal(1, count)
 }
 
 func TestFixedWindow_Expiry(t *testing.T) {
@@ -146,24 +85,17 @@ func TestFixedWindow_Expiry(t *testing.T) {
 			client.FlushAll(ctx)
 		})
 
-		rl := ratelimit.NewFixedWindow(client, &ratelimit.FixedWindowOption{
-			Limit:  5,
-			Period: 10 * time.Second,
-		})
+		rl := ratelimit.NewFixedWindow(client, 5, 10*time.Second)
 
 		key := t.Name()
-		ts := time.Now().Truncate(10 * time.Second).Format(time.RFC3339Nano)
-		redisKey := fmt.Sprintf("%s:ratelimit:fixed_window:%s", key, ts)
+		allow, err := rl.Allow(ctx, key)
+		is := assert.New(t)
+		is.Nil(err)
+		is.True(allow)
 
-		_, err := rl.Allow(ctx, key)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		ttl := client.TTL(ctx, redisKey).Val()
-		if ttl < 9*time.Second || ttl > 10*time.Second {
-			t.Fatalf("ttl: want ~10s, got %s", ttl)
-		}
+		resetAfter, err := rl.ResetAfter(ctx, key)
+		is.Nil(err)
+		is.Equal(time.Duration(0), resetAfter)
 	})
 
 	t.Run("AllowN", func(t *testing.T) {
@@ -171,23 +103,16 @@ func TestFixedWindow_Expiry(t *testing.T) {
 			client.FlushAll(ctx)
 		})
 
-		rl := ratelimit.NewFixedWindow(client, &ratelimit.FixedWindowOption{
-			Limit:  5,
-			Period: 10 * time.Second,
-		})
-
+		rl := ratelimit.NewFixedWindow(client, 5, 10*time.Second)
 		key := t.Name()
-		ts := time.Now().Truncate(10 * time.Second).Format(time.RFC3339Nano)
-		redisKey := fmt.Sprintf("%s:ratelimit:fixed_window:%s", key, ts)
+		allow, err := rl.AllowN(ctx, key, 5)
 
-		_, err := rl.AllowN(ctx, key, 5)
-		if err != nil {
-			t.Fatal(err)
-		}
+		is := assert.New(t)
+		is.Nil(err)
+		is.True(allow)
 
-		ttl := client.TTL(ctx, redisKey).Val()
-		if ttl < 9*time.Second || ttl > 10*time.Second {
-			t.Fatalf("ttl: want ~10s, got %s", ttl)
-		}
+		resetAfter, err := rl.ResetAfter(ctx, key)
+		is.Nil(err)
+		is.LessOrEqual(10*time.Second, resetAfter)
 	})
 }

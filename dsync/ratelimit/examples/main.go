@@ -7,65 +7,59 @@ import (
 	"time"
 
 	"github.com/alextanhongpin/core/dsync/ratelimit"
+	"github.com/alextanhongpin/core/storage/redis/redistest"
 	redis "github.com/redis/go-redis/v9"
 )
 
-func init() {
-	rand.Seed(42)
-}
-
 func main() {
+	stop := redistest.Init()
+	defer stop()
+
 	ctx := context.Background()
 	rdb := redis.NewClient(&redis.Options{
-		Addr: ":6379",
+		Addr: redistest.Addr(),
 	})
 	_ = rdb.FlushDB(ctx).Err()
 	defer rdb.Close()
 
-	key := "user:1"
-	//rl := newFixedWindow(rdb)
-	rl := newTokenBucket(rdb)
-	if err := simulate(ctx, rl, key, 30); err != nil {
-		panic(err)
+	{
+		key := "user:1"
+		rl := newFixedWindow(rdb)
+		if err := simulate(ctx, rl, key); err != nil {
+			panic(err)
+		}
+	}
+	{
+		key := "user:2"
+		rl := newGCRA(rdb)
+		if err := simulate(ctx, rl, key); err != nil {
+			panic(err)
+		}
 	}
 
 	fmt.Println("end")
 }
 
 type ratelimiter interface {
-	Allow(ctx context.Context, key string) (*ratelimit.Result, error)
+	Allow(ctx context.Context, key string) (bool, error)
 }
 
-func simulate(ctx context.Context, rl ratelimiter, key string, n int) error {
+func simulate(ctx context.Context, rl ratelimiter, key string) error {
 	now := time.Now()
 	fmt.Println("start", now)
 	limit := 0
 
-	start := now.Truncate(time.Minute).Add(time.Minute)
-	wait := start.Sub(now)
-	fmt.Println("wait for", wait)
-	time.Sleep(wait)
-
-	now = time.Now()
-
 	for time.Since(now) < 1*time.Second {
-		res, err := rl.Allow(ctx, key)
+		allow, err := rl.Allow(ctx, key)
 		if err != nil {
 			return fmt.Errorf("allow error: %w", err)
 		}
 
-		if res.Allow {
+		if allow {
 			limit++
 		}
 
-		fmt.Printf("elapsed: %s, allow=%t remaining=%d retryIn=%s resetIn=%s now=%s\n",
-			time.Since(now),
-			res.Allow,
-			res.Remaining,
-			res.RetryIn(),
-			res.ResetIn(),
-			time.Now().Format(time.DateTime),
-		)
+		fmt.Printf("elapsed: %s, allow=%t\n", time.Since(now), allow)
 		sleep := time.Duration(rand.Intn(100))
 		time.Sleep(sleep * time.Millisecond)
 	}
@@ -75,16 +69,9 @@ func simulate(ctx context.Context, rl ratelimiter, key string, n int) error {
 }
 
 func newFixedWindow(client *redis.Client) *ratelimit.FixedWindow {
-	return ratelimit.NewFixedWindow(client, &ratelimit.FixedWindowOption{
-		Limit:  5,
-		Period: 1 * time.Second,
-	})
+	return ratelimit.NewFixedWindow(client, 5, time.Second)
 }
 
-func newTokenBucket(client *redis.Client) *ratelimit.TokenBucket {
-	return ratelimit.NewTokenBucket(client, &ratelimit.TokenBucketOption{
-		Limit:  5,
-		Period: 1 * time.Second,
-		Burst:  3,
-	})
+func newGCRA(client *redis.Client) *ratelimit.GCRA {
+	return ratelimit.NewGCRA(client, 5, time.Second, 1)
 }
