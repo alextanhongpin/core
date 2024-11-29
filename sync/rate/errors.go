@@ -7,61 +7,85 @@ import (
 
 type Errors struct {
 	mu      sync.Mutex
-	success *Rate
-	failure *Rate
+	Success *Rate
+	Failure *Rate
 }
 
 func NewErrors(period time.Duration) *Errors {
 	return &Errors{
-		success: NewRate(period),
-		failure: NewRate(period),
+		Success: NewRate(period),
+		Failure: NewRate(period),
 	}
 }
 
 func (e *Errors) Reset() {
 	e.mu.Lock()
-	e.success.reset()
-	e.failure.reset()
+	e.Success.reset()
+	e.Failure.reset()
 	e.mu.Unlock()
-}
-
-func (e *Errors) Fail() float64 {
-	return ErrorRate(e.Inc(-1))
-}
-
-func (e *Errors) OK() float64 {
-	return ErrorRate(e.Inc(1))
-}
-
-func (e *Errors) Inc(n int64) (sucesses, failures float64) {
-	var s, f int64
-	switch {
-	case n < 0:
-		f = -n
-	case n > 0:
-		s = n
-	}
-
-	e.mu.Lock()
-	failures = e.failure.inc(f)
-	sucesses = e.success.inc(s)
-	e.mu.Unlock()
-
-	return
 }
 
 func (e *Errors) SetNow(now func() time.Time) {
-	e.success.Now = now
-	e.failure.Now = now
+	e.Success.Now = now
+	e.Failure.Now = now
 }
 
-func (e *Errors) Rate() float64 {
-	return ErrorRate(e.Inc(0))
+func (e *Errors) IncSuccess() *Result {
+	return e.AddSuccess(1)
 }
 
-func ErrorRate(successes, failures float64) float64 {
-	num := failures
-	den := failures + successes
+func (e *Errors) AddSuccess(f float64) *Result {
+	e.mu.Lock()
+	success := e.Success.add(f)
+	failure := e.Failure.add(0)
+	e.mu.Unlock()
+
+	return &Result{
+		Success: success,
+		Failure: failure,
+	}
+}
+
+func (e *Errors) IncFailure() *Result {
+	return e.AddFailure(1)
+}
+
+func (e *Errors) AddFailure(f float64) *Result {
+	e.mu.Lock()
+	success := e.Success.add(0)
+	failure := e.Failure.add(f)
+	e.mu.Unlock()
+
+	return &Result{
+		Success: success,
+		Failure: failure,
+	}
+}
+
+func (e *Errors) Result() *Result {
+	e.mu.Lock()
+	success := e.Success.add(0)
+	failure := e.Failure.add(0)
+	e.mu.Unlock()
+
+	return &Result{
+		Success: success,
+		Failure: failure,
+	}
+}
+
+type Result struct {
+	Failure float64
+	Success float64
+}
+
+func (r *Result) Total() float64 {
+	return r.Failure + r.Success
+}
+
+func (r *Result) ErrorRate() float64 {
+	num := r.Failure
+	den := r.Failure + r.Success
 	if den <= 0 {
 		return 0
 	}
