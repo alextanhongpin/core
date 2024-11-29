@@ -1,18 +1,14 @@
 local key = KEYS[1]
 
 local limit = tonumber(ARGV[1])
-local now = tonumber(ARGV[2])
-local period = tonumber(ARGV[3])
-local token = tonumber(ARGV[4])
+local period = tonumber(ARGV[2])
+local token = tonumber(ARGV[3])
 
-
-local ok = 0
 local count = tonumber(redis.call('GET', key) or 0)
 
 if count + token <= limit then
-	ok = 1
-	count = count + token
-	redis.call('SET', key, count, 'PX', period)
+	redis.call('SET', key, count + token, 'PX', period)
+	return 1
 end
 
-return {ok, count}
+return 0

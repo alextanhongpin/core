@@ -1,45 +1,38 @@
 package ratelimit
 
-import "time"
-
-type Result struct {
-	Allow      bool
-	Limit      int64
-	Remaining  int64
-	RetryAfter time.Duration
-}
-
-// Throttler limits the number of requests per second.
-type Throttler interface {
-	Allow() bool
-	AllowN(int) bool
-}
-
-// Regulator ensures a constant flow of request.
-type Regulator interface {
+type ratelimiter interface {
 	Allow() bool
 	AllowN(int) bool
 }
 
 type RateLimiter struct {
-	throttler Throttler
-	regulator Regulator
+	rls []ratelimiter
 }
 
-func New(
-	throttler Throttler,
-	regulator Regulator,
-) *RateLimiter {
+func New(rls ...ratelimiter) *RateLimiter {
 	return &RateLimiter{
-		throttler: throttler,
-		regulator: regulator,
+		rls: rls,
 	}
 }
 
 func (r *RateLimiter) Allow() bool {
-	return r.throttler.Allow() && r.regulator.Allow()
+	allow := true
+	for _, rl := range r.rls {
+		if !rl.Allow() {
+			allow = false
+		}
+	}
+
+	return allow
 }
 
 func (r *RateLimiter) AllowN(n int) bool {
-	return r.throttler.AllowN(n) && r.regulator.AllowN(n)
+	allow := true
+	for _, rl := range r.rls {
+		if !rl.AllowN(n) {
+			allow = false
+		}
+	}
+
+	return allow
 }

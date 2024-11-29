@@ -13,10 +13,7 @@ func TestGCRA(t *testing.T) {
 
 	client := newClient(t)
 
-	rl := ratelimit.NewGCRA(client, &ratelimit.GCRAOption{
-		Limit:  5,
-		Period: 1 * time.Second,
-	})
+	rl := ratelimit.NewGCRA(client, 5, time.Second, 0)
 
 	key := t.Name()
 	periods := []time.Duration{
@@ -49,15 +46,13 @@ func TestGCRA(t *testing.T) {
 			return now.Add(p)
 		}
 
-		allow := p.Milliseconds()%2 == 0
-		result, err := rl.Allow(ctx, key)
+		valid := p.Milliseconds()%2 == 0
+		allow, err := rl.Allow(ctx, key)
 		if err != nil {
 			t.Fatal(err)
 		}
-
-		t.Logf("%6s, allow: %t (%d/%d), retry_in: %s, reset_in: %s\n", now.Add(p).Sub(now), result.Allow, result.Remaining, result.Limit, result.RetryIn(), result.ResetIn())
-		if want, got := allow, result.Allow; want != got {
-			t.Fatalf("allow: want %t, got %t", want, got)
+		if valid != allow {
+			t.Fatalf("doesn't allow: %v", p)
 		}
 	}
 }
@@ -67,10 +62,7 @@ func TestGCRAAllowN(t *testing.T) {
 
 	client := newClient(t)
 
-	rl := ratelimit.NewGCRA(client, &ratelimit.GCRAOption{
-		Limit:  5,
-		Period: 1 * time.Second,
-	})
+	rl := ratelimit.NewGCRA(client, 5, time.Second, 0)
 
 	key := t.Name()
 	periods := []time.Duration{
@@ -103,15 +95,13 @@ func TestGCRAAllowN(t *testing.T) {
 			return now.Add(p)
 		}
 
-		allow := p == 0 || p == time.Second
-		result, err := rl.AllowN(ctx, key, 5)
+		valid := p == 0 || p == time.Second
+		allow, err := rl.AllowN(ctx, key, 5)
 		if err != nil {
 			t.Fatal(err)
 		}
-
-		t.Logf("%6s, allow: %t (%d/%d), retry_in: %s, reset_in: %s\n", now.Add(p).Sub(now), result.Allow, result.Remaining, result.Limit, result.RetryIn(), result.ResetIn())
-		if want, got := allow, result.Allow; want != got {
-			t.Fatalf("allow: want %t, got %t", want, got)
+		if valid != allow {
+			t.Fatalf("doesn't allow: %v", p)
 		}
 	}
 }
@@ -121,10 +111,7 @@ func TestGCRAPartial(t *testing.T) {
 
 	client := newClient(t)
 
-	rl := ratelimit.NewGCRA(client, &ratelimit.GCRAOption{
-		Limit:  5,
-		Period: 1 * time.Second,
-	})
+	rl := ratelimit.NewGCRA(client, 5, time.Second, 0)
 
 	key := t.Name()
 	periods := []time.Duration{
@@ -148,15 +135,13 @@ func TestGCRAPartial(t *testing.T) {
 			return now.Add(p)
 		}
 
-		allow := p.Milliseconds()%2 == 0
-		result, err := rl.Allow(ctx, key)
+		valid := p.Milliseconds()%2 == 0
+		allow, err := rl.Allow(ctx, key)
 		if err != nil {
 			t.Fatal(err)
 		}
-
-		t.Logf("%6s, allow: %t (%d/%d), retry_in: %s, reset_in: %s\n", now.Add(p).Sub(now), result.Allow, result.Remaining, result.Limit, result.RetryIn(), result.ResetIn())
-		if want, got := allow, result.Allow; want != got {
-			t.Fatalf("allow: want %t, got %t", want, got)
+		if valid != allow {
+			t.Fatalf("doesn't allow: %v", p)
 		}
 	}
 }
@@ -165,11 +150,7 @@ func TestGCRABurst(t *testing.T) {
 	ctx := context.Background()
 
 	client := newClient(t)
-	rl := ratelimit.NewGCRA(client, &ratelimit.GCRAOption{
-		Limit:  5,
-		Period: 1 * time.Second,
-		Burst:  1,
-	})
+	rl := ratelimit.NewGCRA(client, 5, time.Second, 1)
 
 	key := t.Name()
 	periods := []time.Duration{
@@ -209,15 +190,13 @@ func TestGCRABurst(t *testing.T) {
 			t.Log("deleted key")
 		}
 
-		allow := p.Milliseconds()%2 == 0
-		result, err := rl.Allow(ctx, key)
+		valid := p.Milliseconds()%2 == 0
+		allow, err := rl.Allow(ctx, key)
 		if err != nil {
 			t.Fatal(err)
 		}
-
-		t.Logf("%6s, allow: %t (%d/%d), retry_in: %s, reset_in: %s\n", now.Add(p).Sub(now), result.Allow, result.Remaining, result.Limit, result.RetryIn(), result.ResetIn())
-		if want, got := allow, result.Allow; want != got {
-			t.Fatalf("allow: want %t, got %t", want, got)
+		if valid != allow {
+			t.Fatalf("doesn't allow: %v", p)
 		}
 	}
 }
@@ -226,11 +205,7 @@ func TestGCRABurstPartial(t *testing.T) {
 	ctx := context.Background()
 
 	client := newClient(t)
-	rl := ratelimit.NewGCRA(client, &ratelimit.GCRAOption{
-		Limit:  5,
-		Period: 1 * time.Second,
-		Burst:  1,
-	})
+	rl := ratelimit.NewGCRA(client, 5, time.Second, 1)
 
 	key := t.Name()
 	periods := []time.Duration{
@@ -262,15 +237,13 @@ func TestGCRABurstPartial(t *testing.T) {
 			t.Log("deleted key")
 		}
 
-		allow := p.Milliseconds()%2 == 0
-		result, err := rl.Allow(ctx, key)
+		valid := p.Milliseconds()%2 == 0
+		allow, err := rl.Allow(ctx, key)
 		if err != nil {
 			t.Fatal(err)
 		}
-
-		t.Logf("%6s, allow: %t (%d/%d), retry_in: %s, reset_in: %s\n", now.Add(p).Sub(now), result.Allow, result.Remaining, result.Limit, result.RetryIn(), result.ResetIn())
-		if want, got := allow, result.Allow; want != got {
-			t.Fatalf("allow: want %t, got %t", want, got)
+		if valid != allow {
+			t.Fatalf("doesn't allow: %v", p)
 		}
 	}
 }
@@ -279,12 +252,7 @@ func TestGCRABurstTotal(t *testing.T) {
 	ctx := context.Background()
 
 	client := newClient(t)
-	rl := ratelimit.NewGCRA(client, &ratelimit.GCRAOption{
-		Limit:  5,
-		Period: 1 * time.Second,
-		Burst:  1,
-	})
-
+	rl := ratelimit.NewGCRA(client, 5, time.Second, 1)
 	key := t.Name()
 
 	now := time.Now().Truncate(time.Second)
@@ -295,11 +263,11 @@ func TestGCRABurstTotal(t *testing.T) {
 			return now.Add(p)
 		}
 
-		result, err := rl.Allow(ctx, key)
+		allow, err := rl.Allow(ctx, key)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if result.Allow {
+		if allow {
 			count++
 		}
 	}

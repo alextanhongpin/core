@@ -3,7 +3,6 @@ package ratelimit
 import (
 	"context"
 	_ "embed"
-	"math"
 	"time"
 
 	redis "github.com/redis/go-redis/v9"
@@ -14,62 +13,48 @@ var gcraScript string
 
 var gcra = redis.NewScript(gcraScript)
 
-type GCRAOption struct {
-	Burst  int
-	Limit  int
-	Period time.Duration
-}
-
 type GCRA struct {
 	Now    func() time.Time
+	burst  int
 	client *redis.Client
-	opt    *GCRAOption
+	limit  int
+	period int64
 }
 
-func NewGCRA(client *redis.Client, opt *GCRAOption) *GCRA {
+func NewGCRA(client *redis.Client, limit int, period time.Duration, burst int) *GCRA {
 	return &GCRA{
 		Now:    time.Now,
+		burst:  burst,
 		client: client,
-		opt:    opt,
+		limit:  limit,
+		period: period.Milliseconds(),
 	}
 }
 
-func (g *GCRA) Allow(ctx context.Context, key string) (*Result, error) {
+func (g *GCRA) Allow(ctx context.Context, key string) (bool, error) {
 	return g.AllowN(ctx, key, 1)
 }
 
-func (g *GCRA) AllowN(ctx context.Context, key string, n int) (*Result, error) {
-	period := g.opt.Period
-	limit := g.opt.Limit
-	burst := g.opt.Burst
-
-	interval := period / time.Duration(limit)
+func (g *GCRA) AllowN(ctx context.Context, key string, n int) (bool, error) {
+	burst := g.burst
+	limit := g.limit
 	now := g.Now()
+	period := g.period
+
+	interval := period / int64(limit)
 
 	keys := []string{key}
 	argv := []any{
 		burst,
-		interval.Milliseconds(),
-		limit,
+		interval,
 		now.UnixMilli(),
-		period.Milliseconds(),
+		period,
 		n,
 	}
-	res, err := gcra.Run(ctx, g.client, keys, argv...).Int64Slice()
+	ok, err := gcra.Run(ctx, g.client, keys, argv...).Int()
 	if err != nil {
-		return nil, err
+		return false, err
 	}
-	allow := res[0] == 1
-	ts := time.UnixMilli(res[1])
 
-	resetAt := now.Truncate(period).Add(period)
-	remaining := int64(math.Floor(float64(resetAt.Sub(now)) / float64(interval)))
-
-	return &Result{
-		Allow:     allow,
-		Limit:     int64(limit + burst),
-		Remaining: remaining,
-		ResetAt:   resetAt,
-		RetryAt:   ts,
-	}, nil
+	return ok == 1, nil
 }
