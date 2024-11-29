@@ -91,7 +91,7 @@ func (r *MultiFixedWindow) isExpired(key string, at time.Time) bool {
 	return r.state[key].last+r.period <= at.UnixNano()
 }
 
-func (r *MultiFixedWindow) clear() {
+func (r *MultiFixedWindow) Clear() {
 	r.mu.Lock()
 	now := r.Now().UnixNano()
 	for k, v := range r.state {

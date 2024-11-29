@@ -97,3 +97,14 @@ func (r *MultiSlidingWindow) add(key string, n int) {
 	s.curr += n
 	r.state[key] = s
 }
+
+func (r *MultiSlidingWindow) Clear() {
+	r.mu.Lock()
+	now := r.Now().UnixNano()
+	for k, v := range r.state {
+		if v.window+r.period <= now {
+			delete(r.state, k)
+		}
+	}
+	r.mu.Unlock()
+}

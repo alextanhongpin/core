@@ -11,8 +11,9 @@ type MultiGCRA struct {
 	state map[string]int64
 
 	// Option.
-	offset   int64
 	interval int64
+	offset   int64
+	period   int64
 	Now      func() time.Time
 }
 
@@ -22,8 +23,9 @@ func NewMultiGCRA(limit int, period time.Duration, burst int) *MultiGCRA {
 	return &MultiGCRA{
 		// NOTE: The burst is only applied once.
 		state:    make(map[string]int64),
-		offset:   interval * int64(burst),
 		interval: interval,
+		offset:   interval * int64(burst),
+		period:   period.Nanoseconds(),
 		Now:      time.Now,
 	}
 }
@@ -57,4 +59,15 @@ func (r *MultiGCRA) RetryAt(key string) time.Time {
 	}
 
 	return time.Unix(0, r.state[key]+r.interval)
+}
+
+func (r *MultiGCRA) Clear() {
+	r.mu.Lock()
+	now := r.Now().UnixNano()
+	for k, v := range r.state {
+		if v+r.period <= now {
+			delete(r.state, k)
+		}
+	}
+	r.mu.Unlock()
 }

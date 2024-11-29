@@ -12,6 +12,7 @@ func TestRateLimiter(t *testing.T) {
 		&throttler{ratelimit.NewFixedWindow(3, time.Second)}, // Max 3 request in one second.
 		ratelimit.NewGCRA(10, time.Second, 0),                // 10 request per second, means 1 req every 100ms.
 	)
+
 	var count int
 	for range 10 {
 		time.Sleep(100 * time.Millisecond)
