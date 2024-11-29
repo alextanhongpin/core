@@ -14,7 +14,7 @@ type fixedWindowState struct {
 type MultiFixedWindow struct {
 	// State.
 	mu    sync.RWMutex
-	state map[string]*fixedWindowState
+	state map[string]fixedWindowState
 	// Options.
 	limit  int
 	period int64
@@ -25,7 +25,7 @@ func NewMultiFixedWindow(limit int, period time.Duration) *MultiFixedWindow {
 	return &MultiFixedWindow{
 		limit:  limit,
 		period: period.Nanoseconds(),
-		state:  make(map[string]*fixedWindowState),
+		state:  make(map[string]fixedWindowState),
 		Now:    time.Now,
 	}
 }
@@ -42,8 +42,11 @@ func (r *MultiFixedWindow) AllowN(key string, n int) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if r.remaining(key) >= n {
-		r.add(key, n)
+	s := r.snapshot(r.Now(), key)
+	if r.limit-s.count >= n {
+		s.count += n
+		r.state[key] = s
+
 		return true
 	}
 
@@ -52,56 +55,34 @@ func (r *MultiFixedWindow) AllowN(key string, n int) bool {
 
 func (r *MultiFixedWindow) Remaining(key string) int {
 	r.mu.RLock()
-	n := r.remaining(key)
+	s := r.snapshot(r.Now(), key)
 	r.mu.RUnlock()
 
-	return n
+	return r.limit - s.count
 }
 
 func (r *MultiFixedWindow) RetryAt(key string) time.Time {
-	if r.Remaining(key) > 0 {
-		return r.Now()
-	}
+	now := r.Now()
 
 	r.mu.RLock()
-	v, ok := r.state[key]
-	if !ok {
-		r.mu.RUnlock()
-
-		return r.Now()
-	}
-	nsec := v.last + r.period
+	s := r.snapshot(now, key)
 	r.mu.RUnlock()
 
+	if r.limit > s.count {
+		return now
+	}
+
+	nsec := s.last + r.period
 	return time.Unix(0, nsec)
 }
 
-func (r *MultiFixedWindow) remaining(key string) int {
-	v, ok := r.state[key]
-	if !ok {
-		return r.limit
+func (r *MultiFixedWindow) snapshot(at time.Time, key string) fixedWindowState {
+	now := at.UnixNano()
+
+	s := r.state[key]
+	if s.last+r.period <= now {
+		return fixedWindowState{last: now}
 	}
 
-	now := r.Now().UnixNano()
-	if v.last+r.period <= now {
-		return r.limit
-	}
-
-	return r.limit - v.count
-}
-
-func (r *MultiFixedWindow) add(key string, n int) {
-	v, ok := r.state[key]
-	if !ok {
-		v = new(fixedWindowState)
-		r.state[key] = v
-	}
-
-	now := r.Now().UnixNano()
-	if v.last+r.period <= now {
-		v.count = 0
-		v.last = now
-	}
-
-	v.count += n
+	return s
 }
