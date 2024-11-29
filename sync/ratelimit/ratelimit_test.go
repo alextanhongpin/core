@@ -29,9 +29,9 @@ type throttler struct {
 }
 
 func (t *throttler) Allow() bool {
-	return t.rl.Allow().Allow
+	return t.rl.Allow()
 }
 
 func (t *throttler) AllowN(n int) bool {
-	return t.rl.AllowN(n).Allow
+	return t.rl.AllowN(n)
 }

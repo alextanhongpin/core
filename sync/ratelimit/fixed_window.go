@@ -8,73 +8,79 @@ import (
 // FixedWindow acts as a counter for a given time period.
 type FixedWindow struct {
 	// State.
-	mu      sync.Mutex
-	count   int64
-	resetAt int64
+	mu    sync.RWMutex
+	count int
+	last  int64
 
 	// Options.
-	limit  int64
-	window int64
+	limit  int
+	period int64
 	Now    func() time.Time
 }
 
-func NewFixedWindow(limit int64, period time.Duration) *FixedWindow {
+func NewFixedWindow(limit int, period time.Duration) *FixedWindow {
 	return &FixedWindow{
 		limit:  limit,
-		window: period.Nanoseconds(),
+		period: period.Nanoseconds(),
 		Now:    time.Now,
 	}
 }
 
-// AllowAt allows performing a dry-run to check if the ratelimiter is allowed
-// at the given time without consuming a token.
-func (rl *FixedWindow) AllowAt(t time.Time, n int64) bool {
-	rl.mu.Lock()
-	defer rl.mu.Unlock()
-
-	limit := rl.limit
-	count := rl.count
-
-	if rl.resetAt <= t.UnixNano() {
-		count = 0
-	}
-
-	return count+n <= limit
+// Allow checks if a request is allowed. Special case of AllowN that consumes
+// only 1 token.
+func (r *FixedWindow) Allow() bool {
+	return r.AllowN(1)
 }
 
 // AllowN checks if a request is allowed. Consumes n token
 // if allowed.
-func (rl *FixedWindow) AllowN(i int) *Result {
-	rl.mu.Lock()
-	defer rl.mu.Unlock()
+func (r *FixedWindow) AllowN(n int) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 
-	n := int64(i)
-
-	now := rl.Now().UnixNano()
-	if rl.resetAt <= now {
-		rl.count = 0
-		rl.resetAt = now + rl.window
+	if r.remaining() >= n {
+		r.add(n)
+		return true
 	}
 
-	res := &Result{
-		Limit: rl.limit,
-		Allow: rl.count+n <= rl.limit,
-	}
-	if res.Allow {
-		rl.count += n
-
-		res.Remaining = rl.limit - rl.count
-	}
-
-	if res.Remaining == 0 {
-		res.RetryAfter = time.Duration(rl.resetAt - now)
-	}
-
-	return res
+	return false
 }
 
-// Allow checks if a request is allowed. Special case of AllowN that consumes
-// only 1 token.
-func (rl *FixedWindow) Allow() *Result {
-	return rl.AllowN(1)
+func (r *FixedWindow) Remaining() int {
+	r.mu.RLock()
+	n := r.remaining()
+	r.mu.RUnlock()
+
+	return n
+}
+
+func (r *FixedWindow) RetryAt() time.Time {
+	if r.Remaining() > 0 {
+		return r.Now()
+	}
+
+	r.mu.RLock()
+	nsec := r.last + r.period
+	r.mu.RUnlock()
+
+	return time.Unix(0, nsec)
+}
+
+func (r *FixedWindow) remaining() int {
+	now := r.Now().UnixNano()
+	if r.last+r.period <= now {
+		return r.limit
+	}
+
+	return r.limit - r.count
+}
+
+func (r *FixedWindow) add(n int) {
+	now := r.Now().UnixNano()
+
+	if r.last+r.period <= now {
+		r.count = 0
+		r.last = now
+	}
+	r.count += n
 }

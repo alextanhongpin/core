@@ -2,6 +2,7 @@ package ratelimit_test
 
 import (
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/alextanhongpin/core/sync/ratelimit"
@@ -10,7 +11,6 @@ import (
 func ExampleFixedWindow() {
 	rl := ratelimit.NewFixedWindow(5, time.Second)
 
-	now := time.Now()
 	periods := []time.Duration{
 		0,
 		1 * time.Millisecond,
@@ -25,19 +25,19 @@ func ExampleFixedWindow() {
 		1001 * time.Millisecond,
 	}
 
+	now := time.Now()
 	for _, p := range periods {
 		rl.Now = func() time.Time {
 			return now.Add(p)
 		}
-		allow := p.Milliseconds() < 5 || p >= 1000*time.Millisecond
+		valid := p < 5*time.Millisecond || p >= 1000*time.Millisecond
+		allow := rl.Allow()
 
-		dryRun := rl.AllowAt(now.Add(p), 1)
-		result := rl.Allow()
-		if result.Allow != allow || result.Allow != dryRun {
-			panic("doesn't allow")
+		if allow != valid {
+			log.Fatalf("unexpected allow: %v, %v, %s", allow, valid, p)
 		}
 
-		fmt.Println(now.Add(p).Sub(now), result.Allow, result.Remaining)
+		fmt.Println(now.Add(p).Sub(now), allow, rl.Remaining())
 	}
 	// Output:
 	// 0s true 4
