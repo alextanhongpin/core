@@ -53,13 +53,13 @@ func TestErrors(t *testing.T) {
 				return now.Add(d)
 			})
 
-			r.AddSuccess(success)
-			r.AddFailure(failure)
+			r.Success().Add(success)
+			r.Failure().Add(failure)
 
 			is := assert.New(t)
-			is.Equal(want, r.Result().ErrorRate())
-			is.Equal(success, r.Result().Success, "success")
-			is.Equal(failure, r.Result().Failure, "failure")
+			is.Equal(want, r.Rate().Ratio())
+			is.Equal(success, r.Rate().Success(), "success")
+			is.Equal(failure, r.Rate().Failure(), "failure")
 		})
 	}
 
@@ -70,12 +70,12 @@ func TestErrors(t *testing.T) {
 
 func TestResetErrors(t *testing.T) {
 	ps := rate.NewErrors(time.Second)
-	ps.IncSuccess()
-	ps.IncFailure()
+	ps.Success().Inc()
+	ps.Failure().Inc()
 	ps.Reset()
 
 	is := assert.New(t)
-	is.Equal(0.0, ps.Result().ErrorRate())
-	is.Equal(0.0, ps.Result().Success)
-	is.Equal(0.0, ps.Result().Failure)
+	is.Equal(0.0, ps.Rate().Ratio())
+	is.Equal(0.0, ps.Rate().Success())
+	is.Equal(0.0, ps.Rate().Failure())
 }

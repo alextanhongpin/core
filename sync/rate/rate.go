@@ -5,6 +5,14 @@ import (
 	"time"
 )
 
+type counter interface {
+	Add(float64) float64
+	Inc() float64
+	Count() float64
+}
+
+var _ counter = (*Rate)(nil)
+
 type Rate struct {
 	Now    func() time.Time
 	count  float64
