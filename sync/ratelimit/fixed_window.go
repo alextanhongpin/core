@@ -77,10 +77,10 @@ func (r *FixedWindow) remaining() int {
 
 func (r *FixedWindow) add(n int) {
 	now := r.Now().UnixNano()
-
 	if r.last+r.period <= now {
 		r.count = 0
 		r.last = now
 	}
+
 	r.count += n
 }

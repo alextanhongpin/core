@@ -8,19 +8,19 @@ import (
 
 type SlidingWindow struct {
 	// State.
-	mu     sync.Mutex
-	prev   int64
-	curr   int64
+	mu     sync.RWMutex
+	prev   int
+	curr   int
 	window int64
 
 	// Options.
-	limit  int64
+	limit  int
 	period int64
 
 	Now func() time.Time
 }
 
-func NewSlidingWindow(limit int64, period time.Duration) *SlidingWindow {
+func NewSlidingWindow(limit int, period time.Duration) *SlidingWindow {
 	return &SlidingWindow{
 		limit:  limit,
 		period: period.Nanoseconds(),
@@ -28,45 +28,63 @@ func NewSlidingWindow(limit int64, period time.Duration) *SlidingWindow {
 	}
 }
 
-func (rl *SlidingWindow) Allow() *Result {
-	return rl.AllowN(1)
+func (r *SlidingWindow) Allow() bool {
+	return r.AllowN(1)
 }
 
-func (rl *SlidingWindow) AllowN(n int64) *Result {
-	rl.mu.Lock()
-	defer rl.mu.Unlock()
+func (r *SlidingWindow) AllowN(n int) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 
-	now := int64(rl.Now().Nanosecond())
-	curr := now / rl.period * rl.period
-	prev := curr - rl.period
+	if r.remaining() >= n {
+		r.add(n)
 
-	if rl.window == prev {
-		rl.prev = rl.curr
-		rl.curr = 0
-		rl.window = curr
-	} else if rl.window != curr {
-		rl.prev = 0
-		rl.curr = 0
-		rl.window = curr
+		return true
 	}
 
-	ratio := float64(now-curr) / float64(rl.period)
-	count := int64(math.Round((1-ratio)*float64(rl.prev) + float64(rl.curr)))
+	return false
+}
 
-	res := &Result{
-		Allow: count+n <= rl.limit,
-		Limit: rl.limit,
+func (r *SlidingWindow) Remaining() int {
+	r.mu.RLock()
+	n := r.remaining()
+	r.mu.RUnlock()
+
+	return n
+}
+
+func (r *SlidingWindow) remaining() int {
+	now := r.Now().UnixNano()
+	window := now - now%r.period
+
+	prev := r.prev
+	curr := r.curr
+	if r.window == window-r.period {
+		prev = r.curr
+		curr = 0
+	} else if r.window != window {
+		prev = 0
+		curr = 0
 	}
 
-	if res.Allow {
-		rl.curr += n
+	ratio := 1 - float64(now-window)/float64(r.period)
 
-		res.Remaining = rl.limit - count - n
+	return r.limit - (int(math.Ceil(ratio*float64(prev))) + curr)
+}
+
+func (r *SlidingWindow) add(n int) {
+	now := r.Now().UnixNano()
+	window := now - now%r.period
+
+	if r.window == window-r.period {
+		r.prev = r.curr
+		r.curr = 0
+		r.window = window
+	} else if r.window != window {
+		r.prev = 0
+		r.curr = 0
+		r.window = window
 	}
 
-	if res.Remaining == 0 {
-		res.RetryAfter = time.Duration(now + rl.period)
-	}
-
-	return res
+	r.curr += n
 }
