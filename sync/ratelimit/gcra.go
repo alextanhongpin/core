@@ -55,5 +55,5 @@ func (r *GCRA) RetryAt() time.Time {
 		return now
 	}
 
-	return time.Unix(0, now.UnixNano()+r.interval)
+	return time.Unix(0, r.last+r.interval)
 }

@@ -101,3 +101,10 @@ func (r *MultiFixedWindow) Clear() {
 	}
 	r.mu.Unlock()
 }
+
+func (r *MultiFixedWindow) Size() int {
+	r.mu.RLock()
+	n := len(r.state)
+	r.mu.RUnlock()
+	return n
+}

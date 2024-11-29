@@ -60,17 +60,23 @@ func (r *MultiSlidingWindow) Remaining(key string) int {
 
 func (r *MultiSlidingWindow) remaining(key string) int {
 	now := r.Now().UnixNano()
-	window := now - now%r.period
 
 	s := r.state[key]
 	prev := s.prev
 	curr := s.curr
-	if s.window == window-r.period {
+	window := s.window
+
+	if window+r.period > now {
+		// In current window
+	} else if window+2*r.period > now {
+		// In previous window
 		prev = s.curr
 		curr = 0
-	} else if s.window != window {
+		window += r.period
+	} else {
 		prev = 0
 		curr = 0
+		window = now
 	}
 
 	ratio := 1 - float64(now-window)/float64(r.period)
@@ -80,18 +86,18 @@ func (r *MultiSlidingWindow) remaining(key string) int {
 
 func (r *MultiSlidingWindow) add(key string, n int) {
 	now := r.Now().UnixNano()
-	window := now - now%r.period
-
 	s := r.state[key]
-
-	if s.window == window-r.period {
+	if s.window+r.period > now {
+		// In current window
+	} else if s.window+2*r.period > now {
+		// In previous window
 		s.prev = s.curr
 		s.curr = 0
-		s.window = window
-	} else if s.window != window {
+		s.window += r.period
+	} else {
 		s.prev = 0
 		s.curr = 0
-		s.window = window
+		s.window = now
 	}
 
 	s.curr += n
@@ -107,4 +113,11 @@ func (r *MultiSlidingWindow) Clear() {
 		}
 	}
 	r.mu.Unlock()
+}
+
+func (r *MultiSlidingWindow) Size() int {
+	r.mu.RLock()
+	n := len(r.state)
+	r.mu.RUnlock()
+	return n
 }

@@ -38,13 +38,8 @@ func (r *FixedWindow) AllowN(n int) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	now := r.Now()
-	if r.isExpired(now) {
-		r.count = 0
-		r.last = now.UnixNano()
-	}
-
-	if r.limit-r.count >= n {
+	r.clear(r.Now())
+	if r.remaining() >= n {
 		r.count += n
 
 		return true
@@ -57,11 +52,11 @@ func (r *FixedWindow) Remaining() int {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	if r.isExpired(r.Now()) {
+	if r.expired(r.Now()) {
 		return r.limit
 	}
 
-	return r.limit - r.count
+	return r.remaining()
 }
 
 func (r *FixedWindow) RetryAt() time.Time {
@@ -69,11 +64,11 @@ func (r *FixedWindow) RetryAt() time.Time {
 	defer r.mu.RUnlock()
 
 	now := r.Now()
-	if r.isExpired(now) {
+	if r.expired(now) {
 		return now
 	}
 
-	if r.limit-r.count > 0 {
+	if r.remaining() > 0 {
 		return now
 	}
 
@@ -81,6 +76,17 @@ func (r *FixedWindow) RetryAt() time.Time {
 	return time.Unix(0, nsec)
 }
 
-func (r *FixedWindow) isExpired(at time.Time) bool {
+func (r *FixedWindow) remaining() int {
+	return r.limit - r.count
+}
+
+func (r *FixedWindow) expired(at time.Time) bool {
 	return r.last+r.period <= at.UnixNano()
+}
+
+func (r *FixedWindow) clear(at time.Time) {
+	if r.expired(at) {
+		r.count = 0
+		r.last = at.UnixNano()
+	}
 }

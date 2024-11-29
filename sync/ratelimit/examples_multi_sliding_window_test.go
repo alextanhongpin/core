@@ -11,9 +11,7 @@ import (
 )
 
 func ExampleMultiSlidingWindow() {
-	// We need to truncate the time to the nearest second, as the sliding window
-	// is based on the window.
-	now := time.Now().Truncate(time.Second)
+	now := time.Now()
 
 	rl := ratelimit.NewMultiSlidingWindow(5, time.Second)
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 1, ' ', tabwriter.AlignRight|tabwriter.Debug)

@@ -71,3 +71,10 @@ func (r *MultiGCRA) Clear() {
 	}
 	r.mu.Unlock()
 }
+
+func (r *MultiGCRA) Size() int {
+	r.mu.RLock()
+	n := len(r.state)
+	r.mu.RUnlock()
+	return n
+}

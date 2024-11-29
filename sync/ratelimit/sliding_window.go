@@ -55,16 +55,22 @@ func (r *SlidingWindow) Remaining() int {
 
 func (r *SlidingWindow) remaining() int {
 	now := r.Now().UnixNano()
-	window := now - now%r.period
 
 	prev := r.prev
 	curr := r.curr
-	if r.window == window-r.period {
+	window := r.window
+
+	if window+r.period > now {
+		// In current window
+	} else if window+2*r.period > now {
+		// In previous window
 		prev = r.curr
 		curr = 0
-	} else if r.window != window {
+		window += r.period
+	} else {
 		prev = 0
 		curr = 0
+		window = now
 	}
 
 	ratio := 1 - float64(now-window)/float64(r.period)
@@ -74,16 +80,17 @@ func (r *SlidingWindow) remaining() int {
 
 func (r *SlidingWindow) add(n int) {
 	now := r.Now().UnixNano()
-	window := now - now%r.period
-
-	if r.window == window-r.period {
+	if r.window+r.period > now {
+		// In current window
+	} else if r.window+2*r.period > now {
+		// In previous window
 		r.prev = r.curr
 		r.curr = 0
-		r.window = window
-	} else if r.window != window {
+		r.window += r.period
+	} else {
 		r.prev = 0
 		r.curr = 0
-		r.window = window
+		r.window = now
 	}
 
 	r.curr += n
