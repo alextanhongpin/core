@@ -31,11 +31,11 @@ func (e *Errors) SetNow(now func() time.Time) {
 }
 
 func (e *Errors) Success() counter {
-	return &successTx{e: e}
+	return e.success
 }
 
 func (e *Errors) Failure() counter {
-	return &failureTx{e: e}
+	return e.failure
 }
 
 func (e *Errors) Rate() *ErrorRate {
@@ -75,46 +75,4 @@ func (r *ErrorRate) Ratio() float64 {
 	}
 
 	return num / den
-}
-
-type successTx struct {
-	e *Errors
-}
-
-func (r *successTx) Add(f float64) float64 {
-	r.e.mu.Lock()
-	success := r.e.success.add(f)
-	_ = r.e.failure.add(0)
-	r.e.mu.Unlock()
-
-	return success
-}
-
-func (r *successTx) Inc() float64 {
-	return r.Add(1)
-}
-
-func (r *successTx) Count() float64 {
-	return r.Add(0)
-}
-
-type failureTx struct {
-	e *Errors
-}
-
-func (r *failureTx) Add(f float64) float64 {
-	r.e.mu.Lock()
-	failure := r.e.failure.add(f)
-	_ = r.e.success.add(0)
-	r.e.mu.Unlock()
-
-	return failure
-}
-
-func (r *failureTx) Inc() float64 {
-	return r.Add(1)
-}
-
-func (r *failureTx) Count() float64 {
-	return r.Add(0)
 }

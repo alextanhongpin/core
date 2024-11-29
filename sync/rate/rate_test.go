@@ -8,6 +8,10 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+func ExampleRate() {
+	// Output:
+}
+
 func TestRate(t *testing.T) {
 	now := time.Now()
 	period := 5 * time.Second
