@@ -23,9 +23,9 @@ func TestLimit(t *testing.T) {
 		is.ErrorIs(limit.Do(func() error {
 			return nil
 		}), rate.ErrLimitExceeded)
-		is.Equal(3, limit.FailureCount())
-		is.Equal(0, limit.SuccessCount())
-		is.Equal(3, limit.TotalCount())
+		is.Equal(3, limit.Failure())
+		is.Equal(0, limit.Success())
+		is.Equal(3, limit.Total())
 	})
 
 	t.Run("two consecutive errors, one success, two consecutive errors", func(t *testing.T) {
@@ -51,9 +51,9 @@ func TestLimit(t *testing.T) {
 			return nil
 		}), rate.ErrLimitExceeded)
 
-		is.Equal(4, limit.FailureCount())
-		is.Equal(1, limit.SuccessCount())
-		is.Equal(5, limit.TotalCount())
+		is.Equal(4, limit.Failure())
+		is.Equal(1, limit.Success())
+		is.Equal(5, limit.Total())
 	})
 
 	t.Run("two consecutive errors, three successes, three consecutive errors", func(t *testing.T) {
@@ -81,8 +81,8 @@ func TestLimit(t *testing.T) {
 			return nil
 		}), rate.ErrLimitExceeded)
 
-		is.Equal(5, limit.FailureCount())
-		is.Equal(3, limit.SuccessCount())
-		is.Equal(8, limit.TotalCount())
+		is.Equal(5, limit.Failure())
+		is.Equal(3, limit.Success())
+		is.Equal(8, limit.Total())
 	})
 }
