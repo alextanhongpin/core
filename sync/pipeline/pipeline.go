@@ -3,7 +3,6 @@ package pipeline
 import (
 	"context"
 	"fmt"
-	"math"
 	"sync"
 	"time"
 
@@ -110,21 +109,20 @@ func PassThrough[T any](in chan T, fn func(T)) <-chan T {
 }
 
 type ThroughputInfo struct {
+	ErrorRate     float64
+	Rate          float64
 	Total         int
 	TotalFailures int
-	Rate          int64
-	ErrorRate     float64
 }
 
 func (t ThroughputInfo) String() string {
-	return fmt.Sprintf("total: %d, errors: %d (%.0f%%), rate: %d req/s", t.Total, t.TotalFailures, t.ErrorRate*100, t.Rate)
+	return fmt.Sprintf("total: %d, errors: %d (%.0f%%), rate: %.2f req/s", t.Total, t.TotalFailures, t.ErrorRate*100, t.Rate)
 }
 
 func Throughput[T any](in <-chan Result[T], fn func(ThroughputInfo)) <-chan Result[T] {
 	out := make(chan Result[T])
 
 	var total, totalFailures int
-	r := rate.NewRate(time.Second)
 	er := rate.NewErrors(time.Second)
 
 	go func() {
@@ -134,17 +132,18 @@ func Throughput[T any](in <-chan Result[T], fn func(ThroughputInfo)) <-chan Resu
 			_, err := v.Unwrap()
 			if err != nil {
 				totalFailures++
-				er.Inc(-1)
+				er.Failure().Inc()
 			} else {
-				er.Inc(1)
+				er.Success().Inc()
 			}
 			total++
-			r.Inc(1)
+
+			r := er.Rate()
 			fn(ThroughputInfo{
-				Rate:          int64(math.Ceil(r.Throughput())),
+				ErrorRate:     r.Ratio(),
+				Rate:          r.Total(),
 				Total:         total,
 				TotalFailures: totalFailures,
-				ErrorRate:     er.Rate(),
 			})
 			out <- v
 		}
@@ -155,11 +154,11 @@ func Throughput[T any](in <-chan Result[T], fn func(ThroughputInfo)) <-chan Resu
 
 type RateInfo struct {
 	Total int
-	Rate  int64
+	Rate  float64
 }
 
 func (r RateInfo) String() string {
-	return fmt.Sprintf("total: %d, throughput: %d req/s", r.Total, r.Rate)
+	return fmt.Sprintf("total: %d, rate: %.2f req/s", r.Total, r.Rate)
 }
 
 func Rate[T any](in <-chan T, fn func(RateInfo)) <-chan T {
@@ -173,10 +172,10 @@ func Rate[T any](in <-chan T, fn func(RateInfo)) <-chan T {
 
 		for v := range in {
 			total++
-			r.Inc(1)
+			r.Inc()
 			fn(RateInfo{
 				Total: total,
-				Rate:  int64(math.Ceil(r.Throughput())),
+				Rate:  r.Count(),
 			})
 			out <- v
 		}
@@ -301,7 +300,7 @@ func Semaphore[T, V any](n int, in <-chan T, fn func(T) V) <-chan V {
 		defer close(out)
 
 		for v := range in {
-			sem.Acquire(ctx, 1)
+			_ = sem.Acquire(ctx, 1)
 
 			go func() {
 				defer sem.Release(1)
@@ -309,7 +308,7 @@ func Semaphore[T, V any](n int, in <-chan T, fn func(T) V) <-chan V {
 				out <- fn(v)
 			}()
 		}
-		sem.Acquire(ctx, int64(n))
+		_ = sem.Acquire(ctx, int64(n))
 	}()
 
 	return out
@@ -335,7 +334,7 @@ func Every[T any](tick time.Duration, in <-chan T) <-chan T {
 
 // Resilience.
 func RateLimit[T any](request int, period time.Duration, in <-chan T) <-chan T {
-	return Every[T](period/time.Duration(request), in)
+	return Every(period/time.Duration(request), in)
 }
 
 func Tee[T any](in chan T) (out1, out2 chan T) {

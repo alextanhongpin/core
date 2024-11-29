@@ -9,57 +9,60 @@ var ErrLimitExceeded = errors.New("rate: limit exceeded")
 
 type Limiter struct {
 	mu           sync.RWMutex
-	limit        int
-	totalCount   float64
-	successCount int
-	failureCount int
+	limit        float64
+	total        float64
+	success      int
+	failure      int
+	FailureToken float64
+	SuccessToken float64
 }
 
-func NewLimiter(limit int) *Limiter {
+func NewLimiter(limit float64) *Limiter {
 	return &Limiter{
-		limit:      limit,
-		totalCount: float64(limit),
+		limit:        limit,
+		SuccessToken: 0.5,
+		FailureToken: 1.0,
 	}
 }
 
-func (l *Limiter) SuccessCount() int {
+func (l *Limiter) Success() int {
 	l.mu.RLock()
-	n := l.successCount
+	n := l.success
 	l.mu.RUnlock()
 	return n
 }
 
-func (l *Limiter) TotalCount() int {
+func (l *Limiter) Total() int {
 	l.mu.RLock()
-	n := l.failureCount + l.successCount
+	n := l.failure + l.success
 	l.mu.RUnlock()
 	return n
 }
 
-func (l *Limiter) FailureCount() int {
+func (l *Limiter) Failure() int {
 	l.mu.RLock()
-	n := l.failureCount
+	n := l.failure
 	l.mu.RUnlock()
 	return n
 }
 
 func (l *Limiter) Err() {
 	l.mu.Lock()
-	l.totalCount = max(l.totalCount-1.0, 0)
-	l.failureCount++
+	l.total = min(l.total+l.FailureToken, l.limit)
+	l.failure++
 	l.mu.Unlock()
 }
 
 func (l *Limiter) Ok() {
 	l.mu.Lock()
-	l.totalCount = min(l.totalCount+0.5, float64(l.limit))
-	l.successCount++
+	l.total = max(l.total-l.SuccessToken, 0)
+	l.success++
 	l.mu.Unlock()
 }
 
 func (l *Limiter) Allow() bool {
 	l.mu.RLock()
-	ok := l.totalCount > 0
+	ok := l.total < l.limit
 	l.mu.RUnlock()
 	return ok
 }

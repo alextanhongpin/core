@@ -25,43 +25,51 @@ func (e *Errors) Reset() {
 	e.mu.Unlock()
 }
 
-func (e *Errors) Fail() float64 {
-	return ErrorRate(e.Inc(-1))
-}
-
-func (e *Errors) OK() float64 {
-	return ErrorRate(e.Inc(1))
-}
-
-func (e *Errors) Inc(n int64) (sucesses, failures float64) {
-	var s, f int64
-	switch {
-	case n < 0:
-		f = -n
-	case n > 0:
-		s = n
-	}
-
-	e.mu.Lock()
-	failures = e.failure.inc(f)
-	sucesses = e.success.inc(s)
-	e.mu.Unlock()
-
-	return
-}
-
 func (e *Errors) SetNow(now func() time.Time) {
 	e.success.Now = now
 	e.failure.Now = now
 }
 
-func (e *Errors) Rate() float64 {
-	return ErrorRate(e.Inc(0))
+func (e *Errors) Success() counter {
+	return e.success
 }
 
-func ErrorRate(successes, failures float64) float64 {
-	num := failures
-	den := failures + successes
+func (e *Errors) Failure() counter {
+	return e.failure
+}
+
+func (e *Errors) Rate() *ErrorRate {
+	e.mu.Lock()
+	success := e.success.add(0)
+	failure := e.failure.add(0)
+	e.mu.Unlock()
+
+	return &ErrorRate{
+		success: success,
+		failure: failure,
+	}
+}
+
+type ErrorRate struct {
+	failure float64
+	success float64
+}
+
+func (r *ErrorRate) Success() float64 {
+	return r.success
+}
+
+func (r *ErrorRate) Failure() float64 {
+	return r.failure
+}
+
+func (r *ErrorRate) Total() float64 {
+	return r.failure + r.success
+}
+
+func (r *ErrorRate) Ratio() float64 {
+	num := r.failure
+	den := r.failure + r.success
 	if den <= 0 {
 		return 0
 	}
