@@ -65,11 +65,6 @@ var (
 	ErrForcedOpen  = errors.New("circuit-breaker: forced open")
 )
 
-type counter interface {
-	Inc(successOrFailure int64) (successes, failures float64)
-	Reset()
-}
-
 type CircuitBreaker struct {
 	mu sync.RWMutex
 
@@ -89,7 +84,7 @@ type CircuitBreaker struct {
 	SuccessThreshold  int
 
 	// Dependencies.
-	Counter counter
+	Counter *rate.Errors
 	channel string
 	client  *redis.Client
 }
@@ -198,7 +193,8 @@ func (b *CircuitBreaker) canOpen(n int) bool {
 		return false
 	}
 
-	return b.isUnhealthy(b.Counter.Inc(-int64(n)))
+	res := b.Counter.AddFailure(float64(n))
+	return b.isUnhealthy(res.Success, res.Failure)
 }
 
 func (b *CircuitBreaker) open() {
@@ -256,7 +252,8 @@ func (b *CircuitBreaker) halfOpened(ctx context.Context, fn func() error) error 
 }
 
 func (b *CircuitBreaker) canClose() bool {
-	return b.isHealthy(b.Counter.Inc(1))
+	res := b.Counter.IncSuccess()
+	return b.isHealthy(res.Success, res.Failure)
 }
 
 func (b *CircuitBreaker) close() {
@@ -311,7 +308,7 @@ func (b *CircuitBreaker) closed(ctx context.Context, fn func() error) error {
 		return b.publish(ctx, Open)
 	}
 
-	b.Counter.Inc(1)
+	b.Counter.IncSuccess()
 
 	return nil
 }

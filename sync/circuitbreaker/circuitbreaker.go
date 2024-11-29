@@ -13,7 +13,7 @@ import (
 const (
 	breakDuration    = 5 * time.Second
 	failureRatio     = 0.5              // at least 50% of the requests fails.
-	failureThreshold = 10               // min 10 failures before the circuit breaker becomes open.
+	failureThreshold = 10               // min 10 failure before the circuit breaker becomes open.
 	samplingDuration = 10 * time.Second // time window to measure the error rate.
 	successThreshold = 5                // min 5 successThreshold before the circuit breaker becomes closed.
 )
@@ -38,15 +38,10 @@ func (s Status) String() string {
 	return statusText[s]
 }
 
-type counter interface {
-	Inc(successOrFailure int64) (successes, failures float64)
-	Reset()
-}
-
 type Breaker struct {
 	// Configuration.
 	BreakDuration    time.Duration
-	Counter          counter
+	Counter          *rate.Errors
 	FailureCount     func(error) int
 	FailureRatio     float64
 	FailureThreshold int
@@ -114,7 +109,8 @@ func (b *Breaker) canOpen(n int) bool {
 		return false
 	}
 
-	return b.isUnhealthy(b.Counter.Inc(-int64(n)))
+	res := b.Counter.AddFailure(float64(n))
+	return b.isUnhealthy(res.Success, res.Failure)
 }
 
 func (b *Breaker) open() {
@@ -135,7 +131,8 @@ func (b *Breaker) opened() error {
 }
 
 func (b *Breaker) canClose() bool {
-	return b.isHealthy(b.Counter.Inc(1))
+	res := b.Counter.IncSuccess()
+	return b.isHealthy(res.Success, res.Failure)
 }
 
 func (b *Breaker) close() {
@@ -164,7 +161,7 @@ func (b *Breaker) closed(fn func() error) error {
 		return nil
 	}
 
-	b.Counter.Inc(1)
+	b.Counter.IncSuccess()
 
 	return nil
 }
@@ -198,20 +195,20 @@ func (b *Breaker) halfOpened(fn func() error) error {
 	return nil
 }
 
-func (b *Breaker) isHealthy(successes, _ float64) bool {
-	return math.Ceil(successes) >= float64(b.SuccessThreshold)
+func (b *Breaker) isHealthy(success, _ float64) bool {
+	return math.Ceil(success) >= float64(b.SuccessThreshold)
 }
 
-func (b *Breaker) isUnhealthy(successes, failures float64) bool {
-	isFailureRatioExceeded := failureRate(successes, failures) >= b.FailureRatio
-	isFailureThresholdExceeded := math.Ceil(failures) >= float64(b.FailureThreshold)
+func (b *Breaker) isUnhealthy(success, failure float64) bool {
+	isFailureRatioExceeded := failureRate(success, failure) >= b.FailureRatio
+	isFailureThresholdExceeded := math.Ceil(failure) >= float64(b.FailureThreshold)
 
 	return isFailureRatioExceeded && isFailureThresholdExceeded
 }
 
-func failureRate(successes, failures float64) float64 {
-	num := failures
-	den := failures + successes
+func failureRate(success, failure float64) float64 {
+	num := failure
+	den := failure + success
 	if den <= 0 {
 		return 0
 	}

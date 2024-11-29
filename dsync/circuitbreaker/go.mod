@@ -6,7 +6,7 @@ require (
 	github.com/alextanhongpin/core/storage/redis v0.0.0-20241012071205-3b95b3c0db15
 	github.com/alextanhongpin/core/sync/rate v0.0.0-20241012071205-3b95b3c0db15
 	github.com/redis/go-redis/v9 v9.6.1
-	github.com/stretchr/testify v1.9.0
+	github.com/stretchr/testify v1.10.0
 )
 
 require (
