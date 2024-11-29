@@ -9,7 +9,8 @@ import (
 type FixedWindow struct {
 	// State.
 	mu    sync.RWMutex
-	state fixedWindowState
+	last  int64
+	count int
 
 	// Options.
 	limit  int
@@ -37,10 +38,14 @@ func (r *FixedWindow) AllowN(n int) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	s := r.snapshot(r.Now())
-	if r.limit-s.count >= n {
-		s.count += n
-		r.state = s
+	now := r.Now()
+	if r.isExpired(now) {
+		r.count = 0
+		r.last = now.UnixNano()
+	}
+
+	if r.limit-r.count >= n {
+		r.count += n
 
 		return true
 	}
@@ -50,32 +55,32 @@ func (r *FixedWindow) AllowN(n int) bool {
 
 func (r *FixedWindow) Remaining() int {
 	r.mu.RLock()
-	s := r.snapshot(r.Now())
-	r.mu.RUnlock()
+	defer r.mu.RUnlock()
 
-	return r.limit - s.count
+	if r.isExpired(r.Now()) {
+		return r.limit
+	}
+
+	return r.limit - r.count
 }
 
 func (r *FixedWindow) RetryAt() time.Time {
-	now := r.Now()
-
 	r.mu.RLock()
-	s := r.snapshot(now)
-	r.mu.RUnlock()
+	defer r.mu.RUnlock()
 
-	if r.limit-s.count > 0 {
+	now := r.Now()
+	if r.isExpired(now) {
 		return now
 	}
 
-	nsec := s.last + r.period
+	if r.limit-r.count > 0 {
+		return now
+	}
+
+	nsec := r.last + r.period
 	return time.Unix(0, nsec)
 }
 
-func (r *FixedWindow) snapshot(at time.Time) fixedWindowState {
-	now := at.UnixNano()
-	if r.state.last+r.period <= now {
-		return fixedWindowState{last: now}
-	}
-
-	return r.state
+func (r *FixedWindow) isExpired(at time.Time) bool {
+	return r.last+r.period <= at.UnixNano()
 }

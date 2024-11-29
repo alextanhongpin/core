@@ -42,7 +42,12 @@ func (r *MultiFixedWindow) AllowN(key string, n int) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	s := r.snapshot(r.Now(), key)
+	now := r.Now()
+	if r.isExpired(key, now) {
+		r.state[key] = fixedWindowState{count: 0, last: now.UnixNano()}
+	}
+
+	s := r.state[key]
 	if r.limit-s.count >= n {
 		s.count += n
 		r.state[key] = s
@@ -55,19 +60,25 @@ func (r *MultiFixedWindow) AllowN(key string, n int) bool {
 
 func (r *MultiFixedWindow) Remaining(key string) int {
 	r.mu.RLock()
-	s := r.snapshot(r.Now(), key)
-	r.mu.RUnlock()
+	defer r.mu.RUnlock()
 
-	return r.limit - s.count
+	if r.isExpired(key, r.Now()) {
+		return r.limit
+	}
+
+	return r.limit - r.state[key].count
 }
 
 func (r *MultiFixedWindow) RetryAt(key string) time.Time {
-	now := r.Now()
-
 	r.mu.RLock()
-	s := r.snapshot(now, key)
-	r.mu.RUnlock()
+	defer r.mu.RUnlock()
 
+	now := r.Now()
+	if r.isExpired(key, now) {
+		return now
+	}
+
+	s := r.state[key]
 	if r.limit > s.count {
 		return now
 	}
@@ -76,13 +87,17 @@ func (r *MultiFixedWindow) RetryAt(key string) time.Time {
 	return time.Unix(0, nsec)
 }
 
-func (r *MultiFixedWindow) snapshot(at time.Time, key string) fixedWindowState {
-	now := at.UnixNano()
+func (r *MultiFixedWindow) isExpired(key string, at time.Time) bool {
+	return r.state[key].last+r.period <= at.UnixNano()
+}
 
-	s := r.state[key]
-	if s.last+r.period <= now {
-		return fixedWindowState{last: now}
+func (r *MultiFixedWindow) clear() {
+	r.mu.Lock()
+	now := r.Now().UnixNano()
+	for k, v := range r.state {
+		if v.last+r.period <= now {
+			delete(r.state, k)
+		}
 	}
-
-	return s
+	r.mu.Unlock()
 }

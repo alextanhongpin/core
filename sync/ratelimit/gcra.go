@@ -27,18 +27,18 @@ func NewGCRA(limit int, period time.Duration, burst int) *GCRA {
 	}
 }
 
-func (g *GCRA) Allow() bool {
-	return g.AllowN(1)
+func (r *GCRA) Allow() bool {
+	return r.AllowN(1)
 }
 
-func (g *GCRA) AllowN(n int) bool {
-	g.mu.Lock()
-	defer g.mu.Unlock()
+func (r *GCRA) AllowN(n int) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 
-	now := g.Now().UnixNano()
-	g.last = max(g.last, now)
-	if g.last-g.offset <= now {
-		g.last += int64(n) * g.interval
+	now := r.Now().UnixNano()
+	r.last = max(r.last, now)
+	if r.last-r.offset <= now {
+		r.last += int64(n) * r.interval
 
 		return true
 	}
@@ -46,16 +46,14 @@ func (g *GCRA) AllowN(n int) bool {
 	return false
 }
 
-func (g *GCRA) RetryAt() time.Time {
-	g.mu.RLock()
-	last := g.last
-	interval := g.interval
-	g.mu.RUnlock()
+func (r *GCRA) RetryAt() time.Time {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 
-	now := g.Now()
-	if last < now.UnixNano() {
+	now := r.Now()
+	if r.last < now.UnixNano() {
 		return now
 	}
 
-	return time.Unix(0, now.UnixNano()+interval)
+	return time.Unix(0, now.UnixNano()+r.interval)
 }

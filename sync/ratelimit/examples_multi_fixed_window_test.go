@@ -10,10 +10,10 @@ import (
 	"github.com/alextanhongpin/core/sync/ratelimit"
 )
 
-func ExampleFixedWindow() {
+func ExampleMultiFixedWindow() {
 	now := time.Now()
 
-	rl := ratelimit.NewFixedWindow(5, time.Second)
+	rl := ratelimit.NewMultiFixedWindow(5, time.Second)
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 1, ' ', tabwriter.AlignRight|tabwriter.Debug)
 	fmt.Fprintf(w, "%s\t%s\t\n", "t", "allow")
 	call := func(duration time.Duration, allow bool) {
@@ -21,7 +21,7 @@ func ExampleFixedWindow() {
 			return now.Add(duration)
 		}
 
-		allowed := rl.Allow()
+		allowed := rl.Allow("key")
 		if allow != allowed {
 			log.Fatalf("unexpected allow at %v", duration)
 		}
@@ -45,11 +45,11 @@ func ExampleFixedWindow() {
 	call(1500*time.Millisecond, false)
 	call(1999*time.Millisecond, false)
 
-	fmt.Println("fixed window")
+	fmt.Println("multi fixed window")
 	w.Flush()
 
 	// Output:
-	// fixed window
+	// multi fixed window
 	//       t| allow|
 	//      0s|  true|
 	//     1ms|  true|

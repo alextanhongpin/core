@@ -28,18 +28,18 @@ func NewMultiGCRA(limit int, period time.Duration, burst int) *MultiGCRA {
 	}
 }
 
-func (g *MultiGCRA) Allow(key string) bool {
-	return g.AllowN(key, 1)
+func (r *MultiGCRA) Allow(key string) bool {
+	return r.AllowN(key, 1)
 }
 
-func (g *MultiGCRA) AllowN(key string, n int) bool {
-	g.mu.Lock()
-	defer g.mu.Unlock()
+func (r *MultiGCRA) AllowN(key string, n int) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 
-	now := g.Now().UnixNano()
-	g.state[key] = max(g.state[key], now)
-	if g.state[key]-g.offset <= now {
-		g.state[key] += int64(n) * g.interval
+	now := r.Now().UnixNano()
+	r.state[key] = max(r.state[key], now)
+	if r.state[key]-r.offset <= now {
+		r.state[key] += int64(n) * r.interval
 
 		return true
 	}
@@ -47,16 +47,14 @@ func (g *MultiGCRA) AllowN(key string, n int) bool {
 	return false
 }
 
-func (g *MultiGCRA) RetryAt(key string) time.Time {
-	g.mu.RLock()
-	last := g.state[key]
-	interval := g.interval
-	g.mu.RUnlock()
+func (r *MultiGCRA) RetryAt(key string) time.Time {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 
-	now := g.Now()
-	if last < now.UnixNano() {
+	now := r.Now()
+	if r.state[key] < now.UnixNano() {
 		return now
 	}
 
-	return time.Unix(0, now.UnixNano()+interval)
+	return time.Unix(0, r.state[key]+r.interval)
 }
