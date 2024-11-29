@@ -7,8 +7,8 @@ import (
 
 type GCRA struct {
 	// State.
-	mu sync.RWMutex
-	ts int64
+	mu   sync.RWMutex
+	last int64
 
 	// Option.
 	offset   int64
@@ -16,7 +16,7 @@ type GCRA struct {
 	Now      func() time.Time
 }
 
-func NewGCRA(limit int64, period time.Duration, burst int64) *GCRA {
+func NewGCRA(limit int, period time.Duration, burst int) *GCRA {
 	interval := period.Nanoseconds() / int64(limit)
 
 	return &GCRA{
@@ -36,12 +36,9 @@ func (g *GCRA) AllowN(n int) bool {
 	defer g.mu.Unlock()
 
 	now := g.Now().UnixNano()
-	if g.ts < now {
-		g.ts = now
-	}
-
-	if g.ts-g.offset <= now {
-		g.ts += int64(n) * g.interval
+	g.last = max(g.last, now)
+	if g.last-g.offset <= now {
+		g.last += int64(n) * g.interval
 
 		return true
 	}
@@ -49,12 +46,16 @@ func (g *GCRA) AllowN(n int) bool {
 	return false
 }
 
-func (g *GCRA) RetryAfter() time.Duration {
+func (g *GCRA) RetryAt() time.Time {
 	g.mu.RLock()
-	ts := g.ts
-	offset := g.offset
+	last := g.last
+	interval := g.interval
 	g.mu.RUnlock()
 
-	now := g.Now().UnixNano()
-	return time.Duration(max(0, ts-offset-now))
+	now := g.Now()
+	if last < now.UnixNano() {
+		return now
+	}
+
+	return time.Unix(0, now.UnixNano()+interval)
 }
