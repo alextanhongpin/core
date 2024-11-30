@@ -3,14 +3,12 @@ package idempotent_test
 import (
 	"context"
 	"errors"
-	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
-	redis "github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/alextanhongpin/core/dsync/idempotent"
@@ -21,9 +19,9 @@ var ctx = context.Background()
 
 func TestMain(m *testing.M) {
 	stop := redistest.Init()
-	code := m.Run()
-	stop()
-	os.Exit(code)
+	defer stop()
+
+	m.Run()
 }
 
 func TestRedisStore(t *testing.T) {
@@ -31,33 +29,32 @@ func TestRedisStore(t *testing.T) {
 		return []byte("world"), nil
 	}
 
-	store := idempotent.NewRedisStore(newClient(t))
-	store.HandleFunc("greet", fn)
-	res, shared, err := store.Do(ctx, "greet", t.Name(), []byte("hello"))
+	store := idempotent.NewRedisStore(redistest.Client(t))
+	res, shared, err := store.Do(ctx, t.Name(), fn, []byte("hello"))
 	is := assert.New(t)
 	is.Nil(err)
 	is.False(shared)
 	is.Equal([]byte("world"), res)
 
-	res, shared, err = store.Do(ctx, "greet", t.Name(), []byte("hello"))
+	res, shared, err = store.Do(ctx, t.Name(), fn, []byte("hello"))
 	is.Nil(err)
 	is.True(shared)
 	is.Equal([]byte("world"), res)
 }
 
 func TestMakeHandler(t *testing.T) {
-	store := idempotent.NewRedisStore(newClient(t))
-	h := idempotent.NewClient(store, func(ctx context.Context, req string) (string, error) {
+	fn := func(ctx context.Context, req string) (string, error) {
 		return "world", nil
-	})
+	}
+	h := idempotent.NewHandler(redistest.Client(t), fn, time.Hour, 10*time.Second)
 
-	res, shared, err := h.Do(ctx, t.Name(), "hello")
+	res, shared, err := h.Handle(ctx, t.Name(), "hello")
 	is := assert.New(t)
 	is.Nil(err)
 	is.False(shared)
 	is.Equal("world", res)
 
-	res, shared, err = h.Do(ctx, t.Name(), "hello")
+	res, shared, err = h.Handle(ctx, t.Name(), "hello")
 	is.Nil(err)
 	is.True(shared)
 	is.Equal("world", res)
@@ -84,8 +81,8 @@ func TestConcurrent(t *testing.T) {
 		}, nil
 	}
 
-	client := newClient(t)
-	h := idempotent.NewClient(idempotent.NewRedisStore(client), fn)
+	client := redistest.Client(t)
+	h := idempotent.NewHandler(client, fn, time.Hour, time.Minute)
 	n := 10
 
 	is := assert.New(t)
@@ -97,7 +94,7 @@ func TestConcurrent(t *testing.T) {
 		go func() {
 			defer wg.Done()
 
-			res, shared, err := h.Do(ctx, t.Name(), Request{Msg: "hello"})
+			res, shared, err := h.Handle(ctx, t.Name(), Request{Msg: "hello"})
 			is.Equal("HELLO", res.Msg)
 			is.Nil(err)
 			if shared {
@@ -109,8 +106,8 @@ func TestConcurrent(t *testing.T) {
 			defer wg.Done()
 
 			time.Sleep(50 * time.Millisecond)
-			h := idempotent.NewClient(idempotent.NewRedisStore(client), fn)
-			res, shared, err := h.Do(ctx, t.Name(), Request{Msg: "hello"})
+			h := idempotent.NewHandler(client, fn, time.Hour, time.Minute)
+			res, shared, err := h.Handle(ctx, t.Name(), Request{Msg: "hello"})
 			if errors.Is(err, idempotent.ErrRequestInFlight) {
 				inFlight.Add(1)
 				return
@@ -126,8 +123,8 @@ func TestConcurrent(t *testing.T) {
 			defer wg.Done()
 			time.Sleep(150 * time.Millisecond)
 
-			h := idempotent.NewClient(idempotent.NewRedisStore(client), fn)
-			res, shared, err := h.Do(ctx, t.Name(), Request{Msg: "hello"})
+			h := idempotent.NewHandler(client, fn, time.Hour, time.Minute)
+			res, shared, err := h.Handle(ctx, t.Name(), Request{Msg: "hello"})
 			if errors.Is(err, idempotent.ErrRequestInFlight) {
 				inFlight.Add(1)
 				return
@@ -151,7 +148,7 @@ func TestConcurrent(t *testing.T) {
 // completes.
 // We expect the lock to be refresh periodically.
 func TestExtendLock(t *testing.T) {
-	client := newClient(t)
+	client := redistest.Client(t)
 
 	fn := func(ctx context.Context, req string) (int, error) {
 		// slow function
@@ -159,25 +156,9 @@ func TestExtendLock(t *testing.T) {
 		return 42, nil
 	}
 
-	store := idempotent.NewRedisStore(client)
-	opts := []idempotent.Option{idempotent.WithKeepTTL(200 * time.Millisecond), idempotent.WithLockTTL(100 * time.Millisecond)}
-	h := idempotent.NewClient(store, fn, opts...)
-	_, _, err := h.Do(ctx, t.Name(), "world")
+	h := idempotent.NewHandler(client, fn, 200*time.Millisecond, 100*time.Millisecond)
+	_, _, err := h.Handle(ctx, t.Name(), "world")
 	if err != nil {
 		t.Fatal(err)
 	}
-}
-
-func newClient(t *testing.T) *redis.Client {
-	client := redis.NewClient(&redis.Options{
-		Addr: redistest.Addr(),
-	})
-
-	t.Helper()
-	t.Cleanup(func() {
-		client.FlushAll(ctx).Err()
-		client.Close()
-	})
-
-	return client
 }

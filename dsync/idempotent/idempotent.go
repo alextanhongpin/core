@@ -7,7 +7,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"sync/atomic"
 	"time"
 
@@ -15,6 +14,11 @@ import (
 	"github.com/alextanhongpin/core/sync/promise"
 	"github.com/google/uuid"
 	redis "github.com/redis/go-redis/v9"
+)
+
+const (
+	keepTTL = 24 * time.Hour
+	lockTTL = 10 * time.Second
 )
 
 var (
@@ -31,62 +35,6 @@ var (
 	ErrHandlerNotFound = errors.New("idempoent: handler not found")
 )
 
-type data struct {
-	Request  string `json:"request,omitempty"`
-	Response string `json:"response,omitempty"`
-}
-
-type Options struct {
-	KeepTTL time.Duration
-	LockTTL time.Duration
-}
-
-func NewOptions() *Options {
-	return &Options{
-		KeepTTL: 24 * time.Hour,
-		LockTTL: 10 * time.Second,
-	}
-}
-
-func (o *Options) Apply(opts ...Option) *Options {
-	for _, opt := range opts {
-		opt(o)
-	}
-
-	return o
-}
-
-func (o *Options) Valid() error {
-	if o.KeepTTL <= 0 {
-		return errors.New("idempotent: keep ttl must be greater than 0")
-	}
-
-	if o.LockTTL <= 0 {
-		return errors.New("idempotent: lock ttl must be greater than 0")
-	}
-
-	return nil
-}
-
-type Option func(*Options)
-
-func WithKeepTTL(ttl time.Duration) Option {
-	return func(o *Options) {
-		o.KeepTTL = ttl
-	}
-}
-
-func WithLockTTL(ttl time.Duration) Option {
-	return func(o *Options) {
-		o.LockTTL = ttl
-	}
-}
-
-type Store interface {
-	Do(ctx context.Context, pattern, key string, req []byte, opts ...Option) (res []byte, shared bool, err error)
-	HandleFunc(pattern string, fn func(ctx context.Context, req []byte) ([]byte, error))
-}
-
 type locker interface {
 	Extend(ctx context.Context, key, val string, ttl time.Duration) error
 	LoadOrStore(ctx context.Context, key, token string, lockTTL time.Duration) (string, bool, error)
@@ -95,90 +43,88 @@ type locker interface {
 }
 
 type RedisStore struct {
-	client *redis.Client
-	group  *promise.Group[[]byte]
-	Lock   locker
-	*Router
+	KeepTTL time.Duration
+	Lock    locker
+	LockTTL time.Duration
+	client  *redis.Client
+	group   *promise.Group[[]byte]
 }
 
 // NewRedisStore creates a new RedisStore instance with the specified Redis
 // client, lock TTL, and keep TTL.
 func NewRedisStore(client *redis.Client) *RedisStore {
+	lock := lock.New(client)
+	lock.LockTTL = 10 * time.Second
+	lock.WaitTTL = 0
+
 	return &RedisStore{
-		client: client,
-		group:  promise.NewGroup[[]byte](),
-		Lock: lock.New(client, &lock.Options{
-			LockTTL: 10 * time.Second,
-			WaitTTL: 0,
-		}),
-		Router: NewRouter(),
+		client:  client,
+		group:   promise.NewGroup[[]byte](),
+		Lock:    lock,
+		KeepTTL: keepTTL,
+		LockTTL: lockTTL,
 	}
 }
 
 // Do executes the provided function idempotently, using the specified key and
 // request.
-func (s *RedisStore) Do(ctx context.Context, pattern, key string, req []byte, opts ...Option) (res []byte, shared bool, err error) {
-	fn, ok := s.Router.Handler(pattern)
-	if !ok {
-		return nil, false, fmt.Errorf("%w: %s", ErrHandlerNotFound, pattern)
-	}
-
+func (s *RedisStore) Do(ctx context.Context, key string, fn func(ctx context.Context, req []byte) ([]byte, error), req []byte) (res []byte, loaded bool, err error) {
 	b := new(atomic.Bool)
 	b.Store(true)
 	res, err = s.group.DoAndForget(key, func() ([]byte, error) {
-		res, shared, err := s.do(ctx, key, fn, req, opts...)
-		if !shared {
-			b.Store(shared)
+		res, loaded, err := s.do(ctx, key, fn, req)
+		if !loaded {
+			b.Store(loaded)
 		}
 
 		return res, err
 	})
-	shared = b.Load()
+	loaded = b.Load()
 
 	return
 }
 
-func (s *RedisStore) do(ctx context.Context, key string, h Handler, req []byte, opts ...Option) (res []byte, shared bool, err error) {
-	o := NewOptions()
-	o.Apply(opts...)
-	if err := o.Valid(); err != nil {
-		return nil, false, err
-	}
-
-	keepTTL := o.KeepTTL
-	lock := s.Lock
-	lockTTL := o.LockTTL
-
-	token := newToken()
-	v, loaded, err := lock.LoadOrStore(ctx, key, token, lockTTL)
+// loadOrStore returns the response for the specified key, or stores the request
+func (s *RedisStore) loadOrStore(ctx context.Context, key string, req []byte) ([]byte, error) {
+	v, loaded, err := s.Lock.LoadOrStore(ctx, key, newToken(), s.LockTTL)
 	if err != nil {
-		return res, false, err
+		return nil, err
 	}
+
+	// There are two possible scenarios:
+	// 1) The key/value pair exists. Process the value.
+	// 2) The key/value pair does not exist. Proceed with the request.
+
+	// 1)
 	if loaded {
-		// This is the only place where `shared` can be true.
-		res, err := s.parse(req, []byte(v))
-		return res, err == nil, err
+		return s.parse(req, []byte(v))
 	}
+
+	// 2)
+	return []byte(v), errors.ErrUnsupported
+}
+
+func (s *RedisStore) runInLock(ctx context.Context, key, token string, fn func(context.Context, []byte) ([]byte, error), req []byte) ([]byte, error) {
+	lock := s.Lock
+	lockTTL := s.LockTTL
+	keepTTL := s.KeepTTL
 
 	// Any failure will just unlock the resource.
 	// context.WithoutCancel ensures that the unlock is always called.
+	// If the operation is successful, the token will be replaced with the
+	// response, so the operation should fail.
 	defer lock.Unlock(context.WithoutCancel(ctx), key, token)
 
-	ch := make(chan result[data], 1)
+	// Create a new channel to handle the result.
+	ch := make(chan result[[]byte], 1)
 	go func() {
-		res, err := h.Handle(ctx, req)
-		if err != nil {
-			ch <- result[data]{
-				err: err,
-			}
-		} else {
-			ch <- result[data]{
-				data: data{
-					Request:  hash(req),
-					Response: string(res),
-				},
-			}
+		// Process the request in a separate goroutine.
+		res, err := fn(ctx, req)
+		ch <- result[[]byte]{
+			err:  err,
+			data: res,
 		}
+
 		close(ch)
 	}()
 
@@ -188,61 +134,88 @@ func (s *RedisStore) do(ctx context.Context, key string, h Handler, req []byte, 
 	for {
 		select {
 		case <-ctx.Done():
-			return nil, false, context.Cause(ctx)
-		case res := <-ch:
+			return nil, context.Cause(ctx)
+		case d := <-ch:
 			// Extend once more to prevent token from expiring.
 			if err := lock.Extend(ctx, key, token, lockTTL); err != nil {
-				return nil, false, err
+				return nil, err
 			}
 
-			d, err := res.unwrap()
+			res, err := d.unwrap()
 			if err != nil {
-				return nil, false, err
+				return nil, err
 			}
 
-			b, err := json.Marshal(d)
+			b, err := json.Marshal(makeData(req, res))
 			if err != nil {
-				return nil, false, err
+				return nil, err
 			}
 
 			if err := lock.Replace(ctx, key, token, string(b), keepTTL); err != nil {
-				return nil, false, err
+				return nil, err
 			}
 
-			return []byte(d.Response), false, nil
+			return []byte(res), nil
 		case <-t.C:
 			if err := lock.Extend(ctx, key, token, lockTTL); err != nil {
-				return nil, false, err
+				return nil, err
 			}
 		}
 	}
 }
 
-func (s *RedisStore) parse(req, b []byte) ([]byte, error) {
-	// Check if the request is pending.
-	if isUUID(b) {
+func (s *RedisStore) do(ctx context.Context, key string, fn func(context.Context, []byte) ([]byte, error), req []byte) (res []byte, loaded bool, err error) {
+	res, err = s.loadOrStore(ctx, key, req)
+	if !errors.Is(err, errors.ErrUnsupported) {
+		return res, err == nil, err
+	}
+
+	token := string(res)
+	res, err = s.runInLock(ctx, key, token, fn, req)
+	return res, false, err
+}
+
+// parse parses the value and returns the response if the request matches.
+// There are two possible scenarios:
+//  1. The value is a UUID, which means the request is in flight.
+//  2. The value is a JSON object, which means the request has been processed.
+//     2.1) The request does not match, return an error.
+//     2.2) The request matches, return the response.
+func (s *RedisStore) parse(req, value []byte) ([]byte, error) {
+	// 1)
+	if isPending(value) {
 		return nil, ErrRequestInFlight
 	}
 
+	// 2)
 	var d data
-	if err := json.Unmarshal(b, &d); err != nil {
+	if err := json.Unmarshal(value, &d); err != nil {
 		return nil, err
 	}
 
-	// Check if the request matches.
+	// 2.1)
 	if d.Request != string(hash(req)) {
 		return nil, ErrRequestMismatch
 	}
 
+	// 2.2)
 	return []byte(d.Response), nil
 }
 
 // hash generates a SHA-256 hash of the provided data.
+// We hash the request because
+// 1) The request may contain sensitive information.
+// 2) The request may be too long to store in Redis.
+// 3) We just need to compare the request, not the response.
 func hash(data []byte) string {
 	h := sha256.New()
 	h.Write(data)
 	b := h.Sum(nil)
 	return base64.StdEncoding.EncodeToString(b)
+}
+
+func isPending(b []byte) bool {
+	return isUUID(b)
 }
 
 // isUUID checks if the provided byte slice represents a valid UUID.

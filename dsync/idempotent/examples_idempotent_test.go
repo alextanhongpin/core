@@ -21,17 +21,14 @@ type Response struct {
 	UserID int64
 }
 
-func ExampleMakeHandler() {
+func ExampleNewHandler() {
 	ctx := context.Background()
-	stop := redistest.Init()
-	defer stop()
 
 	client := redis.NewClient(&redis.Options{
 		Addr: redistest.Addr(),
 	})
-	client.FlushAll(ctx)
-
 	defer client.Close()
+	client.FlushAll(ctx)
 
 	// Create a request object with the required fields.
 	req := Request{
@@ -55,9 +52,8 @@ func ExampleMakeHandler() {
 		}
 
 		// Execute the idempotent operation and handle the response
-		store := idempotent.NewRedisStore(client)
-		h := idempotent.NewClient(store, fn)
-		v, shared, err := h.Do(ctx, "get-user", req)
+		h := idempotent.NewHandler(client, fn, time.Hour, time.Minute)
+		v, shared, err := h.Handle(ctx, "get-user", req)
 		if err != nil {
 			panic(err)
 		}
@@ -79,9 +75,8 @@ func ExampleMakeHandler() {
 		}
 
 		// Execute the idempotent operation and handle the response.
-		store := idempotent.NewRedisStore(client)
-		h := idempotent.NewClient(store, fn)
-		_, _, err := h.Do(ctx, "get-user", req)
+		h := idempotent.NewHandler(client, fn, time.Hour, time.Minute)
+		_, _, err := h.Handle(ctx, "get-user", req)
 		if err == nil {
 			fmt.Println(err)
 			panic("want error, got nil")
@@ -107,9 +102,8 @@ func ExampleMakeHandler() {
 		}
 
 		// Execute the idempotent operation and handle the response.
-		store := idempotent.NewRedisStore(client)
-		h := idempotent.NewClient(store, fn)
-		v, shared, err := h.Do(ctx, "get-user", req)
+		h := idempotent.NewHandler(client, fn, time.Hour, time.Minute)
+		v, shared, err := h.Handle(ctx, "get-user", req)
 		if err != nil {
 			panic(err)
 		}

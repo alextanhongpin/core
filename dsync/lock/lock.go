@@ -16,6 +16,7 @@ const lockTTL = 10 * time.Second
 const waitTTL = 1 * time.Minute
 
 var (
+	ErrCanceled        = errors.New("lock: canceled")
 	ErrLocked          = errors.New("lock: another process has acquired the lock")
 	ErrConflict        = errors.New("lock: lock expired or acquired by another process")
 	ErrLockWaitTimeout = errors.New("lock: failed to acquire lock within the wait duration")

@@ -3,67 +3,55 @@ package idempotent
 import (
 	"context"
 	"encoding/json"
-	"reflect"
+	"time"
+
+	redis "github.com/redis/go-redis/v9"
 )
 
-type client[In, Out any] interface {
-	Do(ctx context.Context, key string, req In) (res Out, shared bool, err error)
+type Store interface {
+	Do(ctx context.Context, key string, fn func(context.Context, []byte) ([]byte, error), req []byte) (res []byte, loaded bool, err error)
 }
 
-func NewClient[In, Out any](s Store, fn func(ctx context.Context, req In) (Out, error), opts ...Option) client[In, Out] {
-	client := newClient[In, Out](s, opts...)
-	client.handle(fn)
-	return client
+type Handler[T, V any] struct {
+	s  Store
+	fn func(ctx context.Context, req T) (V, error)
 }
 
-type Client[In, Out any] struct {
-	s    Store
-	opts []Option
-}
+func NewHandler[T, V any](client *redis.Client, fn func(ctx context.Context, req T) (V, error), keepTTL, lockTTL time.Duration) *Handler[T, V] {
+	store := NewRedisStore(client)
+	store.KeepTTL = keepTTL
+	store.LockTTL = lockTTL
 
-func newClient[In, Out any](s Store, opts ...Option) *Client[In, Out] {
-	return &Client[In, Out]{
-		s:    s,
-		opts: opts,
+	return &Handler[T, V]{
+		s:  store,
+		fn: fn,
 	}
 }
 
-func (c *Client[In, Out]) handle(fn func(context.Context, In) (Out, error)) {
-	var in In
-	c.s.HandleFunc(getTypeName(in), func(ctx context.Context, b []byte) ([]byte, error) {
-		var req In
-		if err := json.Unmarshal(b, &req); err != nil {
+func (h *Handler[T, V]) Handle(ctx context.Context, key string, req T) (res V, shared bool, err error) {
+	reqBytes, err := json.Marshal(req)
+	if err != nil {
+		return res, shared, err
+	}
+
+	var resBytes []byte
+	resBytes, shared, err = h.s.Do(ctx, key, func(ctx context.Context, reqBytes []byte) ([]byte, error) {
+		var req T
+		if err := json.Unmarshal(reqBytes, &req); err != nil {
 			return nil, err
 		}
 
-		res, err := fn(ctx, req)
+		res, err := h.fn(ctx, req)
 		if err != nil {
 			return nil, err
 		}
 
 		return json.Marshal(res)
-	})
-}
-
-func (c *Client[In, Out]) Do(ctx context.Context, key string, req In) (res Out, shared bool, err error) {
-	b, err := json.Marshal(req)
-	if err != nil {
-		return res, shared, err
-	}
-
-	b, shared, err = c.s.Do(ctx, getTypeName(req), key, b, c.opts...)
+	}, reqBytes)
 	if err != nil {
 		return
 	}
 
-	err = json.Unmarshal(b, &res)
+	err = json.Unmarshal(resBytes, &res)
 	return
-}
-
-func getTypeName(v any) string {
-	if v == nil {
-		return "<nil>"
-	}
-
-	return reflect.TypeOf(v).String()
 }
