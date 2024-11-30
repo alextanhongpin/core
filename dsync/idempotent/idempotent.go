@@ -29,10 +29,6 @@ var (
 	// ErrRequestMismatch indicates that the request does not match the stored
 	// request for the specified key.
 	ErrRequestMismatch = errors.New("idempotent: request mismatch")
-
-	// ErrHandlerNotFound indicates that the handler for the specified pattern
-	// is not found.
-	ErrHandlerNotFound = errors.New("idempoent: handler not found")
 )
 
 type locker interface {
@@ -44,7 +40,7 @@ type locker interface {
 
 type RedisStore struct {
 	KeepTTL time.Duration
-	Lock    locker
+	Locker  locker
 	LockTTL time.Duration
 	client  *redis.Client
 	group   *promise.Group[[]byte]
@@ -53,14 +49,10 @@ type RedisStore struct {
 // NewRedisStore creates a new RedisStore instance with the specified Redis
 // client, lock TTL, and keep TTL.
 func NewRedisStore(client *redis.Client) *RedisStore {
-	lock := lock.New(client)
-	lock.LockTTL = 10 * time.Second
-	lock.WaitTTL = 0
-
 	return &RedisStore{
 		client:  client,
 		group:   promise.NewGroup[[]byte](),
-		Lock:    lock,
+		Locker:  lock.New(client),
 		KeepTTL: keepTTL,
 		LockTTL: lockTTL,
 	}
@@ -86,7 +78,7 @@ func (s *RedisStore) Do(ctx context.Context, key string, fn func(ctx context.Con
 
 // loadOrStore returns the response for the specified key, or stores the request
 func (s *RedisStore) loadOrStore(ctx context.Context, key string, req []byte) ([]byte, error) {
-	v, loaded, err := s.Lock.LoadOrStore(ctx, key, newToken(), s.LockTTL)
+	v, loaded, err := s.Locker.LoadOrStore(ctx, key, newToken(), s.LockTTL)
 	if err != nil {
 		return nil, err
 	}
@@ -105,7 +97,7 @@ func (s *RedisStore) loadOrStore(ctx context.Context, key string, req []byte) ([
 }
 
 func (s *RedisStore) runInLock(ctx context.Context, key, token string, fn func(context.Context, []byte) ([]byte, error), req []byte) ([]byte, error) {
-	lock := s.Lock
+	locker := s.Locker
 	lockTTL := s.LockTTL
 	keepTTL := s.KeepTTL
 
@@ -113,7 +105,7 @@ func (s *RedisStore) runInLock(ctx context.Context, key, token string, fn func(c
 	// context.WithoutCancel ensures that the unlock is always called.
 	// If the operation is successful, the token will be replaced with the
 	// response, so the operation should fail.
-	defer lock.Unlock(context.WithoutCancel(ctx), key, token)
+	defer locker.Unlock(context.WithoutCancel(ctx), key, token)
 
 	// Create a new channel to handle the result.
 	ch := make(chan result[[]byte], 1)
@@ -137,7 +129,7 @@ func (s *RedisStore) runInLock(ctx context.Context, key, token string, fn func(c
 			return nil, context.Cause(ctx)
 		case d := <-ch:
 			// Extend once more to prevent token from expiring.
-			if err := lock.Extend(ctx, key, token, lockTTL); err != nil {
+			if err := locker.Extend(ctx, key, token, lockTTL); err != nil {
 				return nil, err
 			}
 
@@ -151,13 +143,16 @@ func (s *RedisStore) runInLock(ctx context.Context, key, token string, fn func(c
 				return nil, err
 			}
 
-			if err := lock.Replace(ctx, key, token, string(b), keepTTL); err != nil {
+			// Replace the token with the response.
+			if err := locker.Replace(ctx, key, token, string(b), keepTTL); err != nil {
 				return nil, err
 			}
 
+			// Return the response.
 			return []byte(res), nil
 		case <-t.C:
-			if err := lock.Extend(ctx, key, token, lockTTL); err != nil {
+			// Extend the lock to prevent the token from expiring.
+			if err := locker.Extend(ctx, key, token, lockTTL); err != nil {
 				return nil, err
 			}
 		}
