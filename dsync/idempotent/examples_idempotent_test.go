@@ -52,8 +52,8 @@ func ExampleNewHandler() {
 		}
 
 		// Execute the idempotent operation and handle the response
-		h := idempotent.NewHandler(client, fn, time.Hour, time.Minute)
-		v, shared, err := h.Handle(ctx, "get-user", req)
+		h := idempotent.NewHandler(client, fn)
+		v, shared, err := h.Handle(ctx, "get-user", req, time.Minute, time.Hour)
 		if err != nil {
 			panic(err)
 		}
@@ -75,8 +75,8 @@ func ExampleNewHandler() {
 		}
 
 		// Execute the idempotent operation and handle the response.
-		h := idempotent.NewHandler(client, fn, time.Hour, time.Minute)
-		_, _, err := h.Handle(ctx, "get-user", req)
+		h := idempotent.NewHandler(client, fn)
+		_, _, err := h.Handle(ctx, "get-user", req, time.Minute, time.Hour)
 		if err == nil {
 			fmt.Println(err)
 			panic("want error, got nil")
@@ -102,8 +102,8 @@ func ExampleNewHandler() {
 		}
 
 		// Execute the idempotent operation and handle the response.
-		h := idempotent.NewHandler(client, fn, time.Hour, time.Minute)
-		v, shared, err := h.Handle(ctx, "get-user", req)
+		h := idempotent.NewHandler(client, fn)
+		v, shared, err := h.Handle(ctx, "get-user", req, time.Minute, time.Hour)
 		if err != nil {
 			panic(err)
 		}

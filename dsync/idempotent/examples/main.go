@@ -24,7 +24,6 @@ import (
 
 var (
 	requestTotal       = expvar.NewInt("request_total")
-	successTotal       = expvar.NewInt("success_total")
 	errRequestInFlight = expvar.NewInt("errors_request_in_flight_total")
 	errRequestMismatch = expvar.NewInt("errors_request_mismatch_total")
 	errKeyReleased     = expvar.NewInt("errors_key_released_total")
@@ -41,18 +40,13 @@ func main() {
 		Addr: "localhost:6379",
 	})
 
-	store := idempotent.NewRedisStore(client, &idempotent.Options{
-		LockTTL: 1 * time.Second,
-		KeepTTL: 1 * time.Hour,
-	})
-
 	fn := func(ctx context.Context, req int) (string, error) {
 		// slow function
 		sleep := time.Duration(rand.Intn(int(5 * time.Second)))
 		time.Sleep(sleep)
 		return fmt.Sprint(req), nil
 	}
-	h := idempotent.MakeHandler(store, fn)
+	h := idempotent.NewHandler(client, fn)
 
 	mux := http.NewServeMux()
 	mux.Handle("/debug/vars", expvar.Handler())
@@ -64,7 +58,7 @@ func main() {
 		if mismatch {
 			m = n - 1
 		}
-		res, _, err := h.Do(r.Context(), fmt.Sprint(n), m)
+		res, _, err := h.Handle(r.Context(), fmt.Sprint(n), m, time.Minute, time.Hour)
 		if err != nil {
 			errorsTotal.Add(1)
 			if errors.Is(err, idempotent.ErrRequestInFlight) {

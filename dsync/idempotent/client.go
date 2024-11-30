@@ -9,7 +9,7 @@ import (
 )
 
 type Store interface {
-	Do(ctx context.Context, key string, fn func(context.Context, []byte) ([]byte, error), req []byte) (res []byte, loaded bool, err error)
+	Do(ctx context.Context, key string, fn func(context.Context, []byte) ([]byte, error), req []byte, lockTTL, keepTTL time.Duration) (res []byte, loaded bool, err error)
 }
 
 type Handler[T, V any] struct {
@@ -17,18 +17,14 @@ type Handler[T, V any] struct {
 	fn func(ctx context.Context, req T) (V, error)
 }
 
-func NewHandler[T, V any](client *redis.Client, fn func(ctx context.Context, req T) (V, error), keepTTL, lockTTL time.Duration) *Handler[T, V] {
-	store := NewRedisStore(client)
-	store.KeepTTL = keepTTL
-	store.LockTTL = lockTTL
-
+func NewHandler[T, V any](client *redis.Client, fn func(ctx context.Context, req T) (V, error)) *Handler[T, V] {
 	return &Handler[T, V]{
-		s:  store,
+		s:  NewRedisStore(client),
 		fn: fn,
 	}
 }
 
-func (h *Handler[T, V]) Handle(ctx context.Context, key string, req T) (res V, shared bool, err error) {
+func (h *Handler[T, V]) Handle(ctx context.Context, key string, req T, lockTTL, keepTTL time.Duration) (res V, shared bool, err error) {
 	reqBytes, err := json.Marshal(req)
 	if err != nil {
 		return res, shared, err
@@ -47,7 +43,7 @@ func (h *Handler[T, V]) Handle(ctx context.Context, key string, req T) (res V, s
 		}
 
 		return json.Marshal(res)
-	}, reqBytes)
+	}, reqBytes, lockTTL, keepTTL)
 	if err != nil {
 		return
 	}

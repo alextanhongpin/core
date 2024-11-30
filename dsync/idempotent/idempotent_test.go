@@ -30,13 +30,13 @@ func TestRedisStore(t *testing.T) {
 	}
 
 	store := idempotent.NewRedisStore(redistest.Client(t))
-	res, shared, err := store.Do(ctx, t.Name(), fn, []byte("hello"))
+	res, shared, err := store.Do(ctx, t.Name(), fn, []byte("hello"), time.Minute, time.Hour)
 	is := assert.New(t)
 	is.Nil(err)
 	is.False(shared)
 	is.Equal([]byte("world"), res)
 
-	res, shared, err = store.Do(ctx, t.Name(), fn, []byte("hello"))
+	res, shared, err = store.Do(ctx, t.Name(), fn, []byte("hello"), time.Minute, time.Hour)
 	is.Nil(err)
 	is.True(shared)
 	is.Equal([]byte("world"), res)
@@ -46,15 +46,15 @@ func TestMakeHandler(t *testing.T) {
 	fn := func(ctx context.Context, req string) (string, error) {
 		return "world", nil
 	}
-	h := idempotent.NewHandler(redistest.Client(t), fn, time.Hour, 10*time.Second)
+	h := idempotent.NewHandler(redistest.Client(t), fn)
 
-	res, shared, err := h.Handle(ctx, t.Name(), "hello")
+	res, shared, err := h.Handle(ctx, t.Name(), "hello", time.Minute, time.Hour)
 	is := assert.New(t)
 	is.Nil(err)
 	is.False(shared)
 	is.Equal("world", res)
 
-	res, shared, err = h.Handle(ctx, t.Name(), "hello")
+	res, shared, err = h.Handle(ctx, t.Name(), "hello", time.Minute, time.Hour)
 	is.Nil(err)
 	is.True(shared)
 	is.Equal("world", res)
@@ -82,7 +82,7 @@ func TestConcurrent(t *testing.T) {
 	}
 
 	client := redistest.Client(t)
-	h := idempotent.NewHandler(client, fn, time.Hour, time.Minute)
+	h := idempotent.NewHandler(client, fn)
 	n := 10
 
 	is := assert.New(t)
@@ -94,7 +94,7 @@ func TestConcurrent(t *testing.T) {
 		go func() {
 			defer wg.Done()
 
-			res, shared, err := h.Handle(ctx, t.Name(), Request{Msg: "hello"})
+			res, shared, err := h.Handle(ctx, t.Name(), Request{Msg: "hello"}, time.Minute, time.Hour)
 			is.Equal("HELLO", res.Msg)
 			is.Nil(err)
 			if shared {
@@ -106,8 +106,8 @@ func TestConcurrent(t *testing.T) {
 			defer wg.Done()
 
 			time.Sleep(50 * time.Millisecond)
-			h := idempotent.NewHandler(client, fn, time.Hour, time.Minute)
-			res, shared, err := h.Handle(ctx, t.Name(), Request{Msg: "hello"})
+			h := idempotent.NewHandler(client, fn)
+			res, shared, err := h.Handle(ctx, t.Name(), Request{Msg: "hello"}, time.Minute, time.Hour)
 			if errors.Is(err, idempotent.ErrRequestInFlight) {
 				inFlight.Add(1)
 				return
@@ -123,8 +123,8 @@ func TestConcurrent(t *testing.T) {
 			defer wg.Done()
 			time.Sleep(150 * time.Millisecond)
 
-			h := idempotent.NewHandler(client, fn, time.Hour, time.Minute)
-			res, shared, err := h.Handle(ctx, t.Name(), Request{Msg: "hello"})
+			h := idempotent.NewHandler(client, fn)
+			res, shared, err := h.Handle(ctx, t.Name(), Request{Msg: "hello"}, time.Minute, time.Hour)
 			if errors.Is(err, idempotent.ErrRequestInFlight) {
 				inFlight.Add(1)
 				return
@@ -156,8 +156,8 @@ func TestExtendLock(t *testing.T) {
 		return 42, nil
 	}
 
-	h := idempotent.NewHandler(client, fn, 200*time.Millisecond, 100*time.Millisecond)
-	_, _, err := h.Handle(ctx, t.Name(), "world")
+	h := idempotent.NewHandler(client, fn)
+	_, _, err := h.Handle(ctx, t.Name(), "world", 100*time.Millisecond, 200*time.Millisecond)
 	if err != nil {
 		t.Fatal(err)
 	}
