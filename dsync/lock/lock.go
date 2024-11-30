@@ -12,9 +12,6 @@ import (
 	redis "github.com/redis/go-redis/v9"
 )
 
-const lockTTL = 10 * time.Second
-const waitTTL = 1 * time.Minute
-
 var (
 	ErrCanceled        = errors.New("lock: canceled")
 	ErrLocked          = errors.New("lock: another process has acquired the lock")
@@ -26,35 +23,23 @@ var (
 // Works on with a single redis node.
 type Locker struct {
 	client *redis.Client
-	// The duration the lock is held. Renewed every 7/10 of the LockTTL.
-	// Set it to at least 5s to ensure the lock has enough time to be renewed.
-	LockTTL time.Duration
-	// The duration to wait for the lock to be acquired.
-	// If set to 0, it will not wait and will return the error immediately.
-	WaitTTL time.Duration
 }
 
 // New returns a pointer to Locker.
 func New(client *redis.Client) *Locker {
 	return &Locker{
-		client:  client,
-		LockTTL: lockTTL,
-		WaitTTL: waitTTL,
+		client: client,
 	}
 }
 
 // Do locks the given key until the function completes.
 // If the lock cannot be acquired within the given wait, it will error.
 // The lock is released after the function completes.
-func (l *Locker) Do(ctx context.Context, key string, fn func(ctx context.Context) error, opts ...Option) error {
-	o := &Options{
-		LockTTL: l.LockTTL,
-		WaitTTL: l.WaitTTL,
-	}
-	o.Apply(opts...)
-
+// LockTTL: The duration the lock is held. Renewed every 7/10 of the LockTTL. Set it to at least 5s to ensure the lock has enough time to be renewed.
+// WaitTTL: The duration to wait for the lock to be acquired. If set to 0, it will not wait and will return the error immediately.
+func (l *Locker) Do(ctx context.Context, key string, fn func(ctx context.Context) error, lockTTL, waitTTL time.Duration) error {
 	// Generate a random uuid as the lock value.
-	token, err := l.TryLock(ctx, key, o.LockTTL, o.WaitTTL)
+	token, err := l.TryLock(ctx, key, lockTTL, waitTTL)
 	if err != nil {
 		return err
 	}
@@ -73,7 +58,7 @@ func (l *Locker) Do(ctx context.Context, key string, fn func(ctx context.Context
 		close(ch)
 	}()
 
-	t := time.NewTicker(o.LockTTL * 7 / 10)
+	t := time.NewTicker(lockTTL * 7 / 10)
 	defer t.Stop()
 
 	for {
@@ -83,7 +68,7 @@ func (l *Locker) Do(ctx context.Context, key string, fn func(ctx context.Context
 		case err := <-ch:
 			return err
 		case <-t.C:
-			if err := l.Extend(ctx, key, token, o.LockTTL); err != nil {
+			if err := l.Extend(ctx, key, token, lockTTL); err != nil {
 				return err
 			}
 		}

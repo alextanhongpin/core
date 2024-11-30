@@ -21,14 +21,13 @@ func TestPrivateLockUnlock(t *testing.T) {
 	}
 
 	store := lock.New(client)
-	store.LockTTL = 100 * time.Millisecond
-	store.WaitTTL = 0
+	lockTTL := 100 * time.Millisecond
 
 	t.Run("when lock success", func(t *testing.T) {
 		cleanup(t)
 
 		key := t.Name()
-		_, loaded, err := store.LoadOrStore(ctx, key, "world", store.LockTTL)
+		_, loaded, err := store.LoadOrStore(ctx, key, "world", lockTTL)
 		assert.Nil(t, err, "expected error to be nil")
 		assert.False(t, loaded, "expected value to be stored")
 
@@ -37,7 +36,7 @@ func TestPrivateLockUnlock(t *testing.T) {
 		assert.True(t, 100*time.Millisecond-lockTTL < 10*time.Millisecond, "expected lock TTL to be close to 100ms")
 
 		t.Run("when lock second time", func(t *testing.T) {
-			lockValue, loaded, err := store.LoadOrStore(ctx, key, "world", store.LockTTL)
+			lockValue, loaded, err := store.LoadOrStore(ctx, key, "world", lockTTL)
 			assert.Nil(t, err, "expected error to be nil")
 			assert.True(t, loaded, "then the value is loaded")
 			assert.Equal(t, "world", lockValue, "expected lock value to be 'world'")
@@ -73,7 +72,6 @@ func TestPrivateReplace(t *testing.T) {
 	}
 
 	store := lock.New(client)
-	store.LockTTL = time.Second
 
 	t.Run("when replace failed with invalid old value", func(t *testing.T) {
 		cleanup(t)
