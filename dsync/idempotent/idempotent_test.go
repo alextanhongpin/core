@@ -46,15 +46,15 @@ func TestMakeHandler(t *testing.T) {
 	fn := func(ctx context.Context, req string) (string, error) {
 		return "world", nil
 	}
-	h := idempotent.NewHandler(redistest.Client(t), fn)
+	h := idempotent.NewHandler(redistest.Client(t), fn, nil)
 
-	res, shared, err := h.Handle(ctx, t.Name(), "hello", time.Minute, time.Hour)
+	res, shared, err := h.Handle(ctx, t.Name(), "hello")
 	is := assert.New(t)
 	is.Nil(err)
 	is.False(shared)
 	is.Equal("world", res)
 
-	res, shared, err = h.Handle(ctx, t.Name(), "hello", time.Minute, time.Hour)
+	res, shared, err = h.Handle(ctx, t.Name(), "hello")
 	is.Nil(err)
 	is.True(shared)
 	is.Equal("world", res)
@@ -82,7 +82,7 @@ func TestConcurrent(t *testing.T) {
 	}
 
 	client := redistest.Client(t)
-	h := idempotent.NewHandler(client, fn)
+	h := idempotent.NewHandler(client, fn, nil)
 	n := 10
 
 	is := assert.New(t)
@@ -94,7 +94,7 @@ func TestConcurrent(t *testing.T) {
 		go func() {
 			defer wg.Done()
 
-			res, shared, err := h.Handle(ctx, t.Name(), Request{Msg: "hello"}, time.Minute, time.Hour)
+			res, shared, err := h.Handle(ctx, t.Name(), Request{Msg: "hello"})
 			is.Equal("HELLO", res.Msg)
 			is.Nil(err)
 			if shared {
@@ -106,8 +106,8 @@ func TestConcurrent(t *testing.T) {
 			defer wg.Done()
 
 			time.Sleep(50 * time.Millisecond)
-			h := idempotent.NewHandler(client, fn)
-			res, shared, err := h.Handle(ctx, t.Name(), Request{Msg: "hello"}, time.Minute, time.Hour)
+			h := idempotent.NewHandler(client, fn, nil)
+			res, shared, err := h.Handle(ctx, t.Name(), Request{Msg: "hello"})
 			if errors.Is(err, idempotent.ErrRequestInFlight) {
 				inFlight.Add(1)
 				return
@@ -123,8 +123,8 @@ func TestConcurrent(t *testing.T) {
 			defer wg.Done()
 			time.Sleep(150 * time.Millisecond)
 
-			h := idempotent.NewHandler(client, fn)
-			res, shared, err := h.Handle(ctx, t.Name(), Request{Msg: "hello"}, time.Minute, time.Hour)
+			h := idempotent.NewHandler(client, fn, nil)
+			res, shared, err := h.Handle(ctx, t.Name(), Request{Msg: "hello"})
 			if errors.Is(err, idempotent.ErrRequestInFlight) {
 				inFlight.Add(1)
 				return
@@ -156,8 +156,11 @@ func TestExtendLock(t *testing.T) {
 		return 42, nil
 	}
 
-	h := idempotent.NewHandler(client, fn)
-	_, _, err := h.Handle(ctx, t.Name(), "world", 100*time.Millisecond, 200*time.Millisecond)
+	h := idempotent.NewHandler(client, fn, &idempotent.HandlerOptions{
+		LockTTL: 100 * time.Millisecond,
+		KeepTTL: 200 * time.Millisecond,
+	})
+	_, _, err := h.Handle(ctx, t.Name(), "world")
 	if err != nil {
 		t.Fatal(err)
 	}
