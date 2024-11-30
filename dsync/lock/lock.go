@@ -12,6 +12,8 @@ import (
 	redis "github.com/redis/go-redis/v9"
 )
 
+const payload = "unlock"
+
 var (
 	ErrCanceled        = errors.New("lock: canceled")
 	ErrLocked          = errors.New("lock: another process has acquired the lock")
@@ -87,12 +89,26 @@ func (l *Locker) TryLock(ctx context.Context, key string, ttl, wait time.Duratio
 	// Fire at the last moment before the wait duration.
 	last := time.After(wait)
 
+	pubsub := l.client.Subscribe(ctx, key)
+	defer pubsub.Close()
+
 	var i int
 	for {
 		sleep := exponentialBackoff(time.Second, time.Minute, i)
 
 		// Sleep for the remaining time before the key expires.
 		select {
+		case msg := <-pubsub.Channel():
+			if msg.Payload != payload {
+				continue
+			}
+
+			token, err := l.Lock(ctx, key, ttl)
+			if errors.Is(err, ErrLocked) {
+				continue
+			}
+
+			return token, err
 		case <-ctx.Done():
 			return "", context.Cause(ctx)
 		case <-last:
@@ -142,7 +158,7 @@ func (l *Locker) Unlock(ctx context.Context, key, token string) error {
 		return fmt.Errorf("unlock: %w", err)
 	}
 
-	return l.client.Publish(ctx, key, "unlock").Err()
+	return l.client.Publish(ctx, key, payload).Err()
 }
 
 func (l *Locker) Extend(ctx context.Context, key, val string, ttl time.Duration) error {
