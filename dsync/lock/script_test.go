@@ -5,12 +5,13 @@ import (
 	"time"
 
 	"github.com/alextanhongpin/core/dsync/lock"
+	"github.com/alextanhongpin/core/storage/redis/redistest"
 	redis "github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 )
 
 func TestPrivateLockUnlock(t *testing.T) {
-	client := newClient(t)
+	client := redistest.Client(t)
 
 	cleanup := func(t *testing.T) {
 		t.Helper()
@@ -62,7 +63,7 @@ func TestPrivateLockUnlock(t *testing.T) {
 }
 
 func TestPrivateReplace(t *testing.T) {
-	client := newClient(t)
+	client := redistest.Client(t)
 
 	cleanup := func(t *testing.T) {
 		t.Helper()

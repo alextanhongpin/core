@@ -3,7 +3,6 @@ package lock_test
 import (
 	"context"
 	"errors"
-	"os"
 	"sync"
 	"testing"
 	"time"
@@ -19,13 +18,13 @@ func TestMain(m *testing.M) {
 	// Setup a redis instance in docker.
 	// The address can be obtained from redistest.Addr().
 	stop := redistest.Init()
-	code := m.Run()
-	stop()
-	os.Exit(code)
+	defer stop()
+
+	m.Run()
 }
 
 func TestLock_Success(t *testing.T) {
-	client := newClient(t)
+	client := redistest.Client(t)
 
 	ch := make(chan bool)
 	key := t.Name()
@@ -67,7 +66,7 @@ func TestLock_Success(t *testing.T) {
 		// Wait for the first lock to be acquired.
 		<-ch
 
-		// Lock for 1s minimum, wait for 200ms to acquire lock.
+		// Lock for 1s minimum, wait for 1s to acquire lock.
 		locker := lock.New(client)
 		locker.LockTTL = 1 * time.Second
 		locker.WaitTTL = 200 * time.Millisecond
@@ -113,7 +112,7 @@ func TestLock_Success(t *testing.T) {
 // The second goroutine fails to acquire the lock within 100ms.
 // The second goroutine fails with error.
 func TestLock_WaitTimeout(t *testing.T) {
-	client := newClient(t)
+	client := redistest.Client(t)
 
 	ch := make(chan bool)
 	key := t.Name()
@@ -195,7 +194,7 @@ func TestLock_WaitTimeout(t *testing.T) {
 }
 
 func TestLock_KeyReleased_Timeout(t *testing.T) {
-	client := newClient(t)
+	client := redistest.Client(t)
 	errs := make(chan error)
 	ch := make(chan bool)
 	key := t.Name()
@@ -237,7 +236,7 @@ func TestLock_KeyReleased_Timeout(t *testing.T) {
 func TestLock_KeyReleased_ContextCancelled(t *testing.T) {
 	key := t.Name()
 
-	client := newClient(t)
+	client := redistest.Client(t)
 	locker := lock.New(client)
 	locker.LockTTL = time.Second
 	locker.WaitTTL = time.Second
@@ -258,7 +257,7 @@ func TestLock_KeyReleased_ContextCancelled(t *testing.T) {
 func TestLock_KeyReleased_Error(t *testing.T) {
 	key := t.Name()
 
-	client := newClient(t)
+	client := redistest.Client(t)
 	locker := lock.New(client)
 	locker.LockTTL = time.Second
 	locker.WaitTTL = time.Second
@@ -274,7 +273,7 @@ func TestLock_KeyReleased_Error(t *testing.T) {
 }
 
 func TestLock_Extend_Success(t *testing.T) {
-	client := newClient(t)
+	client := redistest.Client(t)
 	key := t.Name()
 	errs := make(chan error, 10)
 	ch := make(chan bool)
@@ -330,20 +329,6 @@ func TestLock_Extend_Success(t *testing.T) {
 	}
 
 	testKeyReleased(t, client, key)
-}
-
-func newClient(t *testing.T) *redis.Client {
-	t.Helper()
-
-	client := redis.NewClient(&redis.Options{
-		Addr: redistest.Addr(),
-	})
-	t.Cleanup(func() {
-		client.FlushAll(ctx)
-		client.Close()
-	})
-
-	return client
 }
 
 func testKeyReleased(t *testing.T, client *redis.Client, key string) {

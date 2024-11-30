@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"math/rand"
+	"math/rand/v2"
 	"time"
 
 	"github.com/google/uuid"
@@ -21,43 +21,15 @@ var (
 	ErrLockWaitTimeout = errors.New("lock: failed to acquire lock within the wait duration")
 )
 
-type Options struct {
-	LockTTL time.Duration // How long the lock is held.
-	WaitTTL time.Duration // How long to wait for the lock to be acquired.
-}
-
-func (o *Options) Apply(opts ...Option) *Options {
-	for _, opt := range opts {
-		opt(o)
-	}
-
-	return o
-}
-
-type Option func(o *Options)
-
-func NoWait() Option {
-	return func(o *Options) {
-		o.WaitTTL = 0
-	}
-}
-
-func WithLockTTL(t time.Duration) Option {
-	return func(o *Options) {
-		o.LockTTL = t
-	}
-}
-
-func WithWaitTTL(t time.Duration) Option {
-	return func(o *Options) {
-		o.WaitTTL = t
-	}
-}
-
 // Locker represents a distributed lock implementation using Redis.
+// Works on with a single redis node.
 type Locker struct {
-	client  *redis.Client
+	client *redis.Client
+	// The duration the lock is held. Renewed every 7/10 of the LockTTL.
+	// Set it to at least 5s to ensure the lock has enough time to be renewed.
 	LockTTL time.Duration
+	// The duration to wait for the lock to be acquired.
+	// If set to 0, it will not wait and will return the error immediately.
 	WaitTTL time.Duration
 }
 
@@ -121,29 +93,34 @@ func (l *Locker) Do(ctx context.Context, key string, fn func(ctx context.Context
 // will wait for the lock to be released.
 // If the wait is less than or equal to 0, it will not wait.
 func (l *Locker) TryLock(ctx context.Context, key string, ttl, wait time.Duration) (string, error) {
-	noWait := wait <= 0
-	if noWait {
+	nowait := wait <= 0
+	if nowait {
 		return l.Lock(ctx, key, ttl)
 	}
 
-	ctx, cancel := context.WithTimeoutCause(ctx, wait, ErrLockWaitTimeout)
-	defer cancel()
+	// Fire at the last moment before the wait duration.
+	last := time.After(wait)
 
 	var i int
 	for {
+		sleep := exponentialBackoff(time.Second, time.Minute, i)
+
+		// Sleep for the remaining time before the key expires.
 		select {
 		case <-ctx.Done():
 			return "", context.Cause(ctx)
-		default:
+		case <-last:
 			token, err := l.Lock(ctx, key, ttl)
 			if errors.Is(err, ErrLocked) {
-				select {
-				case <-ctx.Done():
-					return "", context.Cause(ctx)
-				case <-time.After(exponentialGrowthDecay(i)):
-					i++
-					continue
-				}
+				return "", ErrLockWaitTimeout
+			}
+
+			return token, err
+		case <-time.After(sleep):
+			token, err := l.Lock(ctx, key, ttl)
+			if errors.Is(err, ErrLocked) {
+				i++
+				continue
 			}
 
 			return token, err
@@ -154,7 +131,7 @@ func (l *Locker) TryLock(ctx context.Context, key string, ttl, wait time.Duratio
 // Lock the key with the given ttl and returns a fencing token.
 // If the lock is already acquired, it will return an error.
 func (l *Locker) Lock(ctx context.Context, key string, ttl time.Duration) (string, error) {
-	token := newFencingToken()
+	token := newToken()
 	ok, err := l.client.SetNX(ctx, key, token, ttl).Result()
 	if err != nil {
 		return "", fmt.Errorf("lock: %w", err)
@@ -179,7 +156,7 @@ func (l *Locker) Unlock(ctx context.Context, key, token string) error {
 		return fmt.Errorf("unlock: %w", err)
 	}
 
-	return nil
+	return l.client.Publish(ctx, key, "unlock").Err()
 }
 
 func (l *Locker) Extend(ctx context.Context, key, val string, ttl time.Duration) error {
@@ -230,22 +207,10 @@ func (l *Locker) LoadOrStore(ctx context.Context, key, value string, ttl time.Du
 	return v.(string), true, nil
 }
 
-// combination of two curves. the duration increases exponentially in the beginning before beginning to decay.
-// The idea is the wait duration should eventually be lesser and lesser over time.
-func exponentialGrowthDecay(i int) time.Duration {
-	x := float64(i)
-	base := 1.0 + rand.Float64()
-	switch {
-	case x < 4: // intersection point rounded to 4
-		base *= math.Pow(2, x)
-	case x < 10:
-		base *= 5 * math.Log(-0.9*x+10)
-	default:
-	}
-
-	return time.Duration(base*100) * time.Millisecond
+func newToken() string {
+	return uuid.Must(uuid.NewV7()).String()
 }
 
-func newFencingToken() string {
-	return uuid.Must(uuid.NewV7()).String()
+func exponentialBackoff(base, limit time.Duration, i int) time.Duration {
+	return rand.N(min(base*time.Duration(math.Pow(2, float64(i))), limit))
 }
