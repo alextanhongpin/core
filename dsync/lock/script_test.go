@@ -10,105 +10,93 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestPrivateLockUnlock(t *testing.T) {
+func TestScript_LoadOrStore_Unlock(t *testing.T) {
 	client := redistest.Client(t)
-
-	cleanup := func(t *testing.T) {
-		t.Helper()
-		t.Cleanup(func() {
-			client.FlushAll(ctx).Err()
-		})
-	}
 
 	store := lock.New(client)
 	lockTTL := 100 * time.Millisecond
 
-	t.Run("when lock success", func(t *testing.T) {
-		cleanup(t)
-
-		key := t.Name()
+	t.Run("stored", func(t *testing.T) {
+		var (
+			is  = assert.New(t)
+			key = t.Name()
+		)
 		_, loaded, err := store.LoadOrStore(ctx, key, "world", lockTTL)
-		assert.Nil(t, err, "expected error to be nil")
-		assert.False(t, loaded, "expected value to be stored")
+		is.Nil(err, "expected error to be nil")
+		is.False(loaded, "expected value to be stored")
 
 		// Check the lock TTL.
-		lockTTL := client.PTTL(ctx, key).Val()
-		assert.True(t, 100*time.Millisecond-lockTTL < 10*time.Millisecond, "expected lock TTL to be close to 100ms")
+		ttl := client.PTTL(ctx, key).Val()
+		is.True(ttl <= lockTTL, "expected lock TTL to be close to 100ms")
 
-		t.Run("when lock second time", func(t *testing.T) {
-			lockValue, loaded, err := store.LoadOrStore(ctx, key, "world", lockTTL)
-			assert.Nil(t, err, "expected error to be nil")
-			assert.True(t, loaded, "then the value is loaded")
-			assert.Equal(t, "world", lockValue, "expected lock value to be 'world'")
+		t.Run("loaded", func(t *testing.T) {
+			val, loaded, err := store.LoadOrStore(ctx, key, "world", lockTTL)
+			is := assert.New(t)
+			is.Nil(err, "expected error to be nil")
+			is.True(loaded, "then the value is loaded")
+			is.Equal("world", val, "expected lock value to be 'world'")
 		})
 
-		t.Run("when unlock failed with wrong key", func(t *testing.T) {
+		t.Run("unlock failed with wrong key", func(t *testing.T) {
+			is := assert.New(t)
 			err := store.Unlock(ctx, key, "wrong-key")
-			assert.ErrorIs(t, err, lock.ErrConflict, "expected error to be ErrConflict")
+			is.ErrorIs(err, lock.ErrConflict, "expected error to be ErrConflict")
 
 			val, err := client.Get(ctx, key).Result()
-			assert.Nil(t, err, "expected error to be nil")
-			assert.Equal(t, "world", val, "expected lock value to remain unchanged")
+			is.Nil(err, "expected error to be nil")
+			is.Equal("world", val, "expected lock value to remain unchanged")
 		})
 
-		t.Run("when unlock success", func(t *testing.T) {
+		t.Run("unlock succeed", func(t *testing.T) {
 			err := store.Unlock(ctx, key, "world")
-			assert.Nil(t, err, "expected error to be nil")
+			is := assert.New(t)
+			is.Nil(err, "expected error to be nil")
 
 			_, err = client.Get(ctx, key).Result()
-			assert.ErrorIs(t, err, redis.Nil, "expected lock to be released")
+			is.ErrorIs(err, redis.Nil, "expected lock to be released")
 		})
 	})
 }
 
-func TestPrivateReplace(t *testing.T) {
+func TestScript_Replace(t *testing.T) {
 	client := redistest.Client(t)
-
-	cleanup := func(t *testing.T) {
-		t.Helper()
-		t.Cleanup(func() {
-			client.FlushAll(ctx).Err()
-		})
-	}
-
 	store := lock.New(client)
 
 	t.Run("when replace failed with invalid old value", func(t *testing.T) {
-		cleanup(t)
+		var (
+			is  = assert.New(t)
+			key = t.Name()
+		)
 
-		a := assert.New(t)
-		key := t.Name()
-
-		// Set a value to be replaced.
-		a.Nil(client.Set(ctx, key, "world", 0).Err())
-
+		// Set is value to be replaced.
+		is.Nil(client.Set(ctx, key, "old-value", 0).Err())
 		err := store.Replace(ctx, key, "invalid-old-value", "new-value", 2*time.Second)
 		// The key should be released.
-		a.ErrorIs(err, lock.ErrConflict)
+		is.ErrorIs(err, lock.ErrConflict)
 
 		v, err := client.Get(ctx, key).Result()
-		a.Nil(err, "expected error to be nil")
-		a.Equal("world", v, "then the value stays the same")
+		is.Nil(err, "expected error to be nil")
+		is.Equal("old-value", v, "then the value stays the same")
 	})
 
 	t.Run("when replace success", func(t *testing.T) {
-		cleanup(t)
+		var (
+			is  = assert.New(t)
+			key = t.Name()
+		)
 
-		a := assert.New(t)
-		key := t.Name()
+		// Set is value to be replaced.
+		is.Nil(client.Set(ctx, key, "old-value", 0).Err())
 
-		// Set a value to be replaced.
-		a.Nil(client.Set(ctx, key, "world", 0).Err())
-
-		err := store.Replace(ctx, key, "world", "new-value", 2*time.Second)
-		a.Nil(err, "expected error to be nil")
+		err := store.Replace(ctx, key, "old-value", "new-value", 200*time.Millisecond)
+		is.Nil(err, "expected error to be nil")
 
 		v, err := client.Get(ctx, key).Result()
-		a.Nil(err, "expected error to be nil")
-		a.Equal("new-value", v, "then the value will be replaced")
+		is.Nil(err, "expected error to be nil")
+		is.Equal("new-value", v, "then the value will be replaced")
 
 		// Check the updated TTL.
-		updatedTTL := client.PTTL(ctx, key).Val()
-		a.True(200*time.Millisecond-updatedTTL < 10*time.Millisecond, "expected updated TTL to be close to 200ms")
+		ttl := client.PTTL(ctx, key).Val()
+		is.True(ttl <= 200*time.Millisecond, "expected updated TTL to be close to 200ms")
 	})
 }

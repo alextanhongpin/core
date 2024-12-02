@@ -86,8 +86,8 @@ func (l *Locker) TryLock(ctx context.Context, key string, ttl, wait time.Duratio
 		return l.Lock(ctx, key, ttl)
 	}
 
-	// Fire at the last moment before the wait duration.
-	last := time.After(wait)
+	// Fire at the timeout moment before the wait duration.
+	timeout := time.After(wait)
 
 	pubsub := l.client.Subscribe(ctx, key)
 	defer pubsub.Close()
@@ -111,7 +111,7 @@ func (l *Locker) TryLock(ctx context.Context, key string, ttl, wait time.Duratio
 			return token, err
 		case <-ctx.Done():
 			return "", context.Cause(ctx)
-		case <-last:
+		case <-timeout:
 			token, err := l.Lock(ctx, key, ttl)
 			if errors.Is(err, ErrLocked) {
 				return "", ErrLockWaitTimeout
