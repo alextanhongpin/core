@@ -60,13 +60,39 @@ func TestChannel(t *testing.T) {
 	}
 }
 
-func TestIdle(t *testing.T) {
+func TestEmpty(t *testing.T) {
 	p := poll.New()
 	p.BatchSize = 3
 	p.MaxConcurrency = 3
 
 	ch, stop := p.Poll(func(ctx context.Context) error {
 		return poll.EOQ
+	})
+
+	var count atomic.Int64
+	for msg := range ch {
+		t.Logf("%+v\n", msg)
+
+		if errors.Is(msg.Err, poll.EOQ) {
+			if count.Add(1) > 2 {
+				stop()
+			}
+		}
+	}
+}
+
+func TestIdle(t *testing.T) {
+	p := poll.New()
+	p.BatchSize = 3
+	p.MaxConcurrency = 1
+
+	i := new(atomic.Int64)
+	ch, stop := p.Poll(func(ctx context.Context) error {
+		if i.Add(1)%3 == 0 {
+			return poll.EOQ
+		}
+
+		return nil
 	})
 
 	var count atomic.Int64

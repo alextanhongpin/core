@@ -3,6 +3,7 @@ package poll
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"runtime"
 	"sync"
@@ -11,12 +12,15 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-var EOQ = errors.New("batch: end of queue")
+var (
+	EOQ   = errors.New("poll: end of queue")
+	Empty = errors.New("poll: empty queue")
+)
 
 type Poll struct {
 	BatchSize        int
 	FailureThreshold int
-	Interval         func(idle int) time.Duration
+	BackOff          func(idle int) time.Duration
 	MaxConcurrency   int
 }
 
@@ -24,7 +28,7 @@ func New() *Poll {
 	return &Poll{
 		BatchSize:        1_000,
 		FailureThreshold: 25,
-		Interval:         ExponentialInterval,
+		BackOff:          ExponentialBackOff,
 		MaxConcurrency:   MaxConcurrency(),
 	}
 }
@@ -35,7 +39,7 @@ func (p *Poll) Poll(fn func(context.Context) error) (<-chan Event, func()) {
 		ch               = make(chan Event)
 		done             = make(chan struct{})
 		failureThreshold = p.FailureThreshold
-		interval         = p.Interval
+		backoff          = p.BackOff
 		maxConcurrency   = p.MaxConcurrency
 	)
 
@@ -85,7 +89,7 @@ func (p *Poll) Poll(fn func(context.Context) error) (<-chan Event, func()) {
 		// An alternative is to check the queue size before
 		// starting the batch.
 		if err := work(); err != nil {
-			return err
+			return fmt.Errorf("%w: %w", Empty, err)
 		}
 
 		g, ctx := errgroup.WithContext(ctx)
@@ -117,7 +121,7 @@ func (p *Poll) Poll(fn func(context.Context) error) (<-chan Event, func()) {
 		var idle int
 		for {
 			// When the process is idle, we can sleep for a longer duration.
-			sleep := interval(idle)
+			sleep := backoff(idle)
 
 			select {
 			case <-done:
@@ -137,9 +141,16 @@ func (p *Poll) Poll(fn func(context.Context) error) (<-chan Event, func()) {
 				return
 			case <-time.After(sleep):
 				if err := batch(context.Background()); err != nil {
-					// End of queue, sleep for a while.
-					if errors.Is(err, EOQ) {
+					// Queue is empty, increment idle.
+					if errors.Is(err, Empty) {
 						idle++
+
+						continue
+					}
+
+					// End of queue, reset the idle counter.
+					if errors.Is(err, EOQ) {
+						idle = 0
 
 						continue
 					}
@@ -160,10 +171,10 @@ func (p *Poll) Poll(fn func(context.Context) error) (<-chan Event, func()) {
 	})
 }
 
-// ExponentialInterval returns the duration to sleep before the next batch.
+// ExponentialBackOff returns the duration to sleep before the next batch.
 // Idle will be zero if there are items in the queue. Otherwise, it will
 // increment.
-func ExponentialInterval(idle int) time.Duration {
+func ExponentialBackOff(idle int) time.Duration {
 	idle = min(idle, 6) // Up to 2^6 = 64
 	seconds := math.Pow(2, float64(idle))
 	return time.Duration(seconds) * time.Second
