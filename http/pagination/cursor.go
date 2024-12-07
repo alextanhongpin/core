@@ -1,8 +1,8 @@
 package pagination
 
 type Cursor[T any] struct {
-	After T
-	First int
+	After T   `json:"after"`
+	First int `json:"first"`
 }
 
 // Limit converts the First into database limit, and fetches an additional row
@@ -12,9 +12,9 @@ func (c *Cursor[T]) Limit() int {
 }
 
 type Pagination[T any] struct {
-	Items   []T
-	Cursor  *Cursor[T]
-	HasNext bool
+	Items   []T        `json:"items"`
+	Cursor  *Cursor[T] `json:"cursor"`
+	HasNext bool       `json:"hasNext"`
 }
 
 func Paginate[T any](items []T, cursor *Cursor[T]) *Pagination[T] {
