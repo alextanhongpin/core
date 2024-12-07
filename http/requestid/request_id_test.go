@@ -12,10 +12,18 @@ import (
 
 func TestRequestID(t *testing.T) {
 	var h http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reqID, ok := requestid.Context.Value(r.Context())
+		if !ok {
+			t.Error("request id not found in context")
+		}
+		if reqID != w.Header().Get("X-Request-Id") {
+			t.Errorf("unexpected request id: %s", reqID)
+		}
+
 		fmt.Fprint(w, "hello world")
 	})
-	h = requestid.Handler(h, "X-Request-Id", func() (string, error) {
-		return "random-token", nil
+	h = requestid.Handler(h, "X-Request-Id", func() string {
+		return "random-token"
 	})
 
 	t.Run("new", func(t *testing.T) {
