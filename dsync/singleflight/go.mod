@@ -1,12 +1,13 @@
 module github.com/alextanhongpin/core/dsync/singleflight
 
-go 1.22.5
+go 1.23.3
 
 require (
-	github.com/alextanhongpin/core/dsync/lock v0.0.0-20241207123041-3871d4095abc
+	github.com/alextanhongpin/core/dsync/lock v0.0.0-20241209150055-ccf482d64049
 	github.com/alextanhongpin/core/storage/redis v0.0.0-20241129173936-869204b716f4
+	github.com/alextanhongpin/core/sync/singleflight v0.0.0-20241210063059-6fb0c8853efe
 	github.com/redis/go-redis/v9 v9.7.0
-	github.com/stretchr/testify v1.9.0
+	github.com/stretchr/testify v1.10.0
 )
 
 require (

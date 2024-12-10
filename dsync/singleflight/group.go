@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/alextanhongpin/core/dsync/lock"
+	"github.com/alextanhongpin/core/sync/singleflight"
 	redis "github.com/redis/go-redis/v9"
 )
 
@@ -23,16 +24,36 @@ type Group struct {
 	BackOff BackOff
 	Client  *redis.Client
 	Locker  *lock.Locker
+	Group   *singleflight.Group[bool]
+}
+
+func New(client *redis.Client) *Group {
+	return &Group{
+		Client: client,
+		Locker: lock.New(client),
+		Group:  singleflight.New[bool](),
+	}
 }
 
 func (g *Group) DoOrWait(ctx context.Context, key string, fn func(context.Context) error, lockTTL, waitTTL time.Duration) (doOrWait bool, err error) {
-	token, err := g.Locker.Lock(ctx, key, lockTTL)
+	did, shared, err := g.Group.Do(ctx, key, func(ctx context.Context) (bool, error) {
+		return g.doOrWait(ctx, key, fn, lockTTL, waitTTL)
+	})
 	if err != nil {
-		if !errors.Is(err, lock.ErrLocked) {
-			return false, err
-		}
+		return false, err
+	}
 
+	return did && !shared, nil
+}
+
+func (g *Group) doOrWait(ctx context.Context, key string, fn func(context.Context) error, lockTTL, waitTTL time.Duration) (doOrWait bool, err error) {
+	token, err := g.Locker.Lock(ctx, key, lockTTL)
+	if errors.Is(err, lock.ErrLocked) {
 		return false, g.wait(ctx, key, waitTTL)
+	}
+
+	if err != nil {
+		return false, err
 	}
 
 	err = g.do(ctx, key, token, fn, lockTTL)
