@@ -12,7 +12,10 @@ import (
 	redis "github.com/redis/go-redis/v9"
 )
 
-var ErrTimeout = errors.New("group: timeout waiting for result")
+var (
+	ErrTimeout            = errors.New("group: timeout waiting for result")
+	ErrSubscriptionClosed = errors.New("group: subscription closed")
+)
 
 const OK = "ok"
 
@@ -35,7 +38,7 @@ func New(client *redis.Client) *Group {
 	}
 }
 
-func (g *Group) DoOrWait(ctx context.Context, key string, fn func(context.Context) error, lockTTL, waitTTL time.Duration) (doOrWait bool, err error) {
+func (g *Group) Do(ctx context.Context, key string, fn func(context.Context) error, lockTTL, waitTTL time.Duration) (doOrWait bool, err error) {
 	did, shared, err := g.Group.Do(ctx, key, func(ctx context.Context) (bool, error) {
 		return g.doOrWait(ctx, key, fn, lockTTL, waitTTL)
 	})
@@ -49,7 +52,17 @@ func (g *Group) DoOrWait(ctx context.Context, key string, fn func(context.Contex
 func (g *Group) doOrWait(ctx context.Context, key string, fn func(context.Context) error, lockTTL, waitTTL time.Duration) (doOrWait bool, err error) {
 	token, err := g.Locker.Lock(ctx, key, lockTTL)
 	if errors.Is(err, lock.ErrLocked) {
-		return false, g.wait(ctx, key, waitTTL)
+		waitErr := g.wait(ctx, key, waitTTL)
+		if waitErr == nil {
+			return false, nil
+		}
+
+		ok, err := g.done(ctx, key)
+		if ok {
+			return false, nil
+		}
+
+		return false, errors.Join(waitErr, err)
 	}
 
 	if err != nil {
@@ -92,26 +105,20 @@ func (g *Group) wait(ctx context.Context, key string, waitTTL time.Duration) err
 	sub := g.Client.Subscribe(ctx, key)
 	defer sub.Close()
 
-	// Get expiry.
-	duration, err := g.Client.PTTL(ctx, key).Result()
-	if err != nil {
-		return err
-	}
+	// NOTE: This is left here for reminder.
+	// Using the expiry is not reliable, because
+	// 1) the key might be deleted before the expiry
+	// 2) the key might be extended before the expiry
+	//
+	// expiry, err := g.Client.PTTL(ctx, key).Result()
 
 	// Timeout after expiry.
-	timeout := time.After(min(duration, waitTTL))
-
-	var backOff BackOff
-	if g.BackOff != nil {
-		backOff = g.BackOff
-	} else {
-		backOff = NewExponentialBackOff(time.Second, time.Minute)
-	}
+	timeout := time.After(waitTTL)
 
 	var i int
 	for {
 		select {
-		case <-time.After(backOff.Duration(i)):
+		case <-time.After(g.backOffDuration(i)):
 			ok, err := g.done(ctx, key)
 			if err != nil {
 				return err
@@ -125,21 +132,11 @@ func (g *Group) wait(ctx context.Context, key string, waitTTL time.Duration) err
 				continue
 			}
 
-			return nil
+			return ErrSubscriptionClosed
 		case <-timeout:
-			ok, err := g.done(ctx, key)
-			if ok {
-				return nil
-			}
-
-			return errors.Join(err, ErrTimeout)
+			return ErrTimeout
 		case <-ctx.Done():
-			ok, err := g.done(ctx, key)
-			if ok {
-				return nil
-			}
-
-			return errors.Join(err, context.Cause(ctx))
+			return context.Cause(ctx)
 		}
 	}
 }
@@ -160,6 +157,14 @@ func (g *Group) unlock(ctx context.Context, key, token string) error {
 	}
 
 	return g.Client.Publish(ctx, key, OK).Err()
+}
+
+func (g *Group) backOffDuration(i int) time.Duration {
+	if g.BackOff != nil {
+		return g.BackOff.Duration(i)
+	}
+
+	return NewExponentialBackOff(time.Second, time.Minute).Duration(i)
 }
 
 type ExponentialBackOff struct {

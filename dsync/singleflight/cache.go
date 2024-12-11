@@ -38,18 +38,13 @@ func (c *Cache[T]) LoadOrStore(ctx context.Context, key string, getter func(ctx 
 		return t, false, err
 	}
 
-	did, err := c.Group.DoOrWait(ctx, fmt.Sprintf("%s:%s", key, c.Suffix), func(ctx context.Context) error {
+	did, err := c.Group.Do(ctx, fmt.Sprintf("%s:%s", key, c.Suffix), func(ctx context.Context) error {
 		v, err := getter(ctx)
 		if err != nil {
 			return err
 		}
 
-		b, err := json.Marshal(v)
-		if err != nil {
-			return err
-		}
-
-		return c.Client.Set(ctx, key, b, ttl).Err()
+		return c.store(ctx, key, v, ttl)
 	}, c.LockTTL, c.WaitTTL)
 	if err != nil {
 		return t, false, err
@@ -71,4 +66,13 @@ func (c *Cache[T]) load(ctx context.Context, key string) (t T, err error) {
 
 	err = json.Unmarshal(b, &t)
 	return t, err
+}
+
+func (c *Cache[T]) store(ctx context.Context, key string, v T, ttl time.Duration) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	return c.Client.Set(ctx, key, b, ttl).Err()
 }

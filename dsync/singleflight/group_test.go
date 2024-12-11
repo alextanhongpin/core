@@ -24,14 +24,14 @@ func TestSingleflight(t *testing.T) {
 
 	t.Run("sync", func(t *testing.T) {
 		key := t.Name()
-		doOrWait, err := g.DoOrWait(ctx, key, func(ctx context.Context) error {
+		doOrWait, err := g.Do(ctx, key, func(ctx context.Context) error {
 			return nil
 		}, lockTTL, waitTTL)
 		is := assert.New(t)
 		is.Nil(err)
 		is.True(doOrWait)
 
-		doOrWait, err = g.DoOrWait(ctx, key, func(ctx context.Context) error {
+		doOrWait, err = g.Do(ctx, key, func(ctx context.Context) error {
 			return nil
 		}, lockTTL, waitTTL)
 		is.Nil(err)
@@ -57,7 +57,7 @@ func TestSingleflight(t *testing.T) {
 				defer wg.Done()
 				<-ch
 
-				doOrWait, err := g.DoOrWait(ctx, key, func(ctx context.Context) error {
+				doOrWait, err := g.Do(ctx, key, func(ctx context.Context) error {
 					did.Add(1)
 					time.Sleep(100 * time.Millisecond)
 					return nil
@@ -76,7 +76,7 @@ func TestSingleflight(t *testing.T) {
 				<-ch
 
 				g := singleflight.New(client)
-				doOrWait, err := g.DoOrWait(ctx, key, func(ctx context.Context) error {
+				doOrWait, err := g.Do(ctx, key, func(ctx context.Context) error {
 					did.Add(1)
 					time.Sleep(100 * time.Millisecond)
 					return nil
