@@ -16,9 +16,10 @@ const payload = "unlock"
 
 var (
 	ErrCanceled        = errors.New("lock: canceled")
-	ErrLocked          = errors.New("lock: another process has acquired the lock")
 	ErrConflict        = errors.New("lock: lock expired or acquired by another process")
+	ErrLockTimeout     = errors.New("lock: exceeded lock duration")
 	ErrLockWaitTimeout = errors.New("lock: failed to acquire lock within the wait duration")
+	ErrLocked          = errors.New("lock: another process has acquired the lock")
 )
 
 // Locker represents a distributed lock implementation using Redis.
@@ -31,6 +32,67 @@ type Locker struct {
 func New(client *redis.Client) *Locker {
 	return &Locker{
 		client: client,
+	}
+}
+
+func (l *Locker) Acquire(ctx context.Context, key string, lockTTL, waitTTL time.Duration) (func() error, error) {
+	// Generate a random uuid as the lock value.
+	token, err := l.TryLock(ctx, key, lockTTL, waitTTL)
+	if err != nil {
+		return nil, err
+	}
+
+	ch := make(chan error, 1)
+	ctx, cancel := context.WithCancel(ctx)
+
+	go func() {
+		defer close(ch)
+
+		t := time.NewTicker(lockTTL * 7 / 10)
+		defer t.Stop()
+
+		for {
+			select {
+			case <-ctx.Done():
+				ch <- context.Cause(ctx)
+				return
+			case <-t.C:
+				if err := l.Extend(ctx, key, token, lockTTL); err != nil {
+					ch <- err
+					return
+				}
+			}
+		}
+	}()
+
+	return func() error {
+		cancel()
+		// To ensure the unlock is called, we avoid using the same context.
+		return errors.Join(<-ch, l.Unlock(context.WithoutCancel(ctx), key, token))
+	}, nil
+}
+
+// DoTimeout ensures that the operation completes within the lockTTL.
+// Use Do if you want the lock duration to be extended until completion.
+func (l *Locker) DoTimeout(ctx context.Context, key string, fn func(ctx context.Context) error, lockTTL, waitTTL time.Duration) error {
+	ctx, cancel := context.WithTimeoutCause(ctx, lockTTL, ErrLockTimeout)
+	defer cancel()
+
+	// Generate a random uuid as the lock value.
+	_, err := l.TryLock(ctx, key, lockTTL, waitTTL)
+	if err != nil {
+		return err
+	}
+	ch := make(chan error, 1)
+	go func() {
+		ch <- fn(ctx)
+	}()
+
+	select {
+	case <-ctx.Done():
+		return context.Cause(ctx)
+	case err := <-ch:
+		return err
 	}
 }
 

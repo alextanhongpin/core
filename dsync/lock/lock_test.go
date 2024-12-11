@@ -323,6 +323,28 @@ func TestLock_Extend_Success(t *testing.T) {
 	assertNoKey(t, client, key)
 }
 
+func TestLock_DoTimeout(t *testing.T) {
+	var (
+		client  = redistest.Client(t)
+		is      = assert.New(t)
+		key     = t.Name()
+		lockTTL = 50 * time.Millisecond
+		locker  = lock.New(client)
+		waitTTL = time.Second
+	)
+
+	var wantErr = errors.New("want error")
+	err := locker.DoTimeout(ctx, key, func(ctx context.Context) error {
+		time.Sleep(100 * time.Millisecond)
+
+		return wantErr
+	}, lockTTL, waitTTL)
+	is.ErrorIs(err, lock.ErrLockTimeout)
+
+	time.Sleep(5 * time.Millisecond) // Ensure the TTL is expired.
+	assertNoKey(t, client, key)
+}
+
 func assertNoKey(t *testing.T, client *redis.Client, key string) {
 	t.Helper()
 
