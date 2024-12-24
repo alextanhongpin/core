@@ -18,6 +18,10 @@ func PathValue(r *http.Request, name string) Value {
 	return Value(r.PathValue(name))
 }
 
+func FormValue(r *http.Request, name string) Value {
+	return Value(r.FormValue(name))
+}
+
 func (v Value) String() string {
 	return string(v)
 }
