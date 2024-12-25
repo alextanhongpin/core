@@ -26,9 +26,9 @@ func TestExtend(t *testing.T) {
 	tpl := &templ.Template{
 		FS: newFS(),
 	}
-	base := tpl.Compile("base.html")
+	base := tpl.Compile("base.html", "partials/*.html")
 	home := base.Extend("home.html")
-	about := base.Extend("about.html", "partials/*.html")
+	about := base.Extend("about.html")
 
 	is := assert.New(t)
 	var b bytes.Buffer

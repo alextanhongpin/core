@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"path/filepath"
 	"slices"
+	"sync"
 	"text/template"
 )
 
@@ -65,11 +66,8 @@ type Extension struct {
 
 func (e *Extension) Extend(files ...string) *Extension {
 	return &Extension{
-		fn: func() *template.Template {
-			top := template.Must(e.fn().Clone())
-			return template.Must(top.ParseFS(e.t.FS, e.t.paths(files...)...))
-		},
-		t: e.t,
+		fn: e.templateFunc(files...),
+		t:  e.t,
 	}
 }
 
@@ -79,4 +77,20 @@ func (e *Extension) Execute(wr io.Writer, data any) error {
 
 func (e *Extension) ExecuteTemplate(wr io.Writer, name string, data any) error {
 	return e.fn().ExecuteTemplate(wr, name, data)
+}
+
+func (e *Extension) Template() *template.Template {
+	return e.fn()
+}
+
+func (e *Extension) templateFunc(files ...string) func() *template.Template {
+	fn := func() *template.Template {
+		top := template.Must(e.fn().Clone())
+		return template.Must(top.ParseFS(e.t.FS, e.t.paths(files...)...))
+	}
+	if e.t.HotReload {
+		return fn
+	}
+
+	return sync.OnceValue(fn)
 }
