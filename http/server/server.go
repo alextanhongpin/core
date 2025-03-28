@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 )
@@ -21,8 +22,28 @@ const (
 )
 
 // ListenAndServe starts the HTTP server with some sane defaults.
-func ListenAndServe(port string, handler http.Handler, opts ...Option) {
+func ListenAndServe(port string, handler http.Handler) {
+	WaitGroup(New(port, handler))
+}
 
+// New returns a new server with the default settings.
+func New(port string, handler http.Handler) *http.Server {
+	// Instead of setting WriteTimeout, we use http.TimeoutHandler to specify the
+	// maximum amount of time for a handler to complete.
+	//handler = http.TimeoutHandler(handler, handlerTimeout, "")
+
+	// Also limit the payload size to 1 MB.
+	//handler = http.MaxBytesHandler(handler, MaxBytesSize)
+	return &http.Server{
+		Addr:              port,
+		ReadHeaderTimeout: readHeaderTimeout,
+		ReadTimeout:       readTimeout,
+		WriteTimeout:      writeTimeout,
+		Handler:           handler,
+	}
+}
+
+func WaitGroup(servers ...*http.Server) {
 	// SIGINT: When a process is interrupted from keyboard by pressing CTRL+C.
 	//         Use os.Interrupt instead for OS-agnostic interrupt.
 	//         Reference: https://github.com/edgexfoundry/edgex-go/issues/995
@@ -30,40 +51,26 @@ func ListenAndServe(port string, handler http.Handler, opts ...Option) {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	// Instead of setting WriteTimeout, we use http.TimeoutHandler to specify the
-	// maximum amount of time for a handler to complete.
-	//handler = http.TimeoutHandler(handler, handlerTimeout, "")
+	var wg sync.WaitGroup
+	wg.Add(len(servers))
 
-	// Also limit the payload size to 1 MB.
-	//handler = http.MaxBytesHandler(handler, MaxBytesSize)
-
-	srv := &http.Server{
-		Addr:              port,
-		ReadHeaderTimeout: readHeaderTimeout,
-		ReadTimeout:       readTimeout,
-		WriteTimeout:      writeTimeout,
-		Handler:           handler,
-		BaseContext: func(_ net.Listener) context.Context {
-			// https://www.rudderstack.com/blog/implementing-graceful-shutdown-in-go/
-			// Pass the main ctx as the context for every request.
-			return ctx
-		},
-	}
-
-	for _, o := range opts {
-		o.Apply(srv)
-	}
-
-	done := make(chan bool)
-
-	// Initializing the srv in a goroutine so that
-	// it won't block the graceful shutdown handling below
-	go func() {
-		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			panic(err)
+	for _, srv := range servers {
+		if srv.BaseContext == nil {
+			srv.BaseContext = func(_ net.Listener) context.Context {
+				// https://www.rudderstack.com/blog/implementing-graceful-shutdown-in-go/
+				// Pass the main ctx as the context for every request.
+				return ctx
+			}
 		}
-		close(done)
-	}()
+
+		go func() {
+			defer wg.Done()
+
+			if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				panic(err)
+			}
+		}()
+	}
 
 	// Listen for the interrupt signal.
 	<-ctx.Done()
@@ -76,10 +83,11 @@ func ListenAndServe(port string, handler http.Handler, opts ...Option) {
 	ctx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
 
-	if err := srv.Shutdown(ctx); err != nil {
-		panic(err)
+	for _, srv := range servers {
+		if err := srv.Shutdown(ctx); err != nil {
+			panic(err)
+		}
 	}
 
-	// Wait for the server to shutdown.
-	<-done
+	wg.Wait()
 }

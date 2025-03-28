@@ -9,7 +9,7 @@ require (
 	github.com/google/go-cmp v0.6.0
 	github.com/google/uuid v1.3.0
 	github.com/stretchr/testify v1.9.0
-	golang.org/x/sys v0.21.0
+	golang.org/x/sys v0.31.0
 )
 
 require (

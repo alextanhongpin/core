@@ -25,7 +25,7 @@ import (
 // $ go build -o main
 // $ kill -SIGUSR2 `lsof -ti:8080`
 // $ curl localhost:8080
-func ListenAndServeForever(port string, handler http.Handler, opts ...Option) {
+func ListenAndServeForever(port string, handler http.Handler) {
 	var l net.Listener
 
 	// Try to obtain parent's listener and kill him.
@@ -58,10 +58,6 @@ func ListenAndServeForever(port string, handler http.Handler, opts ...Option) {
 		ReadTimeout:       readTimeout,
 		WriteTimeout:      writeTimeout,
 		Handler:           handler,
-	}
-
-	for _, o := range opts {
-		o.Apply(s)
 	}
 
 	go func() {
