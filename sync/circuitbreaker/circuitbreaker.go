@@ -38,6 +38,7 @@ func (s Status) String() string {
 	return statusText[s]
 }
 
+// Breaker implements a circuit breaker with pluggable clock and hooks.
 type Breaker struct {
 	// Configuration.
 	BreakDuration    time.Duration
@@ -49,10 +50,16 @@ type Breaker struct {
 	SlowCallCount    func(time.Duration) int
 	SuccessThreshold int
 
+	// Hooks and clock for testability.
+	Now           func() time.Time
+	AfterFunc     func(time.Duration, func()) *time.Timer
+	OnStateChange func(old, new Status)
+
 	// State.
-	mu     sync.RWMutex
-	status Status
-	timer  *time.Timer
+	mu            sync.RWMutex
+	status        Status
+	timer         *time.Timer
+	probeInFlight bool
 }
 
 func New() *Breaker {
@@ -80,6 +87,11 @@ func New() *Breaker {
 			return int(duration / (5 * time.Second))
 		},
 		SuccessThreshold: successThreshold,
+		// Inject defaults for testability.
+		Now:           time.Now,
+		AfterFunc:     time.AfterFunc,
+		OnStateChange: nil,
+		status:        Closed,
 	}
 }
 
@@ -104,6 +116,23 @@ func (b *Breaker) Do(fn func() error) error {
 	}
 }
 
+// setStatus transitions state, resets the counter and timer, and invokes a hook.
+func (b *Breaker) setStatus(s Status) {
+	b.mu.Lock()
+	old := b.status
+	b.status = s
+	b.Counter.Reset()
+	if b.timer != nil {
+		b.timer.Stop()
+	}
+	hook := b.OnStateChange
+	b.mu.Unlock()
+
+	if old != s && hook != nil {
+		go hook(old, s)
+	}
+}
+
 func (b *Breaker) canOpen(n int) bool {
 	if n <= 0 {
 		return false
@@ -115,16 +144,10 @@ func (b *Breaker) canOpen(n int) bool {
 }
 
 func (b *Breaker) open() {
-	b.mu.Lock()
-	b.status = Open
-	b.Counter.Reset()
-	if b.timer != nil {
-		b.timer.Stop()
-	}
-	b.timer = time.AfterFunc(b.BreakDuration, func() {
+	b.setStatus(Open)
+	b.timer = b.AfterFunc(b.BreakDuration, func() {
 		b.halfOpen()
 	})
-	b.mu.Unlock()
 }
 
 func (b *Breaker) opened() error {
@@ -138,17 +161,14 @@ func (b *Breaker) canClose() bool {
 }
 
 func (b *Breaker) close() {
-	b.mu.Lock()
-	b.status = Closed
-	b.Counter.Reset()
-	b.mu.Unlock()
+	b.setStatus(Closed)
 }
 
 func (b *Breaker) closed(fn func() error) error {
-	start := time.Now()
+	start := b.Now()
 	if err := fn(); err != nil {
 		n := b.FailureCount(err)
-		n += b.SlowCallCount(time.Since(start))
+		n += b.SlowCallCount(b.Now().Sub(start))
 		if b.canOpen(n) {
 			b.open()
 		}
@@ -156,7 +176,7 @@ func (b *Breaker) closed(fn func() error) error {
 		return err
 	}
 
-	n := b.SlowCallCount(time.Since(start))
+	n := b.SlowCallCount(b.Now().Sub(start))
 	if b.canOpen(n) {
 		b.open()
 
@@ -169,24 +189,34 @@ func (b *Breaker) closed(fn func() error) error {
 }
 
 func (b *Breaker) halfOpen() {
-	b.mu.Lock()
-	b.status = HalfOpen
-	b.Counter.Reset()
-	b.mu.Unlock()
+	b.setStatus(HalfOpen)
 }
 
 func (b *Breaker) halfOpened(fn func() error) error {
-	start := time.Now()
+	// Allow only one in-flight probe in half-open
+	b.mu.Lock()
+	if b.probeInFlight {
+		b.mu.Unlock()
+		return ErrBrokenCircuit
+	}
+	b.probeInFlight = true
+	b.mu.Unlock()
+
+	defer func() {
+		b.mu.Lock()
+		b.probeInFlight = false
+		b.mu.Unlock()
+	}()
+
+	start := b.Now()
 	if err := fn(); err != nil {
 		b.open()
-
 		return err
 	}
 
-	n := b.SlowCallCount(time.Since(start))
+	n := b.SlowCallCount(b.Now().Sub(start))
 	if b.canOpen(n) {
 		b.open()
-
 		return nil
 	}
 
