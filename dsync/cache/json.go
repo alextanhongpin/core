@@ -3,6 +3,7 @@ package cache
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"time"
 
 	redis "github.com/redis/go-redis/v9"
@@ -73,4 +74,27 @@ func (s *JSON) CompareAndSwap(ctx context.Context, key string, old, value any, t
 	}
 
 	return s.Cache.CompareAndSwap(ctx, key, a, b, ttl)
+}
+
+func LoadOrStore[T any](ctx context.Context, cache Cacheable, key string, valuer func() (T, error), ttl time.Duration) (value T, loaded bool, err error) {
+	jc := &JSON{Cache: cache}
+
+	err = jc.Load(ctx, key, &value)
+	if err == nil {
+		return value, true, nil
+	}
+	if !errors.Is(err, ErrNotExist) {
+		return value, false, err
+	}
+
+	value, err = valuer()
+	if err != nil {
+		return value, false, err
+	}
+
+	if err := jc.Store(ctx, key, value, ttl); err != nil {
+		return value, false, err
+	}
+
+	return value, false, nil
 }

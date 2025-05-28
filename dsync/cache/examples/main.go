@@ -3,7 +3,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -41,12 +40,12 @@ func main() {
 
 type UserRepository struct {
 	users map[int64]*User
-	cache *cache.JSON
+	cache cache.Cacheable
 }
 
 func NewUserRepository() *UserRepository {
 	return &UserRepository{
-		cache: cache.NewJSON(client),
+		cache: cache.New(client),
 		users: map[int64]*User{
 			1: {ID: 1, Name: "John Doe"},
 		},
@@ -54,28 +53,20 @@ func NewUserRepository() *UserRepository {
 }
 
 func (u *UserRepository) Find(ctx context.Context, id int64) (*User, error) {
-	key := fmt.Sprint(id)
-	var user *User
-	err := u.cache.Load(ctx, key, &user)
-	if err == nil {
-		slog.Info("cache hit")
+	user, loaded, err := cache.LoadOrStore(ctx, u.cache, fmt.Sprint(id), func() (*User, error) {
+		slog.Info("loading user from database", "id", id)
+		user, ok := u.users[id]
+		if !ok {
+			return nil, fmt.Errorf("user not found: %d", id)
+		}
 		return user, nil
+	}, time.Minute)
+	if loaded {
+		slog.Info("user loaded from cache", "id", id)
+	} else {
+		slog.Info("user loaded from database", "id", id)
 	}
-	if !errors.Is(err, cache.ErrNotExist) {
-		return nil, err
-	}
-
-	slog.Info("cache miss")
-	user, ok := u.users[id]
-	if !ok {
-		return nil, errors.New("user not found")
-	}
-
-	if err := u.cache.Store(ctx, key, user, time.Minute); err != nil {
-		return nil, err
-	}
-
-	return user, nil
+	return user, err
 }
 
 type User struct {
