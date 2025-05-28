@@ -40,12 +40,12 @@ func main() {
 
 type UserRepository struct {
 	users map[int64]*User
-	cache cache.Cacheable
+	cache *cache.JSON
 }
 
 func NewUserRepository() *UserRepository {
 	return &UserRepository{
-		cache: cache.New(client),
+		cache: cache.NewJSON(client),
 		users: map[int64]*User{
 			1: {ID: 1, Name: "John Doe"},
 		},
@@ -53,7 +53,8 @@ func NewUserRepository() *UserRepository {
 }
 
 func (u *UserRepository) Find(ctx context.Context, id int64) (*User, error) {
-	user, loaded, err := cache.LoadOrStore(ctx, u.cache, fmt.Sprint(id), func() (*User, error) {
+	var user *User
+	loaded, err := u.cache.LoadOrStore(ctx, fmt.Sprint(id), user, func() (any, error) {
 		slog.Info("loading user from database", "id", id)
 		user, ok := u.users[id]
 		if !ok {

@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"reflect"
 	"time"
 
 	redis "github.com/redis/go-redis/v9"
@@ -76,25 +78,30 @@ func (s *JSON) CompareAndSwap(ctx context.Context, key string, old, value any, t
 	return s.Cache.CompareAndSwap(ctx, key, a, b, ttl)
 }
 
-func LoadOrStore[T any](ctx context.Context, cache Cacheable, key string, valuer func() (T, error), ttl time.Duration) (value T, loaded bool, err error) {
-	jc := &JSON{Cache: cache}
-
-	err = jc.Load(ctx, key, &value)
+func (s *JSON) LoadOrStore(ctx context.Context, key string, value any, getter func() (any, error), ttl time.Duration) (loaded bool, err error) {
+	err = s.Load(ctx, key, &value)
 	if err == nil {
-		return value, true, nil
+		return true, nil
 	}
 	if !errors.Is(err, ErrNotExist) {
-		return value, false, err
+		return false, err
 	}
 
-	value, err = valuer()
+	v, err := getter()
 	if err != nil {
-		return value, false, err
+		return false, err
 	}
 
-	if err := jc.Store(ctx, key, value, ttl); err != nil {
-		return value, false, err
+	if err := s.Store(ctx, key, v, ttl); err != nil {
+		return false, err
 	}
 
-	return value, false, nil
+	rv := reflect.ValueOf(value)
+	if rv.Kind() != reflect.Pointer || rv.IsNil() {
+		return false, fmt.Errorf("value must be a non-nil pointer, got %T", value)
+	}
+
+	rv.Elem().Set(reflect.ValueOf(v))
+
+	return false, nil
 }

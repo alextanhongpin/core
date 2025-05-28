@@ -151,4 +151,23 @@ func TestJSON(t *testing.T) {
 		is.Nil(err)
 		is.Equal(newValue, loaded)
 	})
+
+	t.Run("load or store", func(t *testing.T) {
+		key := t.Name()
+		is := assert.New(t)
+		getter := func() (any, error) {
+			return john, nil
+		}
+
+		var u *User
+		loaded, err := c.LoadOrStore(ctx, key, &u, getter, time.Minute)
+		is.NoError(err)
+		is.False(loaded)
+
+		var v *User
+		loaded, err = c.LoadOrStore(ctx, key, &v, getter, time.Minute)
+		is.NoError(err)
+		is.True(loaded)
+		is.Equal(*u, *v)
+	})
 }
