@@ -9,7 +9,10 @@ import (
 )
 
 // ErrNotExist is returned when a key does not exist in the cache.
-var ErrNotExist = redis.Nil
+var (
+	ErrNotExist = redis.Nil
+	ErrExists   = errors.New("key already exists")
+)
 
 type Cacheable interface {
 	CompareAndDelete(ctx context.Context, key string, old []byte) error
@@ -18,6 +21,7 @@ type Cacheable interface {
 	LoadAndDelete(ctx context.Context, key string) (value []byte, err error)
 	LoadOrStore(ctx context.Context, key string, value []byte, ttl time.Duration) (curr []byte, loaded bool, err error)
 	Store(ctx context.Context, key string, value []byte, ttl time.Duration) error
+	StoreOnce(ctx context.Context, key string, value []byte, ttl time.Duration) error
 }
 
 type Cache struct {
@@ -43,6 +47,18 @@ func (c *Cache) Load(ctx context.Context, key string) ([]byte, error) {
 
 func (c *Cache) Store(ctx context.Context, key string, value []byte, ttl time.Duration) error {
 	return c.client.Set(ctx, key, value, ttl).Err()
+}
+
+func (c *Cache) StoreOnce(ctx context.Context, key string, value []byte, ttl time.Duration) error {
+	ok, err := c.client.SetNX(ctx, key, value, ttl).Result()
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return ErrExists
+	}
+
+	return nil
 }
 
 // LoadOrStore returns the existing value for the key if present. Otherwise, it

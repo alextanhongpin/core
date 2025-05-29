@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/alextanhongpin/core/dsync/cache"
-	"github.com/alextanhongpin/core/storage/redis/redistest"
+	"github.com/alextanhongpin/dbtx/testing/redistest"
 	redis "github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 )
@@ -45,6 +45,19 @@ func TestCache(t *testing.T) {
 		loaded, err := c.Load(ctx, key)
 		is.NoError(err)
 		is.Equal(value, loaded)
+	})
+
+	t.Run("store once", func(t *testing.T) {
+		key := t.Name()
+		value := []byte("hello")
+
+		err := c.StoreOnce(ctx, key, value, time.Second)
+
+		is := assert.New(t)
+		is.NoError(err)
+
+		err = c.StoreOnce(ctx, key, value, time.Second)
+		is.ErrorIs(err, cache.ErrExists)
 	})
 
 	t.Run("load or store empty", func(t *testing.T) {
