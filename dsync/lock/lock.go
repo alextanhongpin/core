@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math"
 	"math/rand/v2"
 	"time"
 
+	"github.com/alextanhongpin/core/dsync/cache"
 	"github.com/google/uuid"
 	redis "github.com/redis/go-redis/v9"
 )
@@ -26,12 +28,14 @@ var (
 // Works on with a single redis node.
 type Locker struct {
 	client *redis.Client
+	cache  cache.Cacheable
 }
 
 // New returns a pointer to Locker.
 func New(client *redis.Client) *Locker {
 	return &Locker{
 		client: client,
+		cache:  cache.New(client),
 	}
 }
 
@@ -109,7 +113,13 @@ func (l *Locker) Do(ctx context.Context, key string, fn func(ctx context.Context
 	}
 
 	// To ensure the unlock is called, we avoid using the same context.
-	defer l.Unlock(context.WithoutCancel(ctx), key, token)
+	defer func() {
+		// TODO: Add logger
+		err := l.Unlock(context.WithoutCancel(ctx), key, token)
+		if err != nil {
+			slog.Default().Error("failed to unlock", "key", key, "error", err)
+		}
+	}()
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -209,9 +219,7 @@ func (l *Locker) Lock(ctx context.Context, key string, ttl time.Duration) (strin
 
 // Unlocks the key with the given token.
 func (l *Locker) Unlock(ctx context.Context, key, token string) error {
-	keys := []string{key}
-	argv := []any{token}
-	err := unlock.Run(ctx, l.client, keys, argv...).Err()
+	err := l.cache.CompareAndDelete(ctx, key, []byte(token))
 	if errors.Is(err, redis.Nil) {
 		return ErrConflict
 	}
@@ -224,9 +232,7 @@ func (l *Locker) Unlock(ctx context.Context, key, token string) error {
 }
 
 func (l *Locker) Extend(ctx context.Context, key, val string, ttl time.Duration) error {
-	keys := []string{key}
-	argv := []any{val, ttl.Milliseconds()}
-	err := extend.Run(ctx, l.client, keys, argv...).Err()
+	err := l.cache.CompareAndSwap(ctx, key, []byte(val), []byte(val), ttl)
 	if errors.Is(err, redis.Nil) {
 		return ErrConflict
 	}
@@ -241,9 +247,7 @@ func (l *Locker) Extend(ctx context.Context, key, val string, ttl time.Duration)
 // Replace sets the value of the specified key to the provided new value, if
 // the existing value matches the old value.
 func (l *Locker) Replace(ctx context.Context, key, oldVal, newVal string, ttl time.Duration) error {
-	keys := []string{key}
-	argv := []any{oldVal, newVal, ttl.Milliseconds()}
-	err := replace.Run(ctx, l.client, keys, argv...).Err()
+	err := l.cache.CompareAndSwap(ctx, key, []byte(oldVal), []byte(newVal), ttl)
 	if errors.Is(err, redis.Nil) {
 		return fmt.Errorf("replace: %w", ErrConflict)
 	}
@@ -252,23 +256,6 @@ func (l *Locker) Replace(ctx context.Context, key, oldVal, newVal string, ttl ti
 	}
 
 	return nil
-}
-
-// LoadOrStore allows loading or storing a value to the key in a single
-// operation.
-// Returns true if the value is loaded, false if the value is stored.
-func (l *Locker) LoadOrStore(ctx context.Context, key, value string, ttl time.Duration) (string, bool, error) {
-	v, err := l.client.Do(ctx, "SET", key, value, "NX", "GET", "PX", ttl.Milliseconds()).Result()
-	// If the previous value does not exist when GET, then it will be nil.
-	if errors.Is(err, redis.Nil) {
-		return value, false, nil
-	}
-
-	if err != nil {
-		return "", false, err
-	}
-
-	return v.(string), true, nil
 }
 
 func newToken() string {

@@ -10,10 +10,14 @@ github.com/Nvveen/Gotty v0.0.0-20120604004816-cd527374f1e5 h1:TngWCqHvy9oXAN6lEV
 github.com/Nvveen/Gotty v0.0.0-20120604004816-cd527374f1e5/go.mod h1:lmUJ/7eu/Q8D7ML55dXQrVaamCz2vxCfdQBasLZfHKk=
 github.com/alextanhongpin/core/dsync/lock v0.0.0-20241130041815-a3552097ab1d h1:cEXgQ+H2rvCZrUsquTL+fFswR/7FCsbhqxlvOrwJSNo=
 github.com/alextanhongpin/core/dsync/lock v0.0.0-20241130041815-a3552097ab1d/go.mod h1:6Tuknh+GtJynwWxoVb7jkSvuOhxD+Zkzz2L7S7mP+mQ=
+github.com/alextanhongpin/core/dsync/lock v0.0.0-20250529063622-1b73fde2fbc5 h1:wRdii71HqYX0knxfkKRyGBZCszXSLiVyMQjswpjGz1w=
+github.com/alextanhongpin/core/dsync/lock v0.0.0-20250529063622-1b73fde2fbc5/go.mod h1:6Tuknh+GtJynwWxoVb7jkSvuOhxD+Zkzz2L7S7mP+mQ=
 github.com/alextanhongpin/core/storage/redis v0.0.0-20241129173936-869204b716f4 h1:IHfikodpeVDTHmQKz6UsSUlj+nkD/P/gjjKS/fDTRbw=
 github.com/alextanhongpin/core/storage/redis v0.0.0-20241129173936-869204b716f4/go.mod h1:raiBmLE7odFgrfvq6tiYWVlryZgK5V9kr3vXASbHcs8=
 github.com/alextanhongpin/core/sync/promise v0.0.0-20241130041815-a3552097ab1d h1:M8dQnovxAMV3FGW3KirRuRkuq324YFop/jjFt9Wtt3g=
 github.com/alextanhongpin/core/sync/promise v0.0.0-20241130041815-a3552097ab1d/go.mod h1:AMzb5tn043T3lDg/C87EXKg4QcIeP1WaUiKM02SdvkQ=
+github.com/alextanhongpin/core/sync/promise v0.0.0-20250528075601-a69dec1c2fc7 h1:F0qmNJxfP5jdSW5EaN7hpE/VZvtTvWtwvvlw12Voc8A=
+github.com/alextanhongpin/core/sync/promise v0.0.0-20250528075601-a69dec1c2fc7/go.mod h1:AMzb5tn043T3lDg/C87EXKg4QcIeP1WaUiKM02SdvkQ=
 github.com/bsm/ginkgo/v2 v2.12.0 h1:Ny8MWAHyOepLGlLKYmXG4IEkioBysk6GpaRTLC8zwWs=
 github.com/bsm/ginkgo/v2 v2.12.0/go.mod h1:SwYbGRRDovPVboqFv0tPTcG1sN61LM1Z4ARdbAV9g4c=
 github.com/bsm/gomega v1.27.10 h1:yeMWxP2pV2fG3FgAODIY8EiRE3dy0aeFYt4l7wh6yKA=
@@ -75,6 +79,8 @@ github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZb
 github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
 github.com/redis/go-redis/v9 v9.7.0 h1:HhLSs+B6O021gwzl+locl0zEDnyNkxMtf/Z3NNBMa9E=
 github.com/redis/go-redis/v9 v9.7.0/go.mod h1:f6zhXITC7JUJIlPEiBOTXxJgPLdZcA93GewI7inzyWw=
+github.com/redis/go-redis/v9 v9.9.0 h1:URbPQ4xVQSQhZ27WMQVmZSo3uT3pL+4IdHVcYq2nVfM=
+github.com/redis/go-redis/v9 v9.9.0/go.mod h1:huWgSWd8mW6+m0VPhJjSSQ+d6Nh1VICQ6Q5lHuCH/Iw=
 github.com/sirupsen/logrus v1.9.3 h1:dueUQJ1C2q9oE3F7wvmSGAaVtTmUizReu6fjN8uqzbQ=
 github.com/sirupsen/logrus v1.9.3/go.mod h1:naHLuLoDiP4jHNo9R0sCBMtWGeIprob74mVsIT4qYEQ=
 github.com/stretchr/objx v0.1.0/go.mod h1:HFkY916IF+rwdDfMAkV7OtwuqBVzrE8GR6GFx+wExME=

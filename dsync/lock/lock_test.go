@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/alextanhongpin/core/dsync/lock"
-	"github.com/alextanhongpin/core/storage/redis/redistest"
+	"github.com/alextanhongpin/dbtx/testing/redistest"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 )
@@ -57,7 +57,7 @@ func TestLock_WaitSuccess(t *testing.T) {
 			events = append(events, "worker #1: awake")
 			return nil
 		}, lockTTL, waitTTL)
-		is.Nil(err)
+		is.NoError(err)
 
 		events = append(events, "worker #1: done")
 	}()
@@ -78,7 +78,7 @@ func TestLock_WaitSuccess(t *testing.T) {
 			return nil
 		}, lockTTL, waitTTL)
 		events = append(events, "worker #2: done")
-		is.Nil(err)
+		is.NoError(err)
 	}(t)
 
 	wg.Wait()
@@ -128,7 +128,7 @@ func TestLock_WaitTimeout(t *testing.T) {
 			return nil
 		}, lockTTL, waitTTL)
 		events = append(events, "worker #1: done")
-		is.Nil(err)
+		is.NoError(err)
 	}()
 
 	go func(t *testing.T) {
@@ -185,7 +185,7 @@ func TestLock_NoWait(t *testing.T) {
 			time.Sleep(100 * time.Millisecond)
 			return nil
 		}, lockTTL, waitTTL)
-		is.Nil(err)
+		is.NoError(err)
 	}()
 
 	<-ch
@@ -255,7 +255,7 @@ func TestLock_Unlock_Deleted(t *testing.T) {
 	go func() {
 		<-ch
 		status, err := client.Del(ctx, key).Result()
-		is.Nil(err)
+		is.NoError(err)
 		is.Equal(int64(1), status)
 	}()
 
@@ -294,7 +294,7 @@ func TestLock_Extend_Success(t *testing.T) {
 			time.Sleep(1 * time.Second)
 			return nil
 		}, lockTTL, waitTTL)
-		is.Nil(err)
+		is.NoError(err)
 	}()
 
 	go func() {
