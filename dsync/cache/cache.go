@@ -110,7 +110,7 @@ var compareAndSwap = redis.NewScript(`
 	local ttl = ARGV[3]
 
 	if redis.call('GET', key) == old then
-		return redis.call('SET', key, new, 'PX', ttl)
+		return redis.call('SET', key, new, 'XX', 'PX', ttl)
 	end
 
 	return nil
