@@ -4,8 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
-	"reflect"
 	"time"
 
 	redis "github.com/redis/go-redis/v9"
@@ -22,12 +20,12 @@ func NewJSON(client *redis.Client) *JSON {
 }
 
 func (s *JSON) Load(ctx context.Context, key string, v any) error {
-	str, err := s.Cache.Load(ctx, key)
+	b, err := s.Cache.Load(ctx, key)
 	if err != nil {
 		return err
 	}
 
-	return json.Unmarshal([]byte(str), &v)
+	return json.Unmarshal(b, &v)
 }
 
 func (s *JSON) Store(ctx context.Context, key string, value any, ttl time.Duration) error {
@@ -39,40 +37,32 @@ func (s *JSON) Store(ctx context.Context, key string, value any, ttl time.Durati
 	return s.Cache.Store(ctx, key, b, ttl)
 }
 
-func (s *JSON) LoadAndDelete(ctx context.Context, key string, value any) (loaded bool, err error) {
-	str, loaded, err := s.Cache.LoadAndDelete(ctx, key)
+func (s *JSON) LoadAndDelete(ctx context.Context, key string, value any) error {
+	b, err := s.Cache.LoadAndDelete(ctx, key)
 	if err != nil {
-		return false, err
-	}
-	if !loaded {
-		return false, nil
+		return err
 	}
 
-	err = json.Unmarshal([]byte(str), &value)
-	if err != nil {
-		return false, err
-	}
-
-	return loaded, nil
+	return json.Unmarshal(b, &value)
 }
 
-func (s *JSON) CompareAndDelete(ctx context.Context, key string, old any) (deleted bool, err error) {
+func (s *JSON) CompareAndDelete(ctx context.Context, key string, old any) error {
 	b, err := json.Marshal(old)
 	if err != nil {
-		return false, err
+		return err
 	}
 
 	return s.Cache.CompareAndDelete(ctx, key, b)
 }
 
-func (s *JSON) CompareAndSwap(ctx context.Context, key string, old, value any, ttl time.Duration) (swapped bool, err error) {
+func (s *JSON) CompareAndSwap(ctx context.Context, key string, old, value any, ttl time.Duration) error {
 	a, err := json.Marshal(old)
 	if err != nil {
-		return false, err
+		return err
 	}
 	b, err := json.Marshal(value)
 	if err != nil {
-		return false, err
+		return err
 	}
 
 	return s.Cache.CompareAndSwap(ctx, key, a, b, ttl)
@@ -80,9 +70,11 @@ func (s *JSON) CompareAndSwap(ctx context.Context, key string, old, value any, t
 
 func (s *JSON) LoadOrStore(ctx context.Context, key string, value any, getter func() (any, error), ttl time.Duration) (loaded bool, err error) {
 	err = s.Load(ctx, key, &value)
+	// Loaded, return early if the value exists.
 	if err == nil {
 		return true, nil
 	}
+	// If the error is not ErrNotExist, return the error.
 	if !errors.Is(err, ErrNotExist) {
 		return false, err
 	}
@@ -92,16 +84,19 @@ func (s *JSON) LoadOrStore(ctx context.Context, key string, value any, getter fu
 		return false, err
 	}
 
-	if err := s.Store(ctx, key, v, ttl); err != nil {
+	b, err := json.Marshal(v)
+	if err != nil {
 		return false, err
 	}
 
-	rv := reflect.ValueOf(value)
-	if rv.Kind() != reflect.Pointer || rv.IsNil() {
-		return false, fmt.Errorf("value must be a non-nil pointer, got %T", value)
+	curr, loaded, err := s.Cache.LoadOrStore(ctx, key, b, ttl)
+	if err != nil {
+		return false, err
 	}
 
-	rv.Elem().Set(reflect.ValueOf(v))
+	if err := json.Unmarshal(curr, &value); err != nil {
+		return false, err
+	}
 
-	return false, nil
+	return loaded, nil
 }

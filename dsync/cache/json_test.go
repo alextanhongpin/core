@@ -47,26 +47,22 @@ func TestJSON(t *testing.T) {
 		err := c.Store(ctx, key, value, time.Second)
 
 		is := assert.New(t)
-		is.Nil(err)
+		is.NoError(err)
 
 		var loaded *User
 		err = c.Load(ctx, key, &loaded)
-		is.Nil(err)
+		is.NoError(err)
 		is.Equal(value, loaded)
 	})
 
 	t.Run("load and delete empty", func(t *testing.T) {
 		key := t.Name()
 		var old *User
-		loaded, err := c.LoadAndDelete(ctx, key, &old)
+		err := c.LoadAndDelete(ctx, key, &old)
 
 		is := assert.New(t)
-		is.Nil(err)
-		is.Nil(old)
-		is.False(loaded)
-
-		err = c.Load(ctx, key, new(User))
 		is.ErrorIs(err, cache.ErrNotExist)
+		is.Nil(old)
 	})
 
 	t.Run("load and delete exist", func(t *testing.T) {
@@ -75,14 +71,13 @@ func TestJSON(t *testing.T) {
 
 		err := c.Store(ctx, key, value, time.Second)
 		is := assert.New(t)
-		is.Nil(err)
+		is.NoError(err)
 
 		var old *User
-		loaded, err := c.LoadAndDelete(ctx, key, &old)
+		err = c.LoadAndDelete(ctx, key, &old)
 
-		is.Nil(err)
+		is.NoError(err)
 		is.Equal(value, old)
-		is.True(loaded)
 
 		err = c.Load(ctx, key, new(User))
 		is.ErrorIs(err, cache.ErrNotExist)
@@ -91,11 +86,10 @@ func TestJSON(t *testing.T) {
 	t.Run("compare and delete empty", func(t *testing.T) {
 		key := t.Name()
 		old := john
-		deleted, err := c.CompareAndDelete(ctx, key, old)
+		err := c.CompareAndDelete(ctx, key, old)
 
 		is := assert.New(t)
-		is.Nil(err)
-		is.False(deleted)
+		is.ErrorIs(err, cache.ErrNotExist)
 
 		err = c.Load(ctx, key, new(User))
 		is.ErrorIs(err, cache.ErrNotExist)
@@ -107,12 +101,10 @@ func TestJSON(t *testing.T) {
 
 		err := c.Store(ctx, key, value, time.Second)
 		is := assert.New(t)
-		is.Nil(err)
+		is.NoError(err)
 
-		deleted, err := c.CompareAndDelete(ctx, key, value)
-
-		is.Nil(err)
-		is.True(deleted)
+		err = c.CompareAndDelete(ctx, key, value)
+		is.NoError(err)
 
 		err = c.Load(ctx, key, new(User))
 		is.ErrorIs(err, cache.ErrNotExist)
@@ -122,13 +114,9 @@ func TestJSON(t *testing.T) {
 		key := t.Name()
 		old := john
 		value := jane
-		swapped, err := c.CompareAndSwap(ctx, key, old, value, time.Second)
+		err := c.CompareAndSwap(ctx, key, old, value, time.Second)
 
 		is := assert.New(t)
-		is.Nil(err)
-		is.False(swapped)
-
-		err = c.Load(ctx, key, new(User))
 		is.ErrorIs(err, cache.ErrNotExist)
 	})
 
@@ -138,17 +126,15 @@ func TestJSON(t *testing.T) {
 
 		err := c.Store(ctx, key, value, time.Second)
 		is := assert.New(t)
-		is.Nil(err)
+		is.NoError(err)
 
 		newValue := jane
-		swapped, err := c.CompareAndSwap(ctx, key, value, newValue, time.Second)
-
-		is.Nil(err)
-		is.True(swapped)
+		err = c.CompareAndSwap(ctx, key, value, newValue, time.Second)
+		is.NoError(err)
 
 		var loaded *User
 		err = c.Load(ctx, key, &loaded)
-		is.Nil(err)
+		is.NoError(err)
 		is.Equal(newValue, loaded)
 	})
 

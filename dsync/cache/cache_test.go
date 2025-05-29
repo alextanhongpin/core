@@ -40,10 +40,10 @@ func TestCache(t *testing.T) {
 		err := c.Store(ctx, key, value, time.Second)
 
 		is := assert.New(t)
-		is.Nil(err)
+		is.NoError(err)
 
 		loaded, err := c.Load(ctx, key)
-		is.Nil(err)
+		is.NoError(err)
 		is.Equal(value, loaded)
 	})
 
@@ -54,12 +54,12 @@ func TestCache(t *testing.T) {
 		old, loaded, err := c.LoadOrStore(ctx, key, value, time.Second)
 
 		is := assert.New(t)
-		is.Nil(err)
+		is.NoError(err)
 		is.Equal(value, old)
 		is.False(loaded)
 
 		old, loaded, err = c.LoadOrStore(ctx, key, value, time.Second)
-		is.Nil(err)
+		is.NoError(err)
 		is.Equal(value, old)
 		is.True(loaded)
 	})
@@ -70,26 +70,21 @@ func TestCache(t *testing.T) {
 
 		err := c.Store(ctx, key, value, time.Second)
 		is := assert.New(t)
-		is.Nil(err)
+		is.NoError(err)
 
 		old, loaded, err := c.LoadOrStore(ctx, key, value, time.Second)
 
-		is.Nil(err)
+		is.NoError(err)
 		is.Equal(value, old)
 		is.True(loaded)
 	})
 
 	t.Run("load and delete empty", func(t *testing.T) {
 		key := t.Name()
-		old, loaded, err := c.LoadAndDelete(ctx, key)
-
+		old, err := c.LoadAndDelete(ctx, key)
 		is := assert.New(t)
-		is.Nil(err)
-		is.Empty(old)
-		is.False(loaded)
-
-		_, err = c.Load(ctx, key)
 		is.ErrorIs(err, cache.ErrNotExist)
+		is.Empty(old)
 	})
 
 	t.Run("load and delete exist", func(t *testing.T) {
@@ -98,13 +93,11 @@ func TestCache(t *testing.T) {
 
 		err := c.Store(ctx, key, value, time.Second)
 		is := assert.New(t)
-		is.Nil(err)
+		is.NoError(err)
 
-		old, loaded, err := c.LoadAndDelete(ctx, key)
-
-		is.Nil(err)
+		old, err := c.LoadAndDelete(ctx, key)
+		is.NoError(err)
 		is.Equal(value, old)
-		is.True(loaded)
 
 		_, err = c.Load(ctx, key)
 		is.ErrorIs(err, cache.ErrNotExist)
@@ -113,13 +106,9 @@ func TestCache(t *testing.T) {
 	t.Run("compare and delete empty", func(t *testing.T) {
 		key := t.Name()
 		old := []byte("hello")
-		deleted, err := c.CompareAndDelete(ctx, key, old)
+		err := c.CompareAndDelete(ctx, key, old)
 
 		is := assert.New(t)
-		is.Nil(err)
-		is.False(deleted)
-
-		_, err = c.Load(ctx, key)
 		is.ErrorIs(err, cache.ErrNotExist)
 	})
 
@@ -129,12 +118,10 @@ func TestCache(t *testing.T) {
 
 		err := c.Store(ctx, key, value, time.Second)
 		is := assert.New(t)
-		is.Nil(err)
+		is.NoError(err)
 
-		deleted, err := c.CompareAndDelete(ctx, key, value)
-
-		is.Nil(err)
-		is.True(deleted)
+		err = c.CompareAndDelete(ctx, key, value)
+		is.NoError(err)
 
 		_, err = c.Load(ctx, key)
 		is.ErrorIs(err, cache.ErrNotExist)
@@ -144,11 +131,10 @@ func TestCache(t *testing.T) {
 		key := t.Name()
 		old := []byte("hello")
 		value := []byte("hello")
-		swapped, err := c.CompareAndSwap(ctx, key, old, value, time.Second)
+		err := c.CompareAndSwap(ctx, key, old, value, time.Second)
 
 		is := assert.New(t)
-		is.Nil(err)
-		is.False(swapped)
+		is.ErrorIs(err, cache.ErrNotExist)
 
 		_, err = c.Load(ctx, key)
 		is.ErrorIs(err, cache.ErrNotExist)
@@ -160,16 +146,14 @@ func TestCache(t *testing.T) {
 
 		err := c.Store(ctx, key, value, time.Second)
 		is := assert.New(t)
-		is.Nil(err)
+		is.NoError(err)
 
 		newValue := []byte("world")
-		swapped, err := c.CompareAndSwap(ctx, key, value, newValue, time.Second)
-
-		is.Nil(err)
-		is.True(swapped)
+		err = c.CompareAndSwap(ctx, key, value, newValue, time.Second)
+		is.NoError(err)
 
 		loaded, err := c.Load(ctx, key)
-		is.Nil(err)
+		is.NoError(err)
 		is.Equal(newValue, loaded)
 	})
 }

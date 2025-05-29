@@ -8,14 +8,15 @@ import (
 	redis "github.com/redis/go-redis/v9"
 )
 
-var ErrNotExist = errors.New("cache: not exist")
+// ErrNotExist is returned when a key does not exist in the cache.
+var ErrNotExist = redis.Nil
 
 type Cacheable interface {
-	CompareAndDelete(ctx context.Context, key string, old []byte) (deleted bool, err error)
-	CompareAndSwap(ctx context.Context, key string, old, value []byte, ttl time.Duration) (swapped bool, err error)
+	CompareAndDelete(ctx context.Context, key string, old []byte) error
+	CompareAndSwap(ctx context.Context, key string, old, value []byte, ttl time.Duration) error
 	Load(ctx context.Context, key string) ([]byte, error)
-	LoadAndDelete(ctx context.Context, key string) (value []byte, loaded bool, err error)
-	LoadOrStore(ctx context.Context, key string, value []byte, ttl time.Duration) (old []byte, loaded bool, err error)
+	LoadAndDelete(ctx context.Context, key string) (value []byte, err error)
+	LoadOrStore(ctx context.Context, key string, value []byte, ttl time.Duration) (curr []byte, loaded bool, err error)
 	Store(ctx context.Context, key string, value []byte, ttl time.Duration) error
 }
 
@@ -33,11 +34,11 @@ func New(client *redis.Client) *Cache {
 
 func (c *Cache) Load(ctx context.Context, key string) ([]byte, error) {
 	s, err := c.client.Get(ctx, key).Result()
-	if errors.Is(err, redis.Nil) {
-		return nil, ErrNotExist
+	if err != nil {
+		return nil, err
 	}
 
-	return []byte(s), err
+	return []byte(s), nil
 }
 
 func (c *Cache) Store(ctx context.Context, key string, value []byte, ttl time.Duration) error {
@@ -48,9 +49,10 @@ func (c *Cache) Store(ctx context.Context, key string, value []byte, ttl time.Du
 // stores and returns the given value. The loaded result is true if the value
 // was loaded, false if stored.
 // Also see usecase here: https://github.com/golang/go/issues/33762#issuecomment-523757434
-func (c *Cache) LoadOrStore(ctx context.Context, key string, value []byte, ttl time.Duration) (old []byte, loaded bool, err error) {
+func (c *Cache) LoadOrStore(ctx context.Context, key string, value []byte, ttl time.Duration) (curr []byte, loaded bool, err error) {
 	v, err := c.client.Do(ctx, "SET", key, value, "NX", "GET", "PX", ttl.Milliseconds()).Result()
 	// If the previous value does not exist when GET, then it will be nil.
+	// But since we successfully set the value, we skip the error.
 	if errors.Is(err, redis.Nil) {
 		return value, false, nil
 	}
@@ -65,16 +67,13 @@ func (c *Cache) LoadOrStore(ctx context.Context, key string, value []byte, ttl t
 // LoadAndDelete deletes the value for a key, returning the previous value if
 // any. The loaded result reports whether the key was present.
 // Also see usecase here: https://github.com/golang/go/issues/33762#issuecomment-523757434
-func (c *Cache) LoadAndDelete(ctx context.Context, key string) (value []byte, loaded bool, err error) {
+func (c *Cache) LoadAndDelete(ctx context.Context, key string) (value []byte, err error) {
 	v, err := c.client.Do(ctx, "GETDEL", key).Result()
-	if errors.Is(err, redis.Nil) {
-		return value, false, nil
-	}
 	if err != nil {
-		return value, false, err
+		return value, err
 	}
 
-	return []byte(v.(string)), true, nil
+	return []byte(v.(string)), nil
 }
 
 var compareAndDelete = redis.NewScript(`
@@ -94,19 +93,10 @@ var compareAndDelete = redis.NewScript(`
 // old value must be of a comparable type.
 // If there is no current value for key in the map, CompareAndDelete returns
 // false (even if the old value is the nil interface value).
-func (c *Cache) CompareAndDelete(ctx context.Context, key string, old []byte) (deleted bool, err error) {
+func (c *Cache) CompareAndDelete(ctx context.Context, key string, old []byte) error {
 	keys := []string{key}
 	argv := []any{old}
-	err = compareAndDelete.Run(ctx, c.client, keys, argv...).Err()
-	if errors.Is(err, redis.Nil) {
-		return false, nil
-	}
-
-	if err != nil {
-		return false, err
-	}
-
-	return true, nil
+	return compareAndDelete.Run(ctx, c.client, keys, argv...).Err()
 }
 
 var compareAndSwap = redis.NewScript(`
@@ -128,17 +118,8 @@ var compareAndSwap = redis.NewScript(`
 
 // CompareAndSwap swaps the old and new values for key if the value stored in
 // the map is equal to old. The old value must be of a comparable type.
-func (c *Cache) CompareAndSwap(ctx context.Context, key string, old, value []byte, ttl time.Duration) (swapped bool, err error) {
+func (c *Cache) CompareAndSwap(ctx context.Context, key string, old, value []byte, ttl time.Duration) error {
 	keys := []string{key}
 	argv := []any{old, value, ttl.Milliseconds()}
-	err = compareAndSwap.Run(ctx, c.client, keys, argv...).Err()
-	if errors.Is(err, redis.Nil) {
-		return false, nil
-	}
-
-	if err != nil {
-		return false, err
-	}
-
-	return true, nil
+	return compareAndSwap.Run(ctx, c.client, keys, argv...).Err()
 }
