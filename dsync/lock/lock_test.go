@@ -199,6 +199,8 @@ func TestLock_NoWait(t *testing.T) {
 		return nil
 	}, lockTTL, waitTTL)
 	is.ErrorIs(err, lock.ErrLocked)
+
+	wg.Wait()
 }
 
 func TestLock_Unlock_ContextCanceled(t *testing.T) {

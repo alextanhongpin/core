@@ -29,6 +29,7 @@ var (
 type Locker struct {
 	client *redis.Client
 	cache  cache.Cacheable
+	Logger *slog.Logger // Optional logger for debugging purposes.
 }
 
 // New returns a pointer to Locker.
@@ -36,44 +37,8 @@ func New(client *redis.Client) *Locker {
 	return &Locker{
 		client: client,
 		cache:  cache.New(client),
+		Logger: slog.Default(), // Default logger, can be overridden.
 	}
-}
-
-func (l *Locker) Acquire(ctx context.Context, key string, lockTTL, waitTTL time.Duration) (func() error, error) {
-	// Generate a random uuid as the lock value.
-	token, err := l.TryLock(ctx, key, lockTTL, waitTTL)
-	if err != nil {
-		return nil, err
-	}
-
-	ch := make(chan error, 1)
-	ctx, cancel := context.WithCancel(ctx)
-
-	go func() {
-		defer close(ch)
-
-		t := time.NewTicker(lockTTL * 7 / 10)
-		defer t.Stop()
-
-		for {
-			select {
-			case <-ctx.Done():
-				ch <- context.Cause(ctx)
-				return
-			case <-t.C:
-				if err := l.Extend(ctx, key, token, lockTTL); err != nil {
-					ch <- err
-					return
-				}
-			}
-		}
-	}()
-
-	return func() error {
-		cancel()
-		// To ensure the unlock is called, we avoid using the same context.
-		return errors.Join(<-ch, l.Unlock(context.WithoutCancel(ctx), key, token))
-	}, nil
 }
 
 // DoTimeout ensures that the operation completes within the lockTTL.
@@ -83,10 +48,18 @@ func (l *Locker) DoTimeout(ctx context.Context, key string, fn func(ctx context.
 	defer cancel()
 
 	// Generate a random uuid as the lock value.
-	_, err := l.TryLock(ctx, key, lockTTL, waitTTL)
+	token, err := l.TryLock(ctx, key, lockTTL, waitTTL)
 	if err != nil {
 		return err
 	}
+
+	// To ensure the unlock is called, we avoid using the same context.
+	defer func() {
+		if err := l.Unlock(context.WithoutCancel(ctx), key, token); err != nil {
+			l.Logger.Error("failed to unlock", "key", key, "error", err)
+		}
+	}()
+
 	ch := make(chan error, 1)
 	go func() {
 		ch <- fn(ctx)
@@ -114,10 +87,8 @@ func (l *Locker) Do(ctx context.Context, key string, fn func(ctx context.Context
 
 	// To ensure the unlock is called, we avoid using the same context.
 	defer func() {
-		// TODO: Add logger
-		err := l.Unlock(context.WithoutCancel(ctx), key, token)
-		if err != nil {
-			slog.Default().Error("failed to unlock", "key", key, "error", err)
+		if err := l.Unlock(context.WithoutCancel(ctx), key, token); err != nil {
+			l.Logger.Error("failed to unlock", "key", key, "error", err)
 		}
 	}()
 
@@ -206,12 +177,12 @@ func (l *Locker) TryLock(ctx context.Context, key string, ttl, wait time.Duratio
 // If the lock is already acquired, it will return an error.
 func (l *Locker) Lock(ctx context.Context, key string, ttl time.Duration) (string, error) {
 	token := newToken()
-	ok, err := l.client.SetNX(ctx, key, token, ttl).Result()
-	if err != nil {
-		return "", fmt.Errorf("lock: %w", err)
-	}
-	if !ok {
+	err := l.cache.StoreOnce(ctx, key, []byte(token), ttl)
+	if errors.Is(err, cache.ErrExists) {
 		return "", ErrLocked
+	}
+	if err != nil {
+		return "", err
 	}
 
 	return token, nil
