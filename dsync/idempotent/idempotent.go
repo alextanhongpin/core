@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/alextanhongpin/core/dsync/cache"
 	"github.com/alextanhongpin/core/dsync/lock"
 	"github.com/alextanhongpin/core/sync/promise"
 	"github.com/google/uuid"
@@ -28,13 +29,13 @@ var (
 
 type locker interface {
 	Extend(ctx context.Context, key, val string, ttl time.Duration) error
-	LoadOrStore(ctx context.Context, key, token string, lockTTL time.Duration) (string, bool, error)
 	Replace(ctx context.Context, key, oldVal, newVal string, ttl time.Duration) error
 	Unlock(ctx context.Context, key, token string) error
 }
 
 type RedisStore struct {
 	Locker locker
+	cache  cache.Cacheable
 	client *redis.Client
 	group  *promise.Group[[]byte]
 }
@@ -43,9 +44,10 @@ type RedisStore struct {
 // client, lock TTL, and keep TTL.
 func NewRedisStore(client *redis.Client) *RedisStore {
 	return &RedisStore{
+		Locker: lock.New(client),
+		cache:  cache.New(client),
 		client: client,
 		group:  promise.NewGroup[[]byte](),
-		Locker: lock.New(client),
 	}
 }
 
@@ -69,7 +71,7 @@ func (s *RedisStore) Do(ctx context.Context, key string, fn func(ctx context.Con
 
 // loadOrStore returns the response for the specified key, or stores the request
 func (s *RedisStore) loadOrStore(ctx context.Context, key string, req []byte, lockTTL time.Duration) ([]byte, error) {
-	v, loaded, err := s.Locker.LoadOrStore(ctx, key, newToken(), lockTTL)
+	b, loaded, err := s.cache.LoadOrStore(ctx, key, []byte(newToken()), lockTTL)
 	if err != nil {
 		return nil, err
 	}
@@ -80,11 +82,11 @@ func (s *RedisStore) loadOrStore(ctx context.Context, key string, req []byte, lo
 
 	// 1)
 	if loaded {
-		return s.parse(req, []byte(v))
+		return s.parse(req, b)
 	}
 
 	// 2)
-	return []byte(v), errors.ErrUnsupported
+	return b, errors.ErrUnsupported
 }
 
 func (s *RedisStore) runInLock(ctx context.Context, key, token string, fn func(context.Context, []byte) ([]byte, error), req []byte, lockTTL, keepTTL time.Duration) ([]byte, error) {
