@@ -13,7 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-var ctx = context.Background()
+var wantErr = errors.New("want error")
 
 func TestMain(m *testing.M) {
 	stop := redistest.Init()
@@ -32,21 +32,14 @@ func TestLock_WaitSuccess(t *testing.T) {
 		wg     sync.WaitGroup
 	)
 
-	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
-	defer cancel()
+	ctx := t.Context()
 
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
 
-		var (
-			lockTTL = time.Second
-			locker  = lock.New(client)
-			waitTTL = time.Second
-		)
-
 		// Lock 1 will spend 100ms on the work, and release the lock.
-		err := locker.Do(ctx, key, func(ctx context.Context) error {
+		err := lock.New(client).Do(ctx, key, func(ctx context.Context) error {
 			// Start the second goroutine.
 			events = append(events, "worker #1: lock acquired")
 			close(ch)
@@ -56,7 +49,11 @@ func TestLock_WaitSuccess(t *testing.T) {
 
 			events = append(events, "worker #1: awake")
 			return nil
-		}, lockTTL, waitTTL)
+		}, &lock.LockOption{
+			Lock:         time.Second,
+			Wait:         time.Second,
+			RefreshRatio: 0.7, // Enable refresh to prevent timeout
+		})
 		is.NoError(err)
 
 		events = append(events, "worker #1: done")
@@ -68,15 +65,15 @@ func TestLock_WaitSuccess(t *testing.T) {
 		// Wait for the first lock to be acquired.
 		<-ch
 
-		locker := lock.New(client)
-		lockTTL := 1 * time.Second
-		waitTTL := 200 * time.Millisecond
-
 		// Lock 2 will acquire the lock after 100ms.
-		err := locker.Do(ctx, key, func(ctx context.Context) error {
+		err := lock.New(client).Do(ctx, key, func(ctx context.Context) error {
 			events = append(events, "worker #2: lock acquired")
 			return nil
-		}, lockTTL, waitTTL)
+		}, &lock.LockOption{
+			Lock:         time.Second,
+			Wait:         200 * time.Millisecond,
+			RefreshRatio: 0.7, // Enable refresh to prevent timeout
+		})
 		events = append(events, "worker #2: done")
 		is.NoError(err)
 	}(t)
@@ -107,16 +104,14 @@ func TestLock_WaitTimeout(t *testing.T) {
 	)
 	wg.Add(2)
 
-	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
-	defer cancel()
+	ctx := t.Context()
+	// ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+	// defer cancel()
 
 	go func() {
 		defer wg.Done()
 
-		locker := lock.New(client)
-		lockTTL := time.Second
-		waitTTL := time.Second
-		err := locker.Do(ctx, key, func(ctx context.Context) error {
+		err := lock.New(client).Do(ctx, key, func(ctx context.Context) error {
 			// Start the second goroutine.
 			events = append(events, "worker #1: lock acquired")
 			close(ch)
@@ -126,7 +121,11 @@ func TestLock_WaitTimeout(t *testing.T) {
 
 			events = append(events, "worker #1: awake")
 			return nil
-		}, lockTTL, waitTTL)
+		}, &lock.LockOption{
+			Lock:         time.Second,
+			Wait:         time.Second,
+			RefreshRatio: 0.7,
+		})
 		events = append(events, "worker #1: done")
 		is.NoError(err)
 	}()
@@ -137,13 +136,14 @@ func TestLock_WaitTimeout(t *testing.T) {
 		// Wait for the first lock to be acquired.
 		<-ch
 
-		locker := lock.New(client)
-		lockTTL := time.Second
-		waitTTL := 100 * time.Millisecond
-		err := locker.Do(ctx, key, func(ctx context.Context) error {
+		err := lock.New(client).Do(ctx, key, func(ctx context.Context) error {
 			events = append(events, "worker #2: lock acquired")
 			return nil
-		}, lockTTL, waitTTL)
+		}, &lock.LockOption{
+			Lock:         time.Second,
+			Wait:         100 * time.Millisecond,
+			RefreshRatio: 0.7,
+		})
 		events = append(events, "worker #2: done")
 		is.ErrorIs(err, lock.ErrLockWaitTimeout)
 	}(t)
@@ -176,28 +176,28 @@ func TestLock_NoWait(t *testing.T) {
 		defer wg.Done()
 
 		// Goroutine 1 holds the lock for 100ms.
-		locker := lock.New(client)
-		lockTTL := time.Second
-		waitTTL := time.Second
-		err := locker.Do(ctx, key, func(ctx context.Context) error {
+		err := lock.New(client).Do(t.Context(), key, func(ctx context.Context) error {
 			close(ch) // Signal the second goroutine to start.
 
 			time.Sleep(100 * time.Millisecond)
 			return nil
-		}, lockTTL, waitTTL)
+		}, &lock.LockOption{
+			Lock:         time.Second,
+			Wait:         time.Second,
+			RefreshRatio: 0.7,
+		})
 		is.NoError(err)
 	}()
 
 	<-ch
 
-	var (
-		locker  = lock.New(client)
-		lockTTL = time.Second
-		waitTTL = time.Duration(0)
-	)
-	err := locker.Do(ctx, key, func(ctx context.Context) error {
+	err := lock.New(client).Do(t.Context(), key, func(ctx context.Context) error {
 		return nil
-	}, lockTTL, waitTTL)
+	}, &lock.LockOption{
+		Lock:         time.Second,
+		Wait:         0,
+		RefreshRatio: 0.7,
+	})
 	is.ErrorIs(err, lock.ErrLocked)
 
 	wg.Wait()
@@ -205,19 +205,20 @@ func TestLock_NoWait(t *testing.T) {
 
 func TestLock_Unlock_ContextCanceled(t *testing.T) {
 	var (
-		client  = redistest.Client(t)
-		is      = assert.New(t)
-		key     = t.Name()
-		lockTTL = time.Second
-		locker  = lock.New(client)
-		waitTTL = time.Second
+		client = redistest.Client(t)
+		is     = assert.New(t)
+		key    = t.Name()
 	)
 
-	ctx, cancel := context.WithCancel(ctx)
-	err := locker.Do(ctx, key, func(ctx context.Context) error {
+	ctx, cancel := context.WithCancel(t.Context())
+	err := lock.New(client).Do(ctx, key, func(ctx context.Context) error {
 		cancel()
 		return nil
-	}, lockTTL, waitTTL)
+	}, &lock.LockOption{
+		Lock:         time.Second,
+		Wait:         time.Second,
+		RefreshRatio: 0.7,
+	})
 	is.ErrorIs(err, context.Canceled)
 
 	assertNoKey(t, client, key)
@@ -225,18 +226,18 @@ func TestLock_Unlock_ContextCanceled(t *testing.T) {
 
 func TestLock_Unlock_Error(t *testing.T) {
 	var (
-		client  = redistest.Client(t)
-		is      = assert.New(t)
-		key     = t.Name()
-		lockTTL = time.Second
-		locker  = lock.New(client)
-		waitTTL = time.Second
+		client = redistest.Client(t)
+		is     = assert.New(t)
+		key    = t.Name()
 	)
 
-	var wantErr = errors.New("want error")
-	err := locker.Do(ctx, key, func(ctx context.Context) error {
+	err := lock.New(client).Do(t.Context(), key, func(ctx context.Context) error {
 		return wantErr
-	}, lockTTL, waitTTL)
+	}, &lock.LockOption{
+		Lock:         time.Second,
+		Wait:         time.Second,
+		RefreshRatio: 0.7,
+	})
 	is.ErrorIs(err, wantErr)
 
 	assertNoKey(t, client, key)
@@ -250,25 +251,28 @@ func TestLock_Unlock_Deleted(t *testing.T) {
 		is      = assert.New(t)
 		key     = t.Name()
 		lockTTL = 100 * time.Millisecond
-		locker  = lock.New(client)
 		waitTTL = time.Second
 	)
 
 	go func() {
 		<-ch
-		status, err := client.Del(ctx, key).Result()
+		status, err := client.Del(t.Context(), key).Result()
 		is.NoError(err)
 		is.Equal(int64(1), status)
 	}()
 
-	err := locker.Do(ctx, key, func(ctx context.Context) error {
+	err := lock.New(client).Do(t.Context(), key, func(ctx context.Context) error {
 		// Lock acquired. Signal deletion.
 		ch <- true
 		// Sleep for 2x the lock ttl duration.
 		time.Sleep(2 * lockTTL)
 		return nil
-	}, lockTTL, waitTTL)
-	is.ErrorIs(err, lock.ErrConflict)
+	}, &lock.LockOption{
+		Lock:         lockTTL,
+		Wait:         waitTTL,
+		RefreshRatio: 0.5, // Enable extension so it can detect key deletion
+	})
+	is.ErrorIs(err, lock.ErrExpired)
 }
 
 func TestLock_Extend_Success(t *testing.T) {
@@ -284,18 +288,18 @@ func TestLock_Extend_Success(t *testing.T) {
 	go func() {
 		defer wg.Done()
 
-		locker := lock.New(client)
-		lockTTL := 100 * time.Millisecond
-		waitTTL := 0 * time.Millisecond
-
-		err := locker.Do(ctx, key, func(ctx context.Context) error {
+		err := lock.New(client).Do(t.Context(), key, func(ctx context.Context) error {
 			// Signal the second goroutine to start.
 			close(ch)
 
 			// Holds the lock for 1s. The lock will refresh every 7/10 of 100ms.
 			time.Sleep(1 * time.Second)
 			return nil
-		}, lockTTL, waitTTL)
+		}, &lock.LockOption{
+			Lock:         100 * time.Millisecond,
+			Wait:         0,
+			RefreshRatio: 0.7,
+		})
 		is.NoError(err)
 	}()
 
@@ -306,16 +310,18 @@ func TestLock_Extend_Success(t *testing.T) {
 		<-ch
 
 		locker := lock.New(client)
-		lockTTL := 100 * time.Millisecond
-		waitTTL := 0 * time.Millisecond
 
 		for i := 1; i < 10; i++ {
 			// Try to obtain the lock every 100ms. Because the lock is still held by
 			// the first goroutine, it is expected to fail.
 			time.Sleep(100 * time.Millisecond)
-			err := locker.Do(ctx, key, func(ctx context.Context) error {
+			err := locker.Do(t.Context(), key, func(ctx context.Context) error {
 				return nil
-			}, lockTTL, waitTTL)
+			}, &lock.LockOption{
+				Lock:         100 * time.Millisecond,
+				Wait:         0,
+				RefreshRatio: 0.7,
+			})
 			is.ErrorIs(err, lock.ErrLocked)
 		}
 	}()
@@ -327,20 +333,19 @@ func TestLock_Extend_Success(t *testing.T) {
 
 func TestLock_DoTimeout(t *testing.T) {
 	var (
-		client  = redistest.Client(t)
-		is      = assert.New(t)
-		key     = t.Name()
-		lockTTL = 50 * time.Millisecond
-		locker  = lock.New(client)
-		waitTTL = time.Second
+		client = redistest.Client(t)
+		is     = assert.New(t)
+		key    = t.Name()
 	)
 
-	var wantErr = errors.New("want error")
-	err := locker.DoTimeout(ctx, key, func(ctx context.Context) error {
+	err := lock.New(client).Do(t.Context(), key, func(ctx context.Context) error {
 		time.Sleep(100 * time.Millisecond)
 
 		return wantErr
-	}, lockTTL, waitTTL)
+	}, &lock.LockOption{
+		Lock: 50 * time.Millisecond,
+		Wait: time.Second,
+	})
 	is.ErrorIs(err, lock.ErrLockTimeout)
 
 	time.Sleep(5 * time.Millisecond) // Ensure the TTL is expired.

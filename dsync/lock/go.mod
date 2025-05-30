@@ -3,7 +3,7 @@ module github.com/alextanhongpin/core/dsync/lock
 go 1.24.2
 
 require (
-	github.com/alextanhongpin/core/dsync/cache v0.0.0-20250529165144-ba2ca7cec22e
+	github.com/alextanhongpin/core/dsync/cache v0.0.0-20250529172053-f5cc2f332e08
 	github.com/alextanhongpin/dbtx/testing/redistest v0.0.0-20250528161638-1d13dea36d24
 	github.com/google/uuid v1.6.0
 	github.com/redis/go-redis/v9 v9.9.0
@@ -15,7 +15,6 @@ require (
 	github.com/Azure/go-ansiterm v0.0.0-20250102033503-faa5f7b0171c // indirect
 	github.com/Microsoft/go-winio v0.6.2 // indirect
 	github.com/Nvveen/Gotty v0.0.0-20120604004816-cd527374f1e5 // indirect
-	github.com/alextanhongpin/core/storage/redis v0.0.0-20241129173936-869204b716f4 // indirect
 	github.com/cenkalti/backoff/v4 v4.3.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/containerd/continuity v0.4.5 // indirect

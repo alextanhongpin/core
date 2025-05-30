@@ -1,6 +1,7 @@
 package lock
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -17,82 +18,99 @@ import (
 const payload = "unlock"
 
 var (
-	ErrConflict        = errors.New("lock: lock expired or acquired by another process")
+	ErrExpired         = errors.New("lock: lock expired")
 	ErrLockTimeout     = errors.New("lock: exceeded lock duration")
 	ErrLockWaitTimeout = errors.New("lock: failed to acquire lock within the wait duration")
 	ErrLocked          = errors.New("lock: another process has acquired the lock")
 )
 
+type cacheable interface {
+	CompareAndDelete(ctx context.Context, key string, old []byte) error
+	CompareAndSwap(ctx context.Context, key string, old, value []byte, ttl time.Duration) error
+	StoreOnce(ctx context.Context, key string, value []byte, ttl time.Duration) error
+}
+
+type backOffPolicy interface {
+	BackOff(i int) time.Duration
+}
+
+type LockOption struct {
+	//  The duration to wait for the lock to be available.
+	Wait time.Duration
+	// The duration for which the lock is held.
+	Lock time.Duration
+	// The ratio of the lock duration to refresh the lock.
+	RefreshRatio float64
+	// Optional token to identify the lock owner.
+	Token string
+}
+
+func NewLockOption() *LockOption {
+	return &LockOption{
+		Wait:         5 * time.Second,
+		Lock:         30 * time.Second,
+		RefreshRatio: 0.8,
+	}
+}
+
 // Locker represents a distributed lock implementation using Redis.
 // Works on with a single redis node.
 type Locker struct {
-	client *redis.Client
-	cache  cache.Cacheable
-	Logger *slog.Logger // Optional logger for debugging purposes.
+	mu *KeyedMutex
+
+	BackOff backOffPolicy // Optional backoff policy for retrying lock acquisition.
+	Cache   cacheable
+	Logger  *slog.Logger // Optional logger for debugging purposes.
 }
 
 // New returns a pointer to Locker.
 func New(client *redis.Client) *Locker {
 	return &Locker{
-		client: client,
-		cache:  cache.New(client),
+		mu: NewKeyedMutex(),
+		BackOff: &exponentialBackOff{
+			base:  time.Second, // Base backoff duration.
+			limit: time.Minute, // Maximum backoff duration.
+		},
+		Cache:  cache.New(client),
 		Logger: slog.Default(), // Default logger, can be overridden.
 	}
 }
 
-// DoTimeout ensures that the operation completes within the lockTTL.
-// Use Do if you want the lock duration to be extended until completion.
-func (l *Locker) DoTimeout(ctx context.Context, key string, fn func(ctx context.Context) error, lockTTL, waitTTL time.Duration) error {
-	ctx, cancel := context.WithTimeoutCause(ctx, lockTTL, ErrLockTimeout)
-	defer cancel()
+func (l *Locker) Do(ctx context.Context, key string, fn func(ctx context.Context) error, opts *LockOption) error {
+	mu := l.mu.Key(key)
+	mu.Lock()
+	defer mu.Unlock()
 
-	// Generate a random uuid as the lock value.
-	token, err := l.TryLock(ctx, key, lockTTL, waitTTL)
-	if err != nil {
-		return err
+	if opts == nil {
+		opts = NewLockOption()
+	}
+	token := cmp.Or(opts.Token, newToken())
+	if opts.Lock <= 0 {
+		return fmt.Errorf("lock duration must be greater than zero, got %v", opts.Lock)
 	}
 
-	// To ensure the unlock is called, we avoid using the same context.
+	var cancel context.CancelFunc
+
+	noRefresh := opts.RefreshRatio <= 0
+	if noRefresh {
+		ctx, cancel = context.WithTimeoutCause(ctx, opts.Lock, ErrLockTimeout)
+	} else {
+		ctx, cancel = context.WithCancel(ctx)
+	}
+	defer cancel()
+
+	if err := l.Lock(ctx, key, token, opts.Lock, opts.Wait); err != nil {
+		return err
+	}
 	defer func() {
-		if err := l.Unlock(context.WithoutCancel(ctx), key, token); err != nil {
-			l.Logger.Error("failed to unlock", "key", key, "error", err)
+		if unlockErr := l.Unlock(context.WithoutCancel(ctx), key, token); unlockErr != nil {
+			l.Logger.Error("failed to unlock", "key", key, "err", unlockErr)
 		}
 	}()
 
-	ch := make(chan error, 1)
-	go func() {
-		ch <- fn(ctx)
-	}()
-
-	select {
-	case <-ctx.Done():
-		return context.Cause(ctx)
-	case err := <-ch:
-		return err
+	if noRefresh {
+		return fn(ctx)
 	}
-}
-
-// Do locks the given key until the function completes.
-// If the lock cannot be acquired within the given wait, it will error.
-// The lock is released after the function completes.
-// LockTTL: The duration the lock is held. Renewed every 7/10 of the LockTTL. Set it to at least 5s to ensure the lock has enough time to be renewed.
-// WaitTTL: The duration to wait for the lock to be acquired. If set to 0, it will not wait and will return the error immediately.
-func (l *Locker) Do(ctx context.Context, key string, fn func(ctx context.Context) error, lockTTL, waitTTL time.Duration) error {
-	// Generate a random uuid as the lock value.
-	token, err := l.TryLock(ctx, key, lockTTL, waitTTL)
-	if err != nil {
-		return err
-	}
-
-	// To ensure the unlock is called, we avoid using the same context.
-	defer func() {
-		if err := l.Unlock(context.WithoutCancel(ctx), key, token); err != nil {
-			l.Logger.Error("failed to unlock", "key", key, "error", err)
-		}
-	}()
-
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
 
 	// Create a channel with a buffer of 1 to prevent goroutine leak.
 	ch := make(chan error, 1)
@@ -102,7 +120,7 @@ func (l *Locker) Do(ctx context.Context, key string, fn func(ctx context.Context
 		close(ch)
 	}()
 
-	t := time.NewTicker(lockTTL * 7 / 10)
+	t := time.NewTicker(time.Duration(float64(opts.Lock) * opts.RefreshRatio))
 	defer t.Stop()
 
 	for {
@@ -112,117 +130,71 @@ func (l *Locker) Do(ctx context.Context, key string, fn func(ctx context.Context
 		case err := <-ch:
 			return err
 		case <-t.C:
-			if err := l.Extend(ctx, key, token, lockTTL); err != nil {
+			if err := l.Extend(ctx, key, token, opts.Lock); err != nil {
 				return err
 			}
 		}
 	}
 }
 
-// TryLock attempts to acquire the lock. If the lock is already acquired, it
-// will wait for the lock to be released.
-// If the wait is less than or equal to 0, it will not wait.
-func (l *Locker) TryLock(ctx context.Context, key string, ttl, wait time.Duration) (string, error) {
-	nowait := wait <= 0
-	if nowait {
-		return l.Lock(ctx, key, ttl)
-	}
-
-	// Fire at the timeout moment before the wait duration.
-	timeout := time.After(wait)
-
-	pubsub := l.client.Subscribe(ctx, key)
-	defer pubsub.Close()
-
-	var i int
-	for {
-		sleep := exponentialBackoff(time.Second, time.Minute, i)
-
-		// Sleep for the remaining time before the key expires.
-		select {
-		case msg := <-pubsub.Channel():
-			if msg.Payload != payload {
-				continue
-			}
-
-			token, err := l.Lock(ctx, key, ttl)
-			if errors.Is(err, ErrLocked) {
-				continue
-			}
-
-			return token, err
-		case <-ctx.Done():
-			return "", context.Cause(ctx)
-		case <-timeout:
-			token, err := l.Lock(ctx, key, ttl)
-			if errors.Is(err, ErrLocked) {
-				return "", ErrLockWaitTimeout
-			}
-
-			return token, err
-		case <-time.After(sleep):
-			token, err := l.Lock(ctx, key, ttl)
-			if errors.Is(err, ErrLocked) {
-				i++
-				continue
-			}
-
-			return token, err
-		}
-	}
-}
-
-// Lock the key with the given ttl and returns a fencing token.
-// If the lock is already acquired, it will return an error.
-func (l *Locker) Lock(ctx context.Context, key string, ttl time.Duration) (string, error) {
-	token := newToken()
-	err := l.cache.StoreOnce(ctx, key, []byte(token), ttl)
+func (l *Locker) TryLock(ctx context.Context, key, token string, ttl time.Duration) error {
+	err := l.Cache.StoreOnce(ctx, key, []byte(token), ttl)
 	if errors.Is(err, cache.ErrExists) {
-		return "", fmt.Errorf("lock: %w", ErrLocked)
-	}
-	if err != nil {
-		return "", fmt.Errorf("lock: %w", err)
-	}
-
-	return token, nil
-}
-
-// Unlocks the key with the given token.
-func (l *Locker) Unlock(ctx context.Context, key, token string) error {
-	err := l.cache.CompareAndDelete(ctx, key, []byte(token))
-	if errors.Is(err, redis.Nil) {
-		return fmt.Errorf("unlock: %w", ErrConflict)
-	}
-
-	if err != nil {
-		return fmt.Errorf("unlock: %w", err)
-	}
-
-	return l.client.Publish(ctx, key, payload).Err()
-}
-
-func (l *Locker) Extend(ctx context.Context, key, val string, ttl time.Duration) error {
-	err := l.cache.CompareAndSwap(ctx, key, []byte(val), []byte(val), ttl)
-	if errors.Is(err, redis.Nil) {
-		return fmt.Errorf("extend: %w", ErrConflict)
-	}
-
-	if err != nil {
-		return fmt.Errorf("extend: %w", err)
+		return ErrLocked
 	}
 
 	return nil
 }
 
-// Replace sets the value of the specified key to the provided new value, if
-// the existing value matches the old value.
-func (l *Locker) Replace(ctx context.Context, key, oldVal, newVal string, ttl time.Duration) error {
-	err := l.cache.CompareAndSwap(ctx, key, []byte(oldVal), []byte(newVal), ttl)
-	if errors.Is(err, redis.Nil) {
-		return fmt.Errorf("replace: %w", ErrConflict)
+func (l *Locker) Lock(ctx context.Context, key, token string, ttl, wait time.Duration) error {
+	if wait <= 0 {
+		return l.TryLock(ctx, key, token, ttl)
 	}
+
+	// Fire at the timeout moment before the wait duration.
+	timeout := time.After(wait)
+
+	var i int
+	for {
+		sleep := l.BackOff.BackOff(i)
+
+		// Sleep for the remaining time before the key expires.
+		select {
+		case <-ctx.Done():
+			return context.Cause(ctx)
+		case <-timeout:
+			err := l.TryLock(ctx, key, token, ttl)
+			if errors.Is(err, ErrLocked) {
+				return ErrLockWaitTimeout
+			}
+
+			return err
+		case <-time.After(sleep):
+			err := l.TryLock(ctx, key, token, ttl)
+			if errors.Is(err, ErrLocked) {
+				i++
+				continue
+			}
+
+			return err
+		}
+	}
+}
+
+// Unlocks the key with the given token.
+func (l *Locker) Unlock(ctx context.Context, key, token string) error {
+	err := l.Cache.CompareAndDelete(ctx, key, []byte(token))
 	if err != nil {
-		return fmt.Errorf("replace: %w", err)
+		return fmt.Errorf("unlock: %w", mapError(err))
+	}
+
+	return nil
+}
+
+func (l *Locker) Extend(ctx context.Context, key, token string, ttl time.Duration) error {
+	val := []byte(token)
+	if err := l.Cache.CompareAndSwap(ctx, key, val, val, ttl); err != nil {
+		return fmt.Errorf("extend: %w", mapError(err))
 	}
 
 	return nil
@@ -232,6 +204,23 @@ func newToken() string {
 	return uuid.Must(uuid.NewV7()).String()
 }
 
-func exponentialBackoff(base, limit time.Duration, i int) time.Duration {
-	return rand.N(min(base*time.Duration(math.Pow(2, float64(i))), limit))
+type exponentialBackOff struct {
+	base  time.Duration
+	limit time.Duration
+}
+
+func (b exponentialBackOff) BackOff(i int) time.Duration {
+	return rand.N(min(b.base*time.Duration(math.Pow(2, float64(i))), b.limit))
+}
+
+func mapError(err error) error {
+	if errors.Is(err, cache.ErrNotExist) {
+		return ErrExpired
+	}
+
+	if errors.Is(err, cache.ErrValueMismatch) {
+		return ErrLocked
+	}
+
+	return err
 }
