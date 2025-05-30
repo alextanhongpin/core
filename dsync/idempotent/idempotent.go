@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/alextanhongpin/core/dsync/cache"
-	"github.com/alextanhongpin/core/dsync/lock"
 	"github.com/alextanhongpin/core/sync/promise"
 	"github.com/google/uuid"
 	redis "github.com/redis/go-redis/v9"
@@ -27,15 +26,14 @@ var (
 	ErrRequestMismatch = errors.New("idempotent: request mismatch")
 )
 
-type locker interface {
-	Extend(ctx context.Context, key, val string, ttl time.Duration) error
-	Replace(ctx context.Context, key, oldVal, newVal string, ttl time.Duration) error
-	Unlock(ctx context.Context, key, token string) error
+type cacheable interface {
+	CompareAndDelete(ctx context.Context, key string, old []byte) error
+	CompareAndSwap(ctx context.Context, key string, old, value []byte, ttl time.Duration) error
+	LoadOrStore(ctx context.Context, key string, value []byte, ttl time.Duration) (curr []byte, loaded bool, err error)
 }
 
 type RedisStore struct {
-	Locker locker
-	cache  cache.Cacheable
+	cache  cacheable
 	client *redis.Client
 	group  *promise.Group[[]byte]
 }
@@ -44,7 +42,6 @@ type RedisStore struct {
 // client, lock TTL, and keep TTL.
 func NewRedisStore(client *redis.Client) *RedisStore {
 	return &RedisStore{
-		Locker: lock.New(client),
 		cache:  cache.New(client),
 		client: client,
 		group:  promise.NewGroup[[]byte](),
@@ -94,7 +91,7 @@ func (s *RedisStore) runInLock(ctx context.Context, key, token string, fn func(c
 	// context.WithoutCancel ensures that the unlock is always called.
 	// If the operation is successful, the token will be replaced with the
 	// response, so the operation should fail.
-	defer s.Locker.Unlock(context.WithoutCancel(ctx), key, token)
+	defer s.cache.CompareAndDelete(context.WithoutCancel(ctx), key, []byte(token))
 
 	// Create a new channel to handle the result.
 	ch := make(chan result[[]byte], 1)
@@ -118,7 +115,7 @@ func (s *RedisStore) runInLock(ctx context.Context, key, token string, fn func(c
 			return nil, context.Cause(ctx)
 		case d := <-ch:
 			// Extend once more to prevent token from expiring.
-			if err := s.Locker.Extend(ctx, key, token, lockTTL); err != nil {
+			if err := s.cache.CompareAndSwap(ctx, key, []byte(token), []byte(token), lockTTL); err != nil {
 				return nil, err
 			}
 
@@ -133,7 +130,7 @@ func (s *RedisStore) runInLock(ctx context.Context, key, token string, fn func(c
 			}
 
 			// Replace the token with the response.
-			if err := s.Locker.Replace(ctx, key, token, string(b), keepTTL); err != nil {
+			if err := s.cache.CompareAndSwap(ctx, key, []byte(token), b, keepTTL); err != nil {
 				return nil, err
 			}
 
@@ -141,7 +138,7 @@ func (s *RedisStore) runInLock(ctx context.Context, key, token string, fn func(c
 			return []byte(res), nil
 		case <-t.C:
 			// Extend the lock to prevent the token from expiring.
-			if err := s.Locker.Extend(ctx, key, token, lockTTL); err != nil {
+			if err := s.cache.CompareAndSwap(ctx, key, []byte(token), []byte(token), lockTTL); err != nil {
 				return nil, err
 			}
 		}
