@@ -17,7 +17,6 @@ import (
 const payload = "unlock"
 
 var (
-	ErrCanceled        = errors.New("lock: canceled")
 	ErrConflict        = errors.New("lock: lock expired or acquired by another process")
 	ErrLockTimeout     = errors.New("lock: exceeded lock duration")
 	ErrLockWaitTimeout = errors.New("lock: failed to acquire lock within the wait duration")
