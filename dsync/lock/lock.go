@@ -178,10 +178,10 @@ func (l *Locker) Lock(ctx context.Context, key string, ttl time.Duration) (strin
 	token := newToken()
 	err := l.cache.StoreOnce(ctx, key, []byte(token), ttl)
 	if errors.Is(err, cache.ErrExists) {
-		return "", ErrLocked
+		return "", fmt.Errorf("lock: %w", ErrLocked)
 	}
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("lock: %w", err)
 	}
 
 	return token, nil
@@ -191,7 +191,7 @@ func (l *Locker) Lock(ctx context.Context, key string, ttl time.Duration) (strin
 func (l *Locker) Unlock(ctx context.Context, key, token string) error {
 	err := l.cache.CompareAndDelete(ctx, key, []byte(token))
 	if errors.Is(err, redis.Nil) {
-		return ErrConflict
+		return fmt.Errorf("unlock: %w", ErrConflict)
 	}
 
 	if err != nil {
@@ -204,7 +204,7 @@ func (l *Locker) Unlock(ctx context.Context, key, token string) error {
 func (l *Locker) Extend(ctx context.Context, key, val string, ttl time.Duration) error {
 	err := l.cache.CompareAndSwap(ctx, key, []byte(val), []byte(val), ttl)
 	if errors.Is(err, redis.Nil) {
-		return ErrConflict
+		return fmt.Errorf("extend: %w", ErrConflict)
 	}
 
 	if err != nil {
