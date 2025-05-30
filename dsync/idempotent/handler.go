@@ -42,6 +42,10 @@ func NewHandler[T, V any](client *redis.Client, fn func(ctx context.Context, req
 }
 
 func (h *Handler[T, V]) Handle(ctx context.Context, key string, req T) (res V, shared bool, err error) {
+	if key == "" {
+		return res, false, ErrEmptyKey
+	}
+
 	reqBytes, err := json.Marshal(req)
 	if err != nil {
 		return res, shared, err

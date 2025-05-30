@@ -24,6 +24,18 @@ var (
 	// ErrRequestMismatch indicates that the request does not match the stored
 	// request for the specified key.
 	ErrRequestMismatch = errors.New("idempotent: request mismatch")
+
+	// ErrFunctionExecutionFailed indicates that the function execution failed.
+	ErrFunctionExecutionFailed = errors.New("idempotent: function execution failed")
+
+	// ErrEmptyKey indicates that an empty key was provided.
+	ErrEmptyKey = errors.New("idempotent: key cannot be empty")
+
+	// ErrLockConflict indicates that the lock has expired or is already held by another process.
+	ErrLockConflict = errors.New("idempotent: lock expired or is already held by another process")
+
+	// lockRefreshRatio defines when to refresh the lock (70% of TTL)
+	lockRefreshRatio = 0.7
 )
 
 type cacheable interface {
@@ -51,10 +63,13 @@ func NewRedisStore(client *redis.Client) *RedisStore {
 // Do executes the provided function idempotently, using the specified key and
 // request.
 func (s *RedisStore) Do(ctx context.Context, key string, fn func(ctx context.Context, req []byte) ([]byte, error), req []byte, lockTTL, keepTTL time.Duration) (res []byte, loaded bool, err error) {
+	// Use atomic.Bool to communicate loaded status from the promise group
+	// Start with true (assuming cached) and only update if not loaded
 	b := new(atomic.Bool)
 	b.Store(true)
 	res, err = s.group.DoAndForget(key, func() ([]byte, error) {
 		res, loaded, err := s.do(ctx, key, fn, req, lockTTL, keepTTL)
+		// Only update if result was not loaded from cache
 		if !loaded {
 			b.Store(loaded)
 		}
@@ -95,27 +110,39 @@ func (s *RedisStore) runInLock(ctx context.Context, key, token string, fn func(c
 
 	// Create a new channel to handle the result.
 	ch := make(chan result[[]byte], 1)
-	go func() {
-		// Process the request in a separate goroutine.
-		res, err := fn(ctx, req)
-		ch <- result[[]byte]{
-			err:  err,
-			data: res,
-		}
 
-		close(ch)
+	// Use a context with cancellation to ensure goroutine cleanup
+	fnCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	go func() {
+		defer close(ch)
+		// Process the request in a separate goroutine.
+		res, err := fn(fnCtx, req)
+		select {
+		case ch <- result[[]byte]{err: err, data: res}:
+		case <-fnCtx.Done():
+			// Context cancelled, don't send to channel
+		}
 	}()
 
-	t := time.NewTicker(lockTTL * 7 / 10)
+	t := time.NewTicker(time.Duration(float64(lockTTL) * lockRefreshRatio))
 	defer t.Stop()
 
 	for {
 		select {
 		case <-ctx.Done():
 			return nil, context.Cause(ctx)
-		case d := <-ch:
+		case d, ok := <-ch:
+			if !ok {
+				return nil, ErrFunctionExecutionFailed
+			}
 			// Extend once more to prevent token from expiring.
 			if err := s.cache.CompareAndSwap(ctx, key, []byte(token), []byte(token), lockTTL); err != nil {
+				if isLockConflict(err) {
+					return nil, ErrLockConflict
+				}
+
 				return nil, err
 			}
 
@@ -131,6 +158,9 @@ func (s *RedisStore) runInLock(ctx context.Context, key, token string, fn func(c
 
 			// Replace the token with the response.
 			if err := s.cache.CompareAndSwap(ctx, key, []byte(token), b, keepTTL); err != nil {
+				if isLockConflict(err) {
+					return nil, ErrLockConflict
+				}
 				return nil, err
 			}
 
@@ -139,6 +169,10 @@ func (s *RedisStore) runInLock(ctx context.Context, key, token string, fn func(c
 		case <-t.C:
 			// Extend the lock to prevent the token from expiring.
 			if err := s.cache.CompareAndSwap(ctx, key, []byte(token), []byte(token), lockTTL); err != nil {
+				if isLockConflict(err) {
+					return nil, ErrLockConflict
+				}
+
 				return nil, err
 			}
 		}
@@ -180,7 +214,7 @@ func (s *RedisStore) parse(req, value []byte) ([]byte, error) {
 	}
 
 	// 2.2)
-	return []byte(d.Response), nil
+	return d.getResponseBytes()
 }
 
 // hash generates a SHA-256 hash of the provided data.
@@ -216,4 +250,8 @@ func (r result[T]) unwrap() (T, error) {
 
 func newToken() string {
 	return uuid.Must(uuid.NewV7()).String()
+}
+
+func isLockConflict(err error) bool {
+	return errors.Is(err, redis.Nil)
 }
