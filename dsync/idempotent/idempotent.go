@@ -7,11 +7,10 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"sync/atomic"
+	"sync"
 	"time"
 
 	"github.com/alextanhongpin/core/dsync/cache"
-	"github.com/alextanhongpin/core/sync/promise"
 	"github.com/google/uuid"
 	redis "github.com/redis/go-redis/v9"
 )
@@ -47,7 +46,7 @@ type cacheable interface {
 type RedisStore struct {
 	cache  cacheable
 	client *redis.Client
-	group  *promise.Group[[]byte]
+	mu     *muKey
 }
 
 // NewRedisStore creates a new RedisStore instance with the specified Redis
@@ -56,29 +55,18 @@ func NewRedisStore(client *redis.Client) *RedisStore {
 	return &RedisStore{
 		cache:  cache.New(client),
 		client: client,
-		group:  promise.NewGroup[[]byte](),
+		mu:     newMuKey(),
 	}
 }
 
 // Do executes the provided function idempotently, using the specified key and
 // request.
 func (s *RedisStore) Do(ctx context.Context, key string, fn func(ctx context.Context, req []byte) ([]byte, error), req []byte, lockTTL, keepTTL time.Duration) (res []byte, loaded bool, err error) {
-	// Use atomic.Bool to communicate loaded status from the promise group
-	// Start with true (assuming cached) and only update if not loaded
-	b := new(atomic.Bool)
-	b.Store(true)
-	res, err = s.group.DoAndForget(key, func() ([]byte, error) {
-		res, loaded, err := s.do(ctx, key, fn, req, lockTTL, keepTTL)
-		// Only update if result was not loaded from cache
-		if !loaded {
-			b.Store(loaded)
-		}
+	mu := s.mu.Key(key)
+	mu.Lock()
+	defer mu.Unlock()
 
-		return res, err
-	})
-	loaded = b.Load()
-
-	return
+	return s.do(ctx, key, fn, req, lockTTL, keepTTL)
 }
 
 // loadOrStore returns the response for the specified key, or stores the request
@@ -247,4 +235,26 @@ func (r result[T]) unwrap() (T, error) {
 
 func newToken() string {
 	return uuid.Must(uuid.NewV7()).String()
+}
+
+type muKey struct {
+	mu   sync.Mutex
+	keys map[string]*sync.Mutex
+}
+
+func newMuKey() *muKey {
+	return &muKey{
+		keys: make(map[string]*sync.Mutex),
+	}
+}
+
+func (m *muKey) Key(key string) sync.Locker {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if _, ok := m.keys[key]; !ok {
+		m.keys[key] = new(sync.Mutex)
+	}
+
+	return m.keys[key]
 }

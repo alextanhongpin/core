@@ -14,8 +14,6 @@ github.com/alextanhongpin/core/dsync/lock v0.0.0-20250529063622-1b73fde2fbc5 h1:
 github.com/alextanhongpin/core/dsync/lock v0.0.0-20250529063622-1b73fde2fbc5/go.mod h1:6Tuknh+GtJynwWxoVb7jkSvuOhxD+Zkzz2L7S7mP+mQ=
 github.com/alextanhongpin/core/storage/redis v0.0.0-20241129173936-869204b716f4 h1:IHfikodpeVDTHmQKz6UsSUlj+nkD/P/gjjKS/fDTRbw=
 github.com/alextanhongpin/core/storage/redis v0.0.0-20241129173936-869204b716f4/go.mod h1:raiBmLE7odFgrfvq6tiYWVlryZgK5V9kr3vXASbHcs8=
-github.com/alextanhongpin/core/sync/promise v0.0.0-20250528075601-a69dec1c2fc7 h1:F0qmNJxfP5jdSW5EaN7hpE/VZvtTvWtwvvlw12Voc8A=
-github.com/alextanhongpin/core/sync/promise v0.0.0-20250528075601-a69dec1c2fc7/go.mod h1:AMzb5tn043T3lDg/C87EXKg4QcIeP1WaUiKM02SdvkQ=
 github.com/alextanhongpin/dbtx/testing/redistest v0.0.0-20250528161638-1d13dea36d24 h1:m99FBmRIDxmN/IAuEXyCmnL5JpO4BbUAbpr2e/8ohys=
 github.com/alextanhongpin/dbtx/testing/redistest v0.0.0-20250528161638-1d13dea36d24/go.mod h1:7WOB/agyCRuACS9YYNPIEYnWvgio+2BD54ixo+kdoek=
 github.com/bsm/ginkgo/v2 v2.12.0 h1:Ny8MWAHyOepLGlLKYmXG4IEkioBysk6GpaRTLC8zwWs=

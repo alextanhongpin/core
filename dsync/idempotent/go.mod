@@ -6,7 +6,6 @@ require (
 	github.com/alextanhongpin/core/dsync/cache v0.0.0-20250529165144-ba2ca7cec22e
 	github.com/alextanhongpin/core/dsync/lock v0.0.0-20250529063622-1b73fde2fbc5
 	github.com/alextanhongpin/core/storage/redis v0.0.0-20241129173936-869204b716f4
-	github.com/alextanhongpin/core/sync/promise v0.0.0-20250528075601-a69dec1c2fc7
 	github.com/google/uuid v1.6.0
 	github.com/redis/go-redis/v9 v9.9.0
 	github.com/stretchr/testify v1.10.0
