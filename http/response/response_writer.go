@@ -55,8 +55,8 @@ func (w *ResponseWriterRecorder) Unwrap() http.ResponseWriter {
 	return w.ResponseWriter
 }
 
-func (w *ResponseWriterRecorder) Body() ([]byte, bool) {
-	return w.body, w.wroteBody
+func (w *ResponseWriterRecorder) Body() []byte {
+	return w.body
 }
 
 func (w *ResponseWriterRecorder) StatusCode() int {
