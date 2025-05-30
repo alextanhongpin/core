@@ -3,7 +3,7 @@ module github.com/alextanhongpin/core/dsync/lock
 go 1.24.2
 
 require (
-	github.com/alextanhongpin/core/dsync/cache v0.0.0-20250529172053-f5cc2f332e08
+	github.com/alextanhongpin/core/dsync/cache v0.0.0-20250530081951-9764c3eb58c7
 	github.com/alextanhongpin/dbtx/testing/redistest v0.0.0-20250528161638-1d13dea36d24
 	github.com/google/uuid v1.6.0
 	github.com/redis/go-redis/v9 v9.9.0

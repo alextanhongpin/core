@@ -46,7 +46,7 @@ func main() {
 		time.Sleep(sleep)
 		return fmt.Sprint(req), nil
 	}
-	h := idempotent.NewHandler(client, fn)
+	h := idempotent.NewHandler(client, fn, nil)
 
 	mux := http.NewServeMux()
 	mux.Handle("/debug/vars", expvar.Handler())
@@ -58,7 +58,7 @@ func main() {
 		if mismatch {
 			m = n - 1
 		}
-		res, _, err := h.Handle(r.Context(), fmt.Sprint(n), m, time.Minute, time.Hour)
+		res, _, err := h.Handle(r.Context(), fmt.Sprint(n), m)
 		if err != nil {
 			errorsTotal.Add(1)
 			if errors.Is(err, idempotent.ErrRequestInFlight) {

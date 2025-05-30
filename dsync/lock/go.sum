@@ -10,6 +10,8 @@ github.com/Nvveen/Gotty v0.0.0-20120604004816-cd527374f1e5 h1:TngWCqHvy9oXAN6lEV
 github.com/Nvveen/Gotty v0.0.0-20120604004816-cd527374f1e5/go.mod h1:lmUJ/7eu/Q8D7ML55dXQrVaamCz2vxCfdQBasLZfHKk=
 github.com/alextanhongpin/core/dsync/cache v0.0.0-20250529172053-f5cc2f332e08 h1:gMzGtoSqh4nQwwzDv6KrCOrblwqV9KE7MTFB1F/jTwc=
 github.com/alextanhongpin/core/dsync/cache v0.0.0-20250529172053-f5cc2f332e08/go.mod h1:PEfj5hICLoI2fFNmji/4veUJTVxkH2OitOTtMdrKcgE=
+github.com/alextanhongpin/core/dsync/cache v0.0.0-20250530081951-9764c3eb58c7 h1:/XJvAuGhSr5Tmd2VYQsMFoPj0hGq84p6tlRtdxgdQ1s=
+github.com/alextanhongpin/core/dsync/cache v0.0.0-20250530081951-9764c3eb58c7/go.mod h1:PEfj5hICLoI2fFNmji/4veUJTVxkH2OitOTtMdrKcgE=
 github.com/alextanhongpin/dbtx/testing/redistest v0.0.0-20250528161638-1d13dea36d24 h1:m99FBmRIDxmN/IAuEXyCmnL5JpO4BbUAbpr2e/8ohys=
 github.com/alextanhongpin/dbtx/testing/redistest v0.0.0-20250528161638-1d13dea36d24/go.mod h1:7WOB/agyCRuACS9YYNPIEYnWvgio+2BD54ixo+kdoek=
 github.com/bsm/ginkgo/v2 v2.12.0 h1:Ny8MWAHyOepLGlLKYmXG4IEkioBysk6GpaRTLC8zwWs=

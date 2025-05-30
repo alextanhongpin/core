@@ -10,8 +10,12 @@ github.com/Nvveen/Gotty v0.0.0-20120604004816-cd527374f1e5 h1:TngWCqHvy9oXAN6lEV
 github.com/Nvveen/Gotty v0.0.0-20120604004816-cd527374f1e5/go.mod h1:lmUJ/7eu/Q8D7ML55dXQrVaamCz2vxCfdQBasLZfHKk=
 github.com/alextanhongpin/core/dsync/cache v0.0.0-20250529165144-ba2ca7cec22e h1:UqmYM1IHVhvKTyq1B5FezQrhiYlgM7r+1GEdZBT9Idk=
 github.com/alextanhongpin/core/dsync/cache v0.0.0-20250529165144-ba2ca7cec22e/go.mod h1:PEfj5hICLoI2fFNmji/4veUJTVxkH2OitOTtMdrKcgE=
+github.com/alextanhongpin/core/dsync/cache v0.0.0-20250529172053-f5cc2f332e08 h1:gMzGtoSqh4nQwwzDv6KrCOrblwqV9KE7MTFB1F/jTwc=
+github.com/alextanhongpin/core/dsync/cache v0.0.0-20250529172053-f5cc2f332e08/go.mod h1:PEfj5hICLoI2fFNmji/4veUJTVxkH2OitOTtMdrKcgE=
 github.com/alextanhongpin/core/dsync/lock v0.0.0-20250529063622-1b73fde2fbc5 h1:wRdii71HqYX0knxfkKRyGBZCszXSLiVyMQjswpjGz1w=
 github.com/alextanhongpin/core/dsync/lock v0.0.0-20250529063622-1b73fde2fbc5/go.mod h1:6Tuknh+GtJynwWxoVb7jkSvuOhxD+Zkzz2L7S7mP+mQ=
+github.com/alextanhongpin/core/dsync/lock v0.0.0-20250529172053-f5cc2f332e08 h1:5tJyftYzeuBuJrlDelzD7yukFsUKdCTDgtATB+rVaI4=
+github.com/alextanhongpin/core/dsync/lock v0.0.0-20250529172053-f5cc2f332e08/go.mod h1:VAcV2CMBrB7kYkprG1OWVPAwWzgWOZ5UNzD47yUf4mY=
 github.com/alextanhongpin/core/storage/redis v0.0.0-20241129173936-869204b716f4 h1:IHfikodpeVDTHmQKz6UsSUlj+nkD/P/gjjKS/fDTRbw=
 github.com/alextanhongpin/core/storage/redis v0.0.0-20241129173936-869204b716f4/go.mod h1:raiBmLE7odFgrfvq6tiYWVlryZgK5V9kr3vXASbHcs8=
 github.com/alextanhongpin/dbtx/testing/redistest v0.0.0-20250528161638-1d13dea36d24 h1:m99FBmRIDxmN/IAuEXyCmnL5JpO4BbUAbpr2e/8ohys=
