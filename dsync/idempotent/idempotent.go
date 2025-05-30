@@ -138,11 +138,7 @@ func (s *RedisStore) runInLock(ctx context.Context, key, token string, fn func(c
 				return nil, ErrFunctionExecutionFailed
 			}
 			// Extend once more to prevent token from expiring.
-			if err := s.cache.CompareAndSwap(ctx, key, []byte(token), []byte(token), lockTTL); err != nil {
-				if isLockConflict(err) {
-					return nil, ErrLockConflict
-				}
-
+			if err := s.compareAndSwap(ctx, key, []byte(token), []byte(token), lockTTL); err != nil {
 				return nil, err
 			}
 
@@ -157,10 +153,7 @@ func (s *RedisStore) runInLock(ctx context.Context, key, token string, fn func(c
 			}
 
 			// Replace the token with the response.
-			if err := s.cache.CompareAndSwap(ctx, key, []byte(token), b, keepTTL); err != nil {
-				if isLockConflict(err) {
-					return nil, ErrLockConflict
-				}
+			if err := s.compareAndSwap(ctx, key, []byte(token), b, keepTTL); err != nil {
 				return nil, err
 			}
 
@@ -168,15 +161,19 @@ func (s *RedisStore) runInLock(ctx context.Context, key, token string, fn func(c
 			return []byte(res), nil
 		case <-t.C:
 			// Extend the lock to prevent the token from expiring.
-			if err := s.cache.CompareAndSwap(ctx, key, []byte(token), []byte(token), lockTTL); err != nil {
-				if isLockConflict(err) {
-					return nil, ErrLockConflict
-				}
-
+			if err := s.compareAndSwap(ctx, key, []byte(token), []byte(token), lockTTL); err != nil {
 				return nil, err
 			}
 		}
 	}
+}
+
+func (s *RedisStore) compareAndSwap(ctx context.Context, key string, old, value []byte, ttl time.Duration) error {
+	err := s.cache.CompareAndSwap(ctx, key, old, value, ttl)
+	if errors.Is(err, redis.Nil) {
+		return ErrLockConflict
+	}
+	return err
 }
 
 func (s *RedisStore) do(ctx context.Context, key string, fn func(context.Context, []byte) ([]byte, error), req []byte, lockTTL, keepTTL time.Duration) (res []byte, loaded bool, err error) {
@@ -250,8 +247,4 @@ func (r result[T]) unwrap() (T, error) {
 
 func newToken() string {
 	return uuid.Must(uuid.NewV7()).String()
-}
-
-func isLockConflict(err error) bool {
-	return errors.Is(err, redis.Nil)
 }
