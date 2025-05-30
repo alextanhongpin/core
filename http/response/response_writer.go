@@ -1,6 +1,9 @@
 package response
 
-import "net/http"
+import (
+	"bytes"
+	"net/http"
+)
 
 type ResponseWriterRecorder struct {
 	http.ResponseWriter
@@ -43,7 +46,7 @@ func (w *ResponseWriterRecorder) Write(b []byte) (int, error) {
 
 	if w.writeBody {
 		if !w.wroteBody {
-			w.body = b
+			w.body = bytes.Clone(b)
 			w.wroteBody = true
 		}
 	}
@@ -56,7 +59,7 @@ func (w *ResponseWriterRecorder) Unwrap() http.ResponseWriter {
 }
 
 func (w *ResponseWriterRecorder) Body() []byte {
-	return w.body
+	return bytes.Clone(w.body)
 }
 
 func (w *ResponseWriterRecorder) StatusCode() int {
