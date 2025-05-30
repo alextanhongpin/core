@@ -1,6 +1,7 @@
 package retry
 
 import (
+	"math"
 	"math/rand/v2"
 	"time"
 )
@@ -42,9 +43,7 @@ func NewExponentialBackOff(base, cap time.Duration) *ExponentialBackOff {
 }
 
 func (b *ExponentialBackOff) BackOff(attempts int) time.Duration {
-	sleep := min(int64(b.Cap), int64(b.Base)*1<<attempts)
-	sleep = int64(b.Base) + rand.Int64N(sleep)
-	return time.Duration(sleep)
+	return rand.N(min(b.Base*time.Duration(math.Pow(2, float64(attempts))), b.Cap))
 }
 
 type LinearBackOff struct {
