@@ -61,12 +61,19 @@ func NewRedisStore(client *redis.Client) *RedisStore {
 
 // Do executes the provided function idempotently, using the specified key and
 // request.
-func (s *RedisStore) Do(ctx context.Context, key string, fn func(ctx context.Context, req []byte) ([]byte, error), req []byte, lockTTL, keepTTL time.Duration) (res []byte, loaded bool, err error) {
+func (s *RedisStore) Do(ctx context.Context, key string, fn func(context.Context, []byte) ([]byte, error), req []byte, lockTTL, keepTTL time.Duration) (res []byte, loaded bool, err error) {
 	mu := s.mu.Key(key)
 	mu.Lock()
 	defer mu.Unlock()
 
-	return s.do(ctx, key, fn, req, lockTTL, keepTTL)
+	res, err = s.loadOrStore(ctx, key, req, lockTTL)
+	if !errors.Is(err, errors.ErrUnsupported) {
+		return res, err == nil, err
+	}
+
+	token := string(res)
+	res, err = s.runInLock(ctx, key, token, fn, req, lockTTL, keepTTL)
+	return res, false, err
 }
 
 // loadOrStore returns the response for the specified key, or stores the request
@@ -162,17 +169,6 @@ func (s *RedisStore) compareAndSwap(ctx context.Context, key string, old, value 
 		return ErrLockConflict
 	}
 	return err
-}
-
-func (s *RedisStore) do(ctx context.Context, key string, fn func(context.Context, []byte) ([]byte, error), req []byte, lockTTL, keepTTL time.Duration) (res []byte, loaded bool, err error) {
-	res, err = s.loadOrStore(ctx, key, req, lockTTL)
-	if !errors.Is(err, errors.ErrUnsupported) {
-		return res, err == nil, err
-	}
-
-	token := string(res)
-	res, err = s.runInLock(ctx, key, token, fn, req, lockTTL, keepTTL)
-	return res, false, err
 }
 
 // parse parses the value and returns the response if the request matches.
