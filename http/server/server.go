@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -67,7 +68,12 @@ func WaitGroup(servers ...*http.Server) {
 			defer wg.Done()
 
 			if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-				panic(err)
+				slog.Default().ErrorContext(ctx, "Error starting server",
+					slog.String("err", err.Error()),
+					slog.String("addr", srv.Addr))
+			} else {
+				slog.Default().InfoContext(ctx, "Server started",
+					slog.String("addr", srv.Addr))
 			}
 		}()
 	}
@@ -85,7 +91,9 @@ func WaitGroup(servers ...*http.Server) {
 
 	for _, srv := range servers {
 		if err := srv.Shutdown(ctx); err != nil {
-			panic(err)
+			slog.Default().WarnContext(ctx, "Error shutting down server",
+				slog.String("err", err.Error()),
+				slog.String("addr", srv.Addr))
 		}
 	}
 
