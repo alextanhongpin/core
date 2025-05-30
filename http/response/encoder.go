@@ -9,10 +9,11 @@ func NoContent(w http.ResponseWriter) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func JSON(w http.ResponseWriter, body any, codes ...int) error {
+func JSON(w http.ResponseWriter, body any, codes ...int) {
 	b, err := json.Marshal(body)
 	if err != nil {
-		return err
+		Error(w, err)
+		return
 	}
 
 	code := http.StatusOK
@@ -23,18 +24,18 @@ func JSON(w http.ResponseWriter, body any, codes ...int) error {
 	// This must come before WriteHeader, otherwise the header will not be set correctly.
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(code)
-	_, err = w.Write(b)
-	return err
+	if _, err := w.Write(b); err != nil {
+		Error(w, err)
+	}
 }
 
-func OK(w http.ResponseWriter, data any, codes ...int) error {
+func OK(w http.ResponseWriter, data any, codes ...int) {
 	code := http.StatusOK
 	if len(codes) > 0 {
 		code = codes[0]
 	}
 
-	return JSON(w, &Body{
-		Code: code,
+	JSON(w, &Body{
 		Data: data,
 	}, code)
 }
@@ -44,8 +45,6 @@ func Error(w http.ResponseWriter, err error) {
 		return
 	}
 
-	body := NewJSONError(err)
-	if err := JSON(w, body, body.Code); err != nil {
-		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
-	}
+	body, code := BodyError(err)
+	JSON(w, body, code)
 }

@@ -57,7 +57,7 @@ func TestJSON(t *testing.T) {
 				{ID: "user-2", Name: "Bob"},
 			}
 
-			response.Error(w, response.OK(w, data, http.StatusCreated))
+			response.OK(w, data, http.StatusCreated)
 		})
 
 		hd := httpdump.Handler(t, h)
@@ -71,7 +71,7 @@ func TestJSON(t *testing.T) {
 			data := map[string]any{
 				"bad_number": json.Number("1.5x"),
 			}
-			response.Error(w, response.OK(w, data))
+			response.OK(w, data)
 		})
 
 		hd := httpdump.Handler(t, h)
@@ -93,13 +93,11 @@ func TestJSON(t *testing.T) {
 		wr := httptest.NewRecorder()
 		r := httptest.NewRequest("GET", "/users", nil)
 		h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			response.Error(w,
-				response.JSON(w, &response.Body{
-					PageInfo: &response.PageInfo{
-						HasNextPage: true,
-					},
-				}),
-			)
+			response.JSON(w, &response.Body{
+				PageInfo: &response.PageInfo{
+					HasNextPage: true,
+				},
+			})
 		})
 
 		hd := httpdump.Handler(t, h)
@@ -113,9 +111,7 @@ func TestJSON(t *testing.T) {
 			body := map[string]string{
 				"hello": "world",
 			}
-			response.Error(w,
-				response.JSON(w, body, http.StatusAccepted),
-			)
+			response.JSON(w, body, http.StatusAccepted)
 		})
 
 		hd := httpdump.Handler(t, h)

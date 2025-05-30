@@ -16,7 +16,6 @@ type PageInfo struct {
 }
 
 type Body struct {
-	Code     int        `json:"-"`
 	Data     any        `json:"data,omitempty"`
 	Error    *JSONError `json:"error,omitempty"`
 	PageInfo *PageInfo  `json:"pageInfo,omitempty"`
@@ -28,39 +27,35 @@ type JSONError struct {
 	Errors  ValidationErrors `json:"errors,omitempty"`
 }
 
-func NewJSONError(err error) *Body {
+func BodyError(err error) (*Body, int) {
 	var ve ValidationErrors
 	if errors.As(err, &ve) {
 		code := http.StatusBadRequest
-
 		return &Body{
-			Code: code,
 			Error: &JSONError{
 				Code:    http.StatusText(code),
 				Message: err.Error(),
 				Errors:  ve,
 			},
-		}
+		}, code
 	}
 
 	var det causes.Detail
 	if errors.As(err, &det) {
+		code := codes.HTTP(det.Code())
 		return &Body{
-			Code: codes.HTTP(det.Code()),
 			Error: &JSONError{
 				Code:    det.Kind(),
 				Message: det.Message(),
 			},
-		}
+		}, code
 	}
 
 	code := http.StatusInternalServerError
-
 	return &Body{
-		Code: code,
 		Error: &JSONError{
 			Code:    http.StatusText(code),
 			Message: "An unexpected error has occured. Please try again later",
 		},
-	}
+	}, code
 }
