@@ -4,7 +4,7 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/alextanhongpin/errors/causes"
+	"github.com/alextanhongpin/errors/cause"
 	"github.com/alextanhongpin/errors/codes"
 )
 
@@ -40,13 +40,13 @@ func BodyError(err error) (*Body, int) {
 		}, code
 	}
 
-	var det causes.Detail
-	if errors.As(err, &det) {
-		code := codes.HTTP(det.Code())
+	var c *cause.Error
+	if errors.As(err, &c) {
+		code := codes.HTTP(c.Code)
 		return &Body{
 			Error: &JSONError{
-				Code:    det.Kind(),
-				Message: det.Message(),
+				Code:    c.Name,
+				Message: c.Message,
 			},
 		}, code
 	}

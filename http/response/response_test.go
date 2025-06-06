@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/alextanhongpin/core/http/response"
-	"github.com/alextanhongpin/errors/causes"
+	"github.com/alextanhongpin/errors/cause"
 	"github.com/alextanhongpin/errors/codes"
 	"github.com/alextanhongpin/testdump/httpdump"
 )
@@ -27,7 +27,7 @@ func TestJSONError(t *testing.T) {
 	}
 
 	t.Run("known error", func(t *testing.T) {
-		dumpError(t, causes.New(codes.BadRequest, "api/bad_request", "The request provided is invalid"))
+		dumpError(t, cause.New(codes.BadRequest, "api/bad_request", "The request provided is invalid"))
 	})
 
 	t.Run("validation errors", func(t *testing.T) {

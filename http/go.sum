@@ -2,6 +2,8 @@ github.com/PuerkitoBio/goquery v1.9.2 h1:4/wZksC3KgkQw7SQgkKotmKljk0M6V8TUvA8Wb4
 github.com/PuerkitoBio/goquery v1.9.2/go.mod h1:GHPCaP0ODyyxqcNoFGYlAprUFH81NuRPd0GX3Zu2Mvk=
 github.com/alextanhongpin/errors v0.0.0-20240821095552-2b58a77f37b0 h1:eaXpR8xpaUkXsa+OVuOvmcm9yahLCEgdcUGwjO2AZzU=
 github.com/alextanhongpin/errors v0.0.0-20240821095552-2b58a77f37b0/go.mod h1:5jPdqh1bzNfGBbyIYzKRqJ28RpPOjNtiW7u5ypWoAKc=
+github.com/alextanhongpin/errors v0.0.0-20250606170828-9193ec278585 h1:paRHup+PE2XBAJ11/AHjPJLvuFpc/PjkQq143dKlbFQ=
+github.com/alextanhongpin/errors v0.0.0-20250606170828-9193ec278585/go.mod h1:5jPdqh1bzNfGBbyIYzKRqJ28RpPOjNtiW7u5ypWoAKc=
 github.com/alextanhongpin/testdump/httpdump v0.0.0-20240815130218-4368114cac78 h1:JyhJi6t4YHfzDalq1W+ZWYc9zdghPsEgHdo4v53quTQ=
 github.com/alextanhongpin/testdump/httpdump v0.0.0-20240815130218-4368114cac78/go.mod h1:vIrGM419ww7ORXyPJL2ie8Ib/H5rbA17izMqKNwgBLA=
 github.com/alextanhongpin/testdump/pkg/diff v0.0.0-20240617032328-5cdd37fc0156 h1:F4Vk9uRhSWbkQKrV78gioqjufW/acun1llGnJbz1ujo=
