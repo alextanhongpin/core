@@ -10,7 +10,7 @@ Content-Type: application/json; charset=utf-8
 {
  "error": {
   "code": "Bad Request",
-  "message": "Validation failed",
+  "message": "invalid fields: email",
   "errors": {
    "email": "The email is invalid"
   }

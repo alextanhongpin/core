@@ -22,13 +22,13 @@ type Body struct {
 }
 
 type JSONError struct {
-	Code    string           `json:"code"`
-	Message string           `json:"message"`
-	Errors  ValidationErrors `json:"errors,omitempty"`
+	Code    string         `json:"code"`
+	Message string         `json:"message"`
+	Errors  map[string]any `json:"errors,omitempty"`
 }
 
 func BodyError(err error) (*Body, int) {
-	var ve ValidationErrors
+	var ve cause.MapError
 	if errors.As(err, &ve) {
 		code := http.StatusBadRequest
 		return &Body{

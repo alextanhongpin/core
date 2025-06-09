@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/alextanhongpin/core/http/response"
@@ -31,9 +32,10 @@ func TestJSONError(t *testing.T) {
 	})
 
 	t.Run("validation errors", func(t *testing.T) {
-		err := response.NewValidationErrors(map[string]string{
-			"email": "The email is invalid",
-		})
+		email := "xyz"
+		err := cause.NewMapValidator().
+			Required("email", email, cause.When(!strings.Contains(email, "@"), "The email is invalid")).
+			Validate()
 		dumpError(t, err)
 	})
 
