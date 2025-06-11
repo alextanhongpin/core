@@ -2,6 +2,7 @@ package snapshot_test
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -18,22 +19,25 @@ func TestSnapshot(t *testing.T) {
 		{Every: 100, Interval: 30 * time.Millisecond},
 	}
 	var events []snapshot.Event
+	var mu sync.Mutex
 	bg, stop := snapshot.New(ctx, func(ctx context.Context, evt snapshot.Event) {
+		mu.Lock()
 		events = append(events, evt)
+		mu.Unlock()
 	}, policies...)
 	defer stop()
 
 	bg.Inc(10_000)
-	time.Sleep(10 * time.Millisecond)
+	time.Sleep(11 * time.Millisecond)
+	bg.Inc(1_000)
+	time.Sleep(21 * time.Millisecond)
+	bg.Inc(100)
+	time.Sleep(31 * time.Millisecond)
 
+	mu.Lock()
 	is := assert.New(t)
 	is.Equal(snapshot.Event{Count: 10_000, Policy: policies[0]}, events[0])
-
-	bg.Inc(1_000)
-	time.Sleep(20 * time.Millisecond)
 	is.Equal(snapshot.Event{Count: 1_000, Policy: policies[1]}, events[1])
-
-	bg.Inc(100)
-	time.Sleep(30 * time.Millisecond)
 	is.Equal(snapshot.Event{Count: 100, Policy: policies[2]}, events[2])
+	mu.Unlock()
 }

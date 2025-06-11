@@ -61,7 +61,7 @@ type DataLoader[K comparable, V any] struct {
 	wg sync.WaitGroup
 
 	// State.
-	pg     *promise.Group[V]
+	group  *promise.Map[V]
 	ch     chan K
 	ctx    context.Context
 	cancel func(error)
@@ -78,7 +78,7 @@ func New[K comparable, V any](ctx context.Context, opts *Options[K, V]) *DataLoa
 
 	ctx, cancel := context.WithCancelCause(ctx)
 	return &DataLoader[K, V]{
-		pg:     promise.NewGroup[V](),
+		group:  promise.NewMap[V](),
 		ch:     make(chan K),
 		opts:   opts,
 		ctx:    ctx,
@@ -116,21 +116,21 @@ func (d *DataLoader[K, V]) Stop() {
 	})
 }
 
-func (d *DataLoader[K, V]) start(ctx context.Context) {
+func (d *DataLoader[K, V]) start() {
 	d.begin.Do(func() {
 		d.wg.Add(1)
 
 		go func() {
 			defer d.wg.Done()
 
-			d.loop(ctx)
+			d.loop()
 		}()
 	})
 }
 
 func (d *DataLoader[K, V]) load(k K) *promise.Promise[V] {
 	ctx := d.ctx
-	d.start(ctx)
+	d.start()
 
 	v, err := d.opts.Cache.Get(k)
 	if err == nil {
@@ -145,7 +145,8 @@ func (d *DataLoader[K, V]) load(k K) *promise.Promise[V] {
 		return promise.Reject[V](err)
 	}
 
-	p, loaded := d.pg.LoadOrStore(fmt.Sprint(k))
+	key := fmt.Sprint(k)
+	p, loaded := d.group.LoadOrStore(key)
 	if loaded {
 		return p
 	}
@@ -155,18 +156,15 @@ func (d *DataLoader[K, V]) load(k K) *promise.Promise[V] {
 		err := newKeyError(k, context.Cause(ctx))
 		d.opts.Cache.Set(k, v, err)
 
-		// Remove the key.
-		d.pg.DoAndForget(fmt.Sprint(k), func() (V, error) {
-			var v V
-			return v, err
-		})
+		p.Reject(err)
+		d.group.Delete(fmt.Sprint(k))
 	case d.ch <- k:
 	}
 
 	return p
 }
 
-func (d *DataLoader[K, V]) loop(ctx context.Context) {
+func (d *DataLoader[K, V]) loop() {
 	p1 := pipeline.Context(d.ctx, d.ch)
 	p2 := pipeline.Batch(d.opts.BatchMaxKeys, d.opts.BatchTimeout, p1)
 	p3 := pipeline.Queue(d.opts.BatchQueueSize, p2)
@@ -192,11 +190,19 @@ func (d *DataLoader[K, V]) batch(ctx context.Context, keys []K) {
 
 			return v, newKeyError(k, ErrNoResult)
 		}
-		_, _ = d.pg.DoAndForget(fmt.Sprint(k), func() (V, error) {
-			v, err := fn()
-			d.opts.Cache.Set(k, v, err)
-			return v, err
-		})
+		v, err := fn()
+		d.opts.Cache.Set(k, v, err)
+
+		key := fmt.Sprint(k)
+		p, ok := d.group.Load(key)
+		if ok {
+			if err != nil {
+				p.Reject(err)
+			} else {
+				p.Resolve(v)
+			}
+			d.group.Delete(key)
+		}
 	}
 }
 

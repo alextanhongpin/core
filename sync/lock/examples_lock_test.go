@@ -42,7 +42,6 @@ func ExampleLock() {
 	}
 
 	wg.Wait()
-	fmt.Println("exiting...")
 	// Output:
 	// Total time taken less than 510ms: true
 }
