@@ -8,7 +8,7 @@ import (
 	"github.com/alextanhongpin/core/sync/promise"
 )
 
-func ExamplePromiseDeferred() {
+func ExampleDeferred() {
 	now := time.Now()
 	p := promise.Deferred[int]()
 

@@ -19,40 +19,57 @@ func NewGroup[T any]() *Group[T] {
 	}
 }
 
-func (g *Group[T]) Forget(key string) bool {
-	g.mu.Lock()
-	p, ok := g.ps[key]
-	if ok {
-		delete(g.ps, key)
-		g.mu.Unlock()
-
-		// Reject to prevent goroutine leak.
-		p.Reject(fmt.Errorf("%w: key replaced", ErrAborted))
-		return true
-	}
-
-	g.mu.Unlock()
-	return false
-}
-
-// DoAndForget is like Do, but it removes the promise from the group after the
+// Lock is like Do, but it removes the promise from the group after the
 // promise is resolved or rejected.
 // This allows the promise to be garbage collected.
 // Mimics singleflight behaviour, unless the key is
 // already set and the promise is fulfilled or rejected,
 // then it behaves like Do.
-func (g *Group[T]) DoAndForget(key string, fn func() (T, error)) (T, error) {
-	p, loaded := g.LoadOrStore(key)
-	if !loaded || p.Status() == Idle {
-		defer g.Forget(key)
+func (g *Group[T]) Lock(key string, fn func() (T, error)) (T, error) {
+	g.mu.Lock()
+	p, ok := g.ps[key]
+	if ok {
+		g.mu.Unlock()
+
+		return p.Await()
 	}
 
-	return p.Wait(fn)
+	p = New(fn)
+	g.ps[key] = p
+	g.mu.Unlock()
+	defer g.Delete(key)
+
+	return p.Await()
 }
 
 func (g *Group[T]) Do(key string, fn func() (T, error)) (T, error) {
-	p, _ := g.LoadOrStore(key)
-	return p.Wait(fn)
+	g.mu.Lock()
+	p, ok := g.ps[key]
+	if ok {
+		g.mu.Unlock()
+
+		return p.Await()
+	}
+
+	p = New(fn)
+	g.ps[key] = p
+	g.mu.Unlock()
+
+	return p.Await()
+}
+
+func (g *Group[T]) Delete(key string) bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	p, ok := g.ps[key]
+	if ok {
+		delete(g.ps, key)
+		// Reject to prevent goroutine leak.
+		p.Reject(fmt.Errorf("%w: key replaced", ErrAborted))
+	}
+
+	return ok
 }
 
 func (g *Group[T]) Load(key string) (*Promise[T], bool) {
@@ -75,51 +92,6 @@ func (g *Group[T]) LoadMany(keys ...string) map[string]*Promise[T] {
 	g.mu.Unlock()
 
 	return m
-}
-
-func (g *Group[T]) DeleteAndStore(key string, val *Promise[T]) bool {
-	g.mu.Lock()
-	p, ok := g.ps[key]
-	if ok {
-		g.ps[key] = val
-		g.mu.Unlock()
-
-		// Reject to prevent goroutine leak.
-		p.Reject(fmt.Errorf("%w: key replaced", ErrAborted))
-		return true
-	}
-
-	g.ps[key] = val
-	g.mu.Unlock()
-	return false
-}
-
-func (g *Group[T]) LoadOrStore(key string) (*Promise[T], bool) {
-	g.mu.Lock()
-	p, ok := g.ps[key]
-	if ok {
-		g.mu.Unlock()
-		return p, true
-	}
-
-	p = Deferred[T]()
-	g.ps[key] = p
-	g.mu.Unlock()
-	return p, false
-}
-
-func (g *Group[T]) LoadAndDelete(key string) (*Promise[T], bool) {
-	g.mu.Lock()
-	p, ok := g.ps[key]
-	if ok {
-		delete(g.ps, key)
-		g.mu.Unlock()
-
-		return p, true
-	}
-	g.mu.Unlock()
-
-	return p, false
 }
 
 func (g *Group[T]) Len() int {

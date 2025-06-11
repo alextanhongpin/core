@@ -9,7 +9,7 @@ import (
 	"github.com/alextanhongpin/core/sync/promise"
 )
 
-func ExamplePromiseNew() {
+func ExampleGroup_Lock() {
 	counter := new(atomic.Int64)
 	g := promise.NewGroup[int]()
 	n := 10
@@ -21,7 +21,7 @@ func ExamplePromiseNew() {
 		go func() {
 			defer wg.Done()
 
-			v, err := g.DoAndForget("key", func() (int, error) {
+			v, err := g.Lock("key", func() (int, error) {
 				counter.Add(1)
 				time.Sleep(100 * time.Millisecond)
 				return 42, nil
