@@ -14,14 +14,14 @@ import (
 	"github.com/alextanhongpin/testdump/httpdump"
 )
 
-func TestJSONError(t *testing.T) {
+func TestErrorJSON(t *testing.T) {
 	dumpError := func(t *testing.T, err error) {
 		t.Helper()
 
 		wr := httptest.NewRecorder()
 		r := httptest.NewRequest("GET", "/user/1", nil)
 		h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			response.Error(w, err)
+			response.ErrorJSON(w, err)
 		})
 		hd := httpdump.Handler(t, h)
 		hd.ServeHTTP(wr, r)
@@ -33,9 +33,9 @@ func TestJSONError(t *testing.T) {
 
 	t.Run("validation errors", func(t *testing.T) {
 		email := "xyz"
-		err := cause.NewMapValidator().
-			Required("email", email, cause.When(!strings.Contains(email, "@"), "The email is invalid")).
-			Validate()
+		err := cause.Map{
+			"email": cause.Required("email", email).When(!strings.Contains(email, "@"), "The email is invalid"),
+		}.Err()
 		dumpError(t, err)
 	})
 

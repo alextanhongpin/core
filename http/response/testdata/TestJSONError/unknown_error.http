@@ -10,6 +10,6 @@ Content-Type: application/json; charset=utf-8
 {
  "error": {
   "code": "Internal Server Error",
-  "message": "An unexpected error has occured. Please try again later"
+  "message": "An unexpected error occurred. Please try again later."
  }
 }
