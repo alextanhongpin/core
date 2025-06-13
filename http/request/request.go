@@ -25,7 +25,7 @@ func (b *BodyError) Error() string {
 }
 
 type validatable interface {
-	Valid() error
+	Validate() error
 }
 
 // DecodeJSON decodes the json to struct and performs validation.
@@ -45,5 +45,5 @@ func DecodeJSON(r *http.Request, v validatable) error {
 		return &BodyError{Body: b, err: err}
 	}
 
-	return v.Valid()
+	return v.Validate()
 }

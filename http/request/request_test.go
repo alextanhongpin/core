@@ -3,12 +3,13 @@ package request_test
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/alextanhongpin/core/http/request"
+	"github.com/alextanhongpin/errors/cause"
+	"github.com/alextanhongpin/testdump/jsondump"
 	"github.com/google/go-cmp/cmp"
 	"github.com/stretchr/testify/assert"
 )
@@ -17,26 +18,45 @@ type loginRequest struct {
 	Email string `json:"email"`
 }
 
-func (req *loginRequest) Valid() error {
-	if !strings.Contains(req.Email, "@") {
-		return errors.New("invalid email")
-	}
-
-	return nil
+func (req *loginRequest) Validate() error {
+	return cause.Map{
+		"email": cause.Required(req.Email).When(!strings.Contains(req.Email, "@"), "The email is invalid"),
+	}.Err()
 }
 
 func TestBody(t *testing.T) {
-	body := loginRequest{
-		Email: "john.appleseed@mail.com",
-	}
-	b, err := json.Marshal(body)
-	is := assert.New(t)
-	is.Nil(err)
+	t.Run("valid", func(t *testing.T) {
+		body := loginRequest{
+			Email: "john.appleseed@mail.com",
+		}
+		b, err := json.Marshal(body)
+		is := assert.New(t)
+		is.NoError(err)
 
-	r := httptest.NewRequest("POST", "/login", bytes.NewReader(b))
-	var req loginRequest
-	is.Nil(request.DecodeJSON(r, &req))
-	is.Empty(cmp.Diff(req, body))
+		r := httptest.NewRequest("POST", "/login", bytes.NewReader(b))
+		var req loginRequest
+
+		err = request.DecodeJSON(r, &req)
+		is.NoError(err)
+		is.Empty(cmp.Diff(req, body))
+	})
+
+	t.Run("invalid", func(t *testing.T) {
+		body := loginRequest{
+			Email: "john.doe",
+		}
+		b, err := json.Marshal(body)
+		is := assert.New(t)
+		is.NoError(err)
+
+		r := httptest.NewRequest("POST", "/login", bytes.NewReader(b))
+		var req loginRequest
+
+		err = request.DecodeJSON(r, &req)
+		is.Error(err)
+		is.Empty(cmp.Diff(req, body))
+		jsondump.Dump(t, err)
+	})
 }
 
 func TestBodyInvalid(t *testing.T) {

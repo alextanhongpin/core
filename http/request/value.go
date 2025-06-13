@@ -1,6 +1,7 @@
 package request
 
 import (
+	"cmp"
 	"encoding/base64"
 	"fmt"
 	"net/http"
@@ -30,12 +31,24 @@ func (v Value) Int64() int64 {
 	return toInt64(v.String())
 }
 
+func (v Value) Int64N(n int64) int64 {
+	return cmp.Or(v.Int64(), n)
+}
+
 func (v Value) Int32() int32 {
 	return toInt32(v.String())
 }
 
+func (v Value) Int32N(n int32) int32 {
+	return cmp.Or(v.Int32(), n)
+}
+
 func (v Value) Int() int {
 	return toInt(v.String())
+}
+
+func (v Value) IntN(n int) int {
+	return cmp.Or(v.Int(), n)
 }
 
 func (v Value) Bool() bool {
@@ -81,7 +94,7 @@ func toBase64(s any) string {
 		return ""
 	}
 
-	return base64.URLEncoding.EncodeToString([]byte(fmt.Sprint(s)))
+	return base64.URLEncoding.EncodeToString(fmt.Appendf(nil, "%v", s))
 }
 
 func isZero(a any) bool {
