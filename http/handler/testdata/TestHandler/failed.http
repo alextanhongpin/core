@@ -1,0 +1,21 @@
+-- request.http --
+GET / HTTP/1.1
+Host: example.com
+Content-Length: 2
+Content-Type: application/json
+
+{}
+-- response.http --
+HTTP/1.1 400 Bad Request
+Connection: close
+Content-Type: application/json; charset=utf-8
+
+{
+ "error": {
+  "code": "Bad Request",
+  "message": "invalid fields: name",
+  "errors": {
+   "name": "required"
+  }
+ }
+}

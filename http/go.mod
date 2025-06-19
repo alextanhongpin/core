@@ -3,7 +3,7 @@ module github.com/alextanhongpin/core/http
 go 1.24.2
 
 require (
-	github.com/alextanhongpin/errors v0.0.0-20250610143840-5f47b6249c8d
+	github.com/alextanhongpin/errors v0.0.0-20250613151631-468b5e30c265
 	github.com/alextanhongpin/testdump/httpdump v0.0.0-20250608043033-1b71f7f044e4
 	github.com/alextanhongpin/testdump/jsondump v0.0.0-20250608043033-1b71f7f044e4
 	github.com/golang-jwt/jwt/v5 v5.2.1

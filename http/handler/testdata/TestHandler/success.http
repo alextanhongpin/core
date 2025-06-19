@@ -1,0 +1,17 @@
+-- request.http --
+GET / HTTP/1.1
+Host: example.com
+Content-Length: 21
+Content-Type: application/json
+
+{
+ "name": "john"
+}
+-- response.http --
+HTTP/1.1 200 OK
+Connection: close
+Content-Type: application/json; charset=utf-8
+
+{
+ "message": "Hello, john"
+}

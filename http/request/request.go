@@ -29,7 +29,7 @@ type validatable interface {
 }
 
 // DecodeJSON decodes the json to struct and performs validation.
-func DecodeJSON(r *http.Request, v validatable) error {
+func DecodeJSON(r *http.Request, v any) error {
 	b, err := io.ReadAll(r.Body)
 	if err != nil {
 		return err
@@ -45,5 +45,10 @@ func DecodeJSON(r *http.Request, v validatable) error {
 		return &BodyError{Body: b, err: err}
 	}
 
-	return v.Validate()
+	switch t := v.(type) {
+	case validatable:
+		return t.Validate()
+	default:
+		return nil
+	}
 }
