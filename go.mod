@@ -2,19 +2,19 @@ module github.com/alextanhongpin/core
 
 go 1.23.0
 
-require golang.org/x/exp v0.0.0-20250606033433-dcc06ee1d476
+require golang.org/x/exp v0.0.0-20250620022241-b7579e27df2b
 
 require (
 	github.com/alextanhongpin/core/sync/pipeline v0.0.0-20250611042528-ba68a00792a7
 	github.com/alextanhongpin/core/sync/promise v0.0.0-20250611042528-ba68a00792a7
 	github.com/prometheus/client_golang v1.22.0
-	github.com/prometheus/common v0.64.0
+	github.com/prometheus/common v0.65.0
 	github.com/segmentio/kafka-go v0.4.48
 	github.com/stretchr/testify v1.10.0
-	go.opentelemetry.io/otel v1.36.0
-	go.opentelemetry.io/otel/metric v1.36.0
-	go.opentelemetry.io/otel/trace v1.36.0
-	golang.org/x/exp/event v0.0.0-20250606033433-dcc06ee1d476
+	go.opentelemetry.io/otel v1.37.0
+	go.opentelemetry.io/otel/metric v1.37.0
+	go.opentelemetry.io/otel/trace v1.37.0
+	golang.org/x/exp/event v0.0.0-20250620022241-b7579e27df2b
 )
 
 require (

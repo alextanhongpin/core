@@ -27,12 +27,13 @@ func TestPrometheus(t *testing.T) {
 		c.Record(ctx, 123, event.String("version", "stable"))
 		c.Record(ctx, 456, event.String("version", "canary"))
 
-		collector := metric.Collector("hits")
+		collector, ok := metric.Collector("hits")
 
 		is := assert.New(t)
+		is.True(ok)
 		is.Equal(2, testutil.CollectAndCount(collector, "my_ns_hits"))
 		b, err := testutil.CollectAndFormat(collector, expfmt.TypeTextPlain, "my_ns_hits")
-		is.Nil(err)
+		is.NoError(err)
 		want := `# HELP my_ns_hits Earth meteorite hits
 # TYPE my_ns_hits counter
 my_ns_hits{version="canary"} 456
@@ -53,12 +54,13 @@ my_ns_hits{version="stable"} 123
 		g.Record(ctx, 456, event.String("version", "stable"))
 		g.Record(ctx, 123, event.String("version", "stable"))
 
-		collector := metric.Collector("cpu")
+		collector, ok := metric.Collector("cpu")
 
 		is := assert.New(t)
+		is.True(ok)
 		is.Equal(2, testutil.CollectAndCount(collector, "my_ns_cpu"))
 		b, err := testutil.CollectAndFormat(collector, expfmt.TypeTextPlain, "my_ns_cpu")
-		is.Nil(err)
+		is.NoError(err)
 		want := `# HELP my_ns_cpu cpu usage
 # TYPE my_ns_cpu gauge
 my_ns_cpu{version="canary"} 456
@@ -78,12 +80,13 @@ my_ns_cpu{version="stable"} 123
 		h.Record(ctx, time.Second, event.String("version", "stable"))
 		h.Record(ctx, time.Minute, event.String("version", "canary"))
 
-		collector := metric.Collector("request_duration_seconds")
+		collector, ok := metric.Collector("request_duration")
 
 		is := assert.New(t)
+		is.True(ok)
 		is.Equal(2, testutil.CollectAndCount(collector, "my_ns_request_duration_seconds"))
 		b, err := testutil.CollectAndFormat(collector, expfmt.TypeTextPlain, "my_ns_request_duration_seconds")
-		is.Nil(err)
+		is.NoError(err)
 		want := `# HELP my_ns_request_duration_seconds request per seconds
 # TYPE my_ns_request_duration_seconds histogram
 my_ns_request_duration_seconds_bucket{version="canary",le="0.005"} 0

@@ -4,7 +4,6 @@ package telemetry
 import (
 	"context"
 	"errors"
-	"fmt"
 	"sync"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -19,8 +18,7 @@ type PrometheusHandler struct {
 	// A map from event.Metrics to, effectively, otel Meters.
 	// But since the only thing we need from the Meter is recording a value, we
 	// use a function for that that closes over the Meter itself.
-	recordFuncs map[event.Metric]recordFunc
-	collectors  map[string]prometheus.Collector
+	collectors map[string]prometheus.Collector
 }
 
 var _ event.Handler = (*PrometheusHandler)(nil)
@@ -28,9 +26,8 @@ var _ event.Handler = (*PrometheusHandler)(nil)
 // NewPrometheusHandler creates a new PrometheusHandler.
 func NewPrometheusHandler(client prometheus.Registerer) *PrometheusHandler {
 	return &PrometheusHandler{
-		client:      client,
-		recordFuncs: map[event.Metric]recordFunc{},
-		collectors:  make(map[string]prometheus.Collector),
+		client:     client,
+		collectors: make(map[string]prometheus.Collector),
 	}
 }
 
@@ -51,97 +48,78 @@ func (m *PrometheusHandler) Event(ctx context.Context, e *event.Event) context.C
 		panic(errors.New("no metric value for metric event"))
 	}
 
-	rf := m.getRecordFunc(em, e.Labels)
-	if rf == nil {
-		panic(fmt.Errorf("unable to record for metric %v", em))
-	}
-	rf(ctx, lval, e.Labels)
-	return ctx
-}
-
-func (m *PrometheusHandler) Collector(name string) prometheus.Collector {
-	return m.collectors[name]
-}
-
-func (m *PrometheusHandler) getRecordFunc(em event.Metric, labels []event.Label) recordFunc {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if f, ok := m.recordFuncs[em]; ok {
-		return f
-	}
-	f := m.newRecordFunc(em, labels)
-	m.recordFuncs[em] = f
-	return f
-}
-
-func (m *PrometheusHandler) newRecordFunc(em event.Metric, labels []event.Label) recordFunc {
-	opts := em.Options()
 	name := em.Name()
+	opts := em.Options()
 
+	nameWithUnit := name
 	switch opts.Unit {
 	case event.UnitDimensionless:
 	case event.UnitBytes:
-		name += "_bytes"
+		nameWithUnit += "_bytes"
 	}
 
-	keys, _ := labelsToKeyVals(labels)
+	keys, vals := labelsToKeyVals(e.Labels)
 
-	switch em.(type) {
-	case *event.Counter:
-		c := prometheus.NewCounterVec(prometheus.CounterOpts{
-			Namespace: opts.Namespace,
-			Name:      name,
-			Help:      opts.Description,
-		}, keys)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	c, ok := m.collectors[name]
+	if !ok {
+		switch em.(type) {
+		case *event.Counter:
+			c = prometheus.NewCounterVec(prometheus.CounterOpts{
+				Help:      opts.Description,
+				Name:      nameWithUnit,
+				Namespace: opts.Namespace,
+			}, keys)
+		case *event.FloatGauge:
+			c = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+				Help:      opts.Description,
+				Name:      nameWithUnit,
+				Namespace: opts.Namespace,
+			}, keys)
+		case *event.DurationDistribution:
+			switch opts.Unit {
+			case event.UnitMilliseconds:
+				nameWithUnit += "_milliseconds"
+			default:
+				nameWithUnit += "_seconds"
+			}
+			c = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+				Help:      opts.Description,
+				Name:      nameWithUnit,
+				Namespace: opts.Namespace,
+			}, keys)
+		default:
+			panic(errors.New("unsupported metric type for PrometheusHandler: " + em.Name()))
+		}
 		m.collectors[name] = c
 		m.client.MustRegister(c)
-
-		return func(ctx context.Context, l event.Label, labels []event.Label) {
-			_, vals := labelsToKeyVals(labels)
-			c.WithLabelValues(vals...).Add(float64(l.Int64()))
-		}
-
-	case *event.FloatGauge:
-		g := prometheus.NewGaugeVec(prometheus.GaugeOpts{
-			Namespace: opts.Namespace,
-			Name:      name,
-			Help:      opts.Description,
-		}, keys)
-		m.collectors[name] = g
-		m.client.MustRegister(g)
-
-		return func(ctx context.Context, l event.Label, labels []event.Label) {
-			_, vals := labelsToKeyVals(labels)
-			g.WithLabelValues(vals...).Set(l.Float64())
-		}
-	case *event.DurationDistribution:
-		switch opts.Unit {
-		case event.UnitMilliseconds:
-			name += "_milliseconds"
-		default:
-			name += "_seconds"
-		}
-
-		r := prometheus.NewHistogramVec(prometheus.HistogramOpts{
-			Namespace: opts.Namespace,
-			Name:      name,
-			Help:      opts.Description,
-		}, keys)
-		m.collectors[name] = r
-		m.client.MustRegister(r)
-
-		return func(ctx context.Context, l event.Label, attrs []event.Label) {
-			_, vals := labelsToKeyVals(labels)
-			duration := l.Duration().Seconds()
-			if opts.Unit == event.UnitMilliseconds {
-				duration = float64(l.Duration().Milliseconds())
-			}
-
-			r.WithLabelValues(vals...).Observe(duration)
-		}
-	default:
-		return nil
 	}
+
+	switch col := c.(type) {
+	case *prometheus.CounterVec:
+		col.WithLabelValues(vals...).Add(float64(lval.Int64()))
+	case *prometheus.GaugeVec:
+		col.WithLabelValues(vals...).Set(lval.Float64())
+	case *prometheus.HistogramVec:
+		duration := lval.Duration().Seconds()
+		if opts.Unit == event.UnitMilliseconds {
+			duration = float64(lval.Duration().Milliseconds())
+		}
+		col.WithLabelValues(vals...).Observe(duration)
+	default:
+		panic(errors.New("unsupported collector type for PrometheusHandler: " + em.Name()))
+	}
+	return ctx
+}
+
+func (m *PrometheusHandler) Collector(name string) (prometheus.Collector, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	c, ok := m.collectors[name]
+	return c, ok
 }
 
 func labelsToKeyVals(labels []event.Label) (keys []string, vals []string) {
