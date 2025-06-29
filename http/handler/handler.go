@@ -43,7 +43,6 @@ func (h *Handler[K, V]) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	fmt.Println("Decoded request:", req)
 	resp, err := h.Service.Run(r.Context(), req)
 	if err != nil {
 		h.EncodeError(w, err)
