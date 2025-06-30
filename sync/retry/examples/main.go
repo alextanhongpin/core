@@ -11,7 +11,7 @@ import (
 )
 
 func main() {
-	r := retry.New(retry.NewConstantBackOff(0))
+	r := retry.New().WithBackOff(retry.NewConstantBackOff(0))
 	r.Throttler = retry.NewThrottler(retry.NewThrottlerOptions())
 
 	var mu sync.Mutex

@@ -20,48 +20,16 @@ type retry interface {
 var _ retry = (*Retry)(nil)
 
 type Retry struct {
-	BackOffPolicy backOffPolicy
-	Throttler     throttler
+	BackOff   backOff
+	Throttler throttler
 }
 
-func Do(ctx context.Context, fn func(context.Context) error, n int) (err error) {
-	r := New(NewExponentialBackOff(time.Second, time.Minute))
-	for _, retryErr := range r.Try(ctx, n) {
-		if retryErr != nil {
-			return errors.Join(retryErr, err)
-		}
-
-		err = fn(ctx)
-		if err == nil {
-			break
-		}
-	}
-
-	return nil
-}
-
-func DoValue[T any](ctx context.Context, fn func(context.Context) (T, error), n int) (v T, err error) {
-	r := New(NewExponentialBackOff(time.Second, time.Minute))
-	for _, retryErr := range r.Try(ctx, n) {
-		if retryErr != nil {
-			return v, errors.Join(retryErr, err)
-		}
-
-		v, err = fn(ctx)
-		if err == nil {
-			break
-		}
-	}
-
-	return
-}
-
-func New(bop backOffPolicy) *Retry {
+func New() *Retry {
 	var t *Throttler
 
 	return &Retry{
-		BackOffPolicy: bop,
-		Throttler:     t,
+		BackOff:   NewExponentialBackOff(time.Second, time.Minute),
+		Throttler: t,
 	}
 }
 
@@ -99,9 +67,28 @@ func (r *Retry) Try(ctx context.Context, limit int) iter.Seq2[int, error] {
 			// Use time.After combined with context instead.
 			select {
 			case <-ctx.Done():
-				break
-			case <-time.After(r.BackOffPolicy.BackOff(i)):
+			case <-time.After(r.BackOff.At(i)):
 			}
 		}
 	}
+}
+
+func (r *Retry) WithBackOff(policy backOff) *Retry {
+	r.BackOff = policy
+	return r
+}
+
+func (r *Retry) Do(ctx context.Context, fn func(context.Context) error, limit int) (err error) {
+	for _, retryErr := range r.Try(ctx, limit) {
+		if retryErr != nil {
+			return errors.Join(retryErr, err)
+		}
+
+		err = fn(ctx)
+		if err == nil {
+			break
+		}
+	}
+
+	return nil
 }

@@ -6,14 +6,14 @@ import (
 	"time"
 )
 
-type backOffPolicy interface {
-	BackOff(i int) time.Duration
+type backOff interface {
+	At(i int) time.Duration
 }
 
 var (
-	_ backOffPolicy = (*ConstantBackOff)(nil)
-	_ backOffPolicy = (*ExponentialBackOff)(nil)
-	_ backOffPolicy = (*LinearBackOff)(nil)
+	_ backOff = (*ConstantBackOff)(nil)
+	_ backOff = (*ExponentialBackOff)(nil)
+	_ backOff = (*LinearBackOff)(nil)
 )
 
 type ConstantBackOff struct {
@@ -26,7 +26,7 @@ func NewConstantBackOff(period time.Duration) *ConstantBackOff {
 	}
 }
 
-func (b *ConstantBackOff) BackOff(attempts int) time.Duration {
+func (b *ConstantBackOff) At(attempts int) time.Duration {
 	return b.Period
 }
 
@@ -42,7 +42,7 @@ func NewExponentialBackOff(base, cap time.Duration) *ExponentialBackOff {
 	}
 }
 
-func (b *ExponentialBackOff) BackOff(attempts int) time.Duration {
+func (b *ExponentialBackOff) At(attempts int) time.Duration {
 	return rand.N(min(b.Base*time.Duration(math.Pow(2, float64(attempts))), b.Cap))
 }
 
@@ -56,6 +56,6 @@ func NewLinearBackOff(period time.Duration) *LinearBackOff {
 	}
 }
 
-func (b *LinearBackOff) BackOff(attempts int) time.Duration {
+func (b *LinearBackOff) At(attempts int) time.Duration {
 	return b.Period * time.Duration(attempts)
 }

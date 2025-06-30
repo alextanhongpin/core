@@ -17,7 +17,7 @@ func ExampleRoundTripper() {
 	}))
 	defer ts.Close()
 
-	r := retry.New(retry.NewConstantBackOff(time.Millisecond))
+	r := retry.New().WithBackOff(retry.NewConstantBackOff(time.Millisecond))
 
 	client := ts.Client()
 	client.Transport = retry.NewRoundTripper(client.Transport, r)
