@@ -9,7 +9,7 @@ import (
 )
 
 func TestMultiSlidingWindow_Clear(t *testing.T) {
-	r := ratelimit.NewMultiSlidingWindow(5, time.Second)
+	r := ratelimit.MustNewMultiSlidingWindow(5, time.Second)
 
 	var foo, bar int
 	for range 10 {

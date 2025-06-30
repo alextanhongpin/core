@@ -1,8 +1,14 @@
 package ratelimit
 
 import (
+	"errors"
 	"sync"
 	"time"
+)
+
+var (
+	ErrInvalidMultiFixedWindowLimit  = errors.New("multi fixed window limit must be positive")
+	ErrInvalidMultiFixedWindowPeriod = errors.New("multi fixed window period must be positive")
 )
 
 type fixedWindowState struct {
@@ -21,13 +27,30 @@ type MultiFixedWindow struct {
 	Now    func() time.Time
 }
 
-func NewMultiFixedWindow(limit int, period time.Duration) *MultiFixedWindow {
+func NewMultiFixedWindow(limit int, period time.Duration) (*MultiFixedWindow, error) {
+	if limit <= 0 {
+		return nil, ErrInvalidMultiFixedWindowLimit
+	}
+	if period <= 0 {
+		return nil, ErrInvalidMultiFixedWindowPeriod
+	}
+
 	return &MultiFixedWindow{
 		limit:  limit,
 		period: period.Nanoseconds(),
 		state:  make(map[string]fixedWindowState),
 		Now:    time.Now,
+	}, nil
+}
+
+// MustNewMultiFixedWindow creates a new multi fixed window rate limiter and panics on error.
+// This is provided for backward compatibility and testing.
+func MustNewMultiFixedWindow(limit int, period time.Duration) *MultiFixedWindow {
+	mfw, err := NewMultiFixedWindow(limit, period)
+	if err != nil {
+		panic(err)
 	}
+	return mfw
 }
 
 // Allow checks if a request is allowed. Special case of AllowN that consumes
@@ -39,6 +62,10 @@ func (r *MultiFixedWindow) Allow(key string) bool {
 // AllowN checks if a request is allowed. Consumes n token
 // if allowed.
 func (r *MultiFixedWindow) AllowN(key string, n int) bool {
+	if key == "" || n <= 0 {
+		return false
+	}
+
 	r.mu.Lock()
 	defer r.mu.Unlock()
 

@@ -1,9 +1,15 @@
 package ratelimit
 
 import (
+	"errors"
 	"math"
 	"sync"
 	"time"
+)
+
+var (
+	ErrInvalidMultiSlidingWindowLimit  = errors.New("multi sliding window limit must be positive")
+	ErrInvalidMultiSlidingWindowPeriod = errors.New("multi sliding window period must be positive")
 )
 
 type slidingWindowState struct {
@@ -23,14 +29,31 @@ type MultiSlidingWindow struct {
 	Now    func() time.Time
 }
 
-func NewMultiSlidingWindow(limit int, period time.Duration) *MultiSlidingWindow {
+func NewMultiSlidingWindow(limit int, period time.Duration) (*MultiSlidingWindow, error) {
+	if limit <= 0 {
+		return nil, ErrInvalidMultiSlidingWindowLimit
+	}
+	if period <= 0 {
+		return nil, ErrInvalidMultiSlidingWindowPeriod
+	}
+
 	return &MultiSlidingWindow{
 		// NOTE: The burst is only applied once.
 		state:  make(map[string]slidingWindowState),
 		limit:  limit,
 		period: period.Nanoseconds(),
 		Now:    time.Now,
+	}, nil
+}
+
+// MustNewMultiSlidingWindow creates a new multi sliding window rate limiter and panics on error.
+// This is provided for backward compatibility and testing.
+func MustNewMultiSlidingWindow(limit int, period time.Duration) *MultiSlidingWindow {
+	msw, err := NewMultiSlidingWindow(limit, period)
+	if err != nil {
+		panic(err)
 	}
+	return msw
 }
 
 func (r *MultiSlidingWindow) Allow(key string) bool {
@@ -38,6 +61,10 @@ func (r *MultiSlidingWindow) Allow(key string) bool {
 }
 
 func (r *MultiSlidingWindow) AllowN(key string, n int) bool {
+	if key == "" || n <= 0 {
+		return false
+	}
+
 	r.mu.Lock()
 	defer r.mu.Unlock()
 

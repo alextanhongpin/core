@@ -15,7 +15,7 @@ func ExampleMultiGCRA() {
 	// is based on the window.
 	now := time.Now().Truncate(time.Second)
 
-	rl := ratelimit.NewMultiGCRA(5, time.Second, 1)
+	rl := ratelimit.MustNewMultiGCRA(5, time.Second, 1)
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 1, ' ', tabwriter.AlignRight|tabwriter.Debug)
 	fmt.Fprintf(w, "%s\t%s\t\n", "t", "allow")
 	call := func(duration time.Duration, allow bool) {

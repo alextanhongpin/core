@@ -9,7 +9,7 @@ import (
 )
 
 func TestFixedWindow(t *testing.T) {
-	rl := ratelimit.NewFixedWindow(3, time.Second)
+	rl := ratelimit.MustNewFixedWindow(3, time.Second)
 
 	is := assert.New(t)
 

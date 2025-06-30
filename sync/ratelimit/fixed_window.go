@@ -1,8 +1,14 @@
 package ratelimit
 
 import (
+	"errors"
 	"sync"
 	"time"
+)
+
+var (
+	ErrInvalidFixedWindowLimit  = errors.New("fixed window limit must be positive")
+	ErrInvalidFixedWindowPeriod = errors.New("fixed window period must be positive")
 )
 
 // FixedWindow acts as a counter for a given time period.
@@ -18,12 +24,29 @@ type FixedWindow struct {
 	Now    func() time.Time
 }
 
-func NewFixedWindow(limit int, period time.Duration) *FixedWindow {
+func NewFixedWindow(limit int, period time.Duration) (*FixedWindow, error) {
+	if limit <= 0 {
+		return nil, ErrInvalidFixedWindowLimit
+	}
+	if period <= 0 {
+		return nil, ErrInvalidFixedWindowPeriod
+	}
+
 	return &FixedWindow{
 		limit:  limit,
 		period: period.Nanoseconds(),
 		Now:    time.Now,
+	}, nil
+}
+
+// MustNewFixedWindow creates a new fixed window rate limiter and panics on error.
+// This is provided for backward compatibility and testing.
+func MustNewFixedWindow(limit int, period time.Duration) *FixedWindow {
+	fw, err := NewFixedWindow(limit, period)
+	if err != nil {
+		panic(err)
 	}
+	return fw
 }
 
 // Allow checks if a request is allowed. Special case of AllowN that consumes
@@ -35,6 +58,10 @@ func (r *FixedWindow) Allow() bool {
 // AllowN checks if a request is allowed. Consumes n token
 // if allowed.
 func (r *FixedWindow) AllowN(n int) bool {
+	if n <= 0 {
+		return false
+	}
+
 	r.mu.Lock()
 	defer r.mu.Unlock()
 

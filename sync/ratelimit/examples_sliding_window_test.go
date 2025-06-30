@@ -15,7 +15,7 @@ func ExampleSlidingWindow() {
 	// is based on the window.
 	now := time.Now()
 
-	rl := ratelimit.NewSlidingWindow(5, time.Second)
+	rl := ratelimit.MustNewSlidingWindow(5, time.Second)
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 1, ' ', tabwriter.AlignRight|tabwriter.Debug)
 	fmt.Fprintf(w, "%s\t%s\t\n", "t", "allow")
 	call := func(duration time.Duration, allow bool) {

@@ -1,9 +1,15 @@
 package ratelimit
 
 import (
+	"errors"
 	"math"
 	"sync"
 	"time"
+)
+
+var (
+	ErrInvalidSlidingWindowLimit  = errors.New("sliding window limit must be positive")
+	ErrInvalidSlidingWindowPeriod = errors.New("sliding window period must be positive")
 )
 
 type SlidingWindow struct {
@@ -20,12 +26,29 @@ type SlidingWindow struct {
 	Now func() time.Time
 }
 
-func NewSlidingWindow(limit int, period time.Duration) *SlidingWindow {
+func NewSlidingWindow(limit int, period time.Duration) (*SlidingWindow, error) {
+	if limit <= 0 {
+		return nil, ErrInvalidSlidingWindowLimit
+	}
+	if period <= 0 {
+		return nil, ErrInvalidSlidingWindowPeriod
+	}
+
 	return &SlidingWindow{
 		limit:  limit,
 		period: period.Nanoseconds(),
 		Now:    time.Now,
+	}, nil
+}
+
+// MustNewSlidingWindow creates a new sliding window rate limiter and panics on error.
+// This is provided for backward compatibility and testing.
+func MustNewSlidingWindow(limit int, period time.Duration) *SlidingWindow {
+	sw, err := NewSlidingWindow(limit, period)
+	if err != nil {
+		panic(err)
 	}
+	return sw
 }
 
 func (r *SlidingWindow) Allow() bool {
@@ -33,6 +56,10 @@ func (r *SlidingWindow) Allow() bool {
 }
 
 func (r *SlidingWindow) AllowN(n int) bool {
+	if n <= 0 {
+		return false
+	}
+
 	r.mu.Lock()
 	defer r.mu.Unlock()
 

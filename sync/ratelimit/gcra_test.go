@@ -8,7 +8,7 @@ import (
 )
 
 func TestGCRAFullRange(t *testing.T) {
-	rl := ratelimit.NewGCRA(5, time.Second, 0)
+	rl := ratelimit.MustNewGCRA(5, time.Second, 0)
 
 	periods := []time.Duration{
 		0,
@@ -49,7 +49,7 @@ func TestGCRAFullRange(t *testing.T) {
 }
 
 func TestGCRAPartial(t *testing.T) {
-	rl := ratelimit.NewGCRA(5, time.Second, 0)
+	rl := ratelimit.MustNewGCRA(5, time.Second, 0)
 
 	periods := []time.Duration{
 		0,
@@ -83,7 +83,7 @@ func TestGCRAPartial(t *testing.T) {
 }
 
 func TestGCRABurst(t *testing.T) {
-	rl := ratelimit.NewGCRA(5, time.Second, 1)
+	rl := ratelimit.MustNewGCRA(5, time.Second, 1)
 
 	periods := []time.Duration{
 		0,
@@ -125,7 +125,7 @@ func TestGCRABurst(t *testing.T) {
 }
 
 func TestGCRABurstPartial(t *testing.T) {
-	rl := ratelimit.NewGCRA(5, time.Second, 1)
+	rl := ratelimit.MustNewGCRA(5, time.Second, 1)
 
 	periods := []time.Duration{
 		0,
@@ -167,7 +167,7 @@ func TestGCRABurstPartial(t *testing.T) {
 }
 
 func TestGCRAMultipleBurst(t *testing.T) {
-	rl := ratelimit.NewGCRA(5, time.Second, 5)
+	rl := ratelimit.MustNewGCRA(5, time.Second, 5)
 
 	periods := []time.Duration{
 		0,
@@ -197,7 +197,7 @@ func TestGCRAMultipleBurst(t *testing.T) {
 }
 
 func TestGCRAAllowN(t *testing.T) {
-	rl := ratelimit.NewGCRA(5, time.Second, 0)
+	rl := ratelimit.MustNewGCRA(5, time.Second, 0)
 
 	periods := []time.Duration{
 		0,
@@ -238,7 +238,7 @@ func TestGCRAAllowN(t *testing.T) {
 }
 
 func TestGCRABurstTotal(t *testing.T) {
-	rl := ratelimit.NewGCRA(5, time.Second, 1)
+	rl := ratelimit.MustNewGCRA(5, time.Second, 1)
 
 	now := time.Now().Truncate(time.Second)
 	var delay []time.Duration

@@ -9,7 +9,7 @@ import (
 )
 
 func TestSlidingWindow(t *testing.T) {
-	rl := ratelimit.NewSlidingWindow(1, time.Second)
+	rl := ratelimit.MustNewSlidingWindow(1, time.Second)
 
 	is := assert.New(t)
 	is.True(rl.Allow())
@@ -17,7 +17,7 @@ func TestSlidingWindow(t *testing.T) {
 }
 
 func TestSlidingWindow_RateLimited(t *testing.T) {
-	rl := ratelimit.NewSlidingWindow(5, time.Second)
+	rl := ratelimit.MustNewSlidingWindow(5, time.Second)
 
 	var count int
 	for i := 0; i < 10; i++ {

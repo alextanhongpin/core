@@ -9,7 +9,7 @@ import (
 )
 
 func TestMultiFixedWindow_Clear(t *testing.T) {
-	r := ratelimit.NewMultiFixedWindow(5, time.Second)
+	r := ratelimit.MustNewMultiFixedWindow(5, time.Second)
 
 	var foo, bar int
 	for range 10 {

@@ -9,7 +9,7 @@ import (
 )
 
 func TestMultiGCRA_Clear(t *testing.T) {
-	r := ratelimit.NewMultiGCRA(5, time.Second, 1)
+	r := ratelimit.MustNewMultiGCRA(5, time.Second, 1)
 
 	var foo, bar int
 	for range 10 {
