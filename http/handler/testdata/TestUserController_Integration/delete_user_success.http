@@ -1,0 +1,8 @@
+-- request.http --
+DELETE /users/1 HTTP/1.1
+Host: example.com
+
+-- response.http --
+HTTP/1.1 204 No Content
+Connection: close
+

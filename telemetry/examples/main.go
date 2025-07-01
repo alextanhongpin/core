@@ -23,18 +23,14 @@ import (
 var success = expvar.NewInt("success.count")
 
 func main() {
-	//meter := otel.GetMeterProvider().Meter(
-	//"instrumentation/package/name",             // This will appear as `otel_scope_name`.
-	//metric.WithInstrumentationVersion("0.0.1"), // This will appear as `otel_scope_version`.
-	//)
-	//mh := telemetry.NewMetricHandler(meter)
 	reg := prometheus.DefaultRegisterer
-	ph := telemetry.NewPrometheusHandler(reg)
+	ph, err := telemetry.NewPrometheusHandler(reg)
+	if err != nil {
+		log.Fatalf("Failed to create prometheus handler: %v", err)
+	}
 	reg.MustRegister(collectors.NewExpvarCollector(map[string]*prometheus.Desc{
 		"success.count": prometheus.NewDesc("success_count", "The number of success counts", nil, nil),
 	}))
-
-	//log := logfmt.NewHandler(os.Stdout)
 
 	opt := eventtest.ExporterOptions()
 	opt.EnableNamespaces = true
@@ -42,10 +38,14 @@ func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
 		AddSource: true,
 	}))
+	slogHandler, err := telemetry.NewSlogHandler(logger)
+	if err != nil {
+		log.Fatalf("Failed to create slog handler: %v", err)
+	}
 	ctx := context.Background()
 	ctx = event.WithExporter(ctx, event.NewExporter(&telemetry.MultiHandler{
 		Metric: ph,
-		Log:    telemetry.NewSlogHandler(logger),
+		Log:    slogHandler,
 	}, opt))
 	event.Log(ctx, "my event", event.Int64("myInt", 6))
 	event.Log(ctx, "error event", event.String("myString", "some string value"))
@@ -53,7 +53,6 @@ func main() {
 
 	c := event.NewCounter("hits", &event.MetricOptions{Description: "Earth meteorite hits"})
 	go func() {
-
 		var count int
 		for count < 5 {
 			select {
@@ -63,7 +62,6 @@ func main() {
 				count++
 				success.Add(1)
 			}
-
 		}
 	}()
 

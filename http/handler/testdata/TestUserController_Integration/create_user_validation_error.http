@@ -1,0 +1,24 @@
+-- request.http --
+POST /users HTTP/1.1
+Host: example.com
+Content-Length: 48
+Content-Type: application/json
+
+{
+ "name": "",
+ "email": "john@example.com"
+}
+-- response.http --
+HTTP/1.1 400 Bad Request
+Connection: close
+Content-Type: application/json; charset=utf-8
+
+{
+ "error": {
+  "code": "Bad Request",
+  "message": "invalid fields: name",
+  "errors": {
+   "name": "required"
+  }
+ }
+}

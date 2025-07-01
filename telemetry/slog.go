@@ -2,7 +2,9 @@ package telemetry
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"log"
 	"runtime"
 	"time"
 
@@ -12,17 +14,51 @@ import (
 	"golang.org/x/exp/slog"
 )
 
+var (
+	ErrNilLogger = errors.New("logger cannot be nil")
+)
+
 type SlogHandler struct {
-	logger *slog.Logger
+	logger       *slog.Logger
+	errorHandler func(error)
 }
 
-func NewSlogHandler(logger *slog.Logger) *SlogHandler {
-	return &SlogHandler{
-		logger: logger,
+// SlogHandlerOption configures an SlogHandler.
+type SlogHandlerOption func(*SlogHandler)
+
+// WithSlogErrorHandler sets a custom error handler for the SlogHandler.
+// If not set, errors will be logged using the default logger.
+func WithSlogErrorHandler(handler func(error)) SlogHandlerOption {
+	return func(s *SlogHandler) {
+		s.errorHandler = handler
 	}
 }
 
+func NewSlogHandler(logger *slog.Logger, opts ...SlogHandlerOption) (*SlogHandler, error) {
+	if logger == nil {
+		return nil, ErrNilLogger
+	}
+
+	handler := &SlogHandler{
+		logger: logger,
+		errorHandler: func(err error) {
+			log.Printf("SlogHandler error: %v", err)
+		},
+	}
+
+	for _, opt := range opts {
+		opt(handler)
+	}
+
+	return handler, nil
+}
+
 func (h *SlogHandler) Event(ctx context.Context, ev *event.Event) context.Context {
+	if ev == nil {
+		h.handleError(ErrNilEvent)
+		return ctx
+	}
+
 	if ev.Kind != event.LogKind {
 		return ctx
 	}
@@ -45,6 +81,14 @@ func (h *SlogHandler) Event(ctx context.Context, ev *event.Event) context.Contex
 	}
 
 	var isError bool
+	var msg string
+
+	// Find message first
+	msgLabel := ev.Find("msg")
+	if msgLabel.HasValue() {
+		msg = msgLabel.String()
+	}
+
 	for _, l := range ev.Labels {
 		if !l.HasValue() || l.Name == "" || l.Name == "msg" {
 			continue
@@ -54,15 +98,16 @@ func (h *SlogHandler) Event(ctx context.Context, ev *event.Event) context.Contex
 			isError = true
 		}
 
-		attrs = append(attrs, label(l))
+		attr := label(l)
+		if attr.Key != "" { // Only add valid attributes
+			attrs = append(attrs, attr)
+		}
 	}
 
 	level := slog.LevelInfo
 	if isError {
 		level = slog.LevelError
 	}
-
-	msg := ev.Find("msg").String()
 
 	// https://github.com/uptrace/opentelemetry-go-extra/blob/main/otellogrus/otellogrus.go#L91
 	span := trace.SpanFromContext(ctx)
@@ -85,6 +130,12 @@ func (h *SlogHandler) Event(ctx context.Context, ev *event.Event) context.Contex
 	h.logAttrs(ctx, ev.At, level, msg, attrs...)
 
 	return ctx
+}
+
+func (h *SlogHandler) handleError(err error) {
+	if h.errorHandler != nil {
+		h.errorHandler(err)
+	}
 }
 
 func (h *SlogHandler) logAttrs(ctx context.Context, at time.Time, level slog.Level, msg string, attrs ...slog.Attr) {

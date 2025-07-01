@@ -1,0 +1,22 @@
+-- request.http --
+PUT /users/1 HTTP/1.1
+Host: example.com
+Content-Length: 63
+Content-Type: application/json
+
+{
+ "name": "Updated Name",
+ "email": "updated@example.com"
+}
+-- response.http --
+HTTP/1.1 200 OK
+Connection: close
+Content-Type: application/json; charset=utf-8
+
+{
+ "user": {
+  "id": 1,
+  "name": "Updated Name",
+  "email": "updated@example.com"
+ }
+}

@@ -1,0 +1,36 @@
+-- request.http --
+GET /users HTTP/1.1
+Host: example.com
+
+-- response.http --
+HTTP/1.1 200 OK
+Connection: close
+Content-Type: application/json; charset=utf-8
+
+{
+ "data": {
+  "users": [
+   {
+    "id": 2,
+    "name": "Jane Doe",
+    "email": "jane@example.com"
+   },
+   {
+    "id": 3,
+    "name": "Test User",
+    "email": "test@example.com"
+   },
+   {
+    "id": 4,
+    "name": "Update Test",
+    "email": "update@example.com"
+   },
+   {
+    "id": 5,
+    "name": "Delete Test",
+    "email": "delete@example.com"
+   }
+  ],
+  "total": 4
+ }
+}
