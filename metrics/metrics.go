@@ -119,6 +119,9 @@ func RequestDurationHandler(version string, next http.Handler) http.Handler {
 }
 
 func ObserveResponseSize(r *http.Request) int {
+	if r == nil {
+		return 0
+	}
 	size := computeApproximateRequestSize(r)
 	ResponseSize.WithLabelValues().Observe(float64(size))
 	return size
@@ -126,6 +129,10 @@ func ObserveResponseSize(r *http.Request) int {
 
 // Copied from prometheus source code.
 func computeApproximateRequestSize(r *http.Request) int {
+	if r == nil {
+		return 0
+	}
+
 	s := 0
 	if r.URL != nil {
 		s += len(r.URL.String())

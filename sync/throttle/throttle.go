@@ -26,6 +26,8 @@ func NewOptions() *Options {
 	}
 }
 
+// TODO: Functional options for Options.
+
 func (o *Options) Valid() error {
 	if o.Limit <= 0 {
 		return errors.New("throttle: limit must be greater than 0")
