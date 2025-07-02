@@ -16,9 +16,11 @@ Content-Type: application/json; charset=utf-8
 X-Request-Id: test-request-123
 
 {
- "user": {
-  "id": 1,
-  "name": "John Doe",
-  "email": "john@example.com"
+ "data": {
+  "user": {
+   "id": 1,
+   "name": "John Doe",
+   "email": "john@example.com"
+  }
  }
 }

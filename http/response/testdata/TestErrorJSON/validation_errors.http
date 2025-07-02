@@ -9,10 +9,10 @@ Content-Type: application/json; charset=utf-8
 
 {
  "error": {
-  "code": "Bad Request",
-  "message": "invalid fields: email",
+  "code": "VALIDATION_ERROR",
+  "message": "Validation failed",
   "errors": {
-   "email": "xyz, The email is invalid"
+   "email": "The email is invalid"
   }
  }
 }

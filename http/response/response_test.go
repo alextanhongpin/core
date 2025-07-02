@@ -28,13 +28,13 @@ func TestErrorJSON(t *testing.T) {
 	}
 
 	t.Run("known error", func(t *testing.T) {
-		dumpError(t, cause.New(codes.BadRequest, "api/bad_request", "The request provided is invalid"))
+		dumpError(t, cause.New(codes.BadRequest, "BAD_REQUEST", "The request provided is invalid"))
 	})
 
 	t.Run("validation errors", func(t *testing.T) {
 		email := "xyz"
 		err := cause.Map{
-			"email": cause.Required("email", email).When(!strings.Contains(email, "@"), "The email is invalid"),
+			"email": cause.Required(email).When(!strings.Contains(email, "@"), "The email is invalid"),
 		}.Err()
 		dumpError(t, err)
 	})
@@ -59,7 +59,7 @@ func TestJSON(t *testing.T) {
 				{ID: "user-2", Name: "Bob"},
 			}
 
-			response.OK(w, data, http.StatusCreated)
+			response.JSON(w, response.Body{Data: data}, http.StatusCreated)
 		})
 
 		hd := httpdump.Handler(t, h)
@@ -73,7 +73,7 @@ func TestJSON(t *testing.T) {
 			data := map[string]any{
 				"bad_number": json.Number("1.5x"),
 			}
-			response.OK(w, data)
+			response.JSON(w, response.Body{Data: data}, http.StatusOK)
 		})
 
 		hd := httpdump.Handler(t, h)
@@ -99,7 +99,7 @@ func TestJSON(t *testing.T) {
 				PageInfo: &response.PageInfo{
 					HasNextPage: true,
 				},
-			})
+			}, http.StatusOK)
 		})
 
 		hd := httpdump.Handler(t, h)

@@ -9,7 +9,7 @@ Content-Type: application/json; charset=utf-8
 
 {
  "error": {
-  "code": "api/bad_request",
+  "code": "BAD_REQUEST",
   "message": "The request provided is invalid"
  }
 }

@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"strings"
 	"testing"
 
@@ -132,6 +133,12 @@ func (s *UserService) List(ctx context.Context) ([]User, error) {
 	for _, user := range s.users {
 		users = append(users, user)
 	}
+
+	// Sort by ID for deterministic results in tests
+	sort.Slice(users, func(i, j int) bool {
+		return users[i].ID < users[j].ID
+	})
+
 	return users, nil
 }
 
@@ -153,7 +160,7 @@ func (c *UserController) CreateUser(w http.ResponseWriter, r *http.Request) {
 	c.SetRequestID(w, requestID)
 
 	var req CreateUserRequest
-	if err := c.ReadAndValidateJSON(r, &req); err != nil {
+	if err := c.ReadJSON(r, &req); err != nil {
 		c.Next(w, r, err)
 		return
 	}
@@ -183,7 +190,7 @@ func (c *UserController) GetUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	c.OK(w, GetUserResponse{User: user})
+	c.JSON(w, GetUserResponse{User: user}, http.StatusOK)
 }
 
 func (c *UserController) UpdateUser(w http.ResponseWriter, r *http.Request) {
@@ -191,7 +198,7 @@ func (c *UserController) UpdateUser(w http.ResponseWriter, r *http.Request) {
 	c.SetRequestID(w, requestID)
 
 	var req UpdateUserRequest
-	if err := c.ReadAndValidateJSON(r, &req); err != nil {
+	if err := c.ReadJSON(r, &req); err != nil {
 		c.Next(w, r, err)
 		return
 	}
@@ -205,7 +212,7 @@ func (c *UserController) UpdateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	c.JSON(w, CreateUserResponse{User: user})
+	c.JSON(w, CreateUserResponse{User: user}, http.StatusOK)
 }
 
 func (c *UserController) DeleteUser(w http.ResponseWriter, r *http.Request) {
@@ -236,10 +243,10 @@ func (c *UserController) ListUsers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	c.OK(w, ListUsersResponse{
+	c.JSON(w, ListUsersResponse{
 		Users: users,
 		Total: len(users),
-	})
+	}, http.StatusOK)
 }
 
 // Integration tests
@@ -402,7 +409,7 @@ func BenchmarkBaseHandler_ReadJSON(b *testing.B) {
 	body := `{"name":"John Doe","email":"john@example.com"}`
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		r := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
 		r.Header.Set("Content-Type", "application/json")
 
@@ -422,8 +429,8 @@ func BenchmarkBaseHandler_JSON(b *testing.B) {
 	}
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		w := httptest.NewRecorder()
-		base.JSON(w, data)
+		base.JSON(w, data, http.StatusOK)
 	}
 }

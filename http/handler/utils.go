@@ -1,120 +1,35 @@
 package handler
 
 import (
+	"cmp"
 	"encoding/json"
 	"net/http"
+	"slices"
 	"strconv"
-	"strings"
+
+	"github.com/alextanhongpin/core/http/request"
+	"github.com/alextanhongpin/core/http/response"
 )
 
 // Additional utility methods for the BaseHandler
 
-// ParseIntParam extracts and parses an integer parameter from the URL path or query.
-// It returns a structured error if the parameter is missing or invalid.
-//
-// Example:
-//
-//	userID, err := c.ParseIntParam(r, "id")
-//	if err != nil {
-//		c.Next(w, r, err)
-//		return
-//	}
-func (h BaseHandler) ParseIntParam(r *http.Request, param string) (int, error) {
-	// First try path value (for newer Go versions with routing)
-	if value := r.PathValue(param); value != "" {
-		id, err := strconv.Atoi(value)
-		if err != nil {
-			return 0, &ValidationError{
-				Field:   param,
-				Message: "must be a valid integer",
-				Value:   value,
-			}
-		}
-		return id, nil
-	}
-
-	// Fallback to query parameter
-	value := r.URL.Query().Get(param)
-	if value == "" {
-		return 0, &ValidationError{
-			Field:   param,
-			Message: "is required",
-		}
-	}
-
-	id, err := strconv.Atoi(value)
-	if err != nil {
-		return 0, &ValidationError{
-			Field:   param,
-			Message: "must be a valid integer",
-			Value:   value,
-		}
-	}
-
-	return id, nil
+func (h BaseHandler) QueryValue(r *http.Request, param string) request.Value {
+	return request.QueryValue(r, param)
 }
 
-// ParseStringParam extracts a string parameter from the URL path or query.
-// It returns a structured error if the parameter is missing.
-//
-// Example:
-//
-//	category, err := c.ParseStringParam(r, "category")
-//	if err != nil {
-//		c.Next(w, r, err)
-//		return
-//	}
-func (h BaseHandler) ParseStringParam(r *http.Request, param string) (string, error) {
-	// First try path value
-	if value := r.PathValue(param); value != "" {
-		return value, nil
-	}
-
-	// Fallback to query parameter
-	value := r.URL.Query().Get(param)
-	if value == "" {
-		return "", &ValidationError{
-			Field:   param,
-			Message: "is required",
-		}
-	}
-
-	return strings.TrimSpace(value), nil
+func (h BaseHandler) PathValue(r *http.Request, param string) request.Value {
+	return request.PathValue(r, param)
 }
 
-// ParseOptionalIntParam extracts an optional integer parameter.
-// Returns the default value if the parameter is not provided.
-//
-// Example:
-//
-//	limit := c.ParseOptionalIntParam(r, "limit", 10)
-//	offset := c.ParseOptionalIntParam(r, "offset", 0)
-func (h BaseHandler) ParseOptionalIntParam(r *http.Request, param string, defaultValue int) int {
-	value := r.URL.Query().Get(param)
-	if value == "" {
-		return defaultValue
-	}
-
-	if id, err := strconv.Atoi(value); err == nil {
-		return id
-	}
-
-	return defaultValue
+func (h BaseHandler) FormValue(r *http.Request, param string) request.Value {
+	return request.FormValue(r, param)
 }
 
-// ParseOptionalStringParam extracts an optional string parameter.
-// Returns the default value if the parameter is not provided.
-//
-// Example:
-//
-//	sortBy := c.ParseOptionalStringParam(r, "sort", "created_at")
-//	order := c.ParseOptionalStringParam(r, "order", "desc")
-func (h BaseHandler) ParseOptionalStringParam(r *http.Request, param string, defaultValue string) string {
-	value := r.URL.Query().Get(param)
-	if value == "" {
-		return defaultValue
-	}
-	return strings.TrimSpace(value)
+func (h BaseHandler) Params(r *http.Request, param string) request.Value {
+	return cmp.Or(
+		h.PathValue(r, param),
+		h.QueryValue(r, param),
+	)
 }
 
 // SetCacheHeaders sets appropriate cache headers for the response.
@@ -149,9 +64,7 @@ func (h BaseHandler) SetContentType(w http.ResponseWriter, contentType string) {
 //	jsonData := []byte(`{"message":"success"}`)
 //	c.WriteRawJSON(w, jsonData, http.StatusOK)
 func (h BaseHandler) WriteRawJSON(w http.ResponseWriter, data []byte, statusCode int) {
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.WriteHeader(statusCode)
-	w.Write(data)
+	response.RawJSON(w, data, statusCode)
 }
 
 // StreamJSON writes JSON data in streaming fashion for large responses.
@@ -169,27 +82,6 @@ func (h BaseHandler) StreamJSON(w http.ResponseWriter, statusCode int) *json.Enc
 	return json.NewEncoder(w)
 }
 
-// ValidationError represents a parameter validation error
-type ValidationError struct {
-	Field   string      `json:"field"`
-	Message string      `json:"message"`
-	Value   interface{} `json:"value,omitempty"`
-}
-
-func (e *ValidationError) Error() string {
-	return e.Field + ": " + e.Message
-}
-
-// Map returns a map representation for structured error responses
-func (e *ValidationError) Map() map[string]any {
-	result := map[string]any{
-		e.Field: e.Message,
-	}
-	return map[string]any{
-		"errors": result,
-	}
-}
-
 // PaginationParams represents common pagination parameters
 type PaginationParams struct {
 	Limit  int `json:"limit"`
@@ -203,23 +95,13 @@ type PaginationParams struct {
 //
 //	pagination := c.ParsePaginationParams(r, 20, 100) // default limit 20, max 100
 func (h BaseHandler) ParsePaginationParams(r *http.Request, defaultLimit, maxLimit int) PaginationParams {
-	limit := h.ParseOptionalIntParam(r, "limit", defaultLimit)
-	if limit > maxLimit {
-		limit = maxLimit
-	}
+	limit := min(request.QueryValue(r, "limit").IntOr(defaultLimit), maxLimit)
 	if limit < 1 {
 		limit = defaultLimit
 	}
 
-	offset := h.ParseOptionalIntParam(r, "offset", 0)
-	if offset < 0 {
-		offset = 0
-	}
-
-	page := h.ParseOptionalIntParam(r, "page", 1)
-	if page < 1 {
-		page = 1
-	}
+	offset := max(h.QueryValue(r, "offset").IntOr(0), 0)
+	page := max(h.QueryValue(r, "page").IntOr(1), 1)
 
 	// If page is provided, calculate offset
 	if r.URL.Query().Has("page") && !r.URL.Query().Has("offset") {
@@ -245,19 +127,12 @@ type SortParams struct {
 //
 //	sort := c.ParseSortParams(r, "created_at", []string{"name", "email", "created_at"})
 func (h BaseHandler) ParseSortParams(r *http.Request, defaultSortBy string, allowedFields []string) SortParams {
-	sortBy := h.ParseOptionalStringParam(r, "sort", defaultSortBy)
-	order := h.ParseOptionalStringParam(r, "order", "asc")
+	sortBy := h.QueryValue(r, "sort").StringOr(defaultSortBy)
+	order := h.QueryValue(r, "order").StringOr("asc")
 
 	// Validate sort field
 	if len(allowedFields) > 0 {
-		valid := false
-		for _, field := range allowedFields {
-			if field == sortBy {
-				valid = true
-				break
-			}
-		}
-		if !valid {
+		if !slices.Contains(allowedFields, sortBy) {
 			sortBy = defaultSortBy
 		}
 	}

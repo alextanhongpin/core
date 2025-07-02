@@ -46,7 +46,7 @@ func (c *Controller) Hello(w http.ResponseWriter, r *http.Request) {
 
 	c.JSON(w, &HelloResponse{
 		Message: "Hello, " + req.Name,
-	})
+	}, http.StatusOK)
 }
 
 func TestHandler(t *testing.T) {

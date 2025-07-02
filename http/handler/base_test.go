@@ -96,7 +96,7 @@ func TestBaseHandler_ReadJSON(t *testing.T) {
 			body:        "",
 			contentType: "application/json",
 			target:      &ValidatableRequest{},
-			wantErr:     true,
+			wantErr:     false, // Empty body is allowed by default unless WithRequired() option is used
 		},
 	}
 
@@ -113,49 +113,6 @@ func TestBaseHandler_ReadJSON(t *testing.T) {
 	}
 }
 
-func TestBaseHandler_Validate(t *testing.T) {
-	base := handler.BaseHandler{}
-
-	tests := []struct {
-		name    string
-		req     any
-		wantErr bool
-	}{
-		{
-			name: "valid request with validation",
-			req: ValidatableRequest{
-				Name:  "john",
-				Email: "john@example.com",
-			},
-			wantErr: false,
-		},
-		{
-			name: "invalid request with validation",
-			req: ValidatableRequest{
-				Name:  "",
-				Email: "john@example.com",
-			},
-			wantErr: true,
-		},
-		{
-			name: "request without validation",
-			req: SimpleRequest{
-				Value: "test",
-			},
-			wantErr: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := base.Validate(tt.req)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("Validate() error = %v, wantErr %v", err, tt.wantErr)
-			}
-		})
-	}
-}
-
 func TestBaseHandler_OK(t *testing.T) {
 	base := handler.BaseHandler{}
 	data := TestResponse{Message: "success", ID: 1}
@@ -163,19 +120,16 @@ func TestBaseHandler_OK(t *testing.T) {
 	tests := []struct {
 		name           string
 		data           any
-		codes          []int
 		expectedStatus int
 	}{
 		{
 			name:           "default status code",
 			data:           data,
-			codes:          nil,
 			expectedStatus: http.StatusOK,
 		},
 		{
 			name:           "custom status code",
 			data:           data,
-			codes:          []int{http.StatusCreated},
 			expectedStatus: http.StatusCreated,
 		},
 	}
@@ -183,7 +137,7 @@ func TestBaseHandler_OK(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			w := httptest.NewRecorder()
-			base.OK(w, tt.data, tt.codes...)
+			base.JSON(w, tt.data, tt.expectedStatus)
 
 			if w.Code != tt.expectedStatus {
 				t.Errorf("OK() status = %v, want %v", w.Code, tt.expectedStatus)
@@ -359,7 +313,7 @@ func TestBaseHandler_ReadAndValidateJSON(t *testing.T) {
 			r := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(tt.body))
 			r.Header.Set("Content-Type", tt.contentType)
 
-			err := base.ReadAndValidateJSON(r, tt.target)
+			err := base.ReadJSON(r, tt.target)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ReadAndValidateJSON() error = %v, wantErr %v", err, tt.wantErr)
 			}

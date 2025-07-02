@@ -6,6 +6,26 @@ A comprehensive Go HTTP utilities library providing essential building blocks fo
 
 This library provides a modular approach to HTTP handling in Go, with each package focused on a specific concern. All modules are designed to work together seamlessly while remaining independent and composable.
 
+## ✨ Latest Improvements (v2.0)
+
+### 📥 Enhanced Request Package
+- **Advanced JSON Decoding**: Size limits, required validation, custom options
+- **Form/Query Binding**: Automatic struct binding with reflection and validation  
+- **Comprehensive Validation**: Email, length, range, pattern matching
+- **Enhanced Value Operations**: CSV parsing, URL validation, time parsing
+
+### 📤 Enhanced Response Package
+- **Structured API Responses**: Consistent format with metadata and pagination
+- **Advanced Error Handling**: Typed errors with validation details
+- **Multiple Content Types**: JSON, Text, HTML with proper headers
+- **Security Features**: Built-in security headers, CORS support, cache control
+
+### 📄 Enhanced Pagination Package
+- **Advanced Cursor Pagination**: Forward/backward with validation
+- **Offset Pagination**: Traditional page-based with metadata
+- **Time-Based Cursors**: Pagination based on timestamps  
+- **Cursor Encoding**: Safe base64 encoding for complex types
+
 ## Features
 
 - **🔐 Authentication & Authorization**: JWT, Basic Auth, and Bearer token handling

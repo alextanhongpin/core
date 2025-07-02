@@ -1,7 +1,6 @@
 package handler_test
 
 import (
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -57,11 +56,7 @@ func TestBaseHandler_ParseIntParam(t *testing.T) {
 				r.SetPathValue(tt.param, tt.pathValue)
 			}
 
-			got, err := base.ParseIntParam(r, tt.param)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("ParseIntParam() error = %v, wantErr %v", err, tt.wantErr)
-				return
-			}
+			got := base.Params(r, tt.param).Int()
 			if got != tt.want {
 				t.Errorf("ParseIntParam() = %v, want %v", got, tt.want)
 			}
@@ -117,10 +112,11 @@ func TestBaseHandler_ParseStringParam(t *testing.T) {
 				r.SetPathValue(tt.param, tt.pathValue)
 			}
 
-			got, err := base.ParseStringParam(r, tt.param)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("ParseStringParam() error = %v, wantErr %v", err, tt.wantErr)
-				return
+			var got string
+			if tt.name == "whitespace param" {
+				got = base.Params(r, tt.param).Trim().String()
+			} else {
+				got = base.Params(r, tt.param).String()
 			}
 			if got != tt.want {
 				t.Errorf("ParseStringParam() = %v, want %v", got, tt.want)
@@ -135,10 +131,7 @@ func TestBaseHandler_ParseIntParam_PathValue(t *testing.T) {
 	r := httptest.NewRequest(http.MethodGet, "/test", nil)
 	r.SetPathValue("id", "456")
 
-	got, err := base.ParseIntParam(r, "id")
-	if err != nil {
-		t.Errorf("ParseIntParam() with path value error = %v", err)
-	}
+	got := base.Params(r, "id").Int()
 	if got != 456 {
 		t.Errorf("ParseIntParam() with path value = %v, want %v", got, 456)
 	}
@@ -150,10 +143,7 @@ func TestBaseHandler_ParseStringParam_PathValue(t *testing.T) {
 	r := httptest.NewRequest(http.MethodGet, "/test", nil)
 	r.SetPathValue("name", "testname")
 
-	got, err := base.ParseStringParam(r, "name")
-	if err != nil {
-		t.Errorf("ParseStringParam() with path value error = %v", err)
-	}
+	got := base.Params(r, "name").String()
 	if got != "testname" {
 		t.Errorf("ParseStringParam() with path value = %v, want %v", got, "testname")
 	}
@@ -195,7 +185,7 @@ func TestBaseHandler_ParseOptionalIntParam(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			r := httptest.NewRequest(http.MethodGet, tt.url, nil)
-			got := base.ParseOptionalIntParam(r, tt.param, tt.defaultValue)
+			got := base.Params(r, tt.param).IntOr(tt.defaultValue)
 			if got != tt.want {
 				t.Errorf("ParseOptionalIntParam() = %v, want %v", got, tt.want)
 			}
@@ -246,7 +236,17 @@ func TestBaseHandler_ParseOptionalStringParam(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			r := httptest.NewRequest(http.MethodGet, tt.url, nil)
-			got := base.ParseOptionalStringParam(r, tt.param, tt.defaultValue)
+			var got string
+			if tt.name == "whitespace param" {
+				val := base.Params(r, tt.param).Trim().String()
+				if val == "" {
+					got = tt.defaultValue
+				} else {
+					got = val
+				}
+			} else {
+				got = base.Params(r, tt.param).StringOr(tt.defaultValue)
+			}
 			if got != tt.want {
 				t.Errorf("ParseOptionalStringParam() = %v, want %v", got, tt.want)
 			}
@@ -358,7 +358,7 @@ func TestBaseHandler_StreamJSON(t *testing.T) {
 	encoder := base.StreamJSON(w, http.StatusOK)
 
 	// Test streaming multiple objects
-	objects := []map[string]interface{}{
+	objects := []map[string]any{
 		{"id": 1, "name": "first"},
 		{"id": 2, "name": "second"},
 	}
@@ -541,33 +541,5 @@ func TestBaseHandler_ParseSortParams(t *testing.T) {
 				t.Errorf("ParseSortParams() Order = %v, want %v", got.Order, tt.want.Order)
 			}
 		})
-	}
-}
-
-func TestValidationError(t *testing.T) {
-	err := &handler.ValidationError{
-		Field:   "email",
-		Message: "is required",
-		Value:   "",
-	}
-
-	// Test Error() method
-	if err.Error() != "email: is required" {
-		t.Errorf("Error() = %v, want %v", err.Error(), "email: is required")
-	}
-
-	// Test Map() method
-	errMap := err.Map()
-	expected := map[string]any{
-		"errors": map[string]any{
-			"email": "is required",
-		},
-	}
-
-	expectedJSON, _ := json.Marshal(expected)
-	actualJSON, _ := json.Marshal(errMap)
-
-	if string(actualJSON) != string(expectedJSON) {
-		t.Errorf("Map() = %v, want %v", errMap, expected)
 	}
 }

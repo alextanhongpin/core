@@ -80,42 +80,12 @@ func (h BaseHandler) ReadJSON(r *http.Request, req any) error {
 	return request.DecodeJSON(r, req)
 }
 
-// Validate validates a request struct if it implements a Validate() error method.
-// This is a helper method to standardize validation across handlers.
-//
-// Example:
-//
-//	if err := c.Validate(req); err != nil {
-//		c.Next(w, r, err)
-//		return
-//	}
-func (h BaseHandler) Validate(req any) error {
-	if validator, ok := req.(interface{ Validate() error }); ok {
-		return validator.Validate()
-	}
-	return nil
-}
-
-// OK writes a successful JSON response with optional status code.
-// If no status code is provided, defaults to 200 OK.
-//
-// Example:
-//
-//	c.OK(w, user) // 200 OK
-//	c.OK(w, user, http.StatusCreated) // 201 Created
-func (h BaseHandler) OK(w http.ResponseWriter, data any, codes ...int) {
-	response.OK(w, data, codes...)
-}
-
-// JSON writes a JSON response with optional status code.
+// JSON writes a JSON response with status code.
 // This is an alias for OK method for better semantic clarity.
 //
 // Example:
 //
-//	c.JSON(w, users, http.StatusOK)
-func (h BaseHandler) JSON(w http.ResponseWriter, data any, codes ...int) {
-	response.JSON(w, data, codes...)
-}
+//	c.JSON(w, users, 200)
 
 // ErrorJSON writes an error response in JSON format.
 // It automatically determines the appropriate HTTP status code based on the error type.
@@ -128,6 +98,8 @@ func (h BaseHandler) JSON(w http.ResponseWriter, data any, codes ...int) {
 // Example:
 //
 //	c.ErrorJSON(w, cause.New(codes.NotFound, "user/not_found", "User not found"))
+//
+// ErrorJSON is a helper method to standardize error responses
 func (h BaseHandler) ErrorJSON(w http.ResponseWriter, err error) {
 	response.ErrorJSON(w, err)
 }
@@ -201,23 +173,6 @@ func (h BaseHandler) Next(w http.ResponseWriter, r *http.Request, err error) {
 	h.ErrorJSON(w, err)
 }
 
-// ReadAndValidateJSON is a convenience method that combines ReadJSON and Validate.
-// It reads JSON from the request and validates it if the struct implements validation.
-//
-// Example:
-//
-//	var req CreateUserRequest
-//	if err := c.ReadAndValidateJSON(r, &req); err != nil {
-//		c.Next(w, r, err)
-//		return
-//	}
-func (h BaseHandler) ReadAndValidateJSON(r *http.Request, req any) error {
-	if err := h.ReadJSON(r, req); err != nil {
-		return err
-	}
-	return h.Validate(req)
-}
-
 // GetRequestID extracts the request ID from the request context.
 // This is useful for correlation logging and tracing.
 //
@@ -245,4 +200,14 @@ func (h BaseHandler) SetRequestID(w http.ResponseWriter, requestID string) {
 	if requestID != "" {
 		w.Header().Set("X-Request-ID", requestID)
 	}
+}
+
+// JSON writes a JSON response with status code.
+// This is an alias for OK method for better semantic clarity.
+//
+// Example:
+//
+//	c.JSON(w, users, 200)
+func (h BaseHandler) JSON(w http.ResponseWriter, data any, code int) {
+	response.JSON(w, &response.Body{Data: data}, code)
 }

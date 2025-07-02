@@ -14,9 +14,11 @@ Connection: close
 Content-Type: application/json; charset=utf-8
 
 {
- "user": {
-  "id": 1,
-  "name": "Updated Name",
-  "email": "updated@example.com"
+ "data": {
+  "user": {
+   "id": 1,
+   "name": "Updated Name",
+   "email": "updated@example.com"
+  }
  }
 }

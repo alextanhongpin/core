@@ -13,5 +13,7 @@ Connection: close
 Content-Type: application/json; charset=utf-8
 
 {
- "message": "Hello, john"
+ "data": {
+  "message": "Hello, john"
+ }
 }

@@ -10,8 +10,6 @@ Content-Type: application/json; charset=utf-8
 {
  "pageInfo": {
   "hasPrevPage": false,
-  "hasNextPage": true,
-  "startCursor": "",
-  "endCursor": ""
+  "hasNextPage": true
  }
 }
