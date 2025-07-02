@@ -5,5 +5,5 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJqb2huLmFwc
 
 -- response.http --
 HTTP/1.1 401 Unauthorized
+WWW-Authenticate: Bearer error="invalid_token"
 Connection: close
-

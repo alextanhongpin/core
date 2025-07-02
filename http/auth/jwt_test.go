@@ -61,6 +61,6 @@ func TestSignAndVerifyJWT(t *testing.T) {
 
 		_, err = jwt.Verify(token)
 		is := assert.New(t)
-		is.ErrorIs(err, auth.ErrTokenInvalid)
+		is.ErrorIs(err, auth.ErrTokenExpired)
 	})
 }

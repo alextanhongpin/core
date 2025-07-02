@@ -7,7 +7,7 @@ import (
 )
 
 var (
-	ClaimsContext contextkey.Key[*Claims] = "claims"
-
-	LoggerContext contextkey.Key[*slog.Logger] = "logger"
+	ClaimsContext   contextkey.Key[*Claims]      = "claims"
+	UsernameContext contextkey.Key[string]       = "username"
+	LoggerContext   contextkey.Key[*slog.Logger] = "logger"
 )
