@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/alextanhongpin/errors/cause"
@@ -171,15 +172,15 @@ func ApplyCORS(w http.ResponseWriter, options CORSOptions) {
 	}
 
 	if len(options.AllowedMethods) > 0 {
-		w.Header().Set("Access-Control-Allow-Methods", joinStrings(options.AllowedMethods))
+		w.Header().Set("Access-Control-Allow-Methods", strings.Join(options.AllowedMethods, ", "))
 	}
 
 	if len(options.AllowedHeaders) > 0 {
-		w.Header().Set("Access-Control-Allow-Headers", joinStrings(options.AllowedHeaders))
+		w.Header().Set("Access-Control-Allow-Headers", strings.Join(options.AllowedHeaders, ", "))
 	}
 
 	if len(options.ExposedHeaders) > 0 {
-		w.Header().Set("Access-Control-Expose-Headers", joinStrings(options.ExposedHeaders))
+		w.Header().Set("Access-Control-Expose-Headers", strings.Join(options.ExposedHeaders, ", "))
 	}
 
 	if options.AllowCredentials {
@@ -206,20 +207,4 @@ func CORSHandler(h http.Handler, options CORSOptions) http.Handler {
 		// Continue with the request
 		h.ServeHTTP(w, r)
 	})
-}
-
-// joinStrings joins a slice of strings with commas
-func joinStrings(items []string) string {
-	if len(items) == 0 {
-		return ""
-	}
-
-	result := make([]byte, 0, 128)
-	for i, item := range items {
-		if i > 0 {
-			result = append(result, ", "...)
-		}
-		result = append(result, item...)
-	}
-	return string(result)
 }
