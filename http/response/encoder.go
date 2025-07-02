@@ -132,29 +132,94 @@ func SetSecurityHeaders(w http.ResponseWriter) {
 	w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
 }
 
+// CORSOptions defines configuration options for CORS middleware
+type CORSOptions struct {
+	// AllowedOrigins is a list of allowed origins. Use ["*"] to allow any origin
+	AllowedOrigins []string
+	// AllowedMethods is a list of allowed HTTP methods
+	AllowedMethods []string
+	// AllowedHeaders is a list of allowed HTTP headers
+	AllowedHeaders []string
+	// ExposedHeaders is a list of headers that are exposed to the client
+	ExposedHeaders []string
+	// AllowCredentials indicates whether the request can include user credentials
+	AllowCredentials bool
+	// MaxAge indicates how long the results of a preflight request can be cached
+	MaxAge int
+}
+
 // CORS sets CORS headers for cross-origin requests
 func CORS(w http.ResponseWriter, allowedOrigins []string, allowedMethods []string, allowedHeaders []string) {
-	if len(allowedOrigins) > 0 {
-		w.Header().Set("Access-Control-Allow-Origin", allowedOrigins[0])
+	options := CORSOptions{
+		AllowedOrigins: allowedOrigins,
+		AllowedMethods: allowedMethods,
+		AllowedHeaders: allowedHeaders,
 	}
-	if len(allowedMethods) > 0 {
-		methods := ""
-		for i, method := range allowedMethods {
-			if i > 0 {
-				methods += ", "
-			}
-			methods += method
+	ApplyCORS(w, options)
+}
+
+// ApplyCORS applies CORS headers based on the provided options
+func ApplyCORS(w http.ResponseWriter, options CORSOptions) {
+	if len(options.AllowedOrigins) > 0 {
+		if len(options.AllowedOrigins) == 1 && options.AllowedOrigins[0] == "*" {
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+		} else if len(options.AllowedOrigins) > 0 {
+			// In production, you'd typically check the Origin header against the allowed origins
+			// and set the specific matching origin, but for simplicity we use the first one here
+			w.Header().Set("Access-Control-Allow-Origin", options.AllowedOrigins[0])
 		}
-		w.Header().Set("Access-Control-Allow-Methods", methods)
 	}
-	if len(allowedHeaders) > 0 {
-		headers := ""
-		for i, header := range allowedHeaders {
-			if i > 0 {
-				headers += ", "
-			}
-			headers += header
+
+	if len(options.AllowedMethods) > 0 {
+		w.Header().Set("Access-Control-Allow-Methods", joinStrings(options.AllowedMethods))
+	}
+
+	if len(options.AllowedHeaders) > 0 {
+		w.Header().Set("Access-Control-Allow-Headers", joinStrings(options.AllowedHeaders))
+	}
+
+	if len(options.ExposedHeaders) > 0 {
+		w.Header().Set("Access-Control-Expose-Headers", joinStrings(options.ExposedHeaders))
+	}
+
+	if options.AllowCredentials {
+		w.Header().Set("Access-Control-Allow-Credentials", "true")
+	}
+
+	if options.MaxAge > 0 {
+		w.Header().Set("Access-Control-Max-Age", fmt.Sprintf("%d", options.MaxAge))
+	}
+}
+
+// CORSHandler creates a middleware handler that applies CORS headers
+func CORSHandler(h http.Handler, options CORSOptions) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Apply CORS headers to all responses
+		ApplyCORS(w, options)
+
+		// Handle preflight requests
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
 		}
-		w.Header().Set("Access-Control-Allow-Headers", headers)
+
+		// Continue with the request
+		h.ServeHTTP(w, r)
+	})
+}
+
+// joinStrings joins a slice of strings with commas
+func joinStrings(items []string) string {
+	if len(items) == 0 {
+		return ""
 	}
+
+	result := make([]byte, 0, 128)
+	for i, item := range items {
+		if i > 0 {
+			result = append(result, ", "...)
+		}
+		result = append(result, item...)
+	}
+	return string(result)
 }
