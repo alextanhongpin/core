@@ -11,8 +11,8 @@ func TestCond(t *testing.T) {
 	n := []int{1, 2, 3, 4, 5, 6}
 
 	lessThan := func(m int) func(int) bool {
-		return func(i int) bool {
-			return n[i] < m
+		return func(val int) bool {
+			return val < m
 		}
 	}
 
@@ -41,6 +41,6 @@ func TestCond(t *testing.T) {
 		assert := assert.New(t)
 		assert.False(sliceutil.None(n, lessThan(10)))
 		assert.True(sliceutil.None(n, lessThan(-10)))
-		assert.False(sliceutil.None([]int{}, lessThan(5)))
+		assert.True(sliceutil.None([]int{}, lessThan(5)))
 	})
 }

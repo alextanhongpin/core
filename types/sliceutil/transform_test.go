@@ -13,8 +13,8 @@ func TestMap(t *testing.T) {
 		assert := assert.New(t)
 
 		n := []int{1, 2, 3, 4, 5}
-		n2x := sliceutil.Map(n, func(i int) int {
-			return n[i] * 2
+		n2x := sliceutil.Map(n, func(val int) int {
+			return val * 2
 		})
 		assert.Equal([]int{2, 4, 6, 8, 10}, n2x)
 	})
@@ -23,8 +23,8 @@ func TestMap(t *testing.T) {
 		assert := assert.New(t)
 
 		n := []int{}
-		n2x := sliceutil.Map(n, func(i int) int {
-			return n[i] * 2
+		n2x := sliceutil.Map(n, func(val int) int {
+			return val * 2
 		})
 		assert.Equal([]int{}, n2x)
 	})
@@ -35,8 +35,8 @@ func TestMapError(t *testing.T) {
 		assert := assert.New(t)
 
 		n := []int{1, 2, 3, 4, 5}
-		n2x, err := sliceutil.MapError(n, func(i int) (int, error) {
-			return n[i] * 2, nil
+		n2x, err := sliceutil.MapError(n, func(val int) (int, error) {
+			return val * 2, nil
 		})
 		assert.Equal([]int{2, 4, 6, 8, 10}, n2x)
 		assert.Nil(err)
@@ -46,8 +46,8 @@ func TestMapError(t *testing.T) {
 		assert := assert.New(t)
 
 		n := []int{}
-		n2x, err := sliceutil.MapError(n, func(i int) (int, error) {
-			return n[i] * 2, nil
+		n2x, err := sliceutil.MapError(n, func(val int) (int, error) {
+			return val * 2, nil
 		})
 		assert.Equal([]int{}, n2x)
 		assert.Nil(err)
@@ -59,11 +59,11 @@ func TestMapError(t *testing.T) {
 		wantErr := errors.New("test: want error")
 
 		n := []int{1, 2, 3, 4, 5}
-		n2x, err := sliceutil.MapError(n, func(i int) (int, error) {
-			if n[i] == 3 {
+		n2x, err := sliceutil.MapError(n, func(val int) (int, error) {
+			if val == 3 {
 				return 0, wantErr
 			}
-			return n[i] * 2, nil
+			return val * 2, nil
 		})
 		assert.Equal([]int(nil), n2x)
 		assert.ErrorIs(err, wantErr)
@@ -97,8 +97,8 @@ func TestDedupFunc(t *testing.T) {
 		assert := assert.New(t)
 
 		n := []user{{30}, {20}, {30}, {10}}
-		unique := sliceutil.DedupFunc(n, func(i int) int {
-			return n[i].Age
+		unique := sliceutil.DedupFunc(n, func(u user) int {
+			return u.Age
 		})
 		assert.ElementsMatch([]user{{30}, {20}, {10}}, unique)
 	})
@@ -107,8 +107,8 @@ func TestDedupFunc(t *testing.T) {
 		assert := assert.New(t)
 
 		n := []user{}
-		unique := sliceutil.DedupFunc(n, func(i int) int {
-			return n[i].Age
+		unique := sliceutil.DedupFunc(n, func(u user) int {
+			return u.Age
 		})
 		assert.Equal([]user{}, unique)
 	})

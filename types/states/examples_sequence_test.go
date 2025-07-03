@@ -18,7 +18,7 @@ func ExampleNewSequence() {
 	for i := range 4 {
 		step, ok := seq.Next()
 		fmt.Println("has next?", step.Name(), ok)
-		fmt.Printf("step %d: status=%s valid=%t\n", i+1, seq.Status(), seq.Valid())
+		fmt.Printf("step %d: status=%s valid=%t\n", i+1, seq.Status(), seq.IsValid())
 		fmt.Println()
 
 		status[i%len(status)] = true
@@ -27,7 +27,7 @@ func ExampleNewSequence() {
 	status[1] = false
 	step, ok := seq.Next()
 	fmt.Println("has next?", step.Name(), ok)
-	fmt.Printf("invalid: status=%s valid=%t\n", seq.Status(), seq.Valid())
+	fmt.Printf("invalid: status=%s valid=%t\n", seq.Status(), seq.IsValid())
 	fmt.Println()
 
 	// Output:

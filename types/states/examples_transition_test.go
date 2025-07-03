@@ -15,22 +15,22 @@ var (
 )
 
 func ExampleTransition() {
-	sm := states.NewState(Pending,
+	sm := states.NewStateMachine(Pending,
 		states.NewTransition("resolve", Pending, Success),
 		states.NewTransition("reject", Pending, Failed),
 	)
 
 	// Already pending.
-	fmt.Println(sm.Transition(Pending))
+	fmt.Println(sm.TransitionTo(Pending, "stay"))
 
 	fmt.Println(sm.IsValidTransition(Pending, Success))
 	fmt.Println(sm.IsValidTransition(Pending, Failed))
 	fmt.Println(sm.IsValidTransition(Success, Failed))
 	fmt.Println(sm.IsValidTransition(Failed, Success))
 
-	fmt.Println(sm.Transition(Success))
+	fmt.Println(sm.TransitionTo(Success, "resolve"))
 	fmt.Println(sm.State())
-	fmt.Println(sm.Transition(Failed))
+	fmt.Println(sm.TransitionTo(Failed, "reject"))
 	// Output:
 	// false
 	// true

@@ -1,24 +1,42 @@
 package sliceutil
 
-// Any returns true if all of the result returns true.
-func All[T any](t []T, fn func(i int) bool) bool {
-	for i := range len(t) {
-		if !fn(i) {
+// All returns true if all elements satisfy the predicate.
+// Returns false for empty slices.
+func All[T any](slice []T, predicate func(T) bool) bool {
+	if len(slice) == 0 {
+		return false
+	}
+
+	for _, item := range slice {
+		if !predicate(item) {
 			return false
 		}
 	}
 
-	return len(t) > 0
+	return true
 }
 
-// Any returns true if any of the result returns true.
-func Any[T any](t []T, fn func(i int) bool) bool {
-	if len(t) == 0 {
+// AllIndex returns true if all elements satisfy the index-based predicate.
+// Returns false for empty slices.
+func AllIndex[T any](slice []T, predicate func(int, T) bool) bool {
+	if len(slice) == 0 {
 		return false
 	}
 
-	for i := range len(t) {
-		if fn(i) {
+	for i, item := range slice {
+		if !predicate(i, item) {
+			return false
+		}
+	}
+
+	return true
+}
+
+// Any returns true if any element satisfies the predicate.
+// Returns false for empty slices.
+func Any[T any](slice []T, predicate func(T) bool) bool {
+	for _, item := range slice {
+		if predicate(item) {
 			return true
 		}
 	}
@@ -26,18 +44,43 @@ func Any[T any](t []T, fn func(i int) bool) bool {
 	return false
 }
 
-// Some is an alias to Any.
-func Some[T any](t []T, fn func(i int) bool) bool {
-	return Any(t, fn)
+// AnyIndex returns true if any element satisfies the index-based predicate.
+// Returns false for empty slices.
+func AnyIndex[T any](slice []T, predicate func(int, T) bool) bool {
+	for i, item := range slice {
+		if predicate(i, item) {
+			return true
+		}
+	}
+
+	return false
 }
 
-// None returns true if none of the result returns true.
-func None[T any](t []T, fn func(i int) bool) bool {
-	for i := range len(t) {
-		if fn(i) {
+// Some is an alias to Any for JavaScript-like syntax.
+func Some[T any](slice []T, predicate func(T) bool) bool {
+	return Any(slice, predicate)
+}
+
+// None returns true if no elements satisfy the predicate.
+// Returns true for empty slices.
+func None[T any](slice []T, predicate func(T) bool) bool {
+	for _, item := range slice {
+		if predicate(item) {
 			return false
 		}
 	}
 
-	return len(t) > 0
+	return true
+}
+
+// NoneIndex returns true if no elements satisfy the index-based predicate.
+// Returns true for empty slices.
+func NoneIndex[T any](slice []T, predicate func(int, T) bool) bool {
+	for i, item := range slice {
+		if predicate(i, item) {
+			return false
+		}
+	}
+
+	return true
 }

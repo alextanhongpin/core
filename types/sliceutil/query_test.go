@@ -12,8 +12,8 @@ func TestFind(t *testing.T) {
 		assert := assert.New(t)
 
 		n := []int{1, 2, 3, 4, 5}
-		m, ok := sliceutil.Find(n, func(i int) bool {
-			return n[i] == 3
+		m, ok := sliceutil.Find(n, func(val int) bool {
+			return val == 3
 		})
 		assert.True(ok)
 		assert.Equal(3, m)
@@ -23,8 +23,8 @@ func TestFind(t *testing.T) {
 		assert := assert.New(t)
 
 		n := []int{}
-		m, ok := sliceutil.Find(n, func(i int) bool {
-			return n[i] == 3
+		m, ok := sliceutil.Find(n, func(val int) bool {
+			return val == 3
 		})
 		assert.False(ok)
 		assert.Equal(0, m)
@@ -34,8 +34,8 @@ func TestFind(t *testing.T) {
 		assert := assert.New(t)
 
 		n := []int{1, 2, 3, 4, 5}
-		m, ok := sliceutil.Find(n, func(i int) bool {
-			return n[i] == 99
+		m, ok := sliceutil.Find(n, func(val int) bool {
+			return val == 99
 		})
 		assert.False(ok)
 		assert.Equal(0, m)
@@ -47,8 +47,8 @@ func TestFilter(t *testing.T) {
 		assert := assert.New(t)
 
 		n := []int{1, 2, 3, 4, 5}
-		oddn := sliceutil.Filter(n, func(i int) bool {
-			return n[i]%2 == 1
+		oddn := sliceutil.Filter(n, func(val int) bool {
+			return val%2 == 1
 		})
 
 		assert.Equal([]int{1, 3, 5}, oddn)
@@ -58,8 +58,8 @@ func TestFilter(t *testing.T) {
 		assert := assert.New(t)
 
 		n := []int{}
-		oddn := sliceutil.Filter(n, func(i int) bool {
-			return n[i]%2 == 1
+		oddn := sliceutil.Filter(n, func(val int) bool {
+			return val%2 == 1
 		})
 
 		assert.Equal([]int{}, oddn)
