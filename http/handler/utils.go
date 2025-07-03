@@ -1,3 +1,4 @@
+// Package handler provides a base controller for HTTP handlers with common functionality.
 package handler
 
 import (
@@ -11,12 +12,51 @@ import (
 	"github.com/alextanhongpin/core/http/response"
 )
 
-// Additional utility methods for the BaseHandler
+// Additional utility methods for the BaseHandler that provide convenient access
+// to request parsing and parameter handling functionality.
 
+// QueryValue extracts and returns a query parameter value from the HTTP request.
+//
+// This is a convenience method that wraps request.QueryValue, providing
+// access to the rich Value type functionality for type conversion and validation.
+//
+// Parameters:
+//   - r: The HTTP request to extract the parameter from
+//   - param: The name of the query parameter
+//
+// Returns:
+//   - A request.Value that can be converted to various types
+//
+// Example:
+//
+//	func (h *MyHandler) GetUsers(w http.ResponseWriter, r *http.Request) {
+//		page := h.QueryValue(r, "page").IntOr(1)
+//		limit := h.QueryValue(r, "limit").IntOr(10)
+//		search := h.QueryValue(r, "search").String()
+//		// Use the parameters...
+//	}
 func (h BaseHandler) QueryValue(r *http.Request, param string) request.Value {
 	return request.QueryValue(r, param)
 }
 
+// PathValue extracts and returns a path parameter value from the HTTP request.
+//
+// This is a convenience method that wraps request.PathValue, providing
+// access to path parameters defined in route patterns (e.g., "/users/{id}").
+//
+// Parameters:
+//   - r: The HTTP request to extract the parameter from
+//   - param: The name of the path parameter
+//
+// Returns:
+//   - A request.Value that can be converted to various types
+//
+// Example:
+//
+//	func (h *MyHandler) GetUser(w http.ResponseWriter, r *http.Request) {
+//		userID := h.PathValue(r, "id").MustInt()
+//		// Use the userID...
+//	}
 func (h BaseHandler) PathValue(r *http.Request, param string) request.Value {
 	return request.PathValue(r, param)
 }

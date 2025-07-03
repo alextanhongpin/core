@@ -1,3 +1,30 @@
+// Package pagination provides cursor-based and offset-based pagination utilities for HTTP APIs.
+//
+// This package implements both modern cursor-based pagination (recommended for large datasets)
+// and traditional offset-based pagination (useful for simple use cases with page numbers).
+//
+// Cursor-based pagination is more efficient and consistent for large datasets as it:
+// - Avoids the "page drift" problem when data is added/removed during pagination
+// - Provides stable pagination even when the underlying data changes
+// - Scales better for large datasets by using indexed fields for navigation
+//
+// Example usage:
+//
+//	// Cursor-based pagination for a user list API
+//	cursor := pagination.NewCursor[int](10) // 10 items per page
+//	cursor.After = 100 // Start after user ID 100
+//
+//	users, pagination, err := userService.List(ctx, cursor)
+//	if err != nil {
+//		return err
+//	}
+//
+//	// Offset-based pagination for simpler use cases
+//	offset := &pagination.OffsetPagination{Limit: 10, Offset: 0}
+//	users, pageInfo, err := userService.ListWithOffset(ctx, offset)
+//
+// The package also provides utilities for encoding/decoding cursors to/from
+// base64 strings for safe transmission in HTTP APIs.
 package pagination
 
 import (
@@ -8,24 +35,57 @@ import (
 	"time"
 )
 
-// CursorType represents the type of cursor field
+// CursorType represents the type of cursor field used for pagination.
+//
+// This enumeration helps identify the data type of cursor values, enabling
+// proper encoding, decoding, and validation of cursor parameters.
 type CursorType string
 
 const (
+	// CursorTypeString indicates the cursor field is a string value
 	CursorTypeString CursorType = "string"
-	CursorTypeInt    CursorType = "int"
-	CursorTypeTime   CursorType = "time"
+	// CursorTypeInt indicates the cursor field is an integer value
+	CursorTypeInt CursorType = "int"
+	// CursorTypeTime indicates the cursor field is a timestamp value
+	CursorTypeTime CursorType = "time"
 )
 
-// Cursor represents cursor-based pagination parameters
+// Cursor represents cursor-based pagination parameters for forward and backward navigation.
+//
+// Cursor-based pagination uses opaque tokens (cursors) to navigate through result sets.
+// It supports both forward pagination (using After/First) and backward pagination
+// (using Before/Last), providing efficient navigation through large datasets.
+//
+// Type parameter T represents the type of the cursor field (e.g., int for ID-based
+// cursors, time.Time for timestamp-based cursors, or string for composite cursors).
 type Cursor[T any] struct {
-	After  T   `json:"after"`
-	Before T   `json:"before,omitempty"`
-	First  int `json:"first"`
-	Last   int `json:"last,omitempty"`
+	// After specifies the cursor position to start after for forward pagination
+	After T `json:"after"`
+	// Before specifies the cursor position to end before for backward pagination
+	Before T `json:"before,omitempty"`
+	// First specifies the number of items to return in forward pagination
+	First int `json:"first"`
+	// Last specifies the number of items to return in backward pagination
+	Last int `json:"last,omitempty"`
 }
 
-// NewCursor creates a new cursor with default values
+// NewCursor creates a new cursor with default values for forward pagination.
+//
+// This constructor sets up a cursor for forward pagination with the specified
+// page size. The After field will be the zero value of type T, and Before/Last
+// will remain unset.
+//
+// Parameters:
+//   - first: The number of items to return per page
+//
+// Returns:
+//   - A new cursor configured for forward pagination
+//
+// Example:
+//
+//	// Create cursor for 20 items per page
+//	cursor := pagination.NewCursor[int](20)
+//	cursor.After = 100 // Start after ID 100
 func NewCursor[T any](first int) *Cursor[T] {
 	return &Cursor[T]{
 		First: first,
@@ -34,6 +94,19 @@ func NewCursor[T any](first int) *Cursor[T] {
 
 // Limit converts the First/Last into database limit, and fetches an additional row
 // to check if there are more items.
+//
+// This method adds 1 to the requested limit to enable detection of whether
+// additional pages are available. The extra row is used to determine pagination
+// state but is not included in the final result set.
+//
+// Returns:
+//   - The database limit (requested size + 1 for pagination detection)
+//
+// Example:
+//
+//	cursor := &Cursor[int]{First: 10}
+//	dbLimit := cursor.Limit() // Returns 11
+//	// Query the database with limit 11, return 10 items, use 11th to detect hasNext
 func (c *Cursor[T]) Limit() int {
 	if c.Last > 0 {
 		return c.Last + 1
@@ -41,17 +114,50 @@ func (c *Cursor[T]) Limit() int {
 	return c.First + 1
 }
 
-// IsForward returns true if this is forward pagination
+// IsForward returns true if this is forward pagination (using First).
+//
+// Forward pagination moves through results in ascending order of the cursor field,
+// typically used for "next page" navigation.
+//
+// Returns:
+//   - true if this cursor is configured for forward pagination
 func (c *Cursor[T]) IsForward() bool {
 	return c.First > 0
 }
 
-// IsBackward returns true if this is backward pagination
+// IsBackward returns true if this is backward pagination (using Last).
+//
+// Backward pagination moves through results in descending order of the cursor field,
+// typically used for "previous page" navigation.
+//
+// Returns:
+//   - true if this cursor is configured for backward pagination
 func (c *Cursor[T]) IsBackward() bool {
 	return c.Last > 0
 }
 
-// Validate validates cursor parameters
+// Validate validates cursor parameters against business rules.
+//
+// This method ensures that cursor parameters are valid and within acceptable
+// limits to prevent abuse and maintain system performance.
+//
+// Validation rules:
+// - First and Last must be non-negative
+// - Cannot specify both First and Last simultaneously
+// - Must specify either First or Last (not neither)
+// - Pagination limit cannot exceed the specified maximum
+//
+// Parameters:
+//   - maxLimit: The maximum allowed page size
+//
+// Returns:
+//   - An error if validation fails, nil if parameters are valid
+//
+// Example:
+//
+//	if err := cursor.Validate(100); err != nil {
+//		return fmt.Errorf("invalid pagination parameters: %w", err)
+//	}
 func (c *Cursor[T]) Validate(maxLimit int) error {
 	if c.First < 0 || c.Last < 0 {
 		return fmt.Errorf("pagination limits must be non-negative")
@@ -72,34 +178,68 @@ func (c *Cursor[T]) Validate(maxLimit int) error {
 	return nil
 }
 
-// Pagination represents paginated results
+// Pagination represents paginated results with metadata for navigation.
+//
+// This structure contains the actual result items along with pagination
+// metadata that clients can use to navigate through the result set.
+// It supports both cursor-based and offset-based pagination patterns.
 type Pagination[T any] struct {
-	Items      []T        `json:"items"`
-	Cursor     *Cursor[T] `json:"cursor,omitempty"`
-	HasNext    bool       `json:"hasNext"`
-	HasPrev    bool       `json:"hasPrev"`
-	TotalCount *int64     `json:"totalCount,omitempty"`
-	PageInfo   *PageInfo  `json:"pageInfo,omitempty"`
+	// Items contains the actual result data for this page
+	Items []T `json:"items"`
+	// Cursor contains the cursor used to generate this page (optional)
+	Cursor *Cursor[T] `json:"cursor,omitempty"`
+	// HasNext indicates if there are more items after this page
+	HasNext bool `json:"hasNext"`
+	// HasPrev indicates if there are items before this page
+	HasPrev bool `json:"hasPrev"`
+	// TotalCount contains the total number of items across all pages (optional, expensive to compute)
+	TotalCount *int64 `json:"totalCount,omitempty"`
+	// PageInfo contains detailed pagination information for GraphQL-style APIs
+	PageInfo *PageInfo `json:"pageInfo,omitempty"`
 }
 
-// PageInfo contains detailed pagination information
+// PageInfo contains detailed pagination information following GraphQL Relay specification.
+//
+// This structure provides comprehensive pagination metadata that clients can use
+// to build navigation UIs and understand the current position within the result set.
 type PageInfo struct {
-	HasPrevPage bool   `json:"hasPrevPage"`
-	HasNextPage bool   `json:"hasNextPage"`
+	// HasPrevPage indicates if there are items before the current page
+	HasPrevPage bool `json:"hasPrevPage"`
+	// HasNextPage indicates if there are items after the current page
+	HasNextPage bool `json:"hasNextPage"`
+	// StartCursor is the cursor of the first item in the current page
 	StartCursor string `json:"startCursor,omitempty"`
-	EndCursor   string `json:"endCursor,omitempty"`
-	TotalCount  *int64 `json:"totalCount,omitempty"`
-	PageSize    int    `json:"pageSize"`
-	CurrentPage *int   `json:"currentPage,omitempty"`
-	TotalPages  *int   `json:"totalPages,omitempty"`
+	// EndCursor is the cursor of the last item in the current page
+	EndCursor string `json:"endCursor,omitempty"`
+	// TotalCount is the total number of items across all pages (optional)
+	TotalCount *int64 `json:"totalCount,omitempty"`
+	// PageSize is the requested page size
+	PageSize int `json:"pageSize"`
+	// CurrentPage is the current page number (for offset-based pagination)
+	CurrentPage *int `json:"currentPage,omitempty"`
+	// TotalPages is the total number of pages (for offset-based pagination)
+	TotalPages *int `json:"totalPages,omitempty"`
 }
 
-// OffsetPagination represents offset-based pagination
+// OffsetPagination represents offset-based pagination parameters.
+//
+// Offset-based pagination uses limit/offset parameters to navigate through
+// result sets. While simpler to understand, it can suffer from consistency
+// issues when data is modified during pagination ("page drift").
+//
+// This approach is suitable for:
+// - Small to medium datasets where consistency isn't critical
+// - UIs that need to show page numbers or jump to specific pages
+// - Cases where the total count is important for the user experience
 type OffsetPagination struct {
-	Limit  int   `json:"limit"`
-	Offset int   `json:"offset"`
-	Total  int64 `json:"total"`
-	Page   int   `json:"page"`
+	// Limit specifies the maximum number of items to return
+	Limit int `json:"limit"`
+	// Offset specifies the number of items to skip
+	Offset int `json:"offset"`
+	// Total contains the total number of items across all pages
+	Total int64 `json:"total"`
+	// Page represents the current page number (1-based)
+	Page int `json:"page"`
 }
 
 // NewOffsetPagination creates offset pagination from page and limit

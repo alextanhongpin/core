@@ -1,3 +1,4 @@
+// Package request provides utilities for HTTP request parsing, validation, and manipulation.
 package request
 
 import (
@@ -12,25 +13,138 @@ import (
 	"time"
 )
 
+// Value represents a string value extracted from HTTP requests with type conversion and validation utilities.
+//
+// This type wraps string values from various HTTP request sources (query parameters, path values,
+// form data, headers) and provides a rich set of methods for type conversion, validation,
+// and transformation.
+//
+// The Value type is designed to make HTTP parameter handling type-safe and convenient,
+// reducing boilerplate code for common operations like parsing integers, validating
+// email addresses, or checking required fields.
+//
+// Example usage:
+//
+//	// Extract and validate query parameters
+//	userID := request.QueryValue(r, "user_id").IntOr(0)
+//	email := request.QueryValue(r, "email")
+//	if err := email.Required("email"); err != nil {
+//		return err
+//	}
+//	if err := email.Email(); err != nil {
+//		return err
+//	}
+//
+//	// Extract and convert path parameters
+//	id := request.PathValue(r, "id").MustInt()
+//	name := request.PathValue(r, "name").Trim().String()
 type Value string
 
+// QueryValue extracts a query parameter value from the HTTP request.
+//
+// This function retrieves the value of a query parameter by name from the request URL.
+// If the parameter is not present, it returns an empty Value.
+//
+// Parameters:
+//   - r: The HTTP request to extract the parameter from
+//   - name: The name of the query parameter
+//
+// Returns:
+//   - A Value containing the query parameter value
+//
+// Example:
+//
+//	// GET /users?page=2&limit=10
+//	page := request.QueryValue(r, "page")     // "2"
+//	limit := request.QueryValue(r, "limit")   // "10"
+//	missing := request.QueryValue(r, "sort")  // ""
 func QueryValue(r *http.Request, name string) Value {
 	return Value(r.URL.Query().Get(name))
 }
 
+// PathValue extracts a path parameter value from the HTTP request.
+//
+// This function retrieves the value of a path parameter by name from the request.
+// Path parameters are typically defined in route patterns (e.g., "/users/{id}").
+//
+// Parameters:
+//   - r: The HTTP request to extract the parameter from
+//   - name: The name of the path parameter
+//
+// Returns:
+//   - A Value containing the path parameter value
+//
+// Example:
+//
+//	// Route: /users/{id}
+//	// Request: GET /users/123
+//	userID := request.PathValue(r, "id")  // "123"
 func PathValue(r *http.Request, name string) Value {
 	return Value(r.PathValue(name))
 }
 
+// FormValue extracts a form parameter value from the HTTP request.
+//
+// This function retrieves the value of a form field by name from POST form data.
+// It works with both application/x-www-form-urlencoded and multipart/form-data.
+//
+// Parameters:
+//   - r: The HTTP request to extract the parameter from
+//   - name: The name of the form field
+//
+// Returns:
+//   - A Value containing the form field value
+//
+// Example:
+//
+//	// POST with Content-Type: application/x-www-form-urlencoded
+//	// Body: name=John&email=john@example.com
+//	name := request.FormValue(r, "name")    // "John"
+//	email := request.FormValue(r, "email")  // "john@example.com"
 func FormValue(r *http.Request, name string) Value {
 	return Value(r.FormValue(name))
 }
 
+// HeaderValue extracts a header value from the HTTP request.
+//
+// This function retrieves the value of an HTTP header by name. Header names
+// are case-insensitive according to HTTP specifications.
+//
+// Parameters:
+//   - r: The HTTP request to extract the header from
+//   - name: The name of the header (case-insensitive)
+//
+// Returns:
+//   - A Value containing the header value
+//
+// Example:
+//
+//	userAgent := request.HeaderValue(r, "User-Agent")
+//	authToken := request.HeaderValue(r, "Authorization")
+//	contentType := request.HeaderValue(r, "Content-Type")
 func HeaderValue(r *http.Request, name string) Value {
 	return Value(r.Header.Get(name))
 }
 
-// QueryValues returns all values for a query parameter
+// QueryValues returns all values for a query parameter (for parameters that can have multiple values).
+//
+// This function is useful when a query parameter can appear multiple times in the URL,
+// such as ?tags=go&tags=http&tags=web.
+//
+// Parameters:
+//   - r: The HTTP request to extract the parameters from
+//   - name: The name of the query parameter
+//
+// Returns:
+//   - A slice of Values containing all values for the parameter
+//
+// Example:
+//
+//	// GET /items?tags=go&tags=http&tags=web
+//	tags := request.QueryValues(r, "tags")  // ["go", "http", "web"]
+//	for _, tag := range tags {
+//		fmt.Println(tag.String())
+//	}
 func QueryValues(r *http.Request, name string) []Value {
 	values := r.URL.Query()[name]
 	result := make([]Value, len(values))
@@ -40,32 +154,118 @@ func QueryValues(r *http.Request, name string) []Value {
 	return result
 }
 
+// String returns the underlying string value.
+//
+// This is the most basic conversion method, returning the Value as a string
+// without any processing or validation.
+//
+// Returns:
+//   - The string representation of the value
 func (v Value) String() string {
 	return string(v)
 }
 
+// Trim returns a new Value with leading and trailing whitespace removed.
+//
+// This method is commonly used to clean up user input from forms and query parameters
+// where users might accidentally include leading or trailing spaces.
+//
+// Returns:
+//   - A new Value with whitespace trimmed
+//
+// Example:
+//
+//	value := Value("  hello world  ")
+//	trimmed := value.Trim()  // "hello world"
 func (v Value) Trim() Value {
 	return Value(strings.TrimSpace(string(v)))
 }
 
+// Lower returns a new Value with all Unicode letters mapped to their lower case.
+//
+// This method is useful for case-insensitive comparisons and normalization
+// of user input.
+//
+// Returns:
+//   - A new Value with all characters converted to lowercase
+//
+// Example:
+//
+//	value := Value("Hello World")
+//	lower := value.Lower()  // "hello world"
 func (v Value) Lower() Value {
 	return Value(strings.ToLower(string(v)))
 }
 
+// Upper returns a new Value with all Unicode letters mapped to their upper case.
+//
+// This method is useful for normalization of codes, identifiers, or other
+// values that should be stored in uppercase.
+//
+// Returns:
+//   - A new Value with all characters converted to uppercase
+//
+// Example:
+//
+//	value := Value("hello world")
+//	upper := value.Upper()  // "HELLO WORLD"
 func (v Value) Upper() Value {
 	return Value(strings.ToUpper(string(v)))
 }
 
+// StringOr returns the string value or a default string if the value is empty.
+//
+// This method provides a convenient way to handle optional parameters with
+// default values, using Go's generic cmp.Or function for clean null-coalescing.
+//
+// Parameters:
+//   - str: The default value to return if the Value is empty
+//
+// Returns:
+//   - The Value's string if non-empty, otherwise the default string
+//
+// Example:
+//
+//	page := request.QueryValue(r, "page").StringOr("1")
+//	sort := request.QueryValue(r, "sort").StringOr("created_at")
 func (v Value) StringOr(str string) string {
 	return cmp.Or(v.String(), str)
 }
 
-// IsEmpty returns true if the value is empty or only whitespace
+// IsEmpty returns true if the value is empty or contains only whitespace.
+//
+// This method is useful for validation where both empty strings and
+// whitespace-only strings should be considered invalid.
+//
+// Returns:
+//   - true if the value is empty or whitespace-only, false otherwise
+//
+// Example:
+//
+//	Value("").IsEmpty()       // true
+//	Value("   ").IsEmpty()    // true
+//	Value("hello").IsEmpty()  // false
 func (v Value) IsEmpty() bool {
 	return strings.TrimSpace(string(v)) == ""
 }
 
-// Required returns an error if the value is empty
+// Required returns an error if the value is empty or whitespace-only.
+//
+// This method provides a standard way to validate required fields with
+// consistent error messages that include the field name.
+//
+// Parameters:
+//   - fieldName: The name of the field being validated (used in error messages)
+//
+// Returns:
+//   - An error if the value is empty, nil if the value is present
+//
+// Example:
+//
+//	email := request.QueryValue(r, "email")
+//	if err := email.Required("email"); err != nil {
+//		return fmt.Errorf("validation failed: %w", err)
+//	}
 func (v Value) Required(fieldName string) error {
 	if v.IsEmpty() {
 		return fmt.Errorf("field %s is required", fieldName)
@@ -73,7 +273,24 @@ func (v Value) Required(fieldName string) error {
 	return nil
 }
 
-// Length validates the string length
+// Length validates that the string length is within the specified range.
+//
+// This method checks that the trimmed length of the value falls within
+// the specified minimum and maximum bounds (inclusive).
+//
+// Parameters:
+//   - min: The minimum allowed length (inclusive)
+//   - max: The maximum allowed length (inclusive)
+//
+// Returns:
+//   - An error if the length is outside the valid range, nil if valid
+//
+// Example:
+//
+//	name := request.FormValue(r, "name")
+//	if err := name.Length(2, 50); err != nil {
+//		return fmt.Errorf("invalid name: %w", err)
+//	}
 func (v Value) Length(min, max int) error {
 	length := len(strings.TrimSpace(string(v)))
 	if length < min {
@@ -85,17 +302,58 @@ func (v Value) Length(min, max int) error {
 	return nil
 }
 
-// Contains checks if the value contains a substring
+// Contains checks if the value contains the specified substring.
+//
+// This method performs a case-sensitive substring search within the value.
+//
+// Parameters:
+//   - substr: The substring to search for
+//
+// Returns:
+//   - true if the substring is found, false otherwise
+//
+// Example:
+//
+//	userAgent := request.HeaderValue(r, "User-Agent")
+//	isMobile := userAgent.Contains("Mobile")
 func (v Value) Contains(substr string) bool {
 	return strings.Contains(string(v), substr)
 }
 
-// HasPrefix checks if the value has a prefix
+// HasPrefix checks if the value starts with the specified prefix.
+//
+// This method performs a case-sensitive prefix check, useful for
+// validating URL schemes, token types, or other formatted values.
+//
+// Parameters:
+//   - prefix: The prefix to check for
+//
+// Returns:
+//   - true if the value starts with the prefix, false otherwise
+//
+// Example:
+//
+//	auth := request.HeaderValue(r, "Authorization")
+//	isBearer := auth.HasPrefix("Bearer ")
 func (v Value) HasPrefix(prefix string) bool {
 	return strings.HasPrefix(string(v), prefix)
 }
 
-// HasSuffix checks if the value has a suffix
+// HasSuffix checks if the value ends with the specified suffix.
+//
+// This method performs a case-sensitive suffix check, useful for
+// validating file extensions, domain names, or other formatted values.
+//
+// Parameters:
+//   - suffix: The suffix to check for
+//
+// Returns:
+//   - true if the value ends with the suffix, false otherwise
+//
+// Example:
+//
+//	filename := request.FormValue(r, "filename")
+//	isImage := filename.HasSuffix(".jpg") || filename.HasSuffix(".png")
 func (v Value) HasSuffix(suffix string) bool {
 	return strings.HasSuffix(string(v), suffix)
 }

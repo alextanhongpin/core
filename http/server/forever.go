@@ -1,3 +1,4 @@
+// Package server provides production-ready HTTP server utilities with graceful shutdown and zero-downtime upgrades.
 package server
 
 import (
@@ -15,16 +16,47 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// ListenAndServeForever allows zero-downtime upgrade.
-// This is done by sending the signal SIGUSR2 to the binary.
-// The binary will fork a child process and the parent process will exit.
-// The child process will inherit the listener and continue serving requests.
-// The parent process will gracefully shutdown after serving all the requests.
-// E.g.
+// ListenAndServeForever allows zero-downtime upgrade using file descriptor inheritance.
 //
-// $ go build -o main
-// $ kill -SIGUSR2 `lsof -ti:8080`
-// $ curl localhost:8080
+// This function implements a zero-downtime upgrade mechanism by using Unix signals
+// and file descriptor inheritance. When a SIGUSR2 signal is received, the process
+// forks a child process that inherits the listener file descriptor, allowing the
+// new version to start serving requests while the old version gracefully shuts down.
+//
+// The upgrade process works as follows:
+// 1. The running server listens for SIGUSR2 signals
+// 2. On receiving SIGUSR2, it forks a new process with the same binary
+// 3. The new process inherits the listener file descriptor
+// 4. The old process gracefully shuts down after completing in-flight requests
+// 5. The new process continues serving requests without dropping connections
+//
+// Parameters:
+//   - port: The port to listen on (e.g., ":8080")
+//   - handler: The HTTP handler to serve requests
+//
+// Usage example:
+//
+//	// Start the server
+//	go build -o myapp main.go
+//	./myapp
+//
+//	// In another terminal, trigger zero-downtime upgrade:
+//	kill -SIGUSR2 $(lsof -ti:8080)
+//
+//	// Or using process ID:
+//	kill -SIGUSR2 <pid>
+//
+// The function blocks until the server is shut down. It's designed for production
+// environments where you need to upgrade the application binary without dropping
+// active connections or experiencing downtime.
+//
+// Requirements:
+// - Unix-like operating system (Linux, macOS, etc.)
+// - The binary must be accessible at the same path when upgrading
+// - Sufficient system resources to run both old and new processes briefly
+//
+// Note: This function uses low-level Unix system calls and file descriptor
+// manipulation, making it unsuitable for Windows environments.
 func ListenAndServeForever(port string, handler http.Handler) {
 	var l net.Listener
 
