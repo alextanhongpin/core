@@ -1,6 +1,7 @@
 -- request.http --
 GET / HTTP/1.1
 Host: example.com
+Authorization: Basic am9objoxMjM0NTY=
 
 -- response.http --
 HTTP/1.1 200 OK

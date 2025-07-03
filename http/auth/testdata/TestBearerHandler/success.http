@@ -1,10 +1,11 @@
 -- request.http --
 GET / HTTP/1.1
 Host: example.com
-Authorization: Bearer TOKEN
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJqb2huLmFwcGxlc2VlZEBtYWlsLmNvbSIsImV4cCI6MTc1MTUxNzk3MCwibmJmIjoxNzUxNTE0MzcwLCJpYXQiOjE3NTE1MTQzNzB9.HGfc1t79whYZu8xIe5UTDvvtcveSA2IVYzaR4B9XAdY
 
 -- response.http --
 HTTP/1.1 200 OK
 Connection: close
+Content-Type: text/plain; charset=utf-8
 
 hello world
