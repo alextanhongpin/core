@@ -5,7 +5,7 @@ go 1.24.2
 require (
 	github.com/alextanhongpin/errors v0.0.0-20250613151631-468b5e30c265
 	github.com/alextanhongpin/testdump/httpdump v0.0.0-20250608043033-1b71f7f044e4
-	github.com/alextanhongpin/testdump/jsondump v0.0.0-20250608043033-1b71f7f044e4
+	github.com/alextanhongpin/testdump/jsondump v0.0.0-20250703151453-77514452c9aa
 	github.com/golang-jwt/jwt/v5 v5.2.1
 	github.com/google/go-cmp v0.7.0
 	github.com/google/uuid v1.6.0
@@ -14,10 +14,10 @@ require (
 )
 
 require (
-	github.com/alextanhongpin/testdump/pkg/diff v0.0.0-20240815130218-4368114cac78 // indirect
-	github.com/alextanhongpin/testdump/pkg/file v0.0.0-20240815130218-4368114cac78 // indirect
-	github.com/alextanhongpin/testdump/pkg/reviver v0.0.0-20250416130825-f5d418e5c073 // indirect
-	github.com/alextanhongpin/testdump/pkg/snapshot v0.0.0-20240815130218-4368114cac78 // indirect
+	github.com/alextanhongpin/testdump/pkg/diff v0.0.0-20250703151453-77514452c9aa // indirect
+	github.com/alextanhongpin/testdump/pkg/file v0.0.0-20250703151453-77514452c9aa // indirect
+	github.com/alextanhongpin/testdump/pkg/reviver v0.0.0-20250703151453-77514452c9aa // indirect
+	github.com/alextanhongpin/testdump/pkg/snapshot v0.0.0-20250703151453-77514452c9aa // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	golang.org/x/tools v0.22.0 // indirect

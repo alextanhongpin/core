@@ -1,7 +1,7 @@
 package sliceutil
 
 func Find[T any](t []T, fn func(i int) bool) (T, bool) {
-	for i := 0; i < len(t); i++ {
+	for i := range len(t) {
 		if fn(i) {
 			return t[i], true
 		}
@@ -13,7 +13,7 @@ func Find[T any](t []T, fn func(i int) bool) (T, bool) {
 
 func Filter[T any](t []T, fn func(i int) bool) []T {
 	res := make([]T, 0, len(t))
-	for i := 0; i < len(t); i++ {
+	for i := range len(t) {
 		if !fn(i) {
 			continue
 		}

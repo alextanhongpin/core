@@ -4,7 +4,7 @@ package sliceutil
 
 func Map[K, V any](ks []K, fn func(i int) V) []V {
 	vs := make([]V, len(ks))
-	for i := 0; i < len(ks); i++ {
+	for i := range len(ks) {
 		vs[i] = fn(i)
 	}
 
@@ -13,7 +13,7 @@ func Map[K, V any](ks []K, fn func(i int) V) []V {
 
 func MapError[K, V any](ks []K, fn func(i int) (V, error)) ([]V, error) {
 	vs := make([]V, len(ks))
-	for i := 0; i < len(ks); i++ {
+	for i := range len(ks) {
 		v, err := fn(i)
 		if err != nil {
 			return nil, err
@@ -43,7 +43,7 @@ func DedupFunc[T any, K comparable](t []T, fn func(i int) K) []T {
 	res := make([]T, 0)
 
 	seen := make(map[K]bool)
-	for i := 0; i < len(t); i++ {
+	for i := range len(t) {
 		k := fn(i)
 		if seen[k] {
 			continue

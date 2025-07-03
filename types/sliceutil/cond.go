@@ -2,7 +2,7 @@ package sliceutil
 
 // Any returns true if all of the result returns true.
 func All[T any](t []T, fn func(i int) bool) bool {
-	for i := 0; i < len(t); i++ {
+	for i := range len(t) {
 		if !fn(i) {
 			return false
 		}
@@ -17,7 +17,7 @@ func Any[T any](t []T, fn func(i int) bool) bool {
 		return false
 	}
 
-	for i := 0; i < len(t); i++ {
+	for i := range len(t) {
 		if fn(i) {
 			return true
 		}
@@ -33,7 +33,7 @@ func Some[T any](t []T, fn func(i int) bool) bool {
 
 // None returns true if none of the result returns true.
 func None[T any](t []T, fn func(i int) bool) bool {
-	for i := 0; i < len(t); i++ {
+	for i := range len(t) {
 		if fn(i) {
 			return false
 		}

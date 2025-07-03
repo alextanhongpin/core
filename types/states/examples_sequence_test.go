@@ -6,7 +6,7 @@ import (
 	"github.com/alextanhongpin/core/types/states"
 )
 
-func ExampleSequential() {
+func ExampleNewSequence() {
 	status := []bool{false, false, false}
 
 	seq := states.NewSequence(
