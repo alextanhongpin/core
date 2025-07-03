@@ -1,13 +1,15 @@
-# BaseHandler Documentation
+# HTTP Handler Package
 
-## Overview
-
-The `BaseHandler` provides a standardized foundation for building HTTP handlers in Go applications. It encapsulates common patterns for JSON processing, error handling, response formatting, and structured logging.
+The HTTP Handler package provides a base controller for HTTP handlers with common functionality for JSON handling, error management, response formatting, and structured logging.
 
 ## Features
 
-- **JSON Processing**: Automatic request/response JSON handling
-- **Error Management**: Centralized error processing with intelligent categorization
+- **JSON Request/Response Handling**: Simplified JSON parsing and response generation
+- **Standardized Error Handling**: Consistent error responses with proper status codes
+- **Structured Logging**: Integrated logging with request details
+- **Response Formatting**: Consistent API response structures
+- **Validation Integration**: Automatic validation of request structures
+- **Controller Pattern**: Support for building REST controllers with shared functionality
 - **Structured Logging**: Built-in support for structured logging with request context
 - **Validation**: Built-in validation support for request structs
 - **Request Correlation**: Support for request ID tracking and correlation

@@ -477,3 +477,23 @@ The library is designed for production use with:
 ## Support
 
 For questions, issues, or contributions, please refer to the GitHub repository and documentation.
+
+## Package Documentation
+
+Detailed documentation for each package is available in their respective directories:
+
+- [`auth`](./auth/README.md) - Authentication and authorization utilities (Basic Auth, Bearer tokens, JWT)
+- [`chain`](./chain/README.md) - Middleware composition for HTTP handlers
+- [`contextkey`](./contextkey/README.md) - Type-safe context key management
+- [`handler`](./handler/README.md) - Base handler with common functionality for HTTP endpoints
+- [`health`](./health/README.md) - Health check endpoints for monitoring and observability
+- [`middleware`](./middleware/README.md) - Middleware components including rate limiting
+- [`pagination`](./pagination/README.md) - Cursor-based pagination utilities
+- [`request`](./request/README.md) - Request parsing and validation utilities
+- [`requestid`](./requestid/README.md) - Request ID generation and tracking
+- [`response`](./response/README.md) - Standardized HTTP response handling
+- [`server`](./server/README.md) - Production-ready HTTP server with graceful shutdown
+- [`templ`](./templ/README.md) - Flexible template engine with hot-reload support
+- [`webhook`](./webhook/README.md) - Secure webhook handling with signature verification
+
+Each package README contains detailed usage examples, API reference, and best practices.

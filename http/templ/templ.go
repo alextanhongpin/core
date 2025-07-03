@@ -1,6 +1,7 @@
 package templ
 
 import (
+	"fmt"
 	"io"
 	"io/fs"
 	"path/filepath"
@@ -9,11 +10,15 @@ import (
 	"text/template"
 )
 
+// Template represents a template configuration with optional hot-reload support.
 type Template struct {
+	// BasePath is prepended to all template file paths
 	BasePath string
-	// e.g. os.DirFS(".") or from embed.FS
-	FS        fs.FS
-	Funcs     template.FuncMap
+	// FS is the filesystem to load templates from (e.g. os.DirFS(".") or embed.FS)
+	FS fs.FS
+	// Funcs provides custom functions available in templates
+	Funcs template.FuncMap
+	// HotReload reloads templates on each render (for development)
 	HotReload bool
 }
 
@@ -22,6 +27,44 @@ func (t *Template) Compile(files ...string) *Extension {
 		fn: t.ParseFunc(files...),
 		t:  t,
 	}
+}
+
+// ParseSafe parses templates with error handling instead of panicking
+func (t *Template) ParseSafe(files ...string) (*template.Template, error) {
+	if err := validateFiles(files); err != nil {
+		return nil, err
+	}
+
+	f := t.paths(files...)
+
+	tpl, err := template.New("").Funcs(t.Funcs).ParseFS(t.FS, f...)
+	if err != nil {
+		return nil, err
+	}
+
+	// ParseFS returns the first file, which is the "" in the template.New("").
+	// We want to lookup the first file we passed in instead.
+	result := tpl.Lookup(filepath.Base(f[0]))
+	if result == nil {
+		return nil, fmt.Errorf("template %s not found", filepath.Base(f[0]))
+	}
+
+	return result, nil
+}
+
+// CompileSafe compiles templates with error handling
+func (t *Template) CompileSafe(files ...string) (*Extension, error) {
+	if !t.HotReload {
+		// Validate templates at compile time in production
+		if _, err := t.ParseSafe(files...); err != nil {
+			return nil, err
+		}
+	}
+
+	return &Extension{
+		fn: t.ParseFunc(files...),
+		t:  t,
+	}, nil
 }
 
 func (t *Template) ParseFunc(files ...string) func() *template.Template {
@@ -39,6 +82,10 @@ func (t *Template) ParseFunc(files ...string) func() *template.Template {
 }
 
 func (t *Template) Parse(files ...string) *template.Template {
+	if err := t.Validate(); err != nil {
+		panic(err)
+	}
+
 	f := t.paths(files...)
 
 	tpl := template.Must(template.New("").Funcs(t.Funcs).ParseFS(t.FS, f...))
@@ -59,6 +106,30 @@ func (t *Template) paths(files ...string) []string {
 	return f
 }
 
+// validateFiles validates the input files before processing
+func validateFiles(files []string) error {
+	if len(files) == 0 {
+		return fmt.Errorf("no template files provided")
+	}
+
+	for _, file := range files {
+		if file == "" {
+			return fmt.Errorf("empty filename provided")
+		}
+	}
+
+	return nil
+}
+
+// Validate validates the Template configuration
+func (t *Template) Validate() error {
+	if t.FS == nil {
+		return fmt.Errorf("filesystem (FS) is required")
+	}
+	return nil
+}
+
+// Extension represents a compiled template that can be extended with additional files.
 type Extension struct {
 	fn func() *template.Template
 	t  *Template

@@ -137,6 +137,74 @@ func TestHotReload(t *testing.T) {
 	})
 }
 
+func TestParseSafe(t *testing.T) {
+	tpl := &templ.Template{
+		FS: newFS(),
+	}
+
+	t.Run("valid templates", func(t *testing.T) {
+		tmpl, err := tpl.ParseSafe("base.html")
+		assert.NoError(t, err)
+		assert.NotNil(t, tmpl)
+	})
+
+	t.Run("no files provided", func(t *testing.T) {
+		_, err := tpl.ParseSafe()
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "no template files provided")
+	})
+
+	t.Run("empty filename", func(t *testing.T) {
+		_, err := tpl.ParseSafe("base.html", "")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "empty filename provided")
+	})
+
+	t.Run("template not found", func(t *testing.T) {
+		_, err := tpl.ParseSafe("nonexistent.html")
+		assert.Error(t, err)
+	})
+}
+
+func TestCompileSafe(t *testing.T) {
+	tpl := &templ.Template{
+		FS: newFS(),
+	}
+
+	t.Run("valid templates", func(t *testing.T) {
+		ext, err := tpl.CompileSafe("base.html", "home.html")
+		assert.NoError(t, err)
+		assert.NotNil(t, ext)
+
+		var b bytes.Buffer
+		err = ext.Execute(&b, map[string]any{"Msg": "world"})
+		assert.NoError(t, err)
+		assert.Equal(t, "hello, world", b.String())
+	})
+
+	t.Run("invalid templates in production mode", func(t *testing.T) {
+		tpl.HotReload = false
+		_, err := tpl.CompileSafe("nonexistent.html")
+		assert.Error(t, err)
+	})
+}
+
+func TestValidate(t *testing.T) {
+	t.Run("valid configuration", func(t *testing.T) {
+		tpl := &templ.Template{
+			FS: newFS(),
+		}
+		assert.NoError(t, tpl.Validate())
+	})
+
+	t.Run("missing filesystem", func(t *testing.T) {
+		tpl := &templ.Template{}
+		err := tpl.Validate()
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "filesystem (FS) is required")
+	})
+}
+
 func newFS() fstest.MapFS {
 	return fstest.MapFS{
 		"base.html": {
