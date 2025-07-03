@@ -237,3 +237,30 @@ func TestResetErrors(t *testing.T) {
 	is.Equal(0.0, ps.Rate().Success())
 	is.Equal(0.0, ps.Rate().Failure())
 }
+
+func TestNewRateValidation(t *testing.T) {
+	t.Run("zero period panics", func(t *testing.T) {
+		defer func() {
+			if r := recover(); r == nil {
+				t.Error("expected panic for zero period")
+			}
+		}()
+		rate.NewRate(0)
+	})
+
+	t.Run("negative period panics", func(t *testing.T) {
+		defer func() {
+			if r := recover(); r == nil {
+				t.Error("expected panic for negative period")
+			}
+		}()
+		rate.NewRate(-time.Second)
+	})
+
+	t.Run("positive period works", func(t *testing.T) {
+		r := rate.NewRate(time.Second)
+		if r == nil {
+			t.Error("expected valid rate instance")
+		}
+	})
+}

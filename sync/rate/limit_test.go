@@ -4,8 +4,11 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"text/tabwriter"
+	"time"
 
 	"math/rand/v2"
 
@@ -240,5 +243,80 @@ func TestLimit(t *testing.T) {
 		is.Equal(5, limit.Failure())
 		is.Equal(3, limit.Success())
 		is.Equal(8, limit.Total())
+	})
+}
+
+func TestNewLimiterValidation(t *testing.T) {
+	t.Run("zero limit panics", func(t *testing.T) {
+		defer func() {
+			if r := recover(); r == nil {
+				t.Error("expected panic for zero limit")
+			}
+		}()
+		rate.NewLimiter(0)
+	})
+
+	t.Run("negative limit panics", func(t *testing.T) {
+		defer func() {
+			if r := recover(); r == nil {
+				t.Error("expected panic for negative limit")
+			}
+		}()
+		rate.NewLimiter(-5)
+	})
+
+	t.Run("positive limit works", func(t *testing.T) {
+		l := rate.NewLimiter(10)
+		if l == nil {
+			t.Error("expected valid limiter instance")
+		}
+	})
+}
+
+func TestLimiterConcurrency(t *testing.T) {
+	t.Run("concurrent operations are safe", func(t *testing.T) {
+		limiter := rate.NewLimiter(5)
+		const numGoroutines = 10
+		const numOperations = 100
+
+		var wg sync.WaitGroup
+		var successCount, errorCount int64
+
+		for i := 0; i < numGoroutines; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for j := 0; j < numOperations; j++ {
+					err := limiter.Do(func() error {
+						// Simulate some work
+						time.Sleep(time.Microsecond)
+						// Randomly fail 30% of the time
+						if j%3 == 0 {
+							return errors.New("simulated error")
+						}
+						return nil
+					})
+
+					if err == nil {
+						atomic.AddInt64(&successCount, 1)
+					} else {
+						atomic.AddInt64(&errorCount, 1)
+					}
+				}
+			}()
+		}
+
+		wg.Wait()
+
+		// Verify that the counts make sense
+		totalOps := successCount + errorCount
+		if totalOps != numGoroutines*numOperations {
+			t.Errorf("expected %d total operations, got %d", numGoroutines*numOperations, totalOps)
+		}
+
+		// The limiter should have blocked some operations due to failures
+		if errorCount == 0 {
+			t.Error("expected some operations to be blocked by rate limiter")
+		}
 	})
 }
