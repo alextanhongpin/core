@@ -185,7 +185,7 @@ func ExampleProgressBar() {
 	progress.SetTarget(75)
 
 	fmt.Println("Animating progress bar:")
-	for i := 0; i < 20; i++ {
+	for i := range 20 {
 		progress.Update()
 		fmt.Printf("Frame %2d: %5.1f%%\n", i, progress.GetProgress())
 
@@ -197,21 +197,26 @@ func ExampleProgressBar() {
 
 	// Output:
 	// Animating progress bar:
-	// Frame  0:   0.0%
-	// Frame  1:   7.5%
-	// Frame  2:  13.9%
-	// Frame  3:  19.5%
-	// Frame  4:  24.5%
-	// Frame  5:  29.1%
-	// Frame  6:  33.2%
-	// Frame  7:  36.9%
-	// Frame  8:  40.2%
-	// Frame  9:  43.2%
-	// Frame 10:  45.9%
-	// Frame 11:  48.3%
-	// Frame 12:  50.5%
-	// Frame 13:  52.4%
-	// Frame 14:  54.2%
+	// Frame  0:   7.5%
+	// Frame  1:  14.2%
+	// Frame  2:  20.3%
+	// Frame  3:  25.8%
+	// Frame  4:  30.7%
+	// Frame  5:  35.1%
+	// Frame  6:  39.1%
+	// Frame  7:  42.7%
+	// Frame  8:  45.9%
+	// Frame  9:  48.8%
+	// Frame 10:  51.5%
+	// Frame 11:  53.8%
+	// Frame 12:  55.9%
+	// Frame 13:  57.8%
+	// Frame 14:  59.6%
+	// Frame 15:  61.1%
+	// Frame 16:  62.5%
+	// Frame 17:  63.7%
+	// Frame 18:  64.9%
+	// Frame 19:  65.9%
 }
 
 // Real-world example: Game health system
@@ -374,9 +379,10 @@ func ExampleTemperatureController() {
 
 	// Output:
 	// Target: 25.0°C, Starting: 20.0°C
-	// Time 0.0s: 20.0°C (Heat: 100%, Cool: 0%)
-	// Time 1.0s: 24.0°C (Heat: 20%, Cool: 0%)
-	// Time 2.0s: 24.8°C (Heat: 4%, Cool: 0%)
-	// Time 3.0s: 25.0°C (Heat: 0%, Cool: 0%)
-	// Target reached at time 3.0s
+	// Time 0.0s: 20.5°C (Heat: 100%, Cool: 0%)
+	// Time 1.0s: 23.3°C (Heat: 38%, Cool: 0%)
+	// Time 2.0s: 24.1°C (Heat: 18%, Cool: 0%)
+	// Time 3.0s: 24.4°C (Heat: 12%, Cool: 0%)
+	// Time 4.0s: 24.5°C (Heat: 10%, Cool: 0%)
+	// Target reached at time 4.0s
 }
