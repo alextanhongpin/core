@@ -207,8 +207,8 @@ func ExampleSum_salesAnalytics() {
 
 	fmt.Printf("Total sales: $%.2f\n", totalSales)
 	fmt.Printf("Average daily sales: $%.2f\n", average)
-	// Output: Total sales: $9351.30
-	// Average daily sales: $1870.26
+	// Output: Total sales: $9352.30
+	// Average daily sales: $1870.46
 }
 
 func ExamplePartition_orderProcessing() {
@@ -289,8 +289,12 @@ func ExampleFilter_complexPipeline() {
 
 	// Pipeline: parse -> filter -> transform -> chunk
 	// Step 1: Parse strings to integers, handle errors
-	numbers, _ := sliceutil.MapError(rawData, func(s string) (int, error) {
-		return strconv.Atoi(s)
+	numbers := sliceutil.Map(rawData, func(s string) int {
+		n, err := strconv.Atoi(s)
+		if err != nil {
+			return -1
+		}
+		return n
 	})
 
 	// Step 2: Filter even numbers

@@ -2,7 +2,7 @@
 // available in the standard library's slices package.
 package sliceutil
 
-import "golang.org/x/exp/slices"
+import "slices"
 
 // Map transforms each element of the slice using the provided function.
 func Map[T, U any](slice []T, transform func(T) U) []U {
@@ -82,17 +82,17 @@ func Dedup[T comparable](slice []T) []T {
 	if len(slice) == 0 {
 		return slice
 	}
-	
+
 	seen := make(map[T]bool, len(slice))
 	result := make([]T, 0, len(slice))
-	
+
 	for _, item := range slice {
 		if !seen[item] {
 			seen[item] = true
 			result = append(result, item)
 		}
 	}
-	
+
 	return result
 }
 
@@ -102,10 +102,10 @@ func DedupFunc[T any, K comparable](slice []T, keyFunc func(T) K) []T {
 	if len(slice) == 0 {
 		return slice
 	}
-	
+
 	seen := make(map[K]bool, len(slice))
 	result := make([]T, 0, len(slice))
-	
+
 	for _, item := range slice {
 		key := keyFunc(item)
 		if !seen[key] {
@@ -113,7 +113,7 @@ func DedupFunc[T any, K comparable](slice []T, keyFunc func(T) K) []T {
 			result = append(result, item)
 		}
 	}
-	
+
 	return result
 }
 
@@ -122,7 +122,7 @@ func Reverse[T any](slice []T) []T {
 	if len(slice) <= 1 {
 		return slices.Clone(slice)
 	}
-	
+
 	result := make([]T, len(slice))
 	for i, item := range slice {
 		result[len(slice)-1-i] = item
@@ -136,11 +136,11 @@ func Chunk[T any](slice []T, size int) [][]T {
 	if size <= 0 {
 		return nil
 	}
-	
+
 	if len(slice) == 0 {
 		return [][]T{}
 	}
-	
+
 	chunks := make([][]T, 0, (len(slice)+size-1)/size)
 	for i := 0; i < len(slice); i += size {
 		end := i + size
@@ -149,7 +149,7 @@ func Chunk[T any](slice []T, size int) [][]T {
 		}
 		chunks = append(chunks, slice[i:end])
 	}
-	
+
 	return chunks
 }
 
@@ -177,7 +177,7 @@ func GroupBy[T any, K comparable](slice []T, keyFunc func(T) K) map[K][]T {
 // the second contains elements that don't.
 func Partition[T any](slice []T, predicate func(T) bool) ([]T, []T) {
 	var trueSlice, falseSlice []T
-	
+
 	for _, item := range slice {
 		if predicate(item) {
 			trueSlice = append(trueSlice, item)
@@ -185,35 +185,47 @@ func Partition[T any](slice []T, predicate func(T) bool) ([]T, []T) {
 			falseSlice = append(falseSlice, item)
 		}
 	}
-	
+
 	return trueSlice, falseSlice
 }
 
 // Zip combines elements from two slices into pairs.
 // The resulting slice length is the minimum of the two input slice lengths.
-func Zip[T, U any](slice1 []T, slice2 []U) []struct{ First T; Second U } {
+func Zip[T, U any](slice1 []T, slice2 []U) []struct {
+	First  T
+	Second U
+} {
 	minLen := len(slice1)
 	if len(slice2) < minLen {
 		minLen = len(slice2)
 	}
-	
-	result := make([]struct{ First T; Second U }, minLen)
+
+	result := make([]struct {
+		First  T
+		Second U
+	}, minLen)
 	for i := 0; i < minLen; i++ {
-		result[i] = struct{ First T; Second U }{slice1[i], slice2[i]}
+		result[i] = struct {
+			First  T
+			Second U
+		}{slice1[i], slice2[i]}
 	}
-	
+
 	return result
 }
 
 // Unzip separates a slice of pairs into two separate slices.
-func Unzip[T, U any](pairs []struct{ First T; Second U }) ([]T, []U) {
+func Unzip[T, U any](pairs []struct {
+	First  T
+	Second U
+}) ([]T, []U) {
 	first := make([]T, len(pairs))
 	second := make([]U, len(pairs))
-	
+
 	for i, pair := range pairs {
 		first[i] = pair.First
 		second[i] = pair.Second
 	}
-	
+
 	return first, second
 }
