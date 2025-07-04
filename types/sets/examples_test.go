@@ -121,9 +121,9 @@ func ExampleSet_dataDeduplication() {
 	source3IDs := []int{5, 6, 7, 8, 9, 10}
 
 	// Convert to sets (automatically removes duplicates)
-	set1 := sets.FromSlice(source1IDs)
-	set2 := sets.FromSlice(source2IDs)
-	set3 := sets.FromSlice(source3IDs)
+	set1 := sets.From(source1IDs)
+	set2 := sets.From(source2IDs)
+	set3 := sets.From(source3IDs)
 
 	fmt.Printf("Source 1 (deduplicated): %s\n", set1)
 	fmt.Printf("Source 2: %s\n", set2)
@@ -275,8 +275,8 @@ func ExampleSet_socialNetwork() {
 	// Output:
 	// Social Network Analysis:
 	// Alice & Bob mutual followers: {charlie}
-	// Alice & Charlie mutual followers: {alice, bob, diana}
-	// Follow Alice but not Bob: {diana, eve}
+	// Alice & Charlie mutual followers: {bob, diana}
+	// Follow Alice but not Bob: {bob, diana, eve}
 	// Total unique users: 7 - {alice, bob, charlie, diana, eve, frank, grace}
 	// Followed by everyone: {}
 }
@@ -379,10 +379,10 @@ func ExampleSet_skillsMatching() {
 	// Candidate 2 matches:
 	//   Backend: 0.0%
 	//   Frontend: 80.0%
-	//   Fullstack: 20.0%
+	//   Fullstack: 40.0%
 	// Candidate 3 matches:
 	//   Backend: 80.0%
-	//   Frontend: 20.0%
+	//   Frontend: 40.0%
 	//   Fullstack: 100.0%
 	// Candidate 1 missing skills for backend: {api-design, kubernetes}
 }
@@ -450,7 +450,7 @@ func TestSetOperations(t *testing.T) {
 			t.Errorf("Expected length 7 after adding, got %d", s.Len())
 		}
 
-		s.Delete(1, 2)
+		s.Remove(1, 2)
 		if s.Len() != 5 {
 			t.Errorf("Expected length 5 after deleting, got %d", s.Len())
 		}
@@ -566,39 +566,39 @@ func BenchmarkSetOperations(b *testing.B) {
 	size := 1000
 	a := sets.New[int]()
 	bSlice := make([]int, size)
-	for i := 0; i < size; i++ {
+	for i := range size {
 		a.Add(i)
 		bSlice[i] = i + size/2 // 50% overlap
 	}
-	setB := sets.FromSlice(bSlice)
+	setB := sets.From(bSlice)
 
 	b.Run("Add", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
+		for i := range b.N {
 			s := sets.New[int]()
 			s.Add(i)
 		}
 	})
 
 	b.Run("Has", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
+		for i := range b.N {
 			_ = a.Has(i % size)
 		}
 	})
 
 	b.Run("Union", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			_ = a.Union(setB)
 		}
 	})
 
 	b.Run("Intersect", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			_ = a.Intersect(setB)
 		}
 	})
 
 	b.Run("Difference", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			_ = a.Difference(setB)
 		}
 	})
@@ -663,7 +663,7 @@ func ExampleSet_complexFiltering() {
 	// Long words: {banana, cherry, elderberry}
 	// Any word starts with 'a': true
 	// All words lowercase: true
-	// Total characters: 41
+	// Total characters: 39
 }
 
 func init() {

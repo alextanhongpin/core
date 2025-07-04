@@ -27,15 +27,15 @@ func main() {
     evens := sets.From([]int{2, 4, 6, 8})
     
     // Basic operations
-    fmt.Println("Size:", numbers.Size())           // 5
+    fmt.Println("Len:", numbers.Len())           // 5
     fmt.Println("Contains 3:", numbers.Has(3))    // true
     
     // Set operations
-    intersection := numbers.Intersection(evens)
-    fmt.Println("Intersection:", intersection.ToSlice()) // [2, 4]
+    intersection := numbers.Intersect(evens)
+    fmt.Println("Intersect:", intersection.Slice()) // [2, 4]
     
     union := numbers.Union(evens)
-    fmt.Println("Union size:", union.Size())             // 7
+    fmt.Println("Union size:", union.Len())             // 7
 }
 ```
 
@@ -59,17 +59,17 @@ s := sets.Of("x", "y", "z")
 ```go
 // Add elements
 s.Add("new")
-s.AddAll([]string{"a", "b"})
+s.Add("a", "b")
 
 // Remove elements
 s.Remove("old")
-s.RemoveAll([]string{"x", "y"})
+s.Remove("x", "y")
 
 // Check membership
 exists := s.Has("item")
 
-// Size and emptiness
-size := s.Size()
+// Len and emptiness
+size := s.Len()
 empty := s.IsEmpty()
 
 // Clear all elements
@@ -85,8 +85,8 @@ b := sets.From([]int{3, 4, 5, 6})
 // Union: {1, 2, 3, 4, 5, 6}
 union := a.Union(b)
 
-// Intersection: {3, 4}
-intersection := a.Intersection(b)
+// Intersect: {3, 4}
+intersection := a.Intersect(b)
 
 // Difference: {1, 2}
 diff := a.Difference(b)
@@ -137,7 +137,7 @@ numbers.ForEach(func(n int) {
 s := sets.From([]string{"a", "b", "c"})
 
 // Convert to slice (order not guaranteed)
-slice := s.ToSlice()
+slice := s.Slice()
 
 // Create independent copy
 clone := s.Clone()
@@ -215,7 +215,7 @@ func isFeatureEnabled(env string, feature string) bool {
 
 // Find features only in development
 devOnlyFeatures := devFeatures.Difference(prodFeatures)
-fmt.Println("Dev-only features:", devOnlyFeatures.ToSlice()) // ["debug", "mock-data"]
+fmt.Println("Dev-only features:", devOnlyFeatures.Slice()) // ["debug", "mock-data"]
 ```
 
 ### Data Deduplication
@@ -228,11 +228,11 @@ source3 := []string{"cherry", "fig", "grape"}
 
 // Combine all unique items
 combined := sets.New[string]()
-combined.AddAll(source1)
-combined.AddAll(source2)
-combined.AddAll(source3)
+combined.Add(source1...)
+combined.Add(source2...)
+combined.Add(source3...)
 
-uniqueItems := combined.ToSlice()
+uniqueItems := combined.Slice()
 fmt.Printf("Unique items: %v\n", uniqueItems)
 // Result: All unique fruits from all sources
 ```
@@ -272,7 +272,7 @@ func (s *SafeSet[T]) Has(item T) bool {
 ## Best Practices
 
 1. **Use appropriate constructors**: `From()` for slices, `Of()` for individual elements
-2. **Check emptiness**: Use `IsEmpty()` rather than `Size() == 0`
+2. **Check emptiness**: Use `IsEmpty()` rather than `Len() == 0`
 3. **Immutable operations**: Set operations return new sets, leaving originals unchanged
 4. **Memory management**: Use `Clear()` to reuse sets rather than creating new ones
 5. **Type safety**: Leverage Go's type system - all elements must be the same comparable type

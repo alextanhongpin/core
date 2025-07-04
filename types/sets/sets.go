@@ -44,14 +44,24 @@ func New[T OrderedComparable](ts ...T) *Set[T] {
 	}
 }
 
-// FromSlice creates a new set from a slice, removing duplicates.
+// From creates a new set from a slice, removing duplicates.
 //
 // Example:
 //
 //	slice := []int{1, 2, 3, 2, 1}
-//	s := sets.FromSlice(slice) // Set contains {1, 2, 3}
-func FromSlice[T OrderedComparable](slice []T) *Set[T] {
+//	s := sets.From(slice) // Set contains {1, 2, 3}
+func From[T OrderedComparable](slice []T) *Set[T] {
 	return New(slice...)
+}
+
+// Of is an alias for New, providing a more readable way to create sets.
+//
+// Example:
+//
+//	s := sets.Of(1, 2, 3) // Set contains {1, 2, 3}
+func Of[T OrderedComparable](ts ...T) *Set[T] {
+	// Alias for New for better readability
+	return New(ts...)
 }
 
 // Add adds one or more elements to the set.
@@ -69,13 +79,13 @@ func (s *Set[T]) Add(ts ...T) {
 	}
 }
 
-// Delete removes one or more elements from the set.
+// Remove removes one or more elements from the set.
 // Removing non-existent elements has no effect.
 //
 // Example:
 //
-//	s.Delete(1, 2)
-func (s *Set[T]) Delete(ts ...T) {
+//	s.Remove(1, 2)
+func (s *Set[T]) Remove(ts ...T) {
 	if s.values == nil {
 		return
 	}
@@ -90,12 +100,7 @@ func (s *Set[T]) Delete(ts ...T) {
 //
 //	s.Clear() // Set becomes empty
 func (s *Set[T]) Clear() {
-	if s.values == nil {
-		return
-	}
-	for k := range s.values {
-		delete(s.values, k)
-	}
+	clear(s.values)
 }
 
 // Len returns the number of elements in the set.
@@ -161,12 +166,12 @@ func (s *Set[T]) All() []T {
 	return res
 }
 
-// ToSlice is an alias for All for better API consistency.
+// Slice is an alias for All for better API consistency.
 //
 // Example:
 //
-//	slice := s.ToSlice()
-func (s *Set[T]) ToSlice() []T {
+//	slice := s.Slice()
+func (s *Set[T]) Slice() []T {
 	return s.All()
 }
 
