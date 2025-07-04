@@ -3,6 +3,7 @@ package email_test
 import (
 	"fmt"
 	"log"
+	"sort"
 	"strings"
 
 	"github.com/alextanhongpin/core/types/email"
@@ -94,9 +95,9 @@ func ExampleDomain() {
 	}
 	// Output:
 	// Domain extraction:
-	// user@company.com      -> domain: 'company.com', local: 'user'
+	// user@company.com          -> domain: 'company.com', local: 'user'
 	// admin@subdomain.example.org -> domain: 'subdomain.example.org', local: 'admin'
-	// invalid-email         -> domain: '', local: ''
+	// invalid-email             -> domain: '', local: ''
 }
 
 // Example: Distinguishing business vs consumer emails
@@ -180,6 +181,9 @@ func (s *SubscriptionService) GetBusinessSubscribers() []*NewsletterSubscription
 			businessSubs = append(businessSubs, sub)
 		}
 	}
+	sort.Slice(businessSubs, func(i, j int) bool {
+		return businessSubs[i].Email < businessSubs[j].Email
+	})
 	return businessSubs
 }
 
@@ -216,16 +220,16 @@ func ExampleSubscriptionService() {
 
 	// Output:
 	// Newsletter subscription results:
-	// ✅   John.Doe@COMPANY.COM  : successfully subscribed
+	// ✅ john.doe@company.com: successfully subscribed
 	// ✅ jane@startup.io: successfully subscribed
 	// ✅ personal@gmail.com: successfully subscribed
 	// ❌ invalid-email: invalid email address: invalid-email
 	// ✅ admin@business.org: successfully subscribed
 	//
 	// Business subscribers (3):
-	// - John Doe <john.doe@company.com>
-	// - Jane Smith <jane@startup.io>
 	// - Admin User <admin@business.org>
+	// - Jane Smith <jane@startup.io>
+	// - John Doe <john.doe@company.com>
 }
 
 // Real-world example: Email domain analytics
@@ -277,13 +281,9 @@ func (ea *EmailAnalytics) TopDomains(limit int) []struct {
 	}
 
 	// Simple sort by count (descending)
-	for i := 0; i < len(results)-1; i++ {
-		for j := i + 1; j < len(results); j++ {
-			if results[j].Count > results[i].Count {
-				results[i], results[j] = results[j], results[i]
-			}
-		}
-	}
+	sort.SliceStable(results, func(i, j int) bool {
+		return results[i].Count > results[j].Count
+	})
 
 	if len(results) > limit {
 		results = results[:limit]
