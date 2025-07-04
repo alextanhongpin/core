@@ -6,9 +6,14 @@
 package random
 
 import (
-	"math/rand/v2"
 	"time"
 )
+
+var rng = New()
+
+func SetSeed(seed uint64) {
+	rng = rng.WithSeed(seed)
+}
 
 // Duration generates a random duration between 0 and the given maximum duration.
 // The result is always less than the input duration.
@@ -17,10 +22,7 @@ import (
 //
 //	randomDelay := random.Duration(5 * time.Second) // 0 to 5 seconds
 func Duration(max time.Duration) time.Duration {
-	if max <= 0 {
-		return 0
-	}
-	return time.Duration(rand.Int64N(max.Nanoseconds())) * time.Nanosecond
+	return rng.Duration(max)
 }
 
 // DurationBetween generates a random duration between the given minimum and maximum durations (inclusive of min, exclusive of max).
@@ -29,10 +31,7 @@ func Duration(max time.Duration) time.Duration {
 //
 //	randomDelay := random.DurationBetween(1*time.Second, 5*time.Second) // 1 to 5 seconds
 func DurationBetween(min, max time.Duration) time.Duration {
-	if max <= min {
-		return min
-	}
-	return Duration(max-min) + min
+	return rng.DurationBetween(min, max)
 }
 
 // Int generates a random integer between 0 and max (exclusive).
@@ -42,10 +41,7 @@ func DurationBetween(min, max time.Duration) time.Duration {
 //
 //	dice := random.Int(6) + 1 // 1 to 6
 func Int(max int) int {
-	if max <= 0 {
-		return 0
-	}
-	return rand.IntN(max)
+	return rng.Int(max)
 }
 
 // IntBetween generates a random integer between min (inclusive) and max (exclusive).
@@ -54,10 +50,7 @@ func Int(max int) int {
 //
 //	score := random.IntBetween(80, 100) // 80 to 99
 func IntBetween(min, max int) int {
-	if max <= min {
-		return min
-	}
-	return Int(max-min) + min
+	return rng.IntBetween(min, max)
 }
 
 // Float generates a random float64 between 0.0 and max (exclusive).
@@ -66,10 +59,7 @@ func IntBetween(min, max int) int {
 //
 //	percentage := random.Float(100.0) // 0.0 to 100.0
 func Float(max float64) float64 {
-	if max <= 0 {
-		return 0
-	}
-	return rand.Float64() * max
+	return rng.Float(max)
 }
 
 // FloatBetween generates a random float64 between min (inclusive) and max (exclusive).
@@ -78,10 +68,7 @@ func Float(max float64) float64 {
 //
 //	temperature := random.FloatBetween(20.0, 30.0) // 20.0 to 30.0
 func FloatBetween(min, max float64) float64 {
-	if max <= min {
-		return min
-	}
-	return Float(max-min) + min
+	return rng.FloatBetween(min, max)
 }
 
 // Bool generates a random boolean value with 50% probability for each.
@@ -90,7 +77,7 @@ func FloatBetween(min, max float64) float64 {
 //
 //	coinFlip := random.Bool() // true or false
 func Bool() bool {
-	return rand.IntN(2) == 1
+	return rng.Bool()
 }
 
 // BoolWithProbability generates a random boolean with the given probability of being true.
@@ -101,13 +88,7 @@ func Bool() bool {
 //	// 70% chance of being true
 //	likely := random.BoolWithProbability(0.7)
 func BoolWithProbability(probability float64) bool {
-	if probability <= 0 {
-		return false
-	}
-	if probability >= 1 {
-		return true
-	}
-	return rand.Float64() < probability
+	return rng.BoolWithProbability(probability)
 }
 
 // Choice returns a random element from the given slice.
@@ -122,7 +103,7 @@ func Choice[T any](items []T) T {
 	if len(items) == 0 {
 		return zero
 	}
-	return items[rand.IntN(len(items))]
+	return items[rng.Int(len(items))]
 }
 
 // Choices returns n random elements from the given slice with replacement.
@@ -138,8 +119,8 @@ func Choices[T any](items []T, n int) []T {
 	}
 
 	result := make([]T, n)
-	for i := 0; i < n; i++ {
-		result[i] = items[rand.IntN(len(items))]
+	for i := range n {
+		result[i] = items[rng.Int(len(items))]
 	}
 	return result
 }
@@ -178,7 +159,7 @@ func Sample[T any](items []T, n int) []T {
 //	playlist := []string{"song1", "song2", "song3"}
 //	random.Shuffle(playlist) // playlist is now shuffled
 func Shuffle[T any](items []T) {
-	rand.Shuffle(len(items), func(i, j int) {
+	rng.rand.Shuffle(len(items), func(i, j int) {
 		items[i], items[j] = items[j], items[i]
 	})
 }
@@ -191,19 +172,7 @@ func Shuffle[T any](items []T) {
 //	id := random.String(8, "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
 //	token := random.String(32, "") // Uses default alphanumeric
 func String(length int, charset string) string {
-	if length <= 0 {
-		return ""
-	}
-
-	if charset == "" {
-		charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-	}
-
-	result := make([]byte, length)
-	for i := 0; i < length; i++ {
-		result[i] = charset[rand.IntN(len(charset))]
-	}
-	return string(result)
+	return rng.String(length, charset)
 }
 
 // AlphaNumeric generates a random alphanumeric string of the given length.
@@ -212,7 +181,7 @@ func String(length int, charset string) string {
 //
 //	sessionID := random.AlphaNumeric(16) // "a1B2c3D4e5F6g7H8"
 func AlphaNumeric(length int) string {
-	return String(length, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
+	return rng.AlphaNumeric(length)
 }
 
 // Hex generates a random hexadecimal string of the given length.
@@ -221,5 +190,5 @@ func AlphaNumeric(length int) string {
 //
 //	color := "#" + random.Hex(6) // "#a1b2c3"
 func Hex(length int) string {
-	return String(length, "0123456789abcdef")
+	return rng.Hex(length)
 }

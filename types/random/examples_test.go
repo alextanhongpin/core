@@ -9,12 +9,16 @@ import (
 	"github.com/alextanhongpin/core/types/random"
 )
 
+func init() {
+	random.SetSeed(42)
+}
+
 // Example: Load Testing with Random Delays
 func ExampleDuration_loadTesting() {
 	// Simulate random delays in load testing to avoid thundering herd
 	fmt.Println("Simulating load test with random delays...")
 
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		// Random delay between requests (0-2 seconds)
 		delay := random.Duration(2 * time.Second)
 		fmt.Printf("Request %d: waiting %v\n", i+1, delay.Truncate(time.Millisecond))
@@ -25,9 +29,9 @@ func ExampleDuration_loadTesting() {
 
 	// Output:
 	// Simulating load test with random delays...
-	// Request 1: waiting 1s
-	// Request 2: waiting 500ms
-	// Request 3: waiting 1s500ms
+	// Request 1: waiting 405ms
+	// Request 2: waiting 1.094s
+	// Request 3: waiting 380ms
 }
 
 // Example: Retry with Exponential Backoff + Jitter
@@ -37,7 +41,7 @@ func ExampleDurationBetween_retryBackoff() {
 	baseDelay := 100 * time.Millisecond
 	maxRetries := 3
 
-	for attempt := 0; attempt < maxRetries; attempt++ {
+	for attempt := range maxRetries {
 		// Exponential backoff: 100ms, 200ms, 400ms
 		backoff := time.Duration(1<<attempt) * baseDelay
 
@@ -56,9 +60,9 @@ func ExampleDurationBetween_retryBackoff() {
 
 	// Output:
 	// Retry with exponential backoff and jitter:
-	// Attempt 1: backoff 100ms, actual delay 87ms
-	// Attempt 2: backoff 200ms, actual delay 225ms
-	// Attempt 3: backoff 400ms, actual delay 450ms
+	// Attempt 1: backoff 100ms, actual delay 95ms
+	// Attempt 2: backoff 200ms, actual delay 160ms
+	// Attempt 3: backoff 400ms, actual delay 319ms
 }
 
 // Example: Game Mechanics - Random Damage and Dice Rolling
@@ -89,8 +93,8 @@ func ExampleIntBetween_gameMechanics() {
 
 	// Output:
 	// RPG Game Mechanics:
-	// Player attacks for 18 damage (range: 16-24)
-	// Skill check: rolled 15 + 10 bonus = 25
+	// Player attacks for 22 damage (range: 16-24)
+	// Skill check: rolled 18 + 10 bonus = 28
 	// Critical hit: false
 }
 
@@ -120,14 +124,14 @@ func ExampleBoolWithProbability_abTesting() {
 
 	// Output:
 	// A/B Testing Simulation:
-	// User 1: old feature
-	// User 2: NEW feature
+	// User 1: NEW feature
+	// User 2: old feature
 	// User 3: old feature
 	// User 4: old feature
-	// User 5: NEW feature
+	// User 5: old feature
 	// User 6: old feature
 	// User 7: old feature
-	// User 8: old feature
+	// User 8: NEW feature
 	// User 9: NEW feature
 	// User 10: old feature
 	//
@@ -149,7 +153,7 @@ func ExampleChoice_contentRecommendation() {
 
 	// Recommend content based on preferences + some randomness
 	fmt.Println("Recommendations for user:")
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		var recommendation string
 
 		// 70% chance to pick from user preferences, 30% random discovery
@@ -167,7 +171,7 @@ func ExampleChoice_contentRecommendation() {
 	// Recommendations for user:
 	// - Technology (based on your interests)
 	// - Science (based on your interests)
-	// - Entertainment (discover something new)
+	// - Technology (discover something new)
 }
 
 // Example: Playlist Shuffling and Music Recommendations
@@ -214,16 +218,16 @@ func ExampleShuffle_musicPlaylist() {
 	// ...
 	//
 	// Shuffled playlist:
-	// 1. Purple Haze
-	// 2. Imagine
-	// 3. Billie Jean
+	// 1. Sweet Child O' Mine
+	// 2. Bohemian Rhapsody
+	// 3. Stairway to Heaven
 	// ...
 	//
 	// Quick Mix (4 random songs):
-	// 1. Hotel California
-	// 2. Yesterday
-	// 3. Sweet Child O' Mine
-	// 4. Like a Rolling Stone
+	// 1. Purple Haze
+	// 2. Imagine
+	// 3. Bohemian Rhapsody
+	// 4. Hotel California
 }
 
 // Example: Session ID and Token Generation
@@ -248,10 +252,10 @@ func ExampleAlphaNumeric_sessionManagement() {
 
 	// Output:
 	// Session Management:
-	// Session ID: a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6
-	// CSRF Token: X1Y2Z3A4B5C6D7E8
-	// Temp Password: Km8Qw3Rt7Yp2
-	// Avatar Color: #a1c4f7
+	// Session ID: 9gSWr8uv8aS4wnpfRASRLcSloABYdWs4
+	// CSRF Token: D5hj7D7b5j2oD9AB
+	// Temp Password: fxmDJNZ8DFr6
+	// Avatar Color: #61beb9
 }
 
 // Example: Chaos Engineering - Random Failures
@@ -294,15 +298,15 @@ func ExampleBoolWithProbability_chaosEngineering() {
 	// Chaos Engineering Simulation:
 	// Request 1: SUCCESS
 	// Request 2: SUCCESS
-	// Request 3: FAILED - API error
+	// Request 3: SUCCESS
 	// Request 4: SUCCESS
 	// Request 5: SUCCESS
 	// Request 6: SUCCESS
 	// Request 7: SUCCESS
 	// Request 8: SUCCESS
 	// Request 9: SUCCESS
-	// Request 10: SUCCESS
-	// Request 11: SUCCESS
+	// Request 10: FAILED - Database error
+	// Request 11: FAILED - Database error
 	// Request 12: SUCCESS
 	// Request 13: SUCCESS
 	// Request 14: SUCCESS
@@ -313,27 +317,27 @@ func ExampleBoolWithProbability_chaosEngineering() {
 	// Request 19: SUCCESS
 	// Request 20: SUCCESS
 	//
-	// Summary: 19 successful, 1 failed (95.0% success rate)
+	// Summary: 18 successful, 2 failed (90.0% success rate)
 }
 
 // Example: Test Data Generation
 func TestDataGeneration(t *testing.T) {
 	// Generate test users
 	userCount := 5
-	users := make([]map[string]interface{}, userCount)
+	users := make([]map[string]any, userCount)
 
 	firstNames := []string{"Alice", "Bob", "Charlie", "Diana", "Eve", "Frank", "Grace", "Henry"}
 	lastNames := []string{"Smith", "Johnson", "Williams", "Brown", "Jones", "Garcia", "Miller", "Davis"}
 	domains := []string{"gmail.com", "yahoo.com", "hotmail.com", "outlook.com"}
 
-	for i := 0; i < userCount; i++ {
+	for i := range userCount {
 		firstName := random.Choice(firstNames)
 		lastName := random.Choice(lastNames)
 		age := random.IntBetween(18, 65)
 		email := fmt.Sprintf("%s.%s@%s",
 			firstName, lastName, random.Choice(domains))
 
-		users[i] = map[string]interface{}{
+		users[i] = map[string]any{
 			"id":        random.AlphaNumeric(8),
 			"firstName": firstName,
 			"lastName":  lastName,
@@ -405,16 +409,16 @@ func ExampleFloat_circuitBreaker() {
 
 	// Output:
 	// Circuit Breaker Simulation:
-	// Request 1: SUCCESS (load: 0.81, failure rate: 24.3%)
-	// Request 2: SUCCESS (load: 0.23, failure rate: 6.9%)
-	// Request 3: SUCCESS (load: 0.45, failure rate: 13.5%)
-	// Request 4: FAILED (load: 0.92, failure rate: 27.6%)
-	// Request 5: SUCCESS (load: 0.34, failure rate: 10.2%)
-	// Request 6: SUCCESS (load: 0.12, failure rate: 3.6%)
-	// Request 7: SUCCESS (load: 0.67, failure rate: 20.1%)
-	// Request 8: SUCCESS (load: 0.29, failure rate: 8.7%)
-	// Request 9: FAILED (load: 0.88, failure rate: 26.4%)
-	// Request 10: SUCCESS (load: 0.56, failure rate: 16.8%)
+	// Request 1: SUCCESS (load: 0.77, failure rate: 23.1%)
+	// Request 2: SUCCESS (load: 0.28, failure rate: 8.3%)
+	// Request 3: FAILED (load: 0.66, failure rate: 19.9%)
+	// Request 4: SUCCESS (load: 0.61, failure rate: 18.3%)
+	// Request 5: SUCCESS (load: 0.36, failure rate: 10.7%)
+	// Request 6: SUCCESS (load: 0.65, failure rate: 19.6%)
+	// Request 7: SUCCESS (load: 0.37, failure rate: 11.2%)
+	// Request 8: SUCCESS (load: 0.28, failure rate: 8.3%)
+	// Request 9: SUCCESS (load: 0.23, failure rate: 6.9%)
+	// Request 10: FAILED (load: 0.87, failure rate: 26.2%)
 	//
 	// Circuit Status: CLOSED (20.0% failure rate <= 50.0% threshold)
 }
@@ -427,25 +431,25 @@ func BenchmarkOperations(b *testing.B) {
 	}
 
 	b.Run("Duration", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			_ = random.Duration(time.Second)
 		}
 	})
 
 	b.Run("IntBetween", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			_ = random.IntBetween(0, 1000)
 		}
 	})
 
 	b.Run("Choice", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			_ = random.Choice(items)
 		}
 	})
 
 	b.Run("AlphaNumeric", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			_ = random.AlphaNumeric(16)
 		}
 	})
@@ -453,7 +457,7 @@ func BenchmarkOperations(b *testing.B) {
 	b.Run("Shuffle", func(b *testing.B) {
 		itemsCopy := make([]int, len(items))
 		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			copy(itemsCopy, items)
 			random.Shuffle(itemsCopy)
 		}
