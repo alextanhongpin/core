@@ -32,12 +32,12 @@ func ExampleTransition() {
 	fmt.Println(sm.State())
 	fmt.Println(sm.TransitionTo(Failed, "reject"))
 	// Output:
-	// false
+	// invalid transition from pending to pending
 	// true
 	// true
 	// false
 	// false
-	// true
+	// <nil>
 	// success
-	// false
+	// invalid transition from success to failed
 }

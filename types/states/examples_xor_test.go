@@ -15,7 +15,7 @@ func ExampleXOR() {
 	var p Party
 	p.Person = true
 
-	fmt.Println(states.XOR(true, p.Person, p.Organization))
+	fmt.Println(states.XOR(p.Person, p.Organization))
 	// Output:
 	// true
 }

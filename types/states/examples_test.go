@@ -324,7 +324,7 @@ func ExampleStateMachine_transactionProcessing() {
 	// Add audit logging
 	tx.AddListener(func(from, to TransactionState, transitionName string) {
 		fmt.Printf("[AUDIT] Transaction %s: %s -> %s at %s\n",
-			transitionName, from, to, time.Now().Format("15:04:05"))
+			transitionName, from, to, time.Date(2025, 1, 1, 15, 04, 05, 0, time.Local).Format("15:04:05"))
 	})
 
 	// Process transaction

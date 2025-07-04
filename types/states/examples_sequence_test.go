@@ -44,5 +44,5 @@ func ExampleNewSequence() {
 	// step 4: status=success valid=true
 	//
 	// has next?  false
-	// invalid: status=unknown valid=false
+	// invalid: status=failed valid=false
 }
