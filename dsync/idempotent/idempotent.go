@@ -235,22 +235,84 @@ func newToken() string {
 
 type muKey struct {
 	mu   sync.Mutex
-	keys map[string]*sync.Mutex
+	keys map[string]*keyEntry
+}
+
+type keyEntry struct {
+	mu      *sync.Mutex
+	refs    int
+	lastUse time.Time
 }
 
 func newMuKey() *muKey {
-	return &muKey{
-		keys: make(map[string]*sync.Mutex),
+	mk := &muKey{
+		keys: make(map[string]*keyEntry),
 	}
+
+	// Start a cleanup goroutine to remove unused mutexes
+	go mk.cleanup()
+
+	return mk
 }
 
 func (m *muKey) Key(key string) sync.Locker {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if _, ok := m.keys[key]; !ok {
-		m.keys[key] = new(sync.Mutex)
+	entry, ok := m.keys[key]
+	if !ok {
+		entry = &keyEntry{
+			mu:      new(sync.Mutex),
+			refs:    0,
+			lastUse: time.Now(),
+		}
+		m.keys[key] = entry
 	}
 
-	return m.keys[key]
+	entry.refs++
+	entry.lastUse = time.Now()
+
+	return &keyLock{
+		mu:    entry.mu,
+		entry: entry,
+		mk:    m,
+		key:   key,
+	}
+}
+
+func (m *muKey) cleanup() {
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		m.mu.Lock()
+		now := time.Now()
+		for key, entry := range m.keys {
+			// Remove entries that haven't been used for 10 minutes and have no active references
+			if entry.refs == 0 && now.Sub(entry.lastUse) > 10*time.Minute {
+				delete(m.keys, key)
+			}
+		}
+		m.mu.Unlock()
+	}
+}
+
+type keyLock struct {
+	mu    *sync.Mutex
+	entry *keyEntry
+	mk    *muKey
+	key   string
+}
+
+func (k *keyLock) Lock() {
+	k.mu.Lock()
+}
+
+func (k *keyLock) Unlock() {
+	k.mu.Unlock()
+
+	// Decrement reference count
+	k.mk.mu.Lock()
+	k.entry.refs--
+	k.mk.mu.Unlock()
 }
