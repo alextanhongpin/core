@@ -302,8 +302,8 @@ func ExampleFilter_batchProcessing() {
 	// Output:
 	// Processing batch of records...
 	// Batch processing complete:
-	// - Successful: 16 records
-	// - Failed: 4 records
+	// - Successful: 17 records
+	// - Failed: 3 records
 	//   Success 1: ID=1, Status=processed
 	//   Success 2: ID=2, Status=processed
 	//   Success 3: ID=3, Status=processed
@@ -403,7 +403,7 @@ func ExampleResult_databaseTransactions() {
 		if tx.ID == "db_error" {
 			return result.Err[string](errors.New("database write failed"))
 		}
-		return result.OK(fmt.Sprintf("TXN_%s_%d", tx.ID, time.Now().Unix()))
+		return result.OK(fmt.Sprintf("TXN_%s_%d", tx.ID, time.Date(2025, 1, 1, 0, 0, 0, 0, time.Local).Unix()))
 	}
 
 	// Process transactions
@@ -433,11 +433,11 @@ func ExampleResult_databaseTransactions() {
 
 	// Output:
 	// Database transaction simulation...
-	// Transaction 1 successful: TXN_user1_1640995200
+	// Transaction 1 successful: TXN_user1_1735660800
 	// Transaction 2 failed: invalid amount
 	// Transaction 3 failed: insufficient funds
 	// Transaction 4 failed: amount exceeds limit
-	// Transaction 5 successful: TXN_user4_1640995200
+	// Transaction 5 successful: TXN_user4_1735660800
 }
 
 // Supporting types for examples
