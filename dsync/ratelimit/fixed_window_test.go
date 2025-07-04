@@ -113,6 +113,6 @@ func TestFixedWindow_Expiry(t *testing.T) {
 
 		resetAfter, err := rl.ResetAfter(ctx, key)
 		is.Nil(err)
-		is.LessOrEqual(10*time.Second, resetAfter)
+		is.LessOrEqual(resetAfter, 10*time.Second)
 	})
 }
