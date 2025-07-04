@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"maps"
 	"net/http"
+	"slices"
 
 	"github.com/alextanhongpin/core/types/assert"
 )
@@ -212,13 +214,15 @@ func ExampleOrder_Validate() {
 
 	if errors := order.Validate(); len(errors) > 0 {
 		fmt.Println("Order validation errors:")
-		for field, err := range errors {
+		field := slices.Sorted(maps.Keys(errors))
+		for _, field := range field {
+			err := errors[field]
 			fmt.Printf("  %s: %s\n", field, err)
 		}
 	}
 	// Output:
 	// Order validation errors:
 	//   items[1].price: must be greater than 0
-	//   items[1].product_id: required
-	//   items[1].quantity: must be between 1 and 100
+	//   items[1].product_id: required, must be at least 1 characters
+	//   items[1].quantity: required, must be between 1 and 100
 }
