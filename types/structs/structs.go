@@ -5,7 +5,9 @@ package structs
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"reflect"
+	"slices"
 	"strings"
 )
 
@@ -116,16 +118,18 @@ func GetFields(v any) (map[string]any, error) {
 		return nil, fmt.Errorf("value is not a struct")
 	}
 
-	data, err := toMap(v)
-	if err != nil {
-		return nil, err
+	t := reflect.TypeOf(v)
+	if t.Kind() == reflect.Ptr {
+		t = t.Elem()
 	}
 
-	if mapData, ok := data.(map[string]any); ok {
-		return mapData, nil
+	result := make(map[string]any)
+	for i := 0; i < t.NumField(); i++ {
+		field := t.Field(i)
+		result[field.Name] = reflect.ValueOf(v).Field(i).Interface()
 	}
 
-	return nil, fmt.Errorf("failed to convert struct to map")
+	return result, nil
 }
 
 // HasField checks if a struct has a field with the given name.
@@ -234,7 +238,10 @@ func validateNonZero(path string, v any) error {
 		if len(data) == 0 {
 			return newFieldError(path)
 		}
-		for key, value := range data {
+
+		keys := slices.Sorted(maps.Keys(data))
+		for _, key := range keys {
+			value := data[key]
 			if err := validateNonZero(joinPath(path, key), value); err != nil {
 				return err
 			}

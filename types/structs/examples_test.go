@@ -3,7 +3,9 @@ package structs_test
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"reflect"
+	"slices"
 	"testing"
 	"time"
 
@@ -31,7 +33,7 @@ type Profile struct {
 	Avatar   string `json:"avatar"`
 }
 
-type Metadata map[string]interface{}
+type Metadata map[string]any
 
 type Product struct {
 	Name        string  `json:"name"`
@@ -94,6 +96,13 @@ func ExampleGetFields_fieldAnalysis() {
 	// Get specific field value
 	if email, err := structs.GetFieldValue(user, "Email"); err == nil {
 		fmt.Printf("Email: %s\n", email)
+		if fields["Email"] == email {
+			fmt.Println("Email field matches the value in fields map")
+		} else {
+			fmt.Println("Email field does not match the value in fields map")
+		}
+	} else {
+		fmt.Println(err)
 	}
 
 	// Output:
@@ -102,6 +111,7 @@ func ExampleGetFields_fieldAnalysis() {
 	// Has Name field: true
 	// Has Password field: false
 	// Email: alice@example.com
+	// Email field matches the value in fields map
 }
 
 // Example: Struct Tag Analysis
@@ -116,34 +126,39 @@ func ExampleGetTags_tagAnalysis() {
 	}
 
 	fmt.Println("JSON tags:")
-	for field, tag := range jsonTags {
+	fields := slices.Sorted(maps.Keys(jsonTags))
+	for _, field := range fields {
+		tag := jsonTags[field]
 		fmt.Printf("  %s: %s\n", field, tag)
 	}
 
 	// Get validation tags
 	validateTags, _ := structs.GetTags(user, "validate")
 	fmt.Println("\nValidation tags:")
-	for field, tag := range validateTags {
+
+	fields = slices.Sorted(maps.Keys(validateTags))
+	for _, field := range fields {
+		tag := validateTags[field]
 		fmt.Printf("  %s: %s\n", field, tag)
 	}
 
 	// Output:
 	// JSON tags:
-	//   ID: id
-	//   Name: name
-	//   Email: email
-	//   Age: age
 	//   Active: active
-	//   Profile: profile,omitempty
-	//   Metadata: metadata
-	//   Tags: tags
+	//   Age: age
 	//   CreatedAt: created_at
+	//   Email: email
+	//   ID: id
+	//   Metadata: metadata
+	//   Name: name
+	//   Profile: profile,omitempty
+	//   Tags: tags
 	//
 	// Validation tags:
+	//   Age: min=0,max=150
+	//   Email: required,email
 	//   ID: required
 	//   Name: required,min=2
-	//   Email: required,email
-	//   Age: min=0,max=150
 }
 
 // Example: Struct Validation
@@ -156,7 +171,10 @@ func ExampleNonZero_validation() {
 		Age:    30,
 		Active: true,
 		Profile: &Profile{
-			Bio: "Software Engineer",
+			Bio:      "Software Engineer",
+			Website:  "https://alice.dev",
+			Avatar:   "https://alice.dev/avatar.png",
+			Location: "Wonderland",
 		},
 		Metadata:  Metadata{"role": "admin"},
 		Tags:      []string{"premium"},
@@ -186,7 +204,7 @@ func ExampleNonZero_validation() {
 
 	// Output:
 	// Valid user: all fields non-zero ✓
-	// Invalid user - Field: Name, Path: structs_test.User.Name
+	// Invalid user - Field: active, Path: structs_test.User.active
 }
 
 // Example: Struct Cloning
@@ -233,7 +251,7 @@ func ExampleClone_structCloning() {
 // Example: Type Checking and Nil Handling
 func ExampleIsNil_typeChecking() {
 	var user *User
-	var iface interface{}
+	var iface any
 	var slice []string
 	var m map[string]int
 
@@ -317,15 +335,15 @@ func ExampleNonZero_configValidation() {
 
 	// Output:
 	// Configuration is valid ✓
-	// Missing required field: Password
+	// Missing required field: password
 }
 
 // Example: API Response Processing
 func ExampleGetFields_apiProcessing() {
 	type APIResponse struct {
-		Success bool                   `json:"success"`
-		Data    map[string]interface{} `json:"data"`
-		Error   string                 `json:"error,omitempty"`
+		Success bool           `json:"success"`
+		Data    map[string]any `json:"data"`
+		Error   string         `json:"error,omitempty"`
 		Meta    struct {
 			Page  int `json:"page"`
 			Total int `json:"total"`
@@ -334,8 +352,8 @@ func ExampleGetFields_apiProcessing() {
 
 	response := APIResponse{
 		Success: true,
-		Data: map[string]interface{}{
-			"users": []map[string]interface{}{
+		Data: map[string]any{
+			"users": []map[string]any{
 				{"id": 1, "name": "Alice"},
 				{"id": 2, "name": "Bob"},
 			},
@@ -356,7 +374,7 @@ func ExampleGetFields_apiProcessing() {
 	fmt.Printf("Has error field: %v\n", structs.HasField(response, "Error"))
 
 	// Check if response indicates success
-	if success, ok := fields["success"].(bool); ok && success {
+	if success, ok := fields["Success"].(bool); ok && success {
 		fmt.Println("API call was successful")
 	}
 
@@ -392,6 +410,11 @@ func ExampleNonZero_builderPattern() {
 		return ub
 	}
 
+	withTags := func(ub *UserBuilder, tags []string) *UserBuilder {
+		ub.user.Tags = tags
+		return ub
+	}
+
 	build := func(ub *UserBuilder) (User, error) {
 		// Validate required fields before building
 		if err := structs.NonZero(ub.user); err != nil {
@@ -402,9 +425,14 @@ func ExampleNonZero_builderPattern() {
 
 	// Build a valid user
 	builder := newUserBuilder()
+	builder.user.Age = 25                             // Optional field, can be set later
+	builder.user.Active = true                        // Optional field, can be set later
+	builder.user.Metadata = Metadata{"role": "admin"} // Optional field, can be set later
+
 	builder = withID(builder, 1)
 	builder = withName(builder, "Alice")
 	builder = withEmail(builder, "alice@example.com")
+	builder = withTags(builder, []string{"admin", "premium"})
 
 	user, err := build(builder)
 	if err != nil {
@@ -426,7 +454,7 @@ func ExampleNonZero_builderPattern() {
 
 	// Output:
 	// Built user: Alice (alice@example.com)
-	// Validation caught missing field: user validation failed: field "Email" is empty
+	// Validation caught missing field: user validation failed: field "active" is empty
 }
 
 // Example: Dynamic Field Processing
@@ -501,7 +529,7 @@ func TestStructIntrospection(t *testing.T) {
 		assert := assert.New(t)
 
 		var user *User
-		var iface interface{}
+		var iface any
 		var slice []string
 
 		assert.True(structs.IsNil(user))
@@ -561,9 +589,9 @@ func TestFieldOperations(t *testing.T) {
 
 		fields, err := structs.GetFields(user)
 		assert.NoError(err)
-		assert.Equal(float64(1), fields["id"]) // JSON unmarshaling converts int to float64
-		assert.Equal("Alice", fields["name"])
-		assert.Equal("alice@example.com", fields["email"])
+		assert.Equal(1, fields["ID"]) // JSON unmarshaling converts int to float64
+		assert.Equal("Alice", fields["Name"])
+		assert.Equal("alice@example.com", fields["Email"])
 	})
 }
 
@@ -608,12 +636,17 @@ func TestValidation(t *testing.T) {
 		assert := assert.New(t)
 
 		user := User{
-			ID:        1,
-			Name:      "Alice",
-			Email:     "alice@example.com",
-			Age:       30,
-			Active:    true,
-			Profile:   &Profile{Bio: "Engineer"},
+			ID:     1,
+			Name:   "Alice",
+			Email:  "alice@example.com",
+			Age:    30,
+			Active: true,
+			Profile: &Profile{
+				Avatar:   "https://alice.dev/avatar.png",
+				Bio:      "Engineer",
+				Website:  "https://alice.dev",
+				Location: "Wonderland",
+			},
 			Metadata:  Metadata{"role": "admin"},
 			Tags:      []string{"premium"},
 			CreatedAt: time.Now(),
@@ -637,17 +670,22 @@ func TestValidation(t *testing.T) {
 
 		var fieldErr *structs.FieldError
 		assert.True(errors.As(err, &fieldErr))
-		assert.Equal("Name", fieldErr.Field)
+		assert.Equal("active", fieldErr.Field)
 	})
 
 	t.Run("Invalid struct - empty nested struct", func(t *testing.T) {
 		assert := assert.New(t)
 
 		user := User{
-			ID:      1,
-			Name:    "Alice",
-			Email:   "alice@example.com",
-			Profile: &Profile{}, // Empty profile
+			ID:        1,
+			Name:      "Alice",
+			Email:     "alice@example.com",
+			Profile:   new(Profile), // Empty profile
+			Active:    true,
+			Tags:      []string{"admin"},
+			CreatedAt: time.Now(),
+			Age:       30,
+			Metadata:  Metadata{"role": "admin"},
 		}
 
 		err := structs.NonZero(user)
@@ -655,7 +693,7 @@ func TestValidation(t *testing.T) {
 
 		var fieldErr *structs.FieldError
 		assert.True(errors.As(err, &fieldErr))
-		assert.Contains(fieldErr.Path, "Profile")
+		assert.Contains(fieldErr.Path, "profile.avatar")
 	})
 }
 
@@ -712,7 +750,7 @@ func BenchmarkTypeIntrospection(b *testing.B) {
 	user := User{ID: 1, Name: "Alice"}
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_ = structs.Type(user)
 		_ = structs.Name(user)
 		_ = structs.IsStruct(user)
@@ -723,7 +761,7 @@ func BenchmarkFieldOperations(b *testing.B) {
 	user := User{ID: 1, Name: "Alice", Email: "alice@example.com"}
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_ = structs.HasField(user, "Name")
 		_, _ = structs.GetFieldValue(user, "Email")
 	}
@@ -741,7 +779,7 @@ func BenchmarkValidation(b *testing.B) {
 	}
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_ = structs.NonZero(user)
 	}
 }
@@ -756,7 +794,7 @@ func BenchmarkCloning(b *testing.B) {
 	}
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_, _ = structs.Clone(user)
 	}
 }
