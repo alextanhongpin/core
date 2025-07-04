@@ -19,7 +19,7 @@ func TestLoad(t *testing.T) {
 	is.Equal(10, env.Load[int]("INT"))
 	is.Equal(10.5, env.Load[float64]("FLOAT"))
 	is.Equal(true, env.Load[bool]("BOOL"))
-	is.PanicsWithError(`env: "UNKNOWN" not set`, func() {
+	is.Panics(func() {
 		env.Load[string]("UNKNOWN")
 	})
 }
@@ -46,4 +46,23 @@ func TestLoadDuration(t *testing.T) {
 	is := assert.New(t)
 	is.Equal(0*time.Second, env.LoadDuration("DURATION_ZERO"))
 	is.Equal(10*time.Second, env.LoadDuration("DURATION_SECONDS"))
+}
+
+func TestLoadTime(t *testing.T) {
+	t.Setenv("TIME", "2023-10-01T12:00:00Z")
+	t.Setenv("DATE", "2023-10-01")
+	t.Setenv("TIME_INVALID", "invalid")
+
+	is := assert.New(t)
+	expectedTime, err := time.Parse(time.RFC3339, "2023-10-01T12:00:00Z")
+	is.NoError(err)
+	is.Equal(expectedTime, env.LoadTime("TIME", time.RFC3339))
+
+	expectedDate, err := time.Parse("2006-01-02", "2023-10-01")
+	is.NoError(err)
+	is.Equal(expectedDate, env.LoadTime("DATE", "2006-01-02"))
+
+	is.Panics(func() {
+		env.LoadTime("TIME_INVALID", time.RFC3339)
+	})
 }

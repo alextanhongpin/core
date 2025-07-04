@@ -6,7 +6,6 @@ package env
 import (
 	"fmt"
 	"os"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -29,36 +28,20 @@ type Parseable interface {
 // Returns an error if the parsing fails.
 func Parse[T Parseable](str string) (T, error) {
 	var v T
-	switch any(v).(type) {
-	case string:
-		return any(str).(T), nil
-	case bool:
-		b, err := strconv.ParseBool(str)
-		if err != nil {
-			return v, fmt.Errorf("%w: %s", ErrParseFailed, err)
-		}
-		return any(b).(T), nil
-	default:
-		_, err := fmt.Sscanf(str, "%v", &v)
-		if err != nil {
-			return v, fmt.Errorf("%w: %s", ErrParseFailed, err)
-		}
-		return v, nil
+	_, err := fmt.Sscanf(str, "%v", &v)
+	if err != nil {
+		return v, fmt.Errorf("%w: %s", ErrParseFailed, err)
 	}
+	return v, nil
 }
 
 // Load reads an environment variable and parses it to type T.
 // Panics if the variable is not set or cannot be parsed.
 // Use this for required configuration that should fail fast.
 func Load[T Parseable](name string) T {
-	s, err := lookupEnv(name)
+	v, err := Get[T](name)
 	if err != nil {
 		panic(err)
-	}
-
-	v, err := Parse[T](strings.TrimSpace(s))
-	if err != nil {
-		panic(fmt.Errorf("%w: variable %s", err, name))
 	}
 
 	return v
@@ -95,14 +78,9 @@ func GetWithDefault[T Parseable](name string, defaultValue T) T {
 // LoadDuration reads an environment variable and parses it as a time.Duration.
 // Panics if the variable is not set or cannot be parsed.
 func LoadDuration(name string) time.Duration {
-	s, err := lookupEnv(name)
+	d, err := GetDuration(name)
 	if err != nil {
 		panic(err)
-	}
-
-	d, err := time.ParseDuration(strings.TrimSpace(s))
-	if err != nil {
-		panic(fmt.Errorf("%w: variable %s: %s", ErrParseFailed, name, err))
 	}
 
 	return d
@@ -134,23 +112,50 @@ func GetDurationWithDefault(name string, defaultValue time.Duration) time.Durati
 	return d
 }
 
-// LoadSlice reads an environment variable and parses it as a slice of type T.
-// The string is split by the separator and each element is parsed.
-// Panics if the variable is not set or cannot be parsed.
-func LoadSlice[T Parseable](name string, sep string) []T {
-	v, err := lookupEnv(name)
+// LoadTime reads an environment variable and parses it as a time.Time using
+// the specified layout.
+func LoadTime(name, layout string) time.Time {
+	t, err := GetTime(name, layout)
 	if err != nil {
 		panic(err)
 	}
 
-	vs := strings.Split(v, sep)
-	res := make([]T, len(vs))
-	for i, s := range vs {
-		v, err := Parse[T](strings.TrimSpace(s))
-		if err != nil {
-			panic(fmt.Errorf("%w: variable %s at index %d", err, name, i))
-		}
-		res[i] = v
+	return t
+}
+
+// GetTime reads an environment variable and parses it as a time.Time using the
+// specified layout.
+func GetTime(name, layout string) (time.Time, error) {
+	s, err := lookupEnv(name)
+	if err != nil {
+		return time.Time{}, err
+	}
+
+	t, err := time.Parse(layout, strings.TrimSpace(s))
+	if err != nil {
+		return time.Time{}, fmt.Errorf("%w: variable %s: %s", ErrParseFailed, name, err)
+	}
+
+	return t, nil
+}
+
+// GetTimeWithDefault reads an environment variable and parses it as a
+// time.Time using the specified layout.
+func GetTimeWithDefault(name, layout string, defaultValue time.Time) time.Time {
+	t, err := GetTime(name, layout)
+	if err != nil {
+		return defaultValue
+	}
+	return t
+}
+
+// LoadSlice reads an environment variable and parses it as a slice of type T.
+// The string is split by the separator and each element is parsed.
+// Panics if the variable is not set or cannot be parsed.
+func LoadSlice[T Parseable](name string, sep string) []T {
+	res, err := GetSlice[T](name, sep)
+	if err != nil {
+		panic(err)
 	}
 
 	return res
