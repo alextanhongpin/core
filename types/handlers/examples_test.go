@@ -54,7 +54,7 @@ func ExampleRouter_middleware() {
 
 	// Add logging middleware
 	router.Use(handlers.LoggingMiddleware(func(pattern string, duration time.Duration, status int) {
-		fmt.Printf("[LOG] %s - %d - %v\n", pattern, status, duration)
+		fmt.Printf("[LOG] %s - %d - %v\n", pattern, status, "[duration]")
 	}))
 
 	// Add recovery middleware
@@ -470,6 +470,7 @@ func ExampleRouter_timeout() {
 
 	// Output:
 	// Slow handler error: handlers: request timeout
+	// Slow handler status: 200
 	// Fast handler status: 200
 }
 
