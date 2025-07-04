@@ -17,11 +17,14 @@ var (
 
 // JSON provides automatic JSON marshaling/unmarshaling for cache operations.
 // It wraps a Cacheable implementation and handles serialization transparently.
+// All methods that take value parameters expect pointers for unmarshaling operations.
 type JSON struct {
 	Cache Cacheable
 }
 
 // NewJSON creates a new JSON cache wrapper with the provided Redis client.
+// The returned JSON cache provides automatic serialization/deserialization
+// for Go structs and values.
 func NewJSON(client *redis.Client) *JSON {
 	return &JSON{
 		Cache: New(client),
@@ -47,6 +50,16 @@ func (s *JSON) Store(ctx context.Context, key string, value any, ttl time.Durati
 	}
 
 	return s.Cache.Store(ctx, key, b, ttl)
+}
+
+// StoreOnce stores a key's JSON value only if the key doesn't already exist.
+func (s *JSON) StoreOnce(ctx context.Context, key string, value any, ttl time.Duration) error {
+	b, err := json.Marshal(value)
+	if err != nil {
+		return err
+	}
+
+	return s.Cache.StoreOnce(ctx, key, b, ttl)
 }
 
 // LoadAndDelete atomically retrieves and deletes a JSON value from the cache.
@@ -86,7 +99,7 @@ func (s *JSON) CompareAndSwap(ctx context.Context, key string, old, value any, t
 
 func (s *JSON) LoadOrStore(ctx context.Context, key string, value any, getter func() (any, error), ttl time.Duration) (loaded bool, err error) {
 	// First, try to load from cache
-	err = s.Load(ctx, key, &value)
+	err = s.Load(ctx, key, value)
 	if err == nil {
 		return true, nil
 	}
@@ -114,7 +127,7 @@ func (s *JSON) LoadOrStore(ctx context.Context, key string, value any, getter fu
 	}
 
 	// Unmarshal the current value (either from cache or what we just stored)
-	if err := json.Unmarshal(curr, &value); err != nil {
+	if err := json.Unmarshal(curr, value); err != nil {
 		return false, err
 	}
 
@@ -148,4 +161,12 @@ func (s *JSON) Delete(ctx context.Context, keys ...string) (int64, error) {
 		return c.Delete(ctx, keys...)
 	}
 	return 0, ErrOperationNotSupported
+}
+
+// Expire sets a timeout on a key. After the timeout has expired, the key will automatically be deleted.
+func (s *JSON) Expire(ctx context.Context, key string, ttl time.Duration) error {
+	if c, ok := s.Cache.(*Cache); ok {
+		return c.Expire(ctx, key, ttl)
+	}
+	return ErrOperationNotSupported
 }

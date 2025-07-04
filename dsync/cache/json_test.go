@@ -156,4 +156,17 @@ func TestJSON(t *testing.T) {
 		is.True(loaded)
 		is.Equal(*u, *v)
 	})
+
+	t.Run("store once", func(t *testing.T) {
+		key := t.Name()
+		value := john
+
+		err := c.StoreOnce(ctx, key, value, time.Second)
+
+		is := assert.New(t)
+		is.NoError(err)
+
+		err = c.StoreOnce(ctx, key, value, time.Second)
+		is.ErrorIs(err, cache.ErrExists)
+	})
 }

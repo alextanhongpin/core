@@ -1,3 +1,29 @@
+// Package lock provides distributed locking mechanisms using Redis.
+//
+// The package offers two main implementations:
+//   - Basic Locker: Simple distributed locking with exponential backoff
+//   - PubSub Locker: Optimized locking using Redis pub/sub for faster acquisition
+//
+// Key features:
+//   - Automatic lock refresh during long operations
+//   - Context-based cancellation and timeouts
+//   - Configurable backoff strategies
+//   - Keyed mutexes to prevent local deadlocks
+//   - Comprehensive error handling
+//
+// Example usage:
+//
+//	client := redis.NewClient(&redis.Options{Addr: "localhost:6379"})
+//	locker := lock.New(client)
+//
+//	err := locker.Do(ctx, "resource-key", func(ctx context.Context) error {
+//		// Critical section
+//		return nil
+//	}, &lock.LockOption{
+//		Lock: 30 * time.Second,
+//		Wait: 10 * time.Second,
+//		RefreshRatio: 0.8,
+//	})
 package lock
 
 import (
