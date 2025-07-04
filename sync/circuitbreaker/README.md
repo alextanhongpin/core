@@ -55,6 +55,45 @@ func main() {
 }
 ```
 
+## 🚀 Examples
+
+### Simple Example
+
+A basic example showing circuit breaker functionality:
+
+```bash
+go run examples/simple/main.go
+```
+
+### Advanced Example
+
+A comprehensive example with metrics, callbacks, and multiple failure scenarios:
+
+```bash
+go run examples/main.go
+```
+
+### HTTP Client Example
+
+Real-world HTTP client integration with circuit breaker:
+
+```bash
+go run examples/http/main.go
+```
+
+### HTTP Transport Integration
+
+Use the provided `Transporter` to wrap any HTTP client:
+
+```go
+client := &http.Client{}
+cb := circuitbreaker.New()
+client.Transport = circuitbreaker.NewTransporter(client.Transport, cb)
+
+// Now all HTTP requests will go through the circuit breaker
+resp, err := client.Get("https://api.example.com/users")
+```
+
 ## Advanced Configuration
 
 You can customize defaults by modifying struct fields directly:
@@ -82,6 +121,26 @@ cb := &circuitbreaker.Breaker{
 1. **Closed**: all calls pass; failures and slow calls are counted.
 2. **Open**: calls immediately reject with `ErrBrokenCircuit`; after `BreakDuration`, transitions to half-open.
 3. **Half-Open**: allows exactly one probe call; if it succeeds and thresholds pass, closes; otherwise reopens.
+
+## 🔍 Monitoring & Observability
+
+The circuit breaker provides hooks for monitoring:
+
+```go
+cb := circuitbreaker.New()
+cb.OnStateChange = func(old, new circuitbreaker.Status) {
+    // Log state changes
+    log.Printf("Circuit breaker state: %s -> %s", old, new)
+    
+    // Send metrics to monitoring system
+    metrics.RecordStateChange(old.String(), new.String())
+    
+    // Send alerts for critical state changes
+    if new == circuitbreaker.Open {
+        alerting.SendAlert("Circuit breaker opened", "Service may be down")
+    }
+}
+```
 
 ## Testing
 

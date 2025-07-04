@@ -5,6 +5,7 @@ import (
 	"errors"
 	"math"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/alextanhongpin/core/sync/rate"
@@ -19,6 +20,61 @@ const (
 )
 
 var ErrBrokenCircuit = errors.New("circuit-breaker: broken")
+
+// Metrics contains runtime metrics for the circuit breaker.
+type Metrics struct {
+	TotalRequests      int64  // Total number of requests made
+	SuccessfulRequests int64  // Number of successful requests
+	FailedRequests     int64  // Number of failed requests
+	RejectedRequests   int64  // Number of requests rejected due to open circuit
+	StateTransitions   int64  // Number of state transitions
+	CurrentState       string // Current state as string
+}
+
+// Options configures the circuit breaker behavior.
+type Options struct {
+	// BreakDuration is how long the circuit breaker stays open before transitioning to half-open.
+	BreakDuration time.Duration
+
+	// FailureRatio is the ratio of failures that triggers the circuit breaker to open.
+	// Must be between 0.0 and 1.0. Default is 0.5 (50%).
+	FailureRatio float64
+
+	// FailureThreshold is the minimum number of failures before the circuit breaker can open.
+	// Default is 10.
+	FailureThreshold int
+
+	// SamplingDuration is the time window to measure the error rate.
+	// Default is 10 seconds.
+	SamplingDuration time.Duration
+
+	// SuccessThreshold is the minimum number of successes in half-open state before closing.
+	// Default is 5.
+	SuccessThreshold int
+
+	// FailureCount is a function that returns the penalty count for a given error.
+	// Default behavior ignores context cancellation and gives heavier penalty for timeouts.
+	FailureCount func(error) int
+
+	// SlowCallCount is a function that returns the penalty count for slow calls.
+	// Default behavior gives 1 penalty point per 5 seconds of execution time.
+	SlowCallCount func(time.Duration) int
+
+	// OnStateChange is called when the circuit breaker changes state.
+	OnStateChange func(old, new Status)
+
+	// OnRequest is called before each request is processed.
+	OnRequest func()
+
+	// OnSuccess is called after each successful request.
+	OnSuccess func(duration time.Duration)
+
+	// OnFailure is called after each failed request.
+	OnFailure func(err error, duration time.Duration)
+
+	// OnReject is called when a request is rejected due to open circuit.
+	OnReject func()
+}
 
 type Status int
 
@@ -38,9 +94,9 @@ func (s Status) String() string {
 	return statusText[s]
 }
 
-// Breaker implements a circuit breaker with pluggable clock and hooks.
+// Breaker implements a circuit breaker with pluggable clock, hooks, and metrics.
 type Breaker struct {
-	// Configuration.
+	// Configuration (copied from Options for performance).
 	BreakDuration    time.Duration
 	Counter          *rate.Errors
 	FailureCount     func(error) int
@@ -50,49 +106,100 @@ type Breaker struct {
 	SlowCallCount    func(time.Duration) int
 	SuccessThreshold int
 
-	// Hooks and clock for testability.
-	Now           func() time.Time
-	AfterFunc     func(time.Duration, func()) *time.Timer
+	// Callbacks
 	OnStateChange func(old, new Status)
+	OnRequest     func()
+	OnSuccess     func(duration time.Duration)
+	OnFailure     func(err error, duration time.Duration)
+	OnReject      func()
+
+	// Hooks and clock for testability.
+	Now       func() time.Time
+	AfterFunc func(time.Duration, func()) *time.Timer
 
 	// State.
 	mu            sync.RWMutex
 	status        Status
 	timer         *time.Timer
 	probeInFlight bool
+
+	// Metrics (using atomic operations for thread safety)
+	metrics struct {
+		totalRequests      int64
+		successfulRequests int64
+		failedRequests     int64
+		rejectedRequests   int64
+		stateTransitions   int64
+	}
 }
 
 func New() *Breaker {
-	return &Breaker{
-		BreakDuration: breakDuration,
-		Counter:       rate.NewErrors(samplingDuration),
-		FailureCount: func(err error) int {
-			// Ignore context cancellation.
-			if errors.Is(err, context.Canceled) {
-				return 0
-			}
+	return NewWithOptions(Options{})
+}
 
-			// Additional penalty for deadlines.
-			if errors.Is(err, context.DeadlineExceeded) {
-				return 5
-			}
-
-			return 1
-		},
-		FailureRatio:     failureRatio,
-		FailureThreshold: failureThreshold,
-		SamplingDuration: samplingDuration,
-		SlowCallCount: func(duration time.Duration) int {
-			// Every 5th second, penalty increases by 1.
-			return int(duration / (5 * time.Second))
-		},
-		SuccessThreshold: successThreshold,
-		// Inject defaults for testability.
-		Now:           time.Now,
-		AfterFunc:     time.AfterFunc,
-		OnStateChange: nil,
-		status:        Closed,
+// NewWithOptions creates a new circuit breaker with custom options.
+func NewWithOptions(opts Options) *Breaker {
+	// Set defaults
+	if opts.BreakDuration <= 0 {
+		opts.BreakDuration = breakDuration
 	}
+	if opts.FailureRatio <= 0 {
+		opts.FailureRatio = failureRatio
+	}
+	if opts.FailureThreshold <= 0 {
+		opts.FailureThreshold = failureThreshold
+	}
+	if opts.SamplingDuration <= 0 {
+		opts.SamplingDuration = samplingDuration
+	}
+	if opts.SuccessThreshold <= 0 {
+		opts.SuccessThreshold = successThreshold
+	}
+	if opts.FailureCount == nil {
+		opts.FailureCount = defaultFailureCount
+	}
+	if opts.SlowCallCount == nil {
+		opts.SlowCallCount = defaultSlowCallCount
+	}
+
+	return &Breaker{
+		BreakDuration:    opts.BreakDuration,
+		Counter:          rate.NewErrors(opts.SamplingDuration),
+		FailureCount:     opts.FailureCount,
+		FailureRatio:     opts.FailureRatio,
+		FailureThreshold: opts.FailureThreshold,
+		SamplingDuration: opts.SamplingDuration,
+		SlowCallCount:    opts.SlowCallCount,
+		SuccessThreshold: opts.SuccessThreshold,
+		OnStateChange:    opts.OnStateChange,
+		OnRequest:        opts.OnRequest,
+		OnSuccess:        opts.OnSuccess,
+		OnFailure:        opts.OnFailure,
+		OnReject:         opts.OnReject,
+		// Inject defaults for testability.
+		Now:       time.Now,
+		AfterFunc: time.AfterFunc,
+		status:    Closed,
+	}
+}
+
+func defaultFailureCount(err error) int {
+	// Ignore context cancellation.
+	if errors.Is(err, context.Canceled) {
+		return 0
+	}
+
+	// Additional penalty for deadlines.
+	if errors.Is(err, context.DeadlineExceeded) {
+		return 5
+	}
+
+	return 1
+}
+
+func defaultSlowCallCount(duration time.Duration) int {
+	// Every 5th second, penalty increases by 1.
+	return int(duration / (5 * time.Second))
 }
 
 func (b *Breaker) Status() Status {
@@ -103,7 +210,25 @@ func (b *Breaker) Status() Status {
 	return status
 }
 
+// Metrics returns a copy of the current metrics.
+func (b *Breaker) Metrics() Metrics {
+	return Metrics{
+		TotalRequests:      atomic.LoadInt64(&b.metrics.totalRequests),
+		SuccessfulRequests: atomic.LoadInt64(&b.metrics.successfulRequests),
+		FailedRequests:     atomic.LoadInt64(&b.metrics.failedRequests),
+		RejectedRequests:   atomic.LoadInt64(&b.metrics.rejectedRequests),
+		StateTransitions:   atomic.LoadInt64(&b.metrics.stateTransitions),
+		CurrentState:       b.Status().String(),
+	}
+}
+
 func (b *Breaker) Do(fn func() error) error {
+	atomic.AddInt64(&b.metrics.totalRequests, 1)
+
+	if b.OnRequest != nil {
+		b.OnRequest()
+	}
+
 	switch b.Status() {
 	case Open:
 		return b.opened()
@@ -128,8 +253,11 @@ func (b *Breaker) setStatus(s Status) {
 	hook := b.OnStateChange
 	b.mu.Unlock()
 
-	if old != s && hook != nil {
-		go hook(old, s)
+	if old != s {
+		atomic.AddInt64(&b.metrics.stateTransitions, 1)
+		if hook != nil {
+			go hook(old, s)
+		}
 	}
 }
 
@@ -151,6 +279,10 @@ func (b *Breaker) open() {
 }
 
 func (b *Breaker) opened() error {
+	atomic.AddInt64(&b.metrics.rejectedRequests, 1)
+	if b.OnReject != nil {
+		b.OnReject()
+	}
 	return ErrBrokenCircuit
 }
 
@@ -166,9 +298,17 @@ func (b *Breaker) close() {
 
 func (b *Breaker) closed(fn func() error) error {
 	start := b.Now()
-	if err := fn(); err != nil {
+	err := fn()
+	duration := b.Now().Sub(start)
+
+	if err != nil {
+		atomic.AddInt64(&b.metrics.failedRequests, 1)
+		if b.OnFailure != nil {
+			b.OnFailure(err, duration)
+		}
+
 		n := b.FailureCount(err)
-		n += b.SlowCallCount(b.Now().Sub(start))
+		n += b.SlowCallCount(duration)
 		if b.canOpen(n) {
 			b.open()
 		}
@@ -176,10 +316,14 @@ func (b *Breaker) closed(fn func() error) error {
 		return err
 	}
 
-	n := b.SlowCallCount(b.Now().Sub(start))
+	atomic.AddInt64(&b.metrics.successfulRequests, 1)
+	if b.OnSuccess != nil {
+		b.OnSuccess(duration)
+	}
+
+	n := b.SlowCallCount(duration)
 	if b.canOpen(n) {
 		b.open()
-
 		return nil
 	}
 
@@ -197,6 +341,10 @@ func (b *Breaker) halfOpened(fn func() error) error {
 	b.mu.Lock()
 	if b.probeInFlight {
 		b.mu.Unlock()
+		atomic.AddInt64(&b.metrics.rejectedRequests, 1)
+		if b.OnReject != nil {
+			b.OnReject()
+		}
 		return ErrBrokenCircuit
 	}
 	b.probeInFlight = true
@@ -209,12 +357,24 @@ func (b *Breaker) halfOpened(fn func() error) error {
 	}()
 
 	start := b.Now()
-	if err := fn(); err != nil {
+	err := fn()
+	duration := b.Now().Sub(start)
+
+	if err != nil {
+		atomic.AddInt64(&b.metrics.failedRequests, 1)
+		if b.OnFailure != nil {
+			b.OnFailure(err, duration)
+		}
 		b.open()
 		return err
 	}
 
-	n := b.SlowCallCount(b.Now().Sub(start))
+	atomic.AddInt64(&b.metrics.successfulRequests, 1)
+	if b.OnSuccess != nil {
+		b.OnSuccess(duration)
+	}
+
+	n := b.SlowCallCount(duration)
 	if b.canOpen(n) {
 		b.open()
 		return nil

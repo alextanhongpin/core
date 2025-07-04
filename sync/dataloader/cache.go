@@ -43,6 +43,28 @@ func (c *Cache[K, V]) Get(key K) (V, error) {
 	return v, ErrNotExist
 }
 
+// Clear removes all entries from the cache.
+func (c *Cache[K, V]) Clear() {
+	c.mu.Lock()
+	c.cache = make(map[K]*result[V])
+	c.mu.Unlock()
+}
+
+// Size returns the number of entries in the cache.
+func (c *Cache[K, V]) Size() int {
+	c.mu.RLock()
+	size := len(c.cache)
+	c.mu.RUnlock()
+	return size
+}
+
+// Delete removes a specific key from the cache.
+func (c *Cache[K, V]) Delete(key K) {
+	c.mu.Lock()
+	delete(c.cache, key)
+	c.mu.Unlock()
+}
+
 type result[T any] struct {
 	val T
 	err error
