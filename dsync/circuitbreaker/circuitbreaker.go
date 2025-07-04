@@ -89,7 +89,28 @@ type CircuitBreaker struct {
 	client  *redis.Client
 }
 
+// Config represents the circuit breaker configuration
+type Config struct {
+	BreakDuration     time.Duration
+	FailureRatio      float64
+	FailureThreshold  int
+	SamplingDuration  time.Duration
+	SuccessThreshold  int
+	HeartbeatDuration time.Duration
+	FailureCount      func(error) int
+	SlowCallCount     func(time.Duration) int
+	Now               func() time.Time
+}
+
+// New creates a new circuit breaker with default configuration.
 func New(client *redis.Client, channel string) (*CircuitBreaker, func()) {
+	if client == nil {
+		panic("circuitbreaker: client cannot be nil")
+	}
+	if channel == "" {
+		panic("circuitbreaker: channel cannot be empty")
+	}
+
 	b := &CircuitBreaker{
 		BreakDuration:    breakDuration,
 		FailureRatio:     failureRatio,
@@ -118,13 +139,96 @@ func New(client *redis.Client, channel string) (*CircuitBreaker, func()) {
 		client:  client,
 		Counter: rate.NewErrors(samplingDuration),
 	}
+
+	// Validate configuration
+	b.validate()
+
 	return b, b.init()
 }
 
+// NewWithConfig creates a new circuit breaker with custom configuration
+func NewWithConfig(client *redis.Client, channel string, config Config) (*CircuitBreaker, func()) {
+	if client == nil {
+		panic("circuitbreaker: client cannot be nil")
+	}
+	if channel == "" {
+		panic("circuitbreaker: channel cannot be empty")
+	}
+
+	b := &CircuitBreaker{
+		BreakDuration:     config.BreakDuration,
+		FailureRatio:      config.FailureRatio,
+		FailureThreshold:  config.FailureThreshold,
+		SamplingDuration:  config.SamplingDuration,
+		SuccessThreshold:  config.SuccessThreshold,
+		HeartbeatDuration: config.HeartbeatDuration,
+		FailureCount:      config.FailureCount,
+		SlowCallCount:     config.SlowCallCount,
+		Now:               config.Now,
+		channel:           channel,
+		client:            client,
+		Counter:           rate.NewErrors(config.SamplingDuration),
+	}
+
+	// Set defaults for nil functions
+	if b.FailureCount == nil {
+		b.FailureCount = func(err error) int {
+			// Ignore context cancellation.
+			if errors.Is(err, context.Canceled) {
+				return 0
+			}
+
+			// Deadlines are considered as failures.
+			if errors.Is(err, context.DeadlineExceeded) {
+				return 5
+			}
+
+			return 1
+		}
+	}
+
+	if b.SlowCallCount == nil {
+		b.SlowCallCount = func(duration time.Duration) int {
+			// Every 5th second, penalize the slow call.
+			return int(duration / (5 * time.Second))
+		}
+	}
+
+	if b.Now == nil {
+		b.Now = time.Now
+	}
+
+	// Validate configuration
+	b.validate()
+
+	return b, b.init()
+}
+
+func (b *CircuitBreaker) validate() {
+	if b.BreakDuration <= 0 {
+		panic("circuitbreaker: BreakDuration must be positive")
+	}
+	if b.FailureRatio < 0 || b.FailureRatio > 1 {
+		panic("circuitbreaker: FailureRatio must be between 0 and 1")
+	}
+	if b.FailureThreshold <= 0 {
+		panic("circuitbreaker: FailureThreshold must be positive")
+	}
+	if b.SamplingDuration <= 0 {
+		panic("circuitbreaker: SamplingDuration must be positive")
+	}
+	if b.SuccessThreshold <= 0 {
+		panic("circuitbreaker: SuccessThreshold must be positive")
+	}
+}
+
 func (b *CircuitBreaker) init() func() {
-	ctx := context.Background()
-	status, _ := b.client.Get(ctx, b.channel).Result()
-	b.transition(NewStatus(status))
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// Initialize status from Redis
+	if status, err := b.client.Get(ctx, b.channel).Result(); err == nil {
+		b.transition(NewStatus(status))
+	}
 
 	pubsub := b.client.Subscribe(ctx, b.channel)
 
@@ -132,14 +236,23 @@ func (b *CircuitBreaker) init() func() {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
+		defer pubsub.Close()
 
-		for msg := range pubsub.Channel() {
-			b.transition(NewStatus(msg.Payload))
+		for {
+			select {
+			case msg, ok := <-pubsub.Channel():
+				if !ok {
+					return
+				}
+				b.transition(NewStatus(msg.Payload))
+			case <-ctx.Done():
+				return
+			}
 		}
 	}()
 
 	return func() {
-		pubsub.Close()
+		cancel()
 		wg.Wait()
 	}
 }
@@ -167,6 +280,16 @@ func (b *CircuitBreaker) Status() Status {
 	b.mu.RUnlock()
 
 	return status
+}
+
+// Disable sets the circuit breaker to disabled state, allowing all requests to pass through.
+func (b *CircuitBreaker) Disable() {
+	b.disable()
+}
+
+// ForceOpen sets the circuit breaker to forced open state, rejecting all requests.
+func (b *CircuitBreaker) ForceOpen() {
+	b.forceOpen()
 }
 
 func (b *CircuitBreaker) transition(status Status) {
@@ -199,12 +322,15 @@ func (b *CircuitBreaker) canOpen(n int) bool {
 }
 
 func (b *CircuitBreaker) open() {
-	duration, _ := b.client.PTTL(context.Background(), b.channel).Result()
-	if duration <= 0 {
+	ctx := context.Background()
+	duration, err := b.client.PTTL(ctx, b.channel).Result()
+	if err != nil || duration <= 0 {
 		duration = b.BreakDuration
 	}
 
 	b.mu.Lock()
+	defer b.mu.Unlock()
+
 	b.status = Open
 	b.Counter.Reset()
 
@@ -215,7 +341,6 @@ func (b *CircuitBreaker) open() {
 	b.timer = time.AfterFunc(duration, func() {
 		b.halfOpen()
 	})
-	b.mu.Unlock()
 }
 
 func (b *CircuitBreaker) opened() error {
@@ -336,7 +461,17 @@ func (b *CircuitBreaker) disable() {
 func (b *CircuitBreaker) publish(ctx context.Context, status Status) error {
 	setErr := b.client.Set(ctx, b.channel, status.String(), b.BreakDuration).Err()
 	pubErr := b.client.Publish(ctx, b.channel, status.String()).Err()
-	return errors.Join(setErr, pubErr)
+
+	if setErr != nil && pubErr != nil {
+		return errors.Join(setErr, pubErr)
+	}
+	if setErr != nil {
+		return setErr
+	}
+	if pubErr != nil {
+		return pubErr
+	}
+	return nil
 }
 
 func (b *CircuitBreaker) isHealthy(successes, _ float64) bool {
