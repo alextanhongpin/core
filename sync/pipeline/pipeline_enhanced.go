@@ -216,35 +216,13 @@ func Context[T any](ctx context.Context, in <-chan T) <-chan T {
 // WithTimeout adds timeout to a pipeline stage
 func WithTimeout[T any](timeout time.Duration, in <-chan T) <-chan T {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-
-	out := make(chan T)
 	go func() {
 		defer cancel()
-		defer close(out)
-
-		for {
-			select {
-			case <-ctx.Done():
-				// Drain the input channel to prevent goroutine leaks
-				go func() {
-					for range in {
-					}
-				}()
-				return
-			case v, ok := <-in:
-				if !ok {
-					return
-				}
-				select {
-				case <-ctx.Done():
-					return
-				case out <- v:
-				}
-			}
+		for range in {
+			// Drain the channel to prevent goroutine leaks
 		}
 	}()
-
-	return out
+	return WithContext(ctx, in)
 }
 
 // OrDone provides done channel cancellation
@@ -553,6 +531,38 @@ func PoolWithContext[T, V any](ctx context.Context, n int, in <-chan T, fn func(
 	return out
 }
 
+// Semaphore limits concurrent execution using a semaphore
+func Semaphore[T, V any](n int, in <-chan T, fn func(T) V) <-chan V {
+	if n <= 0 {
+		panic(ErrInvalidWorkers)
+	}
+
+	out := make(chan V)
+	ctx := context.Background()
+	sem := semaphore.NewWeighted(int64(n))
+
+	go func() {
+		defer close(out)
+
+		var wg sync.WaitGroup
+		for v := range in {
+			wg.Add(1)
+
+			go func(item T) {
+				defer wg.Done()
+
+				_ = sem.Acquire(ctx, 1)
+				defer sem.Release(1)
+
+				out <- fn(item)
+			}(v)
+		}
+		wg.Wait()
+	}()
+
+	return out
+}
+
 // FanOut distributes input to multiple output channels
 func FanOut[T any](n int, in <-chan T) []<-chan T {
 	if n <= 0 {
@@ -606,38 +616,6 @@ func FanIn[T any](channels ...<-chan T) <-chan T {
 	go func() {
 		wg.Wait()
 		close(out)
-	}()
-
-	return out
-}
-
-// Semaphore limits concurrent execution using a semaphore
-func Semaphore[T, V any](n int, in <-chan T, fn func(T) V) <-chan V {
-	if n <= 0 {
-		panic(ErrInvalidWorkers)
-	}
-
-	out := make(chan V)
-	ctx := context.Background()
-	sem := semaphore.NewWeighted(int64(n))
-
-	go func() {
-		defer close(out)
-
-		var wg sync.WaitGroup
-		for v := range in {
-			wg.Add(1)
-
-			go func(item T) {
-				defer wg.Done()
-
-				_ = sem.Acquire(ctx, 1)
-				defer sem.Release(1)
-
-				out <- fn(item)
-			}(v)
-		}
-		wg.Wait()
 	}()
 
 	return out
