@@ -5,11 +5,16 @@ A Go implementation of JavaScript-style promises with support for async operatio
 ## Features
 
 - **Promise Pattern**: JavaScript-style promises with resolve/reject semantics
+- **Context Support**: Full context.Context integration for cancellation and timeouts
 - **Deferred Execution**: Create promises that can be resolved or rejected later
 - **Concurrent Safe**: Thread-safe operations for concurrent access
 - **Generic Support**: Full Go generics support for type safety
 - **Async Operations**: Execute functions asynchronously with promise pattern
-- **Chaining**: Support for promise-like patterns in Go
+- **Panic Recovery**: Built-in panic recovery with detailed error information
+- **State Tracking**: Non-blocking state checks (IsPending, IsResolved, IsRejected)
+- **Promise Utilities**: All, AllSettled, Race, Any with context support
+- **Pool Management**: Thread-safe promise pools with context and cancellation
+- **Map/Group Collections**: Organized promise collections with consistent APIs
 
 ## Installation
 
@@ -23,6 +28,7 @@ go get github.com/alextanhongpin/core/sync/promise
 package main
 
 import (
+    "context"
     "fmt"
     "time"
     
@@ -44,6 +50,34 @@ func main() {
     }
     
     fmt.Printf("Result: %s\n", result)
+    
+    // Create a promise with context support
+    ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+    defer cancel()
+    
+    p2 := promise.NewWithContext(ctx, func() (string, error) {
+        time.Sleep(100 * time.Millisecond) // Will timeout
+        return "This will timeout", nil
+    })
+    
+    result2, err2 := p2.Await()
+    if err2 != nil {
+        fmt.Printf("Expected timeout error: %v\n", err2)
+    }
+    
+    // Use deferred promise with timeout
+    p3 := promise.Deferred[string]()
+    go func() {
+        time.Sleep(30 * time.Millisecond)
+        p3.Resolve("Resolved in time!")
+    }()
+    
+    result3, err3 := p3.AwaitWithTimeout(50 * time.Millisecond)
+    if err3 != nil {
+        fmt.Printf("Error: %v\n", err3)
+    } else {
+        fmt.Printf("Result: %s\n", result3)
+    }
 }
 ```
 
@@ -54,8 +88,14 @@ func main() {
 #### `New[T any](fn func() (T, error)) *Promise[T]`
 Creates a new promise that executes the given function asynchronously.
 
+#### `NewWithContext[T any](ctx context.Context, fn func() (T, error)) *Promise[T]`
+Creates a new promise with context support for cancellation and timeouts.
+
 #### `Deferred[T any]() *Promise[T]`
 Creates a deferred promise that can be resolved or rejected manually.
+
+#### `DeferredWithContext[T any](ctx context.Context) *Promise[T]`
+Creates a deferred promise with context support for cancellation.
 
 #### `Resolve[T any](value T) *Promise[T]`
 Creates a promise that immediately resolves with the given value.
@@ -68,11 +108,109 @@ Creates a promise that immediately rejects with the given error.
 #### `Await() (T, error)`
 Waits for the promise to complete and returns the result or error.
 
+#### `AwaitWithTimeout(timeout time.Duration) (T, error)`
+Waits for the promise to complete with a timeout.
+
+#### `AwaitWithContext(ctx context.Context) (T, error)`
+Waits for the promise to complete with context cancellation support.
+
 #### `Resolve(value T) *Promise[T]`
 Resolves a deferred promise with the given value.
 
 #### `Reject(err error) *Promise[T]`
 Rejects a deferred promise with the given error.
+
+#### `Cancel() *Promise[T]`
+Cancels the promise and any ongoing operation.
+
+#### `IsPending() bool`
+Returns true if the promise is still pending (non-blocking).
+
+#### `IsResolved() bool`
+Returns true if the promise has been resolved (non-blocking).
+
+#### `IsRejected() bool`
+Returns true if the promise has been rejected (non-blocking).
+
+### Promise Collections
+
+#### `All[T any](promises []*Promise[T]) *Promise[[]T]`
+Waits for all promises to resolve, returns first error if any fail.
+
+#### `AllWithContext[T any](ctx context.Context, promises []*Promise[T]) *Promise[[]T]`
+Like All but with context support for cancellation.
+
+#### `AllSettled[T any](promises []*Promise[T]) *Promise[[]Result[T]]`
+Waits for all promises to complete, returns all results regardless of success/failure.
+
+#### `AllSettledWithContext[T any](ctx context.Context, promises []*Promise[T]) *Promise[[]Result[T]]`
+Like AllSettled but with context support.
+
+#### `Race[T any](promises []*Promise[T]) *Promise[T]`
+Returns the result of the first promise to complete (resolve or reject).
+
+#### `RaceWithContext[T any](ctx context.Context, promises []*Promise[T]) *Promise[T]`
+Like Race but with context support.
+
+#### `Any[T any](promises []*Promise[T]) *Promise[T]`
+Returns the first promise to resolve, or aggregate error if all fail.
+
+#### `AnyWithContext[T any](ctx context.Context, promises []*Promise[T]) *Promise[T]`
+Like Any but with context support.
+
+### Promise Pool
+
+#### `NewPool[T any]() *Pool[T]`
+Creates a new thread-safe promise pool.
+
+#### `NewPoolWithContext[T any](ctx context.Context) *Pool[T]`
+Creates a new promise pool with context support.
+
+#### Pool Methods:
+- `Submit(fn func() (T, error)) *Promise[T]` - Submit work to pool
+- `SubmitWithContext(ctx context.Context, fn func() (T, error)) *Promise[T]` - Submit with context
+- `Cancel()` - Cancel all pending operations
+- `Wait() []Result[T]` - Wait for all promises to complete
+- `WaitWithTimeout(timeout time.Duration) ([]Result[T], error)` - Wait with timeout
+- `WaitWithContext(ctx context.Context) ([]Result[T], error)` - Wait with context
+
+### Promise Map
+
+#### `NewMap[K comparable, V any]() *Map[K, V]`
+Creates a new thread-safe promise map.
+
+#### `NewMapWithContext[K comparable, V any](ctx context.Context) *Map[K, V]`
+Creates a new promise map with context support.
+
+#### Map Methods:
+- `Do(key K, fn func() (V, error)) *Promise[V]` - Execute function for key
+- `DoWithContext(ctx context.Context, key K, fn func() (V, error)) *Promise[V]` - Execute with context
+- `Lock(key K) *Promise[V]` - Lock and get promise for key
+- `LockWithContext(ctx context.Context, key K) *Promise[V]` - Lock with context
+- `Store(key K, value V)` - Store resolved value
+- `Delete(key K) bool` - Delete key
+- `Keys() []K` - Get all keys
+- `Clear()` - Clear all entries
+- `Len() int` - Get number of entries
+
+### Promise Group
+
+#### `NewGroup[T any]() *Group[T]`
+Creates a new thread-safe promise group.
+
+#### `NewGroupWithContext[T any](ctx context.Context) *Group[T]`
+Creates a new promise group with context support.
+
+#### Group Methods:
+- `Do(key string, fn func() (T, error)) *Promise[T]` - Execute function for key
+- `DoWithContext(ctx context.Context, key string, fn func() (T, error)) *Promise[T]` - Execute with context
+- `Lock(key string) *Promise[T]` - Lock and get promise for key
+- `LockWithContext(ctx context.Context, key string) *Promise[T]` - Lock with context
+- `Store(key string, value T)` - Store resolved value
+- `Delete(key string) bool` - Delete key
+- `Keys() []string` - Get all keys
+- `Clear()` - Clear all entries
+- `Len() int` - Get number of entries
 
 ## Real-World Examples
 
@@ -700,18 +838,61 @@ func TestPromise(t *testing.T) {
 
 ## Best Practices
 
-1. **Error Handling**: Always handle errors returned by `Await()`
-2. **Avoid Blocking**: Don't call `Await()` on the same goroutine that resolves the promise
-3. **Resource Management**: Be mindful of goroutines created by promises
-4. **Timeouts**: Consider implementing timeouts for long-running operations
-5. **Context**: Use context for cancellation in long-running promise operations
-6. **Memory**: Be careful with large data structures in promises to avoid memory leaks
+1. **Error Handling**: Always handle errors returned by `Await()` and its variants
+2. **Context Usage**: Use context for cancellation and timeouts in long-running operations
+3. **Avoid Blocking**: Don't call `Await()` on the same goroutine that resolves the promise
+4. **Resource Management**: Be mindful of goroutines created by promises, use cancellation
+5. **Panic Recovery**: Promises automatically recover from panics and convert them to errors
+6. **State Checking**: Use `IsPending()`, `IsResolved()`, `IsRejected()` for non-blocking state checks
+7. **Memory Management**: Be careful with large data structures in promises to avoid memory leaks
+8. **Pool Usage**: Use promise pools for high-throughput scenarios to manage goroutines
+9. **Timeout Patterns**: Prefer `AwaitWithTimeout()` over manual timeout implementations
+10. **Collection Operations**: Use `All`, `AllSettled`, `Race`, `Any` for coordinating multiple promises
 
 ## Performance Considerations
 
 - Each promise creates a goroutine, so be mindful of the number of concurrent promises
-- Use promise pools or worker patterns for high-throughput scenarios
-- Consider using buffered channels for better performance in high-concurrency situations
+- Use promise pools (`Pool`) for high-throughput scenarios to manage goroutine lifecycle
+- Consider using buffered channels for better performance in high-concurrency situations  
+- Context cancellation helps prevent goroutine leaks in long-running operations
+- Non-blocking state checks (`IsPending()`, etc.) don't create additional goroutines
+- Promise collections (`All`, `AllSettled`, etc.) efficiently coordinate multiple operations
+
+## Error Handling
+
+The promise package provides comprehensive error handling:
+
+```go
+// Automatic panic recovery
+p := promise.New(func() (int, error) {
+    panic("something went wrong")
+})
+
+result, err := p.Await()
+// err will contain: "panic recovered: something went wrong"
+
+// Context cancellation
+ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+defer cancel()
+
+p2 := promise.NewWithContext(ctx, func() (int, error) {
+    time.Sleep(200 * time.Millisecond)
+    return 42, nil
+})
+
+result2, err2 := p2.Await()
+// err2 will be context.DeadlineExceeded
+
+// Aggregate errors with Any
+promises := []*promise.Promise[int]{
+    promise.Reject[int](errors.New("error 1")),
+    promise.Reject[int](errors.New("error 2")),
+}
+
+p3 := promise.Any(promises)
+result3, err3 := p3.Await()
+// err3 will be AggregateError containing all errors
+```
 
 ## License
 

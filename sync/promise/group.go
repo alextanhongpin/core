@@ -1,6 +1,7 @@
 package promise
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"sync"
@@ -26,36 +27,56 @@ func NewGroup[T any]() *Group[T] {
 // already set and the promise is fulfilled or rejected,
 // then it behaves like Do.
 func (g *Group[T]) Lock(key string, fn func() (T, error)) (T, error) {
+	return g.LockWithContext(key, context.Background(), func(ctx context.Context) (T, error) {
+		return fn()
+	})
+}
+
+func (g *Group[T]) LockWithContext(key string, ctx context.Context, fn func(context.Context) (T, error)) (T, error) {
+	if fn == nil {
+		var zero T
+		return zero, ErrNilFunction
+	}
+
 	g.mu.Lock()
 	p, ok := g.ps[key]
 	if ok {
 		g.mu.Unlock()
-
-		return p.Await()
+		return p.AwaitWithContext(ctx)
 	}
 
-	p = New(fn)
+	p = NewWithContext(ctx, fn)
 	g.ps[key] = p
 	g.mu.Unlock()
 	defer g.Delete(key)
 
-	return p.Await()
+	return p.AwaitWithContext(ctx)
 }
 
 func (g *Group[T]) Do(key string, fn func() (T, error)) (T, error) {
+	return g.DoWithContext(key, context.Background(), func(ctx context.Context) (T, error) {
+		return fn()
+	})
+}
+
+func (g *Group[T]) DoWithContext(key string, ctx context.Context, fn func(context.Context) (T, error)) (T, error) {
+	if fn == nil {
+		var zero T
+		return zero, ErrNilFunction
+	}
+
 	g.mu.Lock()
 	p, ok := g.ps[key]
 	if ok {
 		g.mu.Unlock()
-
-		return p.Await()
+		return p.AwaitWithContext(ctx)
 	}
 
-	p = New(fn)
+	p = NewWithContext(ctx, fn)
 	g.ps[key] = p
 	g.mu.Unlock()
 
-	return p.Await()
+	return p.AwaitWithContext(ctx)
 }
 
 func (g *Group[T]) Delete(key string) bool {
@@ -66,32 +87,43 @@ func (g *Group[T]) Delete(key string) bool {
 	if ok {
 		delete(g.ps, key)
 		// Reject to prevent goroutine leak.
-		p.Reject(fmt.Errorf("%w: key replaced", ErrAborted))
+		p.Reject(fmt.Errorf("%w: key deleted", ErrAborted))
 	}
 
 	return ok
 }
 
 func (g *Group[T]) Load(key string) (*Promise[T], bool) {
-	g.mu.Lock()
+	g.mu.RLock()
 	p, ok := g.ps[key]
-	g.mu.Unlock()
+	g.mu.RUnlock()
 
 	return p, ok
 }
 
 func (g *Group[T]) LoadMany(keys ...string) map[string]*Promise[T] {
 	m := make(map[string]*Promise[T])
-	g.mu.Lock()
+	g.mu.RLock()
 	for _, k := range keys {
 		v, ok := g.ps[k]
 		if ok {
 			m[k] = v
 		}
 	}
-	g.mu.Unlock()
+	g.mu.RUnlock()
 
 	return m
+}
+
+func (g *Group[T]) Keys() []string {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+
+	keys := make([]string, 0, len(g.ps))
+	for k := range g.ps {
+		keys = append(keys, k)
+	}
+	return keys
 }
 
 func (g *Group[T]) Len() int {
@@ -100,4 +132,16 @@ func (g *Group[T]) Len() int {
 	g.mu.RUnlock()
 
 	return n
+}
+
+func (g *Group[T]) Clear() {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	// Reject all existing promises to prevent leaks
+	for _, p := range g.ps {
+		p.Reject(fmt.Errorf("%w: group cleared", ErrAborted))
+	}
+
+	g.ps = make(map[string]*Promise[T])
 }
