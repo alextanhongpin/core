@@ -494,19 +494,32 @@ func Pool[T, V any](n int, in <-chan T, fn func(T) V) <-chan V {
 	var wg sync.WaitGroup
 	wg.Add(n)
 
+	// Use buffered channel to prevent blocking when workers complete at different times
+	results := make(chan V, n)
+
 	for i := 0; i < n; i++ {
-		go func() {
+		go func(workerID int) {
 			defer wg.Done()
 
 			for v := range in {
-				out <- fn(v)
+				result := fn(v)
+				results <- result
 			}
-		}()
+		}(i)
 	}
 
+	// Goroutine to forward results and handle cleanup
 	go func() {
 		wg.Wait()
-		close(out)
+		close(results)
+	}()
+
+	// Forward results from buffered channel to output
+	go func() {
+		defer close(out)
+		for result := range results {
+			out <- result
+		}
 	}()
 
 	return out
