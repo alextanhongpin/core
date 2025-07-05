@@ -36,7 +36,7 @@ func basicPollingExample() {
 	poller := poll.New()
 
 	counter := 0
-	events, stop := poller.Poll(func(ctx context.Context) error {
+	events, stop := poller.PollWithContext(ctx, func(ctx context.Context) error {
 		counter++
 		fmt.Printf("Poll iteration %d\n", counter)
 
@@ -94,7 +94,7 @@ func queueProcessingExample() {
 		MaxConcurrency:   2,
 	}
 
-	events, stop := poller.Poll(func(ctx context.Context) error {
+	events, stop := poller.PollWithContext(ctx, func(ctx context.Context) error {
 		messages := queue.GetBatch(3)
 		if len(messages) == 0 {
 			return poll.Empty
@@ -156,7 +156,7 @@ func customBackoffExample() {
 	}
 
 	attempts := 0
-	events, stop := poller.Poll(func(ctx context.Context) error {
+	events, stop := poller.PollWithContext(ctx, func(ctx context.Context) error {
 		attempts++
 		fmt.Printf("Attempt %d\n", attempts)
 
@@ -215,7 +215,7 @@ func fileMonitoringExample() {
 		MaxConcurrency: 3,
 	}
 
-	events, stop := poller.Poll(func(ctx context.Context) error {
+	events, stop := poller.PollWithContext(ctx, func(ctx context.Context) error {
 		changes := fileMonitor.CheckForChanges()
 		if len(changes) == 0 {
 			return poll.Empty

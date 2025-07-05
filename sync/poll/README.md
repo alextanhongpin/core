@@ -5,11 +5,14 @@ A Go package for building robust polling systems with configurable concurrency, 
 ## Features
 
 - **Configurable Concurrency**: Set maximum number of concurrent workers
-- **Backoff Strategies**: Exponential backoff when no work is available
+- **Multiple Backoff Strategies**: Exponential, linear, constant, and custom backoff
 - **Failure Handling**: Configurable failure thresholds with circuit breaker behavior
 - **Event Monitoring**: Real-time monitoring of poll events and metrics
 - **Graceful Shutdown**: Clean shutdown with proper resource cleanup
 - **Context Support**: Full context cancellation support
+- **Flexible Configuration**: Rich options for batch size, timeouts, callbacks, and more
+- **Runtime Metrics**: Detailed metrics for monitoring poll performance
+- **Event Callbacks**: Custom callbacks for handling poll events
 
 ## Installation
 
@@ -53,6 +56,45 @@ func main() {
     // Monitor events
     go func() {
         for event := range events {
+            fmt.Printf("Event: %s\n", event)
+        }
+    }()
+    
+    // Run for 10 seconds
+    time.Sleep(10 * time.Second)
+    stop()
+}
+```
+
+## Advanced Configuration
+
+```go
+// Create a poller with custom options
+poller := poll.NewWithOptions(poll.PollOptions{
+    BatchSize:        100,
+    FailureThreshold: 10,
+    BackOff:          poll.ExponentialBackOff,
+    MaxConcurrency:   5,
+    Timeout:          30 * time.Second,
+    EventBuffer:      50,
+    OnBatchStart: func(ctx context.Context, batchID int64) {
+        fmt.Printf("Starting batch %d\n", batchID)
+    },
+    OnBatchEnd: func(ctx context.Context, batchID int64, metrics poll.BatchMetrics) {
+        fmt.Printf("Batch %d completed: %d items processed\n", batchID, metrics.ItemsProcessed)
+    },
+    OnError: func(ctx context.Context, err error) {
+        fmt.Printf("Poll error: %v\n", err)
+    },
+})
+
+events, stop := poller.Poll(processingFunc)
+```
+    })
+    
+    // Monitor events
+    go func() {
+        for event := range events {
             fmt.Printf("Event: %+v\n", event)
         }
     }()
@@ -68,25 +110,60 @@ func main() {
 ### Poll Configuration
 
 ```go
-type Poll struct {
-    BatchSize        int                              // Number of items to process per batch
-    FailureThreshold int                              // Number of failures before backing off
-    BackOff          func(idle int) time.Duration     // Backoff strategy function
-    MaxConcurrency   int                              // Maximum concurrent workers
+type PollOptions struct {
+    BatchSize        int                                                    // Number of items to process per batch (default: 1000)
+    FailureThreshold int                                                    // Number of failures before backing off (default: 25)
+    BackOff          func(idle int) time.Duration                          // Backoff strategy function (default: ExponentialBackOff)
+    MaxConcurrency   int                                                    // Maximum concurrent workers (default: runtime.NumCPU())
+    Timeout          time.Duration                                          // Timeout for individual poll operations (default: 30s)
+    EventBuffer      int                                                    // Buffer size for event channel (default: 100)
+    OnBatchStart     func(ctx context.Context, batchID int64)               // Called when a batch starts
+    OnBatchEnd       func(ctx context.Context, batchID int64, metrics BatchMetrics) // Called when a batch ends
+    OnError          func(ctx context.Context, err error)                   // Called when an error occurs
+}
+
+type BatchMetrics struct {
+    BatchID         int64         // Unique batch identifier
+    StartTime       time.Time     // When the batch started
+    EndTime         time.Time     // When the batch ended
+    Duration        time.Duration // How long the batch took
+    ItemsProcessed  int           // Number of items processed in this batch
+    Success         bool          // Whether the batch completed successfully
+    ErrorCount      int           // Number of errors encountered
+}
+
+type PollMetrics struct {
+    TotalBatches     int64         // Total number of batches processed
+    TotalItems       int64         // Total number of items processed
+    TotalErrors      int64         // Total number of errors encountered
+    TotalDuration    time.Duration // Total time spent processing
+    AverageItems     float64       // Average items per batch
+    AverageLatency   time.Duration // Average processing time per batch
+    ErrorRate        float64       // Error rate (errors/total)
+    IsRunning        bool          // Whether the poller is currently running
+    CurrentBatchID   int64         // ID of the current batch being processed
+    StartTime        time.Time     // When polling started
+    LastActivity     time.Time     // Last time work was processed
+    ConsecutiveIdles int           // Number of consecutive idle cycles
 }
 ```
 
 ### Methods
 
 #### `New() *Poll`
-Creates a new poller with default settings:
-- BatchSize: 1000
-- FailureThreshold: 25
-- BackOff: ExponentialBackOff
-- MaxConcurrency: Number of CPU cores
+Creates a new poller with default settings.
+
+#### `NewWithOptions(options PollOptions) *Poll`
+Creates a new poller with custom configuration.
 
 #### `Poll(fn func(context.Context) error) (<-chan Event, func())`
 Starts polling with the given function and returns an event channel and stop function.
+
+#### `PollWithContext(ctx context.Context, fn func(context.Context) error) (<-chan Event, func())`
+Starts polling with the given function and context, returns an event channel and stop function.
+
+#### `Metrics() PollMetrics`
+Returns current runtime metrics for the poller.
 
 ### Built-in Backoff Strategies
 
@@ -96,15 +173,32 @@ Exponential backoff with jitter, starting at 100ms and capping at 30 seconds.
 #### `LinearBackOff(idle int) time.Duration`
 Linear backoff, increasing by 100ms each time up to 10 seconds.
 
+#### `ConstantBackOff(idle int) time.Duration`
+Constant 1-second backoff regardless of idle count.
+
+#### `CustomExponentialBackOff(base, max time.Duration, factor float64) func(int) time.Duration`
+Creates a custom exponential backoff with configurable parameters.
+
 ### Event Types
 
 ```go
 type Event struct {
-    Type      string        // Event type (e.g., "start", "stop", "error")
-    Message   string        // Human-readable message
-    Timestamp time.Time     // When the event occurred
-    Metadata  map[string]any // Additional event data
+    Type      string            // Event type (e.g., "start", "stop", "error", "batch_start", "batch_end")
+    Message   string            // Human-readable message
+    Timestamp time.Time         // When the event occurred
+    Metadata  map[string]any    // Additional event data
 }
+```
+
+#### Event Methods
+
+```go
+func (e Event) String() string                    // Human-readable string representation
+func (e Event) IsError() bool                     // True if this is an error event
+func (e Event) IsBatch() bool                     // True if this is a batch-related event
+func (e Event) GetBatchID() (int64, bool)         // Get batch ID if this is a batch event
+func (e Event) GetError() (error, bool)           // Get error if this is an error event
+func (e Event) GetMetrics() (BatchMetrics, bool)  // Get metrics if this is a batch end event
 ```
 
 ### Error Types
@@ -246,7 +340,7 @@ func main() {
     }
     
     // Start polling
-    events, stop := poller.Poll(mq.ProcessMessages)
+    events, stop := poller.PollWithContext(ctx, mq.ProcessMessages)
     defer stop()
     
     // Monitor events
@@ -379,7 +473,7 @@ func main() {
     }
     
     // Start polling
-    events, stop := poller.Poll(processor.ProcessFiles)
+    events, stop := poller.PollWithContext(ctx, processor.ProcessFiles)
     defer stop()
     
     // Monitor events
@@ -501,7 +595,7 @@ func main() {
     }
     
     // Start polling
-    events, stop := poller.Poll(client.PollAPI)
+    events, stop := poller.PollWithContext(ctx, client.PollAPI)
     defer stop()
     
     // Monitor events
@@ -535,13 +629,48 @@ func CustomBackOff(idle int) time.Duration {
     }
 }
 
-poller := &poll.Poll{
-    BackOff: CustomBackOff,
+// Use custom exponential backoff
+customBackOff := poll.CustomExponentialBackOff(
+    500*time.Millisecond, // base delay
+    1*time.Minute,        // max delay
+    2.0,                  // factor
+)
+
+poller := poll.NewWithOptions(poll.PollOptions{
+    BackOff: customBackOff,
     // ... other settings
-}
+})
 ```
 
-## Monitoring and Metrics
+## Metrics and Monitoring
+
+### Real-time Metrics
+
+```go
+poller := poll.New()
+events, stop := poller.Poll(processingFunc)
+
+// Monitor metrics in real-time
+go func() {
+    ticker := time.NewTicker(10 * time.Second)
+    defer ticker.Stop()
+    
+    for {
+        select {
+        case <-ticker.C:
+            metrics := poller.Metrics()
+            fmt.Printf("Poll Metrics: %+v\n", metrics)
+            
+            // Send to monitoring system
+            sendToMonitoring(metrics)
+        case <-ctx.Done():
+            return
+        }
+    }
+}()
+```
+
+### Event-based Monitoring
 
 Monitor poll performance using the event channel:
 
@@ -553,6 +682,7 @@ var (
     totalEvents    int64
     errorCount     int64
     successCount   int64
+    batchCount     int64
 )
 
 go func() {
@@ -562,16 +692,55 @@ go func() {
         switch event.Type {
         case "error":
             errorCount++
-            log.Printf("Poll error: %s", event.Message)
-        case "success":
-            successCount++
+            if err, ok := event.GetError(); ok {
+                log.Printf("Poll error: %v", err)
+            }
+        case "batch_end":
+            batchCount++
+            if metrics, ok := event.GetMetrics(); ok {
+                successCount += int64(metrics.ItemsProcessed)
+                log.Printf("Batch %d: processed %d items in %v", 
+                    metrics.BatchID, metrics.ItemsProcessed, metrics.Duration)
+            }
         }
         
         // Send metrics to monitoring system
-        metrics.Increment("poll.events.total")
-        metrics.Increment(fmt.Sprintf("poll.events.%s", event.Type))
+        sendMetric("poll.events.total", totalEvents)
+        sendMetric("poll.events.errors", errorCount)
+        sendMetric("poll.events.success", successCount)
+        sendMetric("poll.batches.total", batchCount)
     }
 }()
+```
+
+### Callback-based Monitoring
+
+```go
+poller := poll.NewWithOptions(poll.PollOptions{
+    OnBatchStart: func(ctx context.Context, batchID int64) {
+        log.Printf("Starting batch %d", batchID)
+        startTime := time.Now()
+        ctx = context.WithValue(ctx, "batch_start_time", startTime)
+    },
+    OnBatchEnd: func(ctx context.Context, batchID int64, metrics poll.BatchMetrics) {
+        log.Printf("Batch %d completed: %d items in %v", 
+            batchID, metrics.ItemsProcessed, metrics.Duration)
+        
+        // Send metrics to monitoring system
+        sendBatchMetrics(metrics)
+    },
+    OnError: func(ctx context.Context, err error) {
+        log.Printf("Poll error: %v", err)
+        
+        // Send error to monitoring system
+        sendError(err)
+        
+        // Optionally trigger alerts
+        if isCriticalError(err) {
+            triggerAlert(err)
+        }
+    },
+})
 ```
 
 ## Testing
@@ -590,7 +759,7 @@ func TestPoller(t *testing.T) {
     }
     
     poller := poll.New()
-    events, stop := poller.Poll(pollingFunc)
+    events, stop := poller.PollWithContext(ctx, pollingFunc)
     defer stop()
     
     // Collect events
@@ -604,6 +773,44 @@ func TestPoller(t *testing.T) {
     assert.Contains(t, eventTypes, "start")
     assert.Contains(t, eventTypes, "stop")
 }
+
+func TestPollerWithOptions(t *testing.T) {
+    ctx := context.Background()
+    
+    var batchStarts, batchEnds int
+    poller := poll.NewWithOptions(poll.PollOptions{
+        BatchSize: 10,
+        OnBatchStart: func(ctx context.Context, batchID int64) {
+            batchStarts++
+        },
+        OnBatchEnd: func(ctx context.Context, batchID int64, metrics poll.BatchMetrics) {
+            batchEnds++
+            assert.True(t, metrics.Success)
+            assert.Equal(t, batchID, metrics.BatchID)
+        },
+    })
+    
+    callCount := 0
+    pollingFunc := func(ctx context.Context) error {
+        callCount++
+        if callCount > 2 {
+            return poll.EOQ
+        }
+        return nil
+    }
+    
+    events, stop := poller.PollWithContext(ctx, pollingFunc)
+    defer stop()
+    
+    // Wait for completion
+    for range events {
+        // Consume events
+    }
+    
+    assert.Equal(t, 2, callCount)
+    assert.Equal(t, 1, batchStarts)
+    assert.Equal(t, 1, batchEnds)
+}
 ```
 
 ## Best Practices
@@ -611,9 +818,58 @@ func TestPoller(t *testing.T) {
 1. **Error Handling**: Use `poll.Empty` for temporary unavailability and `poll.EOQ` for permanent completion
 2. **Backoff Strategy**: Choose appropriate backoff strategies based on your use case
 3. **Failure Threshold**: Set reasonable failure thresholds to avoid excessive retries
-4. **Concurrency**: Tune concurrency based on your system's capacity
-5. **Monitoring**: Always monitor poll events for operational insights
-6. **Graceful Shutdown**: Always call the stop function to clean up resources
+4. **Concurrency**: Tune concurrency based on your system's capacity and resource constraints
+5. **Monitoring**: Always monitor poll events and metrics for operational insights
+6. **Graceful Shutdown**: Always call the stop function to clean up resources properly
+7. **Context Management**: Use context for cancellation and timeout control
+8. **Callback Usage**: Use callbacks for real-time monitoring and alerting
+9. **Batch Size**: Configure batch sizes based on your workload characteristics
+10. **Timeout Configuration**: Set appropriate timeouts to prevent hanging operations
+
+### Performance Tuning
+
+- **Batch Size**: Larger batches reduce overhead but increase memory usage
+- **Concurrency**: More workers increase throughput but consume more resources
+- **Backoff Strategy**: Aggressive backoff saves resources but increases latency
+- **Event Buffer**: Larger buffers prevent blocking but use more memory
+- **Timeout Values**: Balance between responsiveness and stability
+
+### Error Handling Patterns
+
+```go
+func processingFunc(ctx context.Context) error {
+    // Check for cancellation
+    select {
+    case <-ctx.Done():
+        return ctx.Err()
+    default:
+    }
+    
+    // Get work items
+    items, err := getWorkItems(ctx)
+    if err != nil {
+        // Temporary error - log and retry
+        log.Printf("Failed to get work items: %v", err)
+        return err
+    }
+    
+    if len(items) == 0 {
+        // No work available - use Empty to trigger backoff
+        return poll.Empty
+    }
+    
+    // Process items
+    for _, item := range items {
+        if err := processItem(ctx, item); err != nil {
+            // Item-specific error - log but continue
+            log.Printf("Failed to process item %v: %v", item, err)
+            continue
+        }
+    }
+    
+    return nil
+}
+```
 
 ## License
 

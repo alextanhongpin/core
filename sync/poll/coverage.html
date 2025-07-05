@@ -1,0 +1,670 @@
+
+<!DOCTYPE html>
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+		<title>poll: Go Coverage Report</title>
+		<style>
+			body {
+				background: black;
+				color: rgb(80, 80, 80);
+			}
+			body, pre, #legend span {
+				font-family: Menlo, monospace;
+				font-weight: bold;
+			}
+			#topbar {
+				background: black;
+				position: fixed;
+				top: 0; left: 0; right: 0;
+				height: 42px;
+				border-bottom: 1px solid rgb(80, 80, 80);
+			}
+			#content {
+				margin-top: 50px;
+			}
+			#nav, #legend {
+				float: left;
+				margin-left: 10px;
+			}
+			#legend {
+				margin-top: 12px;
+			}
+			#nav {
+				margin-top: 10px;
+			}
+			#legend span {
+				margin: 0 5px;
+			}
+			.cov0 { color: rgb(192, 0, 0) }
+.cov1 { color: rgb(128, 128, 128) }
+.cov2 { color: rgb(116, 140, 131) }
+.cov3 { color: rgb(104, 152, 134) }
+.cov4 { color: rgb(92, 164, 137) }
+.cov5 { color: rgb(80, 176, 140) }
+.cov6 { color: rgb(68, 188, 143) }
+.cov7 { color: rgb(56, 200, 146) }
+.cov8 { color: rgb(44, 212, 149) }
+.cov9 { color: rgb(32, 224, 152) }
+.cov10 { color: rgb(20, 236, 155) }
+
+		</style>
+	</head>
+	<body>
+		<div id="topbar">
+			<div id="nav">
+				<select id="files">
+				
+				<option value="file0">github.com/alextanhongpin/core/sync/poll/limiter.go (87.5%)</option>
+				
+				<option value="file1">github.com/alextanhongpin/core/sync/poll/poll.go (84.8%)</option>
+				
+				</select>
+			</div>
+			<div id="legend">
+				<span>not tracked</span>
+			
+				<span class="cov0">not covered</span>
+				<span class="cov8">covered</span>
+			
+			</div>
+		</div>
+		<div id="content">
+		
+		<pre class="file" id="file0" style="display: none">package poll
+
+import (
+        "errors"
+        "sync"
+)
+
+var ErrLimitExceeded = errors.New("poll: limit exceeded")
+
+type Limiter struct {
+        mu           sync.RWMutex
+        limit        int
+        totalCount   float64
+        successCount int
+        failureCount int
+}
+
+func NewLimiter(limit int) *Limiter <span class="cov8" title="1">{
+        return &amp;Limiter{
+                limit:      limit,
+                totalCount: float64(limit),
+        }
+}</span>
+
+func (l *Limiter) SuccessCount() int <span class="cov8" title="1">{
+        l.mu.RLock()
+        n := l.successCount
+        l.mu.RUnlock()
+        return n
+}</span>
+
+func (l *Limiter) TotalCount() int <span class="cov0" title="0">{
+        l.mu.RLock()
+        n := l.failureCount + l.successCount
+        l.mu.RUnlock()
+        return n
+}</span>
+
+func (l *Limiter) FailureCount() int <span class="cov8" title="1">{
+        l.mu.RLock()
+        n := l.failureCount
+        l.mu.RUnlock()
+        return n
+}</span>
+
+func (l *Limiter) Err() <span class="cov8" title="1">{
+        l.mu.Lock()
+        l.totalCount = max(l.totalCount-1.0, 0)
+        l.failureCount++
+        l.mu.Unlock()
+}</span>
+
+func (l *Limiter) Ok() <span class="cov8" title="1">{
+        l.mu.Lock()
+        l.totalCount = min(l.totalCount+0.5, float64(l.limit))
+        l.successCount++
+        l.mu.Unlock()
+}</span>
+
+func (l *Limiter) Allow() bool <span class="cov8" title="1">{
+        l.mu.RLock()
+        ok := l.totalCount &gt; 0
+        l.mu.RUnlock()
+        return ok
+}</span>
+
+func (l *Limiter) Do(fn func() error) error <span class="cov8" title="1">{
+        if !l.Allow() </span><span class="cov8" title="1">{
+                return ErrLimitExceeded
+        }</span>
+
+        <span class="cov8" title="1">if err := fn(); err != nil </span><span class="cov8" title="1">{
+                l.Err()
+                return err
+        }</span>
+
+        <span class="cov8" title="1">l.Ok()
+        return nil</span>
+}
+</pre>
+		
+		<pre class="file" id="file1" style="display: none">package poll
+
+import (
+        "context"
+        "errors"
+        "fmt"
+        "math"
+        "runtime"
+        "sync"
+        "sync/atomic"
+        "time"
+
+        "golang.org/x/sync/errgroup"
+)
+
+var (
+        // ErrEndOfQueue is returned when there are no more items to process
+        ErrEndOfQueue = errors.New("poll: end of queue")
+        // ErrEmptyQueue is returned when the queue is temporarily empty
+        ErrEmptyQueue = errors.New("poll: empty queue")
+        // ErrShutdown is returned when the poller is shutting down
+        ErrShutdown = errors.New("poll: shutting down")
+        
+        // Backward compatibility
+        EOQ   = ErrEndOfQueue
+        Empty = ErrEmptyQueue
+)
+
+// PollOptions configures the polling behavior
+type PollOptions struct {
+        // BatchSize is the number of items to process in each batch
+        BatchSize int
+        
+        // FailureThreshold is the number of consecutive failures before stopping
+        FailureThreshold int
+        
+        // BackOff is the backoff strategy when no work is available
+        BackOff func(idle int) time.Duration
+        
+        // MaxConcurrency is the maximum number of concurrent workers
+        MaxConcurrency int
+        
+        // Timeout is the timeout for individual operations
+        Timeout time.Duration
+        
+        // EventBufferSize is the size of the event channel buffer
+        EventBufferSize int
+        
+        // OnError is called when an error occurs (optional)
+        OnError func(error)
+        
+        // OnBatchComplete is called when a batch completes (optional)
+        OnBatchComplete func(BatchMetrics)
+}
+
+// BatchMetrics contains metrics for a completed batch
+type BatchMetrics struct {
+        SuccessCount int
+        FailureCount int
+        Duration     time.Duration
+        StartTime    time.Time
+        EndTime      time.Time
+}
+
+// PollMetrics contains overall polling metrics
+type PollMetrics struct {
+        TotalBatches    int64
+        TotalSuccess    int64
+        TotalFailures   int64
+        TotalIdleCycles int64
+        StartTime       time.Time
+        Running         bool
+}
+
+type Poll struct {
+        // Configuration
+        BatchSize        int
+        FailureThreshold int
+        BackOff          func(idle int) time.Duration
+        MaxConcurrency   int
+        Timeout          time.Duration
+        EventBufferSize  int
+        OnError          func(error)
+        OnBatchComplete  func(BatchMetrics)
+        
+        // Internal state
+        mu      sync.RWMutex
+        metrics PollMetrics
+        running int32 // atomic
+}
+
+// New creates a new Poll instance with default configuration
+func New() *Poll <span class="cov8" title="1">{
+        return NewWithOptions(PollOptions{})
+}</span>
+
+// NewWithOptions creates a new Poll instance with custom options
+func NewWithOptions(opts PollOptions) *Poll <span class="cov8" title="1">{
+        p := &amp;Poll{
+                BatchSize:        opts.BatchSize,
+                FailureThreshold: opts.FailureThreshold,
+                BackOff:          opts.BackOff,
+                MaxConcurrency:   opts.MaxConcurrency,
+                Timeout:          opts.Timeout,
+                EventBufferSize:  opts.EventBufferSize,
+                OnError:          opts.OnError,
+                OnBatchComplete:  opts.OnBatchComplete,
+        }
+        
+        // Apply defaults
+        if p.BatchSize &lt;= 0 </span><span class="cov8" title="1">{
+                p.BatchSize = 1_000
+        }</span>
+        <span class="cov8" title="1">if p.FailureThreshold &lt;= 0 </span><span class="cov8" title="1">{
+                p.FailureThreshold = 25
+        }</span>
+        <span class="cov8" title="1">if p.BackOff == nil </span><span class="cov8" title="1">{
+                p.BackOff = ExponentialBackOff
+        }</span>
+        <span class="cov8" title="1">if p.MaxConcurrency &lt;= 0 </span><span class="cov8" title="1">{
+                p.MaxConcurrency = MaxConcurrency()
+        }</span>
+        <span class="cov8" title="1">if p.Timeout &lt;= 0 </span><span class="cov8" title="1">{
+                p.Timeout = 30 * time.Second
+        }</span>
+        <span class="cov8" title="1">if p.EventBufferSize &lt;= 0 </span><span class="cov8" title="1">{
+                p.EventBufferSize = 100
+        }</span>
+        
+        <span class="cov8" title="1">return p</span>
+}
+
+// GetMetrics returns the current polling metrics
+func (p *Poll) GetMetrics() PollMetrics <span class="cov8" title="1">{
+        p.mu.RLock()
+        defer p.mu.RUnlock()
+        return p.metrics
+}</span>
+
+// IsRunning returns true if the poller is currently running
+func (p *Poll) IsRunning() bool <span class="cov8" title="1">{
+        return atomic.LoadInt32(&amp;p.running) == 1
+}</span>
+
+// Poll starts polling with the given function and returns an event channel and stop function
+func (p *Poll) Poll(fn func(context.Context) error) (&lt;-chan Event, func()) <span class="cov8" title="1">{
+        return p.PollWithContext(context.Background(), fn)
+}</span>
+
+// PollWithContext starts polling with context and returns an event channel and stop function
+func (p *Poll) PollWithContext(ctx context.Context, fn func(context.Context) error) (&lt;-chan Event, func()) <span class="cov8" title="1">{
+        if !atomic.CompareAndSwapInt32(&amp;p.running, 0, 1) </span><span class="cov0" title="0">{
+                // Already running, return closed channel
+                ch := make(chan Event)
+                close(ch)
+                return ch, func() </span>{<span class="cov0" title="0">}</span>
+        }
+        
+        <span class="cov8" title="1">var (
+                batchSize        = p.BatchSize
+                ch               = make(chan Event, p.EventBufferSize)
+                done             = make(chan struct{})
+                failureThreshold = p.FailureThreshold
+                backoff          = p.BackOff
+                maxConcurrency   = p.MaxConcurrency
+                timeout          = p.Timeout
+        )
+        
+        // Initialize metrics
+        p.mu.Lock()
+        p.metrics = PollMetrics{
+                StartTime: time.Now(),
+                Running:   true,
+        }
+        p.mu.Unlock()
+
+        batch := func(batchCtx context.Context) (err error) </span><span class="cov8" title="1">{
+                // Create timeout context if timeout is configured
+                if timeout &gt; 0 </span><span class="cov8" title="1">{
+                        var cancel context.CancelFunc
+                        batchCtx, cancel = context.WithTimeout(batchCtx, timeout)
+                        defer cancel()
+                }</span>
+                
+                <span class="cov8" title="1">limiter := NewLimiter(failureThreshold)
+                startTime := time.Now()
+                
+                work := func() error </span><span class="cov8" title="1">{
+                        // Check if we're shutting down
+                        select </span>{
+                        case &lt;-done:<span class="cov0" title="0">
+                                return ErrShutdown</span>
+                        case &lt;-batchCtx.Done():<span class="cov8" title="1">
+                                return batchCtx.Err()</span>
+                        default:<span class="cov8" title="1"></span>
+                        }
+                        
+                        <span class="cov8" title="1">err := limiter.Do(func() error </span><span class="cov8" title="1">{
+                                return fn(batchCtx)
+                        }</span>)
+
+                        <span class="cov8" title="1">if errors.Is(err, ErrEndOfQueue) || errors.Is(err, ErrLimitExceeded) </span><span class="cov8" title="1">{
+                                return err
+                        }</span>
+
+                        <span class="cov8" title="1">if err != nil &amp;&amp; !errors.Is(err, ErrShutdown) </span><span class="cov8" title="1">{
+                                // Send error event (non-blocking)
+                                select </span>{
+                                case &lt;-done:<span class="cov0" title="0"></span>
+                                case ch &lt;- Event{
+                                        Name: "error",
+                                        Err:  err,
+                                        Time: time.Now(),
+                                }:<span class="cov8" title="1"></span>
+                                default:<span class="cov0" title="0">
+                                        // Channel full, call error handler if available
+                                        if p.OnError != nil </span><span class="cov0" title="0">{
+                                                p.OnError(err)
+                                        }</span>
+                                }
+                        }
+
+                        // Failure in one batch should not stop the entire process.
+                        <span class="cov8" title="1">return nil</span>
+                }
+
+                <span class="cov8" title="1">defer func(start time.Time) </span><span class="cov8" title="1">{
+                        endTime := time.Now()
+                        duration := endTime.Sub(start)
+                        
+                        metrics := BatchMetrics{
+                                SuccessCount: limiter.SuccessCount(),
+                                FailureCount: limiter.FailureCount(),
+                                Duration:     duration,
+                                StartTime:    start,
+                                EndTime:      endTime,
+                        }
+                        
+                        // Update global metrics
+                        p.mu.Lock()
+                        p.metrics.TotalBatches++
+                        p.metrics.TotalSuccess += int64(metrics.SuccessCount)
+                        p.metrics.TotalFailures += int64(metrics.FailureCount)
+                        p.mu.Unlock()
+                        
+                        // Call batch complete handler if available
+                        if p.OnBatchComplete != nil </span><span class="cov8" title="1">{
+                                p.OnBatchComplete(metrics)
+                        }</span>
+                        
+                        // Send batch event (non-blocking)
+                        <span class="cov8" title="1">batchEvent := Event{
+                                Name: "batch",
+                                Data: map[string]any{
+                                        "success":  metrics.SuccessCount,
+                                        "failures": metrics.FailureCount,
+                                        "total":    metrics.SuccessCount + metrics.FailureCount,
+                                        "start":    start,
+                                        "took":     duration.Seconds(),
+                                },
+                                Err:  err,
+                                Time: endTime,
+                        }
+                        
+                        select </span>{
+                        case &lt;-done:<span class="cov0" title="0"></span>
+                        case ch &lt;- batchEvent:<span class="cov8" title="1"></span>
+                        default:<span class="cov0" title="0"></span>
+                                // Channel full, drop event
+                        }
+                }(startTime)
+
+                // Do one work before starting the batch.
+                // This allows us to check if the queue is empty.
+                <span class="cov8" title="1">if err := work(); err != nil </span><span class="cov8" title="1">{
+                        if errors.Is(err, ErrShutdown) </span><span class="cov0" title="0">{
+                                return err
+                        }</span>
+                        <span class="cov8" title="1">return fmt.Errorf("%w: %w", ErrEmptyQueue, err)</span>
+                }
+
+                <span class="cov8" title="1">g, workCtx := errgroup.WithContext(batchCtx)
+                g.SetLimit(maxConcurrency)
+
+        loop:
+                // Minus one work done earlier.
+                for range batchSize - 1 </span><span class="cov8" title="1">{
+                        select </span>{
+                        case &lt;-done:<span class="cov0" title="0">
+                                break loop</span>
+                        case &lt;-workCtx.Done():<span class="cov8" title="1">
+                                break loop</span>
+                        default:<span class="cov8" title="1">
+                                g.Go(work)</span>
+                        }
+                }
+
+                <span class="cov8" title="1">return g.Wait()</span>
+        }
+
+        <span class="cov8" title="1">var wg sync.WaitGroup
+        wg.Add(1)
+
+        go func() </span><span class="cov8" title="1">{
+                defer wg.Done()
+                defer close(ch)
+                defer atomic.StoreInt32(&amp;p.running, 0)
+                defer func() </span><span class="cov8" title="1">{
+                        p.mu.Lock()
+                        p.metrics.Running = false
+                        p.mu.Unlock()
+                }</span>()
+
+                <span class="cov8" title="1">var idle int
+                for </span><span class="cov8" title="1">{
+                        // Check for shutdown or context cancellation
+                        select </span>{
+                        case &lt;-done:<span class="cov0" title="0">
+                                return</span>
+                        case &lt;-ctx.Done():<span class="cov0" title="0">
+                                return</span>
+                        default:<span class="cov8" title="1"></span>
+                        }
+                        
+                        // When the process is idle, we can sleep for a longer duration.
+                        <span class="cov8" title="1">sleep := backoff(idle)
+
+                        // Send poll event (non-blocking)
+                        pollEvent := Event{
+                                Name: "poll",
+                                Data: map[string]any{
+                                        "idle":  idle,
+                                        "sleep": sleep.Seconds(),
+                                },
+                                Time: time.Now(),
+                        }
+                        
+                        select </span>{
+                        case &lt;-done:<span class="cov0" title="0">
+                                return</span>
+                        case &lt;-ctx.Done():<span class="cov0" title="0">
+                                return</span>
+                        case ch &lt;- pollEvent:<span class="cov8" title="1"></span>
+                        default:<span class="cov0" title="0"></span>
+                                // Channel full, continue anyway
+                        }
+
+                        // Sleep with cancellation support
+                        <span class="cov8" title="1">timer := time.NewTimer(sleep)
+                        select </span>{
+                        case &lt;-done:<span class="cov8" title="1">
+                                timer.Stop()
+                                return</span>
+                        case &lt;-ctx.Done():<span class="cov0" title="0">
+                                timer.Stop()
+                                return</span>
+                        case &lt;-timer.C:<span class="cov8" title="1"></span>
+                                // Continue to batch processing
+                        }
+                        
+                        // Update idle cycles metric
+                        <span class="cov8" title="1">p.mu.Lock()
+                        p.metrics.TotalIdleCycles++
+                        p.mu.Unlock()
+
+                        if err := batch(ctx); err != nil </span><span class="cov8" title="1">{
+                                // Queue is empty, increment idle.
+                                if errors.Is(err, ErrEmptyQueue) </span><span class="cov8" title="1">{
+                                        idle++
+                                        continue</span>
+                                }
+
+                                // End of queue, reset the idle counter.
+                                <span class="cov8" title="1">if errors.Is(err, ErrEndOfQueue) </span><span class="cov8" title="1">{
+                                        idle = 0
+                                        continue</span>
+                                }
+                                
+                                // Shutdown requested
+                                <span class="cov8" title="1">if errors.Is(err, ErrShutdown) </span><span class="cov0" title="0">{
+                                        return
+                                }</span>
+
+                                // Context cancelled
+                                <span class="cov8" title="1">if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) </span><span class="cov8" title="1">{
+                                        return
+                                }</span>
+
+                                // Too many failures, stop the process.
+                                <span class="cov8" title="1">return</span>
+                        }
+
+                        // No errors, reset the idle counter.
+                        <span class="cov8" title="1">idle = 0</span>
+                }
+        }()
+
+        <span class="cov8" title="1">stopFunc := sync.OnceFunc(func() </span><span class="cov8" title="1">{
+                close(done)
+                wg.Wait()
+        }</span>)
+
+        <span class="cov8" title="1">return ch, stopFunc</span>
+}
+
+// ExponentialBackOff returns the duration to sleep before the next batch.
+// Idle will be zero if there are items in the queue. Otherwise, it will
+// increment.
+func ExponentialBackOff(idle int) time.Duration <span class="cov8" title="1">{
+        idle = min(idle, 6) // Up to 2^6 = 64 seconds
+        seconds := math.Pow(2, float64(idle))
+        return time.Duration(seconds) * time.Second
+}</span>
+
+// LinearBackOff provides linear backoff with configurable step and max
+func LinearBackOff(step, max time.Duration) func(int) time.Duration <span class="cov8" title="1">{
+        return func(idle int) time.Duration </span><span class="cov8" title="1">{
+                duration := time.Duration(idle) * step
+                if duration &gt; max </span><span class="cov0" title="0">{
+                        return max
+                }</span>
+                <span class="cov8" title="1">if duration &lt; step </span><span class="cov0" title="0">{
+                        return step
+                }</span>
+                <span class="cov8" title="1">return duration</span>
+        }
+}
+
+// ConstantBackOff provides constant backoff duration
+func ConstantBackOff(duration time.Duration) func(int) time.Duration <span class="cov8" title="1">{
+        return func(idle int) time.Duration </span><span class="cov8" title="1">{
+                return duration
+        }</span>
+}
+
+// CustomExponentialBackOff provides configurable exponential backoff
+func CustomExponentialBackOff(base time.Duration, multiplier float64, max time.Duration) func(int) time.Duration <span class="cov8" title="1">{
+        return func(idle int) time.Duration </span><span class="cov8" title="1">{
+                if idle == 0 </span><span class="cov0" title="0">{
+                        return base
+                }</span>
+                <span class="cov8" title="1">duration := time.Duration(float64(base) * math.Pow(multiplier, float64(idle)))
+                if duration &gt; max </span><span class="cov0" title="0">{
+                        return max
+                }</span>
+                <span class="cov8" title="1">return duration</span>
+        }
+}
+
+// MaxConcurrency returns the optimal concurrency level for the current system
+func MaxConcurrency() int <span class="cov8" title="1">{
+        return min(runtime.GOMAXPROCS(0), runtime.NumCPU())
+}</span>
+
+// Event represents a polling event with metadata
+type Event struct {
+        Name string         `json:"name"`
+        Data map[string]any `json:"data,omitempty"`
+        Err  error          `json:"error,omitempty"`
+        Time time.Time      `json:"time"`
+}
+
+// String returns a string representation of the event
+func (e Event) String() string <span class="cov8" title="1">{
+        if e.Err != nil </span><span class="cov8" title="1">{
+                return fmt.Sprintf("[%s] %s: %v (error: %v)", e.Time.Format(time.RFC3339), e.Name, e.Data, e.Err)
+        }</span>
+        <span class="cov8" title="1">return fmt.Sprintf("[%s] %s: %v", e.Time.Format(time.RFC3339), e.Name, e.Data)</span>
+}
+
+// IsError returns true if the event contains an error
+func (e Event) IsError() bool <span class="cov0" title="0">{
+        return e.Err != nil
+}</span>
+
+// IsBatch returns true if the event is a batch completion event
+func (e Event) IsBatch() bool <span class="cov0" title="0">{
+        return e.Name == "batch"
+}</span>
+
+// IsPoll returns true if the event is a poll event
+func (e Event) IsPoll() bool <span class="cov0" title="0">{
+        return e.Name == "poll"
+}</span>
+</pre>
+		
+		</div>
+	</body>
+	<script>
+	(function() {
+		var files = document.getElementById('files');
+		var visible;
+		files.addEventListener('change', onChange, false);
+		function select(part) {
+			if (visible)
+				visible.style.display = 'none';
+			visible = document.getElementById(part);
+			if (!visible)
+				return;
+			files.value = part;
+			visible.style.display = 'block';
+			location.hash = part;
+		}
+		function onChange() {
+			select(files.value);
+			window.scrollTo(0, 0);
+		}
+		if (location.hash != "") {
+			select(location.hash.substr(1));
+		}
+		if (!visible) {
+			select("file0");
+		}
+	})();
+	</script>
+</html>
