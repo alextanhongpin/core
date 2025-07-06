@@ -62,7 +62,7 @@ func main() {
     numbers := []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
     
     // Chainable method calls
-    result := list.New(numbers).
+    result := list.From(numbers).
         Filter(func(n int) bool { return n%2 == 0 }).
         Map(func(n int) int { return n * 2 }).
         Take(3).
@@ -71,7 +71,7 @@ func main() {
     fmt.Println(result.ToSlice()) // [12 8 4]
     
     // Create from variadic arguments
-    words := list.From("hello", "world", "go")
+    words := list.Of("hello", "world", "go")
     filtered := words.Filter(func(s string) bool { return len(s) > 2 })
     fmt.Println(filtered.ToSlice()) // ["hello" "world"]
 }

@@ -10,13 +10,13 @@ type List[T any] struct {
 	data []T
 }
 
-// New creates a new List from a slice.
-func New[T any](slice []T) *List[T] {
+// From creates a new List from a slice.
+func From[T any](slice []T) *List[T] {
 	return &List[T]{data: slice}
 }
 
-// From creates a new List from variadic arguments.
-func From[T any](items ...T) *List[T] {
+// Of creates a new List from variadic arguments.
+func Of[T any](items ...T) *List[T] {
 	return &List[T]{data: items}
 }
 

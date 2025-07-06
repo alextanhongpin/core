@@ -252,7 +252,7 @@ unique := list.Dedup([]int{1, 2, 2, 3, 3, 3})
 batches := list.Chunk(numbers, 2) // [[1,2], [3,4], [5]]
 
 // Chainable List type (new!)
-result := list.New(numbers).
+result := list.From(numbers).
     Filter(func(n int) bool { return n%2 == 0 }).
     Map(func(n int) int { return n * 2 }).
     Take(3).

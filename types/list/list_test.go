@@ -8,29 +8,29 @@ import (
 )
 
 func TestList(t *testing.T) {
-	t.Run("New", func(t *testing.T) {
-		l := list.New([]int{1, 2, 3})
+	t.Run("From", func(t *testing.T) {
+		l := list.From([]int{1, 2, 3})
 		assert.Equal(t, []int{1, 2, 3}, l.ToSlice())
 		assert.Equal(t, 3, l.Len())
 		assert.False(t, l.IsEmpty())
 	})
 
-	t.Run("From", func(t *testing.T) {
-		l := list.From(1, 2, 3)
+	t.Run("Of", func(t *testing.T) {
+		l := list.Of(1, 2, 3)
 		assert.Equal(t, []int{1, 2, 3}, l.ToSlice())
 		assert.Equal(t, 3, l.Len())
 		assert.False(t, l.IsEmpty())
 	})
 
 	t.Run("Empty", func(t *testing.T) {
-		l := list.New([]int{})
+		l := list.From([]int{})
 		assert.Equal(t, []int{}, l.ToSlice())
 		assert.Equal(t, 0, l.Len())
 		assert.True(t, l.IsEmpty())
 	})
 
 	t.Run("Map", func(t *testing.T) {
-		l := list.New([]int{1, 2, 3})
+		l := list.From([]int{1, 2, 3})
 		doubled := l.Map(func(x int) int { return x * 2 })
 		assert.Equal(t, []int{2, 4, 6}, doubled.ToSlice())
 		// Original should be unchanged
@@ -38,13 +38,13 @@ func TestList(t *testing.T) {
 	})
 
 	t.Run("Filter", func(t *testing.T) {
-		l := list.New([]int{1, 2, 3, 4, 5})
+		l := list.From([]int{1, 2, 3, 4, 5})
 		evens := l.Filter(func(x int) bool { return x%2 == 0 })
 		assert.Equal(t, []int{2, 4}, evens.ToSlice())
 	})
 
 	t.Run("Chaining", func(t *testing.T) {
-		l := list.New([]int{1, 2, 3, 4, 5})
+		l := list.From([]int{1, 2, 3, 4, 5})
 		result := l.
 			Filter(func(x int) bool { return x%2 == 0 }).
 			Map(func(x int) int { return x * 2 })
@@ -52,27 +52,27 @@ func TestList(t *testing.T) {
 	})
 
 	t.Run("Reverse", func(t *testing.T) {
-		l := list.New([]int{1, 2, 3})
+		l := list.From([]int{1, 2, 3})
 		reversed := l.Reverse()
 		assert.Equal(t, []int{3, 2, 1}, reversed.ToSlice())
 	})
 
 	t.Run("Chunk", func(t *testing.T) {
-		l := list.New([]int{1, 2, 3, 4, 5})
+		l := list.From([]int{1, 2, 3, 4, 5})
 		chunked := l.Chunk(2)
 		expected := [][]int{{1, 2}, {3, 4}, {5}}
 		assert.Equal(t, expected, chunked)
 	})
 
 	t.Run("Partition", func(t *testing.T) {
-		l := list.New([]int{1, 2, 3, 4, 5})
+		l := list.From([]int{1, 2, 3, 4, 5})
 		evens, odds := l.Partition(func(x int) bool { return x%2 == 0 })
 		assert.Equal(t, []int{2, 4}, evens.ToSlice())
 		assert.Equal(t, []int{1, 3, 5}, odds.ToSlice())
 	})
 
 	t.Run("Conditional methods", func(t *testing.T) {
-		l := list.New([]int{2, 4, 6})
+		l := list.From([]int{2, 4, 6})
 		assert.True(t, l.All(func(x int) bool { return x%2 == 0 }))
 		assert.True(t, l.Any(func(x int) bool { return x > 5 }))
 		assert.False(t, l.None(func(x int) bool { return x%2 == 0 }))
@@ -80,7 +80,7 @@ func TestList(t *testing.T) {
 	})
 
 	t.Run("Query methods", func(t *testing.T) {
-		l := list.New([]int{1, 2, 3, 4, 5})
+		l := list.From([]int{1, 2, 3, 4, 5})
 		
 		// Find
 		val, found := l.Find(func(x int) bool { return x > 3 })
@@ -105,7 +105,7 @@ func TestList(t *testing.T) {
 	})
 
 	t.Run("Complex chaining", func(t *testing.T) {
-		l := list.New([]int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10})
+		l := list.From([]int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10})
 		result := l.
 			Filter(func(x int) bool { return x%2 == 0 }).
 			Map(func(x int) int { return x * 2 }).
@@ -115,7 +115,7 @@ func TestList(t *testing.T) {
 	})
 
 	t.Run("List manipulation methods", func(t *testing.T) {
-		l := list.New([]int{1, 2, 3})
+		l := list.From([]int{1, 2, 3})
 		
 		// Clone
 		cloned := l.Clone()
@@ -133,7 +133,7 @@ func TestList(t *testing.T) {
 	})
 
 	t.Run("Reduce", func(t *testing.T) {
-		l := list.New([]int{1, 2, 3, 4, 5})
+		l := list.From([]int{1, 2, 3, 4, 5})
 		sum := l.Reduce(0, func(acc interface{}, item int) interface{} {
 			return acc.(int) + item
 		})
@@ -141,7 +141,7 @@ func TestList(t *testing.T) {
 	})
 
 	t.Run("FlatMap", func(t *testing.T) {
-		l := list.New([]int{1, 2, 3})
+		l := list.From([]int{1, 2, 3})
 		result := l.FlatMap(func(x int) []int {
 			return []int{x, x * 2}
 		})
