@@ -1,8 +1,62 @@
-// Package sliceutil provides utilities for slice operations that are not
+// Package list provides utilities for slice operations that are not
 // available in the standard library's slices package.
-package sliceutil
+// It also provides a chainable List container type.
+package list
 
 import "slices"
+
+// List is a generic container that wraps a slice and provides chainable methods.
+type List[T any] struct {
+	data []T
+}
+
+// From creates a new List from a slice.
+func From[T any](slice []T) *List[T] {
+	return &List[T]{data: slice}
+}
+
+// Of creates a new List from variadic arguments.
+func Of[T any](items ...T) *List[T] {
+	return &List[T]{data: items}
+}
+
+// ToSlice returns the underlying slice.
+func (l *List[T]) ToSlice() []T {
+	return l.data
+}
+
+// Len returns the length of the list.
+func (l *List[T]) Len() int {
+	return len(l.data)
+}
+
+// IsEmpty returns true if the list is empty.
+func (l *List[T]) IsEmpty() bool {
+	return len(l.data) == 0
+}
+
+// Clone returns a deep copy of the list.
+func (l *List[T]) Clone() *List[T] {
+	cloned := make([]T, len(l.data))
+	copy(cloned, l.data)
+	return &List[T]{data: cloned}
+}
+
+// Append adds elements to the end of the list and returns a new list.
+func (l *List[T]) Append(items ...T) *List[T] {
+	newData := make([]T, len(l.data)+len(items))
+	copy(newData, l.data)
+	copy(newData[len(l.data):], items)
+	return &List[T]{data: newData}
+}
+
+// Prepend adds elements to the beginning of the list and returns a new list.
+func (l *List[T]) Prepend(items ...T) *List[T] {
+	newData := make([]T, len(items)+len(l.data))
+	copy(newData, items)
+	copy(newData[len(items):], l.data)
+	return &List[T]{data: newData}
+}
 
 // Map transforms each element of the slice using the provided function.
 func Map[T, U any](slice []T, transform func(T) U) []U {
@@ -228,4 +282,65 @@ func Unzip[T, U any](pairs []struct {
 	}
 
 	return first, second
+}
+
+// Chainable methods for List type
+
+// Map transforms each element of the list using the provided function.
+func (l *List[T]) Map(transform func(T) T) *List[T] {
+	result := Map(l.data, transform)
+	return &List[T]{data: result}
+}
+
+// MapTo transforms each element of the list to a different type using the provided function.
+func (l *List[T]) MapTo(transform func(T) any) *List[any] {
+	result := Map(l.data, transform)
+	return &List[any]{data: result}
+}
+
+// Filter returns a new list with all elements that satisfy the predicate.
+func (l *List[T]) Filter(predicate func(T) bool) *List[T] {
+	result := make([]T, 0, len(l.data))
+	for _, item := range l.data {
+		if predicate(item) {
+			result = append(result, item)
+		}
+	}
+	return &List[T]{data: result}
+}
+
+// Reverse returns a new list with elements in reverse order.
+func (l *List[T]) Reverse() *List[T] {
+	result := Reverse(l.data)
+	return &List[T]{data: result}
+}
+
+// Chunk splits the list into chunks of the specified size.
+// Returns a regular slice of slices to avoid type instantiation issues.
+func (l *List[T]) Chunk(size int) [][]T {
+	return Chunk(l.data, size)
+}
+
+// Note: Some methods like DedupFunc and GroupBy require specific type constraints
+// and will be implemented separately or have different signatures for method chaining
+
+// Partition splits the list into two lists based on a predicate.
+func (l *List[T]) Partition(predicate func(T) bool) (*List[T], *List[T]) {
+	trueSlice, falseSlice := Partition(l.data, predicate)
+	return &List[T]{data: trueSlice}, &List[T]{data: falseSlice}
+}
+
+// Reduce applies a function against all elements in the list to reduce it to a single value.
+func (l *List[T]) Reduce(initial interface{}, reducer func(interface{}, T) interface{}) interface{} {
+	result := initial
+	for _, item := range l.data {
+		result = reducer(result, item)
+	}
+	return result
+}
+
+// FlatMap applies the transform function to each element and flattens the results.
+func (l *List[T]) FlatMap(transform func(T) []T) *List[T] {
+	result := FlatMap(l.data, transform)
+	return &List[T]{data: result}
 }

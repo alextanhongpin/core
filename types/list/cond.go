@@ -1,4 +1,4 @@
-package sliceutil
+package list
 
 // All returns true if all elements satisfy the predicate.
 // Returns false for empty slices.
@@ -83,4 +83,26 @@ func NoneIndex[T any](slice []T, predicate func(int, T) bool) bool {
 	}
 
 	return true
+}
+
+// Chainable methods for List type
+
+// All returns true if all elements satisfy the predicate.
+func (l *List[T]) All(predicate func(T) bool) bool {
+	return All(l.data, predicate)
+}
+
+// Any returns true if any element satisfies the predicate.
+func (l *List[T]) Any(predicate func(T) bool) bool {
+	return Any(l.data, predicate)
+}
+
+// Some is an alias to Any for JavaScript-like syntax.
+func (l *List[T]) Some(predicate func(T) bool) bool {
+	return Some(l.data, predicate)
+}
+
+// None returns true if no elements satisfy the predicate.
+func (l *List[T]) None(predicate func(T) bool) bool {
+	return None(l.data, predicate)
 }

@@ -1,6 +1,6 @@
-# SliceUtil
+# List
 
-The `sliceutil` package provides comprehensive slice utilities that complement Go's standard library `slices` package. Built with generics, it offers functional programming patterns, mathematical operations, and advanced slice manipulations for modern Go development.
+The `list` package provides comprehensive slice utilities that complement Go's standard library `slices` package. Built with generics, it offers functional programming patterns, mathematical operations, and advanced slice manipulations for modern Go development.
 
 ## Features
 
@@ -11,31 +11,69 @@ The `sliceutil` package provides comprehensive slice utilities that complement G
 - **Transformation Utilities**: Dedup, Reverse, Chunk, Flatten, Partition
 - **Advanced Operations**: GroupBy, Zip/Unzip, Map with error handling
 - **Type Safety**: Full generic support for any comparable or ordered types
+- **Chainable List Type**: New List container type that allows method chaining
+
+## Installation
+
+```bash
+go get github.com/alextanhongpin/core/types/list
+```
 
 ## Quick Start
+
+### Using standalone functions (traditional approach)
 
 ```go
 package main
 
 import (
     "fmt"
-    "github.com/alextanhongpin/core/types/sliceutil"
+    "github.com/alextanhongpin/core/types/list"
 )
 
 func main() {
     numbers := []int{1, 2, 3, 4, 5}
     
     // Transform data
-    doubled := sliceutil.Map(numbers, func(n int) int { return n * 2 })
+    doubled := list.Map(numbers, func(n int) int { return n * 2 })
     fmt.Println("Doubled:", doubled) // [2, 4, 6, 8, 10]
     
     // Filter data
-    evens := sliceutil.Filter(numbers, func(n int) bool { return n%2 == 0 })
+    evens := list.Filter(numbers, func(n int) bool { return n%2 == 0 })
     fmt.Println("Evens:", evens) // [2, 4]
     
     // Aggregate data
-    sum := sliceutil.Sum(numbers)
+    sum := list.Sum(numbers)
     fmt.Println("Sum:", sum) // 15
+}
+```
+
+### Using chainable List type (new approach)
+
+```go
+package main
+
+import (
+    "fmt"
+    "github.com/alextanhongpin/core/types/list"
+)
+
+func main() {
+    numbers := []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
+    
+    // Chainable method calls
+    result := list.From(numbers).
+        Filter(func(n int) bool { return n%2 == 0 }).
+        Map(func(n int) int { return n * 2 }).
+        Take(3).
+        Reverse()
+    
+    fmt.Println(result.ToSlice()) // [12 8 4]
+    
+    // Create from variadic arguments
+    words := list.Of("hello", "world", "go")
+    filtered := words.Filter(func(s string) bool { return len(s) > 2 })
+    fmt.Println(filtered.ToSlice()) // ["hello" "world"]
 }
 ```
 
@@ -45,13 +83,13 @@ func main() {
 
 ```go
 // Check if all elements satisfy a condition
-all := sliceutil.All([]int{2, 4, 6}, func(n int) bool { return n%2 == 0 })
+all := list.All([]int{2, 4, 6}, func(n int) bool { return n%2 == 0 })
 
 // Check if any element satisfies a condition
-any := sliceutil.Any([]int{1, 3, 4}, func(n int) bool { return n%2 == 0 })
+any := list.Any([]int{1, 3, 4}, func(n int) bool { return n%2 == 0 })
 
 // Check if no elements satisfy a condition
-none := sliceutil.None([]int{1, 3, 5}, func(n int) bool { return n%2 == 0 })
+none := list.None([]int{1, 3, 5}, func(n int) bool { return n%2 == 0 })
 
 // Index-based variants available: AllIndex, AnyIndex, NoneIndex
 ```
@@ -60,36 +98,36 @@ none := sliceutil.None([]int{1, 3, 5}, func(n int) bool { return n%2 == 0 })
 
 ```go
 // Transform elements
-doubled := sliceutil.Map([]int{1, 2, 3}, func(n int) int { return n * 2 })
+doubled := list.Map([]int{1, 2, 3}, func(n int) int { return n * 2 })
 
 // Transform with error handling
-result, err := sliceutil.MapError([]string{"1", "2", "x"}, strconv.Atoi)
+result, err := list.MapError([]string{"1", "2", "x"}, strconv.Atoi)
 
 // Transform and flatten
-tags := sliceutil.FlatMap(articles, func(a Article) []string { return a.Tags })
+tags := list.FlatMap(articles, func(a Article) []string { return a.Tags })
 
 // Remove duplicates
-unique := sliceutil.Dedup([]int{1, 2, 2, 3, 3, 3})
+unique := list.Dedup([]int{1, 2, 2, 3, 3, 3})
 ```
 
 ### Query Operations
 
 ```go
 // Find first matching element
-user, found := sliceutil.Find(users, func(u User) bool { 
+user, found := list.Find(users, func(u User) bool { 
     return u.Email == "john@example.com" 
 })
 
 // Find with index
-user, index, found := sliceutil.FindIndex(users, func(u User) bool { 
+user, index, found := list.FindIndex(users, func(u User) bool { 
     return u.Age > 30 
 })
 
 // Check membership
-exists := sliceutil.Contains([]string{"a", "b", "c"}, "b")
+exists := list.Contains([]string{"a", "b", "c"}, "b")
 
 // Get element indices
-index := sliceutil.IndexOf([]string{"a", "b", "c"}, "b") // 1
+index := list.IndexOf([]string{"a", "b", "c"}, "b") // 1
 ```
 
 ### Mathematical Operations
@@ -98,31 +136,31 @@ index := sliceutil.IndexOf([]string{"a", "b", "c"}, "b") // 1
 numbers := []int{1, 2, 3, 4, 5}
 
 // Basic operations
-sum := sliceutil.Sum(numbers)           // 15
-product := sliceutil.Product(numbers)   // 120
+sum := list.Sum(numbers)           // 15
+product := list.Product(numbers)   // 120
 
 // Statistical operations
-min, ok := sliceutil.Min(numbers)       // 1, true
-max, ok := sliceutil.Max(numbers)       // 5, true
-avg, ok := sliceutil.Average(numbers)   // 3.0, true
+min, ok := list.Min(numbers)       // 1, true
+max, ok := list.Max(numbers)       // 5, true
+avg, ok := list.Average(numbers)   // 3.0, true
 ```
 
 ### Advanced Operations
 
 ```go
 // Group elements by key
-grouped := sliceutil.GroupBy(users, func(u User) string { return u.Role })
+grouped := list.GroupBy(users, func(u User) string { return u.Role })
 
 // Split into chunks
-batches := sliceutil.Chunk(orders, 100) // Process in batches of 100
+batches := list.Chunk(orders, 100) // Process in batches of 100
 
 // Partition by predicate
-active, inactive := sliceutil.Partition(users, func(u User) bool { 
+active, inactive := list.Partition(users, func(u User) bool { 
     return u.Active 
 })
 
 // Zip two slices
-pairs := sliceutil.Zip([]string{"a", "b"}, []int{1, 2})
+pairs := list.Zip([]string{"a", "b"}, []int{1, 2})
 // Result: []struct{First string; Second int}{{a, 1}, {b, 2}}
 ```
 
@@ -130,15 +168,15 @@ pairs := sliceutil.Zip([]string{"a", "b"}, []int{1, 2})
 
 ```go
 // Reverse elements
-reversed := sliceutil.Reverse([]int{1, 2, 3}) // [3, 2, 1]
+reversed := list.Reverse([]int{1, 2, 3}) // [3, 2, 1]
 
 // Take/Drop elements
-first3 := sliceutil.Take([]int{1, 2, 3, 4, 5}, 3)     // [1, 2, 3]
-last2 := sliceutil.TakeLast([]int{1, 2, 3, 4, 5}, 2)  // [4, 5]
-rest := sliceutil.Drop([]int{1, 2, 3, 4, 5}, 2)       // [3, 4, 5]
+first3 := list.Take([]int{1, 2, 3, 4, 5}, 3)     // [1, 2, 3]
+last2 := list.TakeLast([]int{1, 2, 3, 4, 5}, 2)  // [4, 5]
+rest := list.Drop([]int{1, 2, 3, 4, 5}, 2)       // [3, 4, 5]
 
 // Flatten nested slices
-flat := sliceutil.Flatten([][]int{{1, 2}, {3, 4}, {5}}) // [1, 2, 3, 4, 5]
+flat := list.Flatten([][]int{{1, 2}, {3, 4}, {5}}) // [1, 2, 3, 4, 5]
 ```
 
 ## Real-World Examples
@@ -162,22 +200,22 @@ users := []User{
 }
 
 // Find active admin users
-activeAdmins := sliceutil.Filter(users, func(u User) bool {
+activeAdmins := list.Filter(users, func(u User) bool {
     return u.Active && u.Role == "admin"
 })
 
 // Get all email addresses
-emails := sliceutil.Map(users, func(u User) string {
+emails := list.Map(users, func(u User) string {
     return u.Email
 })
 
 // Group users by role
-byRole := sliceutil.GroupBy(users, func(u User) string {
+byRole := list.GroupBy(users, func(u User) string {
     return u.Role
 })
 
 // Check if all users are adults
-allAdults := sliceutil.All(users, func(u User) bool {
+allAdults := list.All(users, func(u User) bool {
     return u.Age >= 18
 })
 ```
@@ -189,19 +227,19 @@ allAdults := sliceutil.All(users, func(u User) bool {
 rawData := []string{"1", "2", "3", "invalid", "5"}
 
 // Parse with error handling
-numbers, err := sliceutil.MapError(rawData, strconv.Atoi)
+numbers, err := list.MapError(rawData, strconv.Atoi)
 if err != nil {
     // Handle parsing errors
 }
 
 // Filter and transform
-evenSquares := sliceutil.Map(
-    sliceutil.Filter(numbers, func(n int) bool { return n%2 == 0 }),
+evenSquares := list.Map(
+    list.Filter(numbers, func(n int) bool { return n%2 == 0 }),
     func(n int) int { return n * n },
 )
 
 // Process in batches
-batches := sliceutil.Chunk(evenSquares, 10)
+batches := list.Chunk(evenSquares, 10)
 for _, batch := range batches {
     // Process each batch
 }
@@ -223,25 +261,25 @@ sales := []Sale{
 }
 
 // Calculate total revenue
-totalRevenue := sliceutil.Sum(sliceutil.Map(sales, func(s Sale) float64 {
+totalRevenue := list.Sum(list.Map(sales, func(s Sale) float64 {
     return s.Amount
 }))
 
 // Group sales by region
-byRegion := sliceutil.GroupBy(sales, func(s Sale) string {
+byRegion := list.GroupBy(sales, func(s Sale) string {
     return s.Region
 })
 
 // Find high-value sales
-highValueSales := sliceutil.Filter(sales, func(s Sale) bool {
+highValueSales := list.Filter(sales, func(s Sale) bool {
     return s.Amount > 2000
 })
 
 // Get sales statistics
-amounts := sliceutil.Map(sales, func(s Sale) float64 { return s.Amount })
-minSale, _ := sliceutil.Min(amounts)
-maxSale, _ := sliceutil.Max(amounts)
-avgSale, _ := sliceutil.Average(amounts)
+amounts := list.Map(sales, func(s Sale) float64 { return s.Amount })
+minSale, _ := list.Min(amounts)
+maxSale, _ := list.Max(amounts)
+avgSale, _ := list.Average(amounts)
 ```
 
 ### Content Management
@@ -260,17 +298,17 @@ articles := []Article{
 }
 
 // Get all unique tags
-allTags := sliceutil.Dedup(sliceutil.FlatMap(articles, func(a Article) []string {
+allTags := list.Dedup(list.FlatMap(articles, func(a Article) []string {
     return a.Tags
 }))
 
 // Find popular articles
-popular := sliceutil.Filter(articles, func(a Article) bool {
+popular := list.Filter(articles, func(a Article) bool {
     return a.Views > 1000
 })
 
 // Calculate total views
-totalViews := sliceutil.Sum(sliceutil.Map(articles, func(a Article) int {
+totalViews := list.Sum(list.Map(articles, func(a Article) int {
     return a.Views
 }))
 ```
@@ -293,12 +331,12 @@ configs := []Config{
 }
 
 // Group configurations by environment
-byEnv := sliceutil.GroupBy(configs, func(c Config) string {
+byEnv := list.GroupBy(configs, func(c Config) string {
     return c.Env
 })
 
 // Get enabled configurations only
-enabled := sliceutil.Filter(configs, func(c Config) bool {
+enabled := list.Filter(configs, func(c Config) bool {
     return c.Enabled
 })
 
@@ -337,17 +375,17 @@ If upgrading from index-based function signatures:
 
 ```go
 // Old (index-based)
-result := sliceutil.Map(slice, func(i int) string {
+result := list.Map(slice, func(i int) string {
     return fmt.Sprintf("%d", slice[i])
 })
 
 // New (element-based)
-result := sliceutil.Map(slice, func(item int) string {
+result := list.Map(slice, func(item int) string {
     return fmt.Sprintf("%d", item)
 })
 
 // Use MapIndex if you need the index
-result := sliceutil.MapIndex(slice, func(i int, item int) string {
+result := list.MapIndex(slice, func(i int, item int) string {
     return fmt.Sprintf("%d:%d", i, item)
 })
 ```

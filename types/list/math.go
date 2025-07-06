@@ -1,4 +1,4 @@
-package sliceutil
+package list
 
 import "golang.org/x/exp/constraints"
 
@@ -69,3 +69,7 @@ func Average[T constraints.Integer | constraints.Float](numbers []T) (float64, b
 	sum := Sum(numbers)
 	return float64(sum) / float64(len(numbers)), true
 }
+
+// Note: Math methods for List type would require type constraints,
+// so they are implemented as separate methods for numeric List types.
+// These can be added when needed for specific numeric types.

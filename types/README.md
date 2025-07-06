@@ -230,30 +230,37 @@ evens := userIDs.Filter(func(id int) bool { return id%2 == 0 })
 **Key Features**: Generic implementation, mathematical operations, functional helpers, memory efficient  
 **Use Cases**: Permission systems, data deduplication, tag management, set-based logic
 
-### 📋 [SliceUtil](./sliceutil/) - Slice Operations
-Comprehensive slice utilities with functional programming patterns and mathematical operations.
+### 📋 [List](./list/) - Slice Operations
+Comprehensive slice utilities with functional programming patterns, mathematical operations, and chainable List container type.
 
 ```go
-import "github.com/alextanhongpin/core/types/sliceutil"
+import "github.com/alextanhongpin/core/types/list"
 
 numbers := []int{1, 2, 3, 4, 5}
 
-// Functional operations
-doubled := sliceutil.Map(numbers, func(n int) int { return n * 2 })
-evens := sliceutil.Filter(numbers, func(n int) bool { return n%2 == 0 })
-sum := sliceutil.Reduce(numbers, 0, func(a, b int) int { return a + b })
+// Traditional functional operations
+doubled := list.Map(numbers, func(n int) int { return n * 2 })
+evens := list.Filter(numbers, func(n int) bool { return n%2 == 0 })
+sum := list.Reduce(numbers, 0, func(a, b int) int { return a + b })
 
 // Conditional operations
-allPositive := sliceutil.All(numbers, func(n int) bool { return n > 0 })
-hasNegative := sliceutil.Any(numbers, func(n int) bool { return n < 0 })
+allPositive := list.All(numbers, func(n int) bool { return n > 0 })
+hasNegative := list.Any(numbers, func(n int) bool { return n < 0 })
 
 // Utility operations
-unique := sliceutil.Dedup([]int{1, 2, 2, 3, 3, 3})
-batches := sliceutil.Chunk(numbers, 2) // [[1,2], [3,4], [5]]
+unique := list.Dedup([]int{1, 2, 2, 3, 3, 3})
+batches := list.Chunk(numbers, 2) // [[1,2], [3,4], [5]]
+
+// Chainable List type (new!)
+result := list.From(numbers).
+    Filter(func(n int) bool { return n%2 == 0 }).
+    Map(func(n int) int { return n * 2 }).
+    Take(3).
+    ToSlice()  // [4, 8, 12]
 ```
 
-**Key Features**: Functional programming, mathematical operations, utility functions, type-safe generics  
-**Use Cases**: Data processing, functional programming, batch processing, data transformation
+**Key Features**: Functional programming, mathematical operations, utility functions, type-safe generics, **chainable List type**  
+**Use Cases**: Data processing, functional programming, batch processing, data transformation, method chaining
 
 ### 🔄 [States](./states/) - State Management
 State machine implementation and sequential workflow validation for complex business processes.
@@ -405,12 +412,12 @@ package main
 
 import (
     "github.com/alextanhongpin/core/types/result"
-    "github.com/alextanhongpin/core/types/sliceutil"
+    "github.com/alextanhongpin/core/types/list"
 )
 
 func ProcessUserData(rawData []string) ([]User, error) {
     // Parse and validate users
-    userResults := sliceutil.Map(rawData, func(data string) *result.Result[User] {
+    userResults := list.Map(rawData, func(data string) *result.Result[User] {
         return result.From(func() (User, error) {
             return parseUser(data)
         })
@@ -420,13 +427,13 @@ func ProcessUserData(rawData []string) ([]User, error) {
     users := result.Filter(userResults...)
     
     // Apply business logic transformations
-    processedUsers := sliceutil.Map(users, func(user User) User {
+    processedUsers := list.Map(users, func(user User) User {
         user.Email = email.Normalize(user.Email)
         return user
     })
     
     // Batch process
-    batches := sliceutil.Chunk(processedUsers, 100)
+    batches := list.Chunk(processedUsers, 100)
     for _, batch := range batches {
         if err := processBatch(batch); err != nil {
             return nil, err
@@ -513,13 +520,13 @@ mapped := number.Map(mouseX, 0, 800, 0, 360)
 
 **Use Cases**: Games, animations, data visualization, control systems
 
-### 📝 [Sliceutil](./sliceutil/) - Slice Operations
+### 📝 [List](./list/) - Slice Operations
 ```go
-import "github.com/alextanhongpin/core/types/sliceutil"
+import "github.com/alextanhongpin/core/types/list"
 
-doubled := sliceutil.Map(numbers, func(i int) int { return numbers[i] * 2 })
-unique := sliceutil.Dedup(items)
-found, ok := sliceutil.Find(users, func(i int) bool { return users[i].ID == "123" })
+doubled := list.Map(numbers, func(i int) int { return numbers[i] * 2 })
+unique := list.Dedup(items)
+found, ok := list.Find(users, func(i int) bool { return users[i].ID == "123" })
 ```
 
 **Use Cases**: Data processing, functional programming, collections manipulation
@@ -690,7 +697,7 @@ import (
     "github.com/alextanhongpin/core/types/number"
     "github.com/alextanhongpin/core/types/random"
     "github.com/alextanhongpin/core/types/states"
-    "github.com/alextanhongpin/core/types/sliceutil"
+    "github.com/alextanhongpin/core/types/list"
 )
 
 type Player struct {
@@ -723,7 +730,7 @@ func (g *Game) Update(deltaTime float64) {
     }
     
     // Update game state
-    alivePlayers := sliceutil.Filter(g.players, func(i int) bool {
+    alivePlayers := list.Filter(g.players, func(i int) bool {
         return g.players[i].Health > 0
     })
     
@@ -781,7 +788,7 @@ Contributions are welcome! Please:
 | env | ✅ Stable | 90%+ | Complete |
 | handlers | ✅ Stable | 85%+ | Complete |  
 | number | ✅ Stable | 90%+ | Complete |
-| sliceutil | ✅ Stable | 95%+ | Partial |
+| list | ✅ Stable | 95%+ | Complete |
 | sets | ✅ Stable | 90%+ | Partial |
 | states | ✅ Stable | 85%+ | Partial |
 | safe | ✅ Stable | 80%+ | Partial |

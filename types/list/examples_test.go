@@ -1,4 +1,4 @@
-package sliceutil_test
+package list_test
 
 import (
 	"errors"
@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/alextanhongpin/core/types/sliceutil"
+	"github.com/alextanhongpin/core/types/list"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -29,7 +29,7 @@ func ExampleAll_userValidation() {
 	}
 
 	// Check if all users are active
-	allActive := sliceutil.All(users, func(u User) bool {
+	allActive := list.All(users, func(u User) bool {
 		return u.Active
 	})
 
@@ -45,7 +45,7 @@ func ExampleAny_roleCheck() {
 	}
 
 	// Check if any user is an admin
-	hasAdmin := sliceutil.Any(users, func(u User) bool {
+	hasAdmin := list.Any(users, func(u User) bool {
 		return u.Role == "admin"
 	})
 
@@ -61,7 +61,7 @@ func ExampleFilter_activeUsers() {
 	}
 
 	// Filter active users over 30
-	activeAdults := sliceutil.Filter(users, func(u User) bool {
+	activeAdults := list.Filter(users, func(u User) bool {
 		return u.Active && u.Age >= 30
 	})
 
@@ -77,7 +77,7 @@ func ExampleMap_emailExtraction() {
 	}
 
 	// Extract emails
-	emails := sliceutil.Map(users, func(u User) string {
+	emails := list.Map(users, func(u User) string {
 		return u.Email
 	})
 
@@ -89,7 +89,7 @@ func ExampleMapError_userValidation() {
 	userInputs := []string{"alice@example.com", "invalid-email", "bob@example.com"}
 
 	// Validate and transform emails
-	validEmails, err := sliceutil.MapError(userInputs, func(email string) (string, error) {
+	validEmails, err := list.MapError(userInputs, func(email string) (string, error) {
 		if !strings.Contains(email, "@") {
 			return "", errors.New("invalid email format")
 		}
@@ -112,7 +112,7 @@ func ExampleFind_userLookup() {
 	}
 
 	// Find user by email
-	user, found := sliceutil.Find(users, func(u User) bool {
+	user, found := list.Find(users, func(u User) bool {
 		return u.Email == "bob@example.com"
 	})
 
@@ -131,7 +131,7 @@ func ExampleGroupBy_usersByRole() {
 	}
 
 	// Group users by role
-	grouped := sliceutil.GroupBy(users, func(u User) string {
+	grouped := list.GroupBy(users, func(u User) string {
 		return u.Role
 	})
 
@@ -147,7 +147,7 @@ func ExampleChunk_batchProcessing() {
 	orders := []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
 
 	// Process orders in batches of 3
-	batches := sliceutil.Chunk(orders, 3)
+	batches := list.Chunk(orders, 3)
 
 	for i, batch := range batches {
 		fmt.Printf("Batch %d: %v\n", i+1, batch)
@@ -169,14 +169,14 @@ func ExampleFlatMap_tagExpansion() {
 	}
 
 	// Extract all unique tags
-	allTags := sliceutil.FlatMap(articles, func(article struct {
+	allTags := list.FlatMap(articles, func(article struct {
 		Title string
 		Tags  []string
 	}) []string {
 		return article.Tags
 	})
 
-	uniqueTags := sliceutil.Dedup(allTags)
+	uniqueTags := list.Dedup(allTags)
 	fmt.Printf("Unique tags: %v\n", uniqueTags)
 	// Output: Unique tags: [go programming tutorial advanced web javascript frontend]
 }
@@ -185,12 +185,12 @@ func ExampleReduce_statistics() {
 	numbers := []int{1, 2, 3, 4, 5}
 
 	// Calculate sum using reduce
-	sum := sliceutil.Reduce(numbers, 0, func(acc, n int) int {
+	sum := list.Reduce(numbers, 0, func(acc, n int) int {
 		return acc + n
 	})
 
 	// Calculate product using reduce
-	product := sliceutil.Reduce(numbers, 1, func(acc, n int) int {
+	product := list.Reduce(numbers, 1, func(acc, n int) int {
 		return acc * n
 	})
 
@@ -202,8 +202,8 @@ func ExampleReduce_statistics() {
 func ExampleSum_salesAnalytics() {
 	dailySales := []float64{1500.50, 2300.75, 1800.25, 2100.00, 1650.80}
 
-	totalSales := sliceutil.Sum(dailySales)
-	average, _ := sliceutil.Average(dailySales)
+	totalSales := list.Sum(dailySales)
+	average, _ := list.Average(dailySales)
 
 	fmt.Printf("Total sales: $%.2f\n", totalSales)
 	fmt.Printf("Average daily sales: $%.2f\n", average)
@@ -225,7 +225,7 @@ func ExamplePartition_orderProcessing() {
 	}
 
 	// Partition orders by completion status
-	completed, pending := sliceutil.Partition(orders, func(order struct {
+	completed, pending := list.Partition(orders, func(order struct {
 		ID     int
 		Amount float64
 		Status string
@@ -244,7 +244,7 @@ func ExampleDedup_wordFrequency() {
 	words := []string{"apple", "banana", "apple", "cherry", "banana", "date", "apple"}
 
 	// Remove duplicates while preserving order
-	uniqueWords := sliceutil.Dedup(words)
+	uniqueWords := list.Dedup(words)
 
 	fmt.Printf("Original: %v\n", words)
 	fmt.Printf("Unique: %v\n", uniqueWords)
@@ -256,7 +256,7 @@ func ExampleDedupFunc_caseInsensitive() {
 	words := []string{"Apple", "BANANA", "apple", "Cherry", "banana", "DATE"}
 
 	// Remove duplicates case-insensitively
-	uniqueWords := sliceutil.DedupFunc(words, func(word string) string {
+	uniqueWords := list.DedupFunc(words, func(word string) string {
 		return strings.ToLower(word)
 	})
 
@@ -268,9 +268,9 @@ func ExampleDedupFunc_caseInsensitive() {
 func ExampleMin_temperatureAnalysis() {
 	temperatures := []float64{23.5, 18.2, 31.8, 15.9, 28.7, 22.1}
 
-	minTemp, _ := sliceutil.Min(temperatures)
-	maxTemp, _ := sliceutil.Max(temperatures)
-	avgTemp, _ := sliceutil.Average(temperatures)
+	minTemp, _ := list.Min(temperatures)
+	maxTemp, _ := list.Max(temperatures)
+	avgTemp, _ := list.Average(temperatures)
 
 	fmt.Printf("Temperature Analysis:\n")
 	fmt.Printf("Min: %.1f°C\n", minTemp)
@@ -289,7 +289,7 @@ func ExampleFilter_complexPipeline() {
 
 	// Pipeline: parse -> filter -> transform -> chunk
 	// Step 1: Parse strings to integers, handle errors
-	numbers := sliceutil.Map(rawData, func(s string) int {
+	numbers := list.Map(rawData, func(s string) int {
 		n, err := strconv.Atoi(s)
 		if err != nil {
 			return -1
@@ -298,17 +298,17 @@ func ExampleFilter_complexPipeline() {
 	})
 
 	// Step 2: Filter even numbers
-	evenNumbers := sliceutil.Filter(numbers, func(n int) bool {
+	evenNumbers := list.Filter(numbers, func(n int) bool {
 		return n%2 == 0
 	})
 
 	// Step 3: Square the numbers
-	squared := sliceutil.Map(evenNumbers, func(n int) int {
+	squared := list.Map(evenNumbers, func(n int) int {
 		return n * n
 	})
 
 	// Step 4: Process in batches
-	batches := sliceutil.Chunk(squared, 2)
+	batches := list.Chunk(squared, 2)
 
 	for i, batch := range batches {
 		fmt.Printf("Batch %d: %v\n", i+1, batch)
@@ -326,7 +326,7 @@ func BenchmarkMap(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = sliceutil.Map(data, func(n int) int {
+		_ = list.Map(data, func(n int) int {
 			return n * 2
 		})
 	}
@@ -340,7 +340,7 @@ func BenchmarkFilter(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = sliceutil.Filter(data, func(n int) bool {
+		_ = list.Filter(data, func(n int) bool {
 			return n%2 == 0
 		})
 	}
@@ -354,7 +354,7 @@ func BenchmarkDedup(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = sliceutil.Dedup(data)
+		_ = list.Dedup(data)
 	}
 }
 
@@ -364,64 +364,64 @@ func TestSliceUtilFunctions(t *testing.T) {
 		assert := assert.New(t)
 
 		// All positive numbers
-		assert.True(sliceutil.All([]int{1, 2, 3, 4}, func(n int) bool { return n > 0 }))
+		assert.True(list.All([]int{1, 2, 3, 4}, func(n int) bool { return n > 0 }))
 
 		// Not all even numbers
-		assert.False(sliceutil.All([]int{1, 2, 3, 4}, func(n int) bool { return n%2 == 0 }))
+		assert.False(list.All([]int{1, 2, 3, 4}, func(n int) bool { return n%2 == 0 }))
 
 		// Empty slice
-		assert.False(sliceutil.All([]int{}, func(n int) bool { return n > 0 }))
+		assert.False(list.All([]int{}, func(n int) bool { return n > 0 }))
 	})
 
 	t.Run("Any", func(t *testing.T) {
 		assert := assert.New(t)
 
 		// Any even number
-		assert.True(sliceutil.Any([]int{1, 2, 3, 4}, func(n int) bool { return n%2 == 0 }))
+		assert.True(list.Any([]int{1, 2, 3, 4}, func(n int) bool { return n%2 == 0 }))
 
 		// No negative numbers
-		assert.False(sliceutil.Any([]int{1, 2, 3, 4}, func(n int) bool { return n < 0 }))
+		assert.False(list.Any([]int{1, 2, 3, 4}, func(n int) bool { return n < 0 }))
 
 		// Empty slice
-		assert.False(sliceutil.Any([]int{}, func(n int) bool { return n > 0 }))
+		assert.False(list.Any([]int{}, func(n int) bool { return n > 0 }))
 	})
 
 	t.Run("Sum", func(t *testing.T) {
 		assert := assert.New(t)
 
-		assert.Equal(15, sliceutil.Sum([]int{1, 2, 3, 4, 5}))
-		assert.Equal(0, sliceutil.Sum([]int{}))
-		assert.Equal(15.5, sliceutil.Sum([]float64{1.5, 2.5, 3.5, 4.5, 3.5}))
+		assert.Equal(15, list.Sum([]int{1, 2, 3, 4, 5}))
+		assert.Equal(0, list.Sum([]int{}))
+		assert.Equal(15.5, list.Sum([]float64{1.5, 2.5, 3.5, 4.5, 3.5}))
 	})
 
 	t.Run("Map", func(t *testing.T) {
 		assert := assert.New(t)
 
-		doubled := sliceutil.Map([]int{1, 2, 3}, func(n int) int { return n * 2 })
+		doubled := list.Map([]int{1, 2, 3}, func(n int) int { return n * 2 })
 		assert.Equal([]int{2, 4, 6}, doubled)
 
-		strings := sliceutil.Map([]int{1, 2, 3}, func(n int) string { return fmt.Sprintf("num_%d", n) })
+		strings := list.Map([]int{1, 2, 3}, func(n int) string { return fmt.Sprintf("num_%d", n) })
 		assert.Equal([]string{"num_1", "num_2", "num_3"}, strings)
 	})
 
 	t.Run("Filter", func(t *testing.T) {
 		assert := assert.New(t)
 
-		evens := sliceutil.Filter([]int{1, 2, 3, 4, 5, 6}, func(n int) bool { return n%2 == 0 })
+		evens := list.Filter([]int{1, 2, 3, 4, 5, 6}, func(n int) bool { return n%2 == 0 })
 		assert.Equal([]int{2, 4, 6}, evens)
 
-		empty := sliceutil.Filter([]int{1, 3, 5}, func(n int) bool { return n%2 == 0 })
+		empty := list.Filter([]int{1, 3, 5}, func(n int) bool { return n%2 == 0 })
 		assert.Equal([]int{}, empty)
 	})
 
 	t.Run("Dedup", func(t *testing.T) {
 		assert := assert.New(t)
 
-		unique := sliceutil.Dedup([]int{1, 2, 2, 3, 3, 3, 4})
+		unique := list.Dedup([]int{1, 2, 2, 3, 3, 3, 4})
 		assert.ElementsMatch([]int{1, 2, 3, 4}, unique)
 
 		// Order preservation test
-		uniquePreserved := sliceutil.Dedup([]string{"a", "b", "a", "c", "b"})
+		uniquePreserved := list.Dedup([]string{"a", "b", "a", "c", "b"})
 		expected := []string{"a", "b", "c"}
 		assert.Equal(expected, uniquePreserved)
 	})
@@ -429,23 +429,23 @@ func TestSliceUtilFunctions(t *testing.T) {
 	t.Run("Chunk", func(t *testing.T) {
 		assert := assert.New(t)
 
-		chunks := sliceutil.Chunk([]int{1, 2, 3, 4, 5, 6, 7}, 3)
+		chunks := list.Chunk([]int{1, 2, 3, 4, 5, 6, 7}, 3)
 		expected := [][]int{{1, 2, 3}, {4, 5, 6}, {7}}
 		assert.Equal(expected, chunks)
 
 		// Empty slice
-		emptyChunks := sliceutil.Chunk([]int{}, 3)
+		emptyChunks := list.Chunk([]int{}, 3)
 		assert.Equal([][]int{}, emptyChunks)
 
 		// Invalid chunk size
-		nilChunks := sliceutil.Chunk([]int{1, 2, 3}, 0)
+		nilChunks := list.Chunk([]int{1, 2, 3}, 0)
 		assert.Nil(nilChunks)
 	})
 
 	t.Run("Partition", func(t *testing.T) {
 		assert := assert.New(t)
 
-		evens, odds := sliceutil.Partition([]int{1, 2, 3, 4, 5, 6}, func(n int) bool { return n%2 == 0 })
+		evens, odds := list.Partition([]int{1, 2, 3, 4, 5, 6}, func(n int) bool { return n%2 == 0 })
 		assert.Equal([]int{2, 4, 6}, evens)
 		assert.Equal([]int{1, 3, 5}, odds)
 	})

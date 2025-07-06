@@ -1,4 +1,4 @@
-package sliceutil
+package list
 
 // Find returns the first element that satisfies the predicate.
 // Returns zero value and false if no element is found.
@@ -161,4 +161,55 @@ func LastIndexOf[T comparable](slice []T, element T) int {
 		}
 	}
 	return -1
+}
+
+// Chainable methods for List type
+
+// Find returns the first element that satisfies the predicate.
+func (l *List[T]) Find(predicate func(T) bool) (T, bool) {
+	return Find(l.data, predicate)
+}
+
+// FindIndex returns the first element and its index that satisfies the predicate.
+func (l *List[T]) FindIndex(predicate func(T) bool) (T, int, bool) {
+	return FindIndex(l.data, predicate)
+}
+
+// FindLast returns the last element that satisfies the predicate.
+func (l *List[T]) FindLast(predicate func(T) bool) (T, bool) {
+	return FindLast(l.data, predicate)
+}
+
+// Head returns the first element of the list.
+func (l *List[T]) Head() (T, bool) {
+	return Head(l.data)
+}
+
+// Tail returns the last element of the list.
+func (l *List[T]) Tail() (T, bool) {
+	return Tail(l.data)
+}
+
+// Take returns a new list with the first n elements.
+func (l *List[T]) Take(n int) *List[T] {
+	result := Take(l.data, n)
+	return &List[T]{data: result}
+}
+
+// TakeLast returns a new list with the last n elements.
+func (l *List[T]) TakeLast(n int) *List[T] {
+	result := TakeLast(l.data, n)
+	return &List[T]{data: result}
+}
+
+// Drop returns a new list with the first n elements removed.
+func (l *List[T]) Drop(n int) *List[T] {
+	result := Drop(l.data, n)
+	return &List[T]{data: result}
+}
+
+// DropLast returns a new list with the last n elements removed.
+func (l *List[T]) DropLast(n int) *List[T] {
+	result := DropLast(l.data, n)
+	return &List[T]{data: result}
 }

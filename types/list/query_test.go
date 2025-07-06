@@ -1,9 +1,9 @@
-package sliceutil_test
+package list_test
 
 import (
 	"testing"
 
-	"github.com/alextanhongpin/core/types/sliceutil"
+	"github.com/alextanhongpin/core/types/list"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -12,7 +12,7 @@ func TestFind(t *testing.T) {
 		assert := assert.New(t)
 
 		n := []int{1, 2, 3, 4, 5}
-		m, ok := sliceutil.Find(n, func(val int) bool {
+		m, ok := list.Find(n, func(val int) bool {
 			return val == 3
 		})
 		assert.True(ok)
@@ -23,7 +23,7 @@ func TestFind(t *testing.T) {
 		assert := assert.New(t)
 
 		n := []int{}
-		m, ok := sliceutil.Find(n, func(val int) bool {
+		m, ok := list.Find(n, func(val int) bool {
 			return val == 3
 		})
 		assert.False(ok)
@@ -34,7 +34,7 @@ func TestFind(t *testing.T) {
 		assert := assert.New(t)
 
 		n := []int{1, 2, 3, 4, 5}
-		m, ok := sliceutil.Find(n, func(val int) bool {
+		m, ok := list.Find(n, func(val int) bool {
 			return val == 99
 		})
 		assert.False(ok)
@@ -47,7 +47,7 @@ func TestFilter(t *testing.T) {
 		assert := assert.New(t)
 
 		n := []int{1, 2, 3, 4, 5}
-		oddn := sliceutil.Filter(n, func(val int) bool {
+		oddn := list.Filter(n, func(val int) bool {
 			return val%2 == 1
 		})
 
@@ -58,7 +58,7 @@ func TestFilter(t *testing.T) {
 		assert := assert.New(t)
 
 		n := []int{}
-		oddn := sliceutil.Filter(n, func(val int) bool {
+		oddn := list.Filter(n, func(val int) bool {
 			return val%2 == 1
 		})
 
@@ -71,7 +71,7 @@ func TestHead(t *testing.T) {
 		assert := assert.New(t)
 
 		n := []int{1, 2, 3, 4, 5}
-		m, ok := sliceutil.Head(n)
+		m, ok := list.Head(n)
 		assert.True(ok)
 		assert.Equal(1, m)
 	})
@@ -80,7 +80,7 @@ func TestHead(t *testing.T) {
 		assert := assert.New(t)
 
 		n := []int{}
-		m, ok := sliceutil.Head(n)
+		m, ok := list.Head(n)
 		assert.False(ok)
 		assert.Equal(0, m)
 	})
@@ -91,7 +91,7 @@ func TestTail(t *testing.T) {
 		assert := assert.New(t)
 
 		n := []int{1, 2, 3, 4, 5}
-		m, ok := sliceutil.Tail(n)
+		m, ok := list.Tail(n)
 		assert.True(ok)
 		assert.Equal(5, m)
 	})
@@ -100,7 +100,7 @@ func TestTail(t *testing.T) {
 		assert := assert.New(t)
 
 		n := []int{}
-		m, ok := sliceutil.Tail(n)
+		m, ok := list.Tail(n)
 		assert.False(ok)
 		assert.Equal(0, m)
 	})
@@ -111,19 +111,19 @@ func TestTake(t *testing.T) {
 		assert := assert.New(t)
 
 		n := []int{1, 2, 3, 4, 5}
-		assert.Equal([]int{}, sliceutil.Take(n, 0))
-		assert.Equal([]int{1}, sliceutil.Take(n, 1))
-		assert.Equal([]int{1, 2, 3, 4, 5}, sliceutil.Take(n, 5))
-		assert.Equal(n, sliceutil.Take(n, 10))
+		assert.Equal([]int{}, list.Take(n, 0))
+		assert.Equal([]int{1}, list.Take(n, 1))
+		assert.Equal([]int{1, 2, 3, 4, 5}, list.Take(n, 5))
+		assert.Equal(n, list.Take(n, 10))
 	})
 
 	t.Run("empty", func(t *testing.T) {
 		assert := assert.New(t)
 
 		n := []int{}
-		assert.Equal(n, sliceutil.Take(n, 0))
-		assert.Equal(n, sliceutil.Take(n, 1))
-		assert.Equal(n, sliceutil.Take(n, 5))
-		assert.Equal(n, sliceutil.Take(n, 10))
+		assert.Equal(n, list.Take(n, 0))
+		assert.Equal(n, list.Take(n, 1))
+		assert.Equal(n, list.Take(n, 5))
+		assert.Equal(n, list.Take(n, 10))
 	})
 }

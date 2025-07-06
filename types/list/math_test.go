@@ -1,9 +1,9 @@
-package sliceutil_test
+package list_test
 
 import (
 	"testing"
 
-	"github.com/alextanhongpin/core/types/sliceutil"
+	"github.com/alextanhongpin/core/types/list"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -13,8 +13,8 @@ func TestMath(t *testing.T) {
 
 	t.Run("Sum", func(t *testing.T) {
 		assert := assert.New(t)
-		assert.Equal(15, sliceutil.Sum(n))
-		assert.Equal(0, sliceutil.Sum([]int{}))
-		assert.Equal(-15, sliceutil.Sum(m))
+		assert.Equal(15, list.Sum(n))
+		assert.Equal(0, list.Sum([]int{}))
+		assert.Equal(-15, list.Sum(m))
 	})
 }
