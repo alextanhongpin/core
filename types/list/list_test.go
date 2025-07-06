@@ -113,4 +113,38 @@ func TestList(t *testing.T) {
 			Reverse()
 		assert.Equal(t, []int{8, 4}, result.ToSlice())
 	})
+
+	t.Run("List manipulation methods", func(t *testing.T) {
+		l := list.New([]int{1, 2, 3})
+		
+		// Clone
+		cloned := l.Clone()
+		assert.Equal(t, l.ToSlice(), cloned.ToSlice())
+		
+		// Append
+		appended := l.Append(4, 5)
+		assert.Equal(t, []int{1, 2, 3, 4, 5}, appended.ToSlice())
+		assert.Equal(t, []int{1, 2, 3}, l.ToSlice()) // Original unchanged
+		
+		// Prepend
+		prepended := l.Prepend(0, -1)
+		assert.Equal(t, []int{0, -1, 1, 2, 3}, prepended.ToSlice())
+		assert.Equal(t, []int{1, 2, 3}, l.ToSlice()) // Original unchanged
+	})
+
+	t.Run("Reduce", func(t *testing.T) {
+		l := list.New([]int{1, 2, 3, 4, 5})
+		sum := l.Reduce(0, func(acc interface{}, item int) interface{} {
+			return acc.(int) + item
+		})
+		assert.Equal(t, 15, sum)
+	})
+
+	t.Run("FlatMap", func(t *testing.T) {
+		l := list.New([]int{1, 2, 3})
+		result := l.FlatMap(func(x int) []int {
+			return []int{x, x * 2}
+		})
+		assert.Equal(t, []int{1, 2, 2, 4, 3, 6}, result.ToSlice())
+	})
 }

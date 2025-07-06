@@ -35,6 +35,29 @@ func (l *List[T]) IsEmpty() bool {
 	return len(l.data) == 0
 }
 
+// Clone returns a deep copy of the list.
+func (l *List[T]) Clone() *List[T] {
+	cloned := make([]T, len(l.data))
+	copy(cloned, l.data)
+	return &List[T]{data: cloned}
+}
+
+// Append adds elements to the end of the list and returns a new list.
+func (l *List[T]) Append(items ...T) *List[T] {
+	newData := make([]T, len(l.data)+len(items))
+	copy(newData, l.data)
+	copy(newData[len(l.data):], items)
+	return &List[T]{data: newData}
+}
+
+// Prepend adds elements to the beginning of the list and returns a new list.
+func (l *List[T]) Prepend(items ...T) *List[T] {
+	newData := make([]T, len(items)+len(l.data))
+	copy(newData, items)
+	copy(newData[len(items):], l.data)
+	return &List[T]{data: newData}
+}
+
 // Map transforms each element of the slice using the provided function.
 func Map[T, U any](slice []T, transform func(T) U) []U {
 	result := make([]U, len(slice))
@@ -305,4 +328,19 @@ func (l *List[T]) Chunk(size int) [][]T {
 func (l *List[T]) Partition(predicate func(T) bool) (*List[T], *List[T]) {
 	trueSlice, falseSlice := Partition(l.data, predicate)
 	return &List[T]{data: trueSlice}, &List[T]{data: falseSlice}
+}
+
+// Reduce applies a function against all elements in the list to reduce it to a single value.
+func (l *List[T]) Reduce(initial interface{}, reducer func(interface{}, T) interface{}) interface{} {
+	result := initial
+	for _, item := range l.data {
+		result = reducer(result, item)
+	}
+	return result
+}
+
+// FlatMap applies the transform function to each element and flattens the results.
+func (l *List[T]) FlatMap(transform func(T) []T) *List[T] {
+	result := FlatMap(l.data, transform)
+	return &List[T]{data: result}
 }
