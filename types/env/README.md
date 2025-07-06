@@ -33,14 +33,14 @@ import (
 
 func main() {
     // Load required config (panics if missing)
-    port := env.Load[int]("PORT")
+    port := env.MustLoad[int]("PORT")
     
     // Load optional config with defaults
-    host := env.GetWithDefault[string]("HOST", "localhost")
-    timeout := env.GetDurationWithDefault("TIMEOUT", 30*time.Second)
+    host := env.LoadOr[string]("HOST", "localhost")
+    timeout := env.LoadDurationOr("TIMEOUT", 30*time.Second)
     
     // Load arrays
-    allowedHosts := env.GetSliceWithDefault[string]("ALLOWED_HOSTS", ",", []string{"localhost"})
+    allowedHosts := env.LoadSliceOr[string]("ALLOWED_HOSTS", ",", []string{"localhost"})
     
     fmt.Printf("Server: %s:%d, Timeout: %v, Hosts: %v\n", 
         host, port, timeout, allowedHosts)
@@ -55,27 +55,29 @@ func main() {
 
 These functions panic if the environment variable is missing or invalid. Use for critical configuration that should cause the application to fail at startup.
 
-- **`Load[T](name string) T`** - Load required variable
-- **`LoadDuration(name string) time.Duration`** - Load required duration
-- **`LoadSlice[T](name, sep string) []T`** - Load required slice
+- **`MustLoad[T](name string) T`** - Load required variable
+- **`MustLoadDuration(name string) time.Duration`** - Load required duration
+- **`MustLoadSlice[T](name, sep string) []T`** - Load required slice
+- **`MustLoadTime(name, layout string) time.Time`** - Load required time
 - **`MustExist(names ...string)`** - Ensure variables exist
 
 ```go
 // Application will panic if PORT is not set or invalid
-port := env.Load[int]("PORT")
-timeout := env.LoadDuration("REQUEST_TIMEOUT")
+port := env.MustLoad[int]("PORT")
+timeout := env.MustLoadDuration("REQUEST_TIMEOUT")
 ```
 
 #### Error-Returning (Graceful)
 
 These functions return errors for missing or invalid variables. Use when you want to handle configuration errors gracefully.
 
-- **`Get[T](name string) (T, error)`** - Load with error handling
-- **`GetDuration(name string) (time.Duration, error)`** - Load duration with error handling
-- **`GetSlice[T](name, sep string) ([]T, error)`** - Load slice with error handling
+- **`Load[T](name string) (T, error)`** - Load with error handling
+- **`LoadDuration(name string) (time.Duration, error)`** - Load duration with error handling
+- **`LoadSlice[T](name, sep string) ([]T, error)`** - Load slice with error handling
+- **`LoadTime(name, layout string) (time.Time, error)`** - Load time with error handling
 
 ```go
-port, err := env.Get[int]("PORT")
+port, err := env.Load[int]("PORT")
 if err != nil {
     log.Printf("Failed to get port: %v", err)
     port = 8080 // fallback
@@ -86,13 +88,14 @@ if err != nil {
 
 These functions provide fallback values if the environment variable is missing or invalid.
 
-- **`GetWithDefault[T](name string, defaultValue T) T`** - Load with default
-- **`GetDurationWithDefault(name string, defaultValue time.Duration) time.Duration`** - Load duration with default
-- **`GetSliceWithDefault[T](name, sep string, defaultValue []T) []T`** - Load slice with default
+- **`LoadOr[T](name string, defaultValue T) T`** - Load with default
+- **`LoadDurationOr(name string, defaultValue time.Duration) time.Duration`** - Load duration with default
+- **`LoadSliceOr[T](name, sep string, defaultValue []T) []T`** - Load slice with default
+- **`LoadTimeOr(name, layout string, defaultValue time.Time) time.Time`** - Load time with default
 
 ```go
-host := env.GetWithDefault[string]("HOST", "0.0.0.0")
-maxConns := env.GetWithDefault[int]("MAX_CONNECTIONS", 100)
+host := env.LoadOr[string]("HOST", "0.0.0.0")
+maxConns := env.LoadOr[int]("MAX_CONNECTIONS", 100)
 ```
 
 ### Utility Functions
@@ -132,12 +135,12 @@ func LoadServerConfig() *ServerConfig {
     env.MustExist("PORT")
 
     return &ServerConfig{
-        Host:         env.GetWithDefault[string]("HOST", "0.0.0.0"),
-        Port:         env.Load[int]("PORT"),
-        ReadTimeout:  env.GetDurationWithDefault("READ_TIMEOUT", 10*time.Second),
-        WriteTimeout: env.GetDurationWithDefault("WRITE_TIMEOUT", 10*time.Second),
-        TLSEnabled:   env.GetWithDefault[bool]("TLS_ENABLED", false),
-        TLSCertFile:  env.GetWithDefault[string]("TLS_CERT_FILE", ""),
+        Host:         env.LoadOr[string]("HOST", "0.0.0.0"),
+        Port:         env.MustLoad[int]("PORT"),
+        ReadTimeout:  env.LoadDurationOr("READ_TIMEOUT", 10*time.Second),
+        WriteTimeout: env.LoadDurationOr("WRITE_TIMEOUT", 10*time.Second),
+        TLSEnabled:   env.LoadOr[bool]("TLS_ENABLED", false),
+        TLSCertFile:  env.LoadOr[string]("TLS_CERT_FILE", ""),
     }
 }
 ```
@@ -166,20 +169,20 @@ func LoadDatabaseConfig() (*DatabaseConfig, error) {
     }
 
     // Load with error handling
-    host, err := env.Get[string]("DB_HOST")
+    host, err := env.Load[string]("DB_HOST")
     if err != nil {
         return nil, err
     }
 
     return &DatabaseConfig{
         Host:            host,
-        Port:            env.GetWithDefault[int]("DB_PORT", 5432),
-        Database:        env.Load[string]("DB_DATABASE"),
-        Username:        env.Load[string]("DB_USERNAME"),
-        Password:        env.Load[string]("DB_PASSWORD"),
-        MaxConnections:  env.GetWithDefault[int]("DB_MAX_CONNECTIONS", 25),
-        ConnMaxLifetime: env.GetDurationWithDefault("DB_CONN_MAX_LIFETIME", 30*time.Minute),
-        SSLMode:         env.GetWithDefault[string]("DB_SSL_MODE", "require"),
+        Port:            env.LoadOr[int]("DB_PORT", 5432),
+        Database:        env.MustLoad[string]("DB_DATABASE"),
+        Username:        env.MustLoad[string]("DB_USERNAME"),
+        Password:        env.MustLoad[string]("DB_PASSWORD"),
+        MaxConnections:  env.LoadOr[int]("DB_MAX_CONNECTIONS", 25),
+        ConnMaxLifetime: env.LoadDurationOr("DB_CONN_MAX_LIFETIME", 30*time.Minute),
+        SSLMode:         env.LoadOr[string]("DB_SSL_MODE", "require"),
     }, nil
 }
 ```
@@ -198,12 +201,12 @@ type ServiceConfig struct {
 
 func LoadServiceConfig() *ServiceConfig {
     return &ServiceConfig{
-        ServiceName:      env.Load[string]("SERVICE_NAME"),
-        Environment:      env.GetWithDefault[string]("ENVIRONMENT", "development"),
-        LogLevel:         env.GetWithDefault[string]("LOG_LEVEL", "info"),
-        MetricsEnabled:   env.GetWithDefault[bool]("METRICS_ENABLED", true),
-        UpstreamServices: env.GetSliceWithDefault[string]("UPSTREAM_SERVICES", ",", []string{}),
-        RateLimits:       env.GetSliceWithDefault[int]("RATE_LIMITS", " ", []int{100, 1000}),
+        ServiceName:      env.MustLoad[string]("SERVICE_NAME"),
+        Environment:      env.LoadOr[string]("ENVIRONMENT", "development"),
+        LogLevel:         env.LoadOr[string]("LOG_LEVEL", "info"),
+        MetricsEnabled:   env.LoadOr[bool]("METRICS_ENABLED", true),
+        UpstreamServices: env.LoadSliceOr[string]("UPSTREAM_SERVICES", ",", []string{}),
+        RateLimits:       env.LoadSliceOr[int]("RATE_LIMITS", " ", []int{100, 1000}),
     }
 }
 ```
@@ -275,11 +278,11 @@ func init() {
 ```go
 func setupOptionalFeatures() {
     // Enable optional features based on environment
-    if env.GetWithDefault[bool]("REDIS_ENABLED", false) {
+    if env.LoadOr[bool]("REDIS_ENABLED", false) {
         setupRedis()
     }
     
-    if env.GetWithDefault[bool]("METRICS_ENABLED", false) {
+    if env.LoadOr[bool]("METRICS_ENABLED", false) {
         setupMetrics()
     }
 }
@@ -289,15 +292,15 @@ func setupOptionalFeatures() {
 
 ```go
 func getLogLevel() string {
-    environment := env.GetWithDefault[string]("ENVIRONMENT", "development")
+    environment := env.LoadOr[string]("ENVIRONMENT", "development")
     
     switch environment {
     case "production":
-        return env.GetWithDefault[string]("LOG_LEVEL", "warn")
+        return env.LoadOr[string]("LOG_LEVEL", "warn")
     case "staging":
-        return env.GetWithDefault[string]("LOG_LEVEL", "info")
+        return env.LoadOr[string]("LOG_LEVEL", "info")
     default:
-        return env.GetWithDefault[string]("LOG_LEVEL", "debug")
+        return env.LoadOr[string]("LOG_LEVEL", "debug")
     }
 }
 ```
@@ -306,12 +309,12 @@ func getLogLevel() string {
 
 ```go
 func validateConfig() error {
-    port := env.GetWithDefault[int]("PORT", 8080)
+    port := env.LoadOr[int]("PORT", 8080)
     if port < 1 || port > 65535 {
         return fmt.Errorf("invalid port: %d", port)
     }
 
-    logLevel := env.GetWithDefault[string]("LOG_LEVEL", "info")
+    logLevel := env.LoadOr[string]("LOG_LEVEL", "info")
     validLevels := []string{"debug", "info", "warn", "error"}
     if !contains(validLevels, logLevel) {
         return fmt.Errorf("invalid log level: %s", logLevel)
@@ -330,14 +333,14 @@ Use when the application cannot continue without the configuration:
 
 ```go
 // Will panic if PORT is not set or invalid
-port := env.Load[int]("PORT")
+port := env.MustLoad[int]("PORT")
 ```
 
 ### 2. Error-Returning (Graceful)
 Use when you want to handle configuration errors gracefully:
 
 ```go
-port, err := env.Get[int]("PORT")
+port, err := env.Load[int]("PORT")
 if err != nil {
     log.Printf("PORT not set, using default: %v", err)
     port = 8080
@@ -352,8 +355,8 @@ if err != nil {
 ## Best Practices
 
 1. **Validate Early**: Use `MustExist()` or validation functions at application startup
-2. **Use Appropriate Error Handling**: Panic for critical config, return errors for optional config
-3. **Provide Sensible Defaults**: Use `GetWithDefault` for optional configuration
+2. **Use Appropriate Error Handling**: Use `MustLoad*` for critical config, `Load*` for optional config with error handling
+3. **Provide Sensible Defaults**: Use `LoadOr*` for optional configuration with fallback values
 4. **Group Related Config**: Create config structs for related settings
 5. **Document Environment Variables**: Maintain a list of all environment variables your app uses
 6. **Use Type Safety**: Leverage the generic functions to catch type errors at compile time

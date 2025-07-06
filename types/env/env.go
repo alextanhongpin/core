@@ -35,11 +35,11 @@ func Parse[T Parseable](str string) (T, error) {
 	return v, nil
 }
 
-// Load reads an environment variable and parses it to type T.
+// MustLoad reads an environment variable and parses it to type T.
 // Panics if the variable is not set or cannot be parsed.
 // Use this for required configuration that should fail fast.
-func Load[T Parseable](name string) T {
-	v, err := Get[T](name)
+func MustLoad[T Parseable](name string) T {
+	v, err := Load[T](name)
 	if err != nil {
 		panic(err)
 	}
@@ -47,10 +47,10 @@ func Load[T Parseable](name string) T {
 	return v
 }
 
-// Get reads an environment variable and parses it to type T.
+// Load reads an environment variable and parses it to type T.
 // Returns the parsed value and an error if the variable is not set or cannot be parsed.
 // Use this for optional configuration or when you want to handle errors gracefully.
-func Get[T Parseable](name string) (T, error) {
+func Load[T Parseable](name string) (T, error) {
 	var zero T
 	s, err := lookupEnv(name)
 	if err != nil {
@@ -65,20 +65,20 @@ func Get[T Parseable](name string) (T, error) {
 	return v, nil
 }
 
-// GetWithDefault reads an environment variable and parses it to type T.
+// LoadOr reads an environment variable and parses it to type T.
 // Returns the default value if the variable is not set or cannot be parsed.
-func GetWithDefault[T Parseable](name string, defaultValue T) T {
-	v, err := Get[T](name)
+func LoadOr[T Parseable](name string, defaultValue T) T {
+	v, err := Load[T](name)
 	if err != nil {
 		return defaultValue
 	}
 	return v
 }
 
-// LoadDuration reads an environment variable and parses it as a time.Duration.
+// MustLoadDuration reads an environment variable and parses it as a time.Duration.
 // Panics if the variable is not set or cannot be parsed.
-func LoadDuration(name string) time.Duration {
-	d, err := GetDuration(name)
+func MustLoadDuration(name string) time.Duration {
+	d, err := LoadDuration(name)
 	if err != nil {
 		panic(err)
 	}
@@ -86,9 +86,9 @@ func LoadDuration(name string) time.Duration {
 	return d
 }
 
-// GetDuration reads an environment variable and parses it as a time.Duration.
+// LoadDuration reads an environment variable and parses it as a time.Duration.
 // Returns an error if the variable is not set or cannot be parsed.
-func GetDuration(name string) (time.Duration, error) {
+func LoadDuration(name string) (time.Duration, error) {
 	s, err := lookupEnv(name)
 	if err != nil {
 		return 0, err
@@ -102,20 +102,20 @@ func GetDuration(name string) (time.Duration, error) {
 	return d, nil
 }
 
-// GetDurationWithDefault reads an environment variable and parses it as a time.Duration.
+// LoadDurationOr reads an environment variable and parses it as a time.Duration.
 // Returns the default value if the variable is not set or cannot be parsed.
-func GetDurationWithDefault(name string, defaultValue time.Duration) time.Duration {
-	d, err := GetDuration(name)
+func LoadDurationOr(name string, defaultValue time.Duration) time.Duration {
+	d, err := LoadDuration(name)
 	if err != nil {
 		return defaultValue
 	}
 	return d
 }
 
-// LoadTime reads an environment variable and parses it as a time.Time using
+// MustLoadTime reads an environment variable and parses it as a time.Time using
 // the specified layout.
-func LoadTime(name, layout string) time.Time {
-	t, err := GetTime(name, layout)
+func MustLoadTime(name, layout string) time.Time {
+	t, err := LoadTime(name, layout)
 	if err != nil {
 		panic(err)
 	}
@@ -123,9 +123,9 @@ func LoadTime(name, layout string) time.Time {
 	return t
 }
 
-// GetTime reads an environment variable and parses it as a time.Time using the
+// LoadTime reads an environment variable and parses it as a time.Time using the
 // specified layout.
-func GetTime(name, layout string) (time.Time, error) {
+func LoadTime(name, layout string) (time.Time, error) {
 	s, err := lookupEnv(name)
 	if err != nil {
 		return time.Time{}, err
@@ -139,21 +139,21 @@ func GetTime(name, layout string) (time.Time, error) {
 	return t, nil
 }
 
-// GetTimeWithDefault reads an environment variable and parses it as a
+// LoadTimeOr reads an environment variable and parses it as a
 // time.Time using the specified layout.
-func GetTimeWithDefault(name, layout string, defaultValue time.Time) time.Time {
-	t, err := GetTime(name, layout)
+func LoadTimeOr(name, layout string, defaultValue time.Time) time.Time {
+	t, err := LoadTime(name, layout)
 	if err != nil {
 		return defaultValue
 	}
 	return t
 }
 
-// LoadSlice reads an environment variable and parses it as a slice of type T.
+// MustLoadSlice reads an environment variable and parses it as a slice of type T.
 // The string is split by the separator and each element is parsed.
 // Panics if the variable is not set or cannot be parsed.
-func LoadSlice[T Parseable](name string, sep string) []T {
-	res, err := GetSlice[T](name, sep)
+func MustLoadSlice[T Parseable](name string, sep string) []T {
+	res, err := LoadSlice[T](name, sep)
 	if err != nil {
 		panic(err)
 	}
@@ -161,10 +161,10 @@ func LoadSlice[T Parseable](name string, sep string) []T {
 	return res
 }
 
-// GetSlice reads an environment variable and parses it as a slice of type T.
+// LoadSlice reads an environment variable and parses it as a slice of type T.
 // The string is split by the separator and each element is parsed.
 // Returns an error if the variable is not set or cannot be parsed.
-func GetSlice[T Parseable](name string, sep string) ([]T, error) {
+func LoadSlice[T Parseable](name string, sep string) ([]T, error) {
 	v, err := lookupEnv(name)
 	if err != nil {
 		return nil, err
@@ -183,10 +183,10 @@ func GetSlice[T Parseable](name string, sep string) ([]T, error) {
 	return res, nil
 }
 
-// GetSliceWithDefault reads an environment variable and parses it as a slice of type T.
+// LoadSliceOr reads an environment variable and parses it as a slice of type T.
 // Returns the default value if the variable is not set or cannot be parsed.
-func GetSliceWithDefault[T Parseable](name string, sep string, defaultValue []T) []T {
-	v, err := GetSlice[T](name, sep)
+func LoadSliceOr[T Parseable](name string, sep string, defaultValue []T) []T {
+	v, err := LoadSlice[T](name, sep)
 	if err != nil {
 		return defaultValue
 	}
