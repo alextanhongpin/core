@@ -209,5 +209,12 @@ func (h BaseHandler) SetRequestID(w http.ResponseWriter, requestID string) {
 //
 //	c.JSON(w, users, 200)
 func (h BaseHandler) JSON(w http.ResponseWriter, data any, code int) {
+	response.JSON(w, data, code)
+}
+
+// Body writes a JSON response with a structured body.
+// It wraps the data in a response.Body struct, which includes a Data field.
+// This is useful for consistent API responses that include metadata or additional fields.
+func (h BaseHandler) Body(w http.ResponseWriter, data any, code int) {
 	response.JSON(w, &response.Body{Data: data}, code)
 }

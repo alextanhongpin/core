@@ -20,7 +20,7 @@ type HelloRequest struct {
 
 func (r HelloRequest) Validate() error {
 	return cause.Map{
-		"name": cause.Required(r.Name),
+		"name": cause.Required(r.Name).Err(),
 	}.Err()
 }
 
@@ -44,7 +44,7 @@ func (c *Controller) Hello(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	c.JSON(w, &HelloResponse{
+	c.Body(w, &HelloResponse{
 		Message: "Hello, " + req.Name,
 	}, http.StatusOK)
 }

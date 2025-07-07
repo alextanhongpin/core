@@ -30,8 +30,8 @@ type CreateUserRequest struct {
 
 func (r CreateUserRequest) Validate() error {
 	return cause.Map{
-		"name":  cause.Required(r.Name),
-		"email": cause.Required(r.Email),
+		"name":  cause.Required(r.Name).Err(),
+		"email": cause.Required(r.Email).Err(),
 	}.Err()
 }
 
@@ -42,8 +42,8 @@ type UpdateUserRequest struct {
 
 func (r UpdateUserRequest) Validate() error {
 	return cause.Map{
-		"name":  cause.Required(r.Name),
-		"email": cause.Required(r.Email),
+		"name":  cause.Required(r.Name).Err(),
+		"email": cause.Required(r.Email).Err(),
 	}.Err()
 }
 
@@ -171,7 +171,7 @@ func (c *UserController) CreateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	c.JSON(w, CreateUserResponse{User: user}, http.StatusCreated)
+	c.Body(w, CreateUserResponse{User: user}, http.StatusCreated)
 }
 
 func (c *UserController) GetUser(w http.ResponseWriter, r *http.Request) {
@@ -190,7 +190,7 @@ func (c *UserController) GetUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	c.JSON(w, GetUserResponse{User: user}, http.StatusOK)
+	c.Body(w, GetUserResponse{User: user}, http.StatusOK)
 }
 
 func (c *UserController) UpdateUser(w http.ResponseWriter, r *http.Request) {
@@ -212,7 +212,7 @@ func (c *UserController) UpdateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	c.JSON(w, CreateUserResponse{User: user}, http.StatusOK)
+	c.Body(w, CreateUserResponse{User: user}, http.StatusOK)
 }
 
 func (c *UserController) DeleteUser(w http.ResponseWriter, r *http.Request) {
@@ -243,7 +243,7 @@ func (c *UserController) ListUsers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	c.JSON(w, ListUsersResponse{
+	c.Body(w, ListUsersResponse{
 		Users: users,
 		Total: len(users),
 	}, http.StatusOK)
@@ -431,6 +431,6 @@ func BenchmarkBaseHandler_JSON(b *testing.B) {
 	b.ResetTimer()
 	for b.Loop() {
 		w := httptest.NewRecorder()
-		base.JSON(w, data, http.StatusOK)
+		base.Body(w, data, http.StatusOK)
 	}
 }
