@@ -32,9 +32,9 @@ type BanditArm struct {
 	Beta  float64 `json:"beta"`  // Failure count + 1 (prior)
 
 	// Configuration
-	Config    map[string]interface{} `json:"config"`
-	CreatedAt time.Time              `json:"created_at"`
-	UpdatedAt time.Time              `json:"updated_at"`
+	Config    map[string]any `json:"config"`
+	CreatedAt time.Time      `json:"created_at"`
+	UpdatedAt time.Time      `json:"updated_at"`
 }
 
 // BanditExperiment represents a multi-armed bandit experiment
@@ -61,13 +61,13 @@ type BanditExperiment struct {
 
 // BanditResult represents the result of pulling a bandit arm
 type BanditResult struct {
-	ExperimentID string                 `json:"experiment_id"`
-	ArmID        string                 `json:"arm_id"`
-	UserID       string                 `json:"user_id"`
-	Reward       float64                `json:"reward"`
-	Success      bool                   `json:"success"`
-	Context      map[string]interface{} `json:"context"`
-	Timestamp    time.Time              `json:"timestamp"`
+	ExperimentID string         `json:"experiment_id"`
+	ArmID        string         `json:"arm_id"`
+	UserID       string         `json:"user_id"`
+	Reward       float64        `json:"reward"`
+	Success      bool           `json:"success"`
+	Context      map[string]any `json:"context"`
+	Timestamp    time.Time      `json:"timestamp"`
 }
 
 // BanditEngine manages multi-armed bandit experiments
@@ -129,7 +129,7 @@ func (b *BanditEngine) CreateBanditExperiment(exp *BanditExperiment) error {
 }
 
 // SelectArm selects an arm based on the bandit algorithm
-func (b *BanditEngine) SelectArm(experimentID, userID string, context map[string]interface{}) (*BanditArm, error) {
+func (b *BanditEngine) SelectArm(experimentID, userID string, context map[string]any) (*BanditArm, error) {
 	b.mu.RLock()
 	exp, exists := b.experiments[experimentID]
 	b.mu.RUnlock()
@@ -171,7 +171,7 @@ func (b *BanditEngine) SelectArm(experimentID, userID string, context map[string
 }
 
 // RecordReward records the reward for a bandit arm pull
-func (b *BanditEngine) RecordReward(experimentID, armID, userID string, reward float64, success bool, context map[string]interface{}) error {
+func (b *BanditEngine) RecordReward(experimentID, armID, userID string, reward float64, success bool, context map[string]any) error {
 	b.mu.RLock()
 	exp, exists := b.experiments[experimentID]
 	b.mu.RUnlock()
@@ -408,9 +408,10 @@ func (b *BanditEngine) calculateBetaConfidenceInterval(alpha, beta, confidence f
 
 	// Z-score for confidence level
 	z := 1.96 // For 95% confidence
-	if confidence == 0.99 {
+	switch confidence {
+	case 0.99:
 		z = 2.576
-	} else if confidence == 0.90 {
+	case 0.90:
 		z = 1.645
 	}
 
