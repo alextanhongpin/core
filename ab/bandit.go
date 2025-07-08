@@ -5,6 +5,7 @@ import (
 	"math"
 	"math/rand"
 	"sort"
+	"sync"
 	"time"
 )
 
@@ -74,6 +75,7 @@ type BanditEngine struct {
 	experiments map[string]*BanditExperiment
 	results     []BanditResult
 	rng         *rand.Rand
+	mu          sync.RWMutex
 }
 
 // NewBanditEngine creates a new bandit engine
@@ -120,13 +122,17 @@ func (b *BanditEngine) CreateBanditExperiment(exp *BanditExperiment) error {
 	exp.CreatedAt = time.Now()
 	exp.UpdatedAt = time.Now()
 
+	b.mu.Lock()
+	defer b.mu.Unlock()
 	b.experiments[exp.ID] = exp
 	return nil
 }
 
 // SelectArm selects an arm based on the bandit algorithm
 func (b *BanditEngine) SelectArm(experimentID, userID string, context map[string]interface{}) (*BanditArm, error) {
+	b.mu.RLock()
 	exp, exists := b.experiments[experimentID]
+	b.mu.RUnlock()
 	if !exists {
 		return nil, fmt.Errorf("experiment %s not found", experimentID)
 	}
@@ -154,18 +160,21 @@ func (b *BanditEngine) SelectArm(experimentID, userID string, context map[string
 		return nil, fmt.Errorf("failed to select arm")
 	}
 
-	// Update pull count
+	b.mu.Lock()
 	selectedArm.Pulls++
 	exp.TotalPulls++
 	selectedArm.UpdatedAt = time.Now()
 	exp.UpdatedAt = time.Now()
+	b.mu.Unlock()
 
 	return selectedArm, nil
 }
 
 // RecordReward records the reward for a bandit arm pull
 func (b *BanditEngine) RecordReward(experimentID, armID, userID string, reward float64, success bool, context map[string]interface{}) error {
+	b.mu.RLock()
 	exp, exists := b.experiments[experimentID]
+	b.mu.RUnlock()
 	if !exists {
 		return fmt.Errorf("experiment %s not found", experimentID)
 	}
@@ -183,6 +192,7 @@ func (b *BanditEngine) RecordReward(experimentID, armID, userID string, reward f
 		return fmt.Errorf("arm %s not found in experiment %s", armID, experimentID)
 	}
 
+	b.mu.Lock()
 	// Update arm statistics
 	arm.TotalReward += reward
 	if success {
@@ -205,6 +215,7 @@ func (b *BanditEngine) RecordReward(experimentID, armID, userID string, reward f
 		Timestamp:    time.Now(),
 	}
 	b.results = append(b.results, result)
+	b.mu.Unlock()
 
 	return nil
 }
@@ -318,7 +329,9 @@ func (b *BanditEngine) sampleGamma(shape, scale float64) float64 {
 
 // GetBanditResults returns analysis of bandit experiment results
 func (b *BanditEngine) GetBanditResults(experimentID string) (*BanditAnalysis, error) {
+	b.mu.RLock()
 	exp, exists := b.experiments[experimentID]
+	b.mu.RUnlock()
 	if !exists {
 		return nil, fmt.Errorf("experiment %s not found", experimentID)
 	}
@@ -456,8 +469,10 @@ func (b *BanditEngine) calculateTotalRegret(exp *BanditExperiment) float64 {
 
 // StopExperiment stops a bandit experiment
 func (b *BanditEngine) StopExperiment(experimentID string) error {
+	b.mu.Lock()
 	exp, exists := b.experiments[experimentID]
 	if !exists {
+		b.mu.Unlock()
 		return fmt.Errorf("experiment %s not found", experimentID)
 	}
 
@@ -465,6 +480,7 @@ func (b *BanditEngine) StopExperiment(experimentID string) error {
 	now := time.Now()
 	exp.EndTime = &now
 	exp.UpdatedAt = now
+	b.mu.Unlock()
 
 	return nil
 }
