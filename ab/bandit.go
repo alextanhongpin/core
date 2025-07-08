@@ -5,7 +5,6 @@ import (
 	"math"
 	"math/rand"
 	"sort"
-	"sync"
 	"time"
 )
 
@@ -70,12 +69,63 @@ type BanditResult struct {
 	Timestamp    time.Time      `json:"timestamp"`
 }
 
+// BanditStorage defines interface for persisting bandit experiments, arms, and results
+// In production, implement with Redis, SQL, etc.
+type BanditStorage interface {
+	SaveExperiment(exp *BanditExperiment) error
+	SaveArm(expID string, arm *BanditArm) error
+	SaveResult(result BanditResult) error
+	ListResults(expID string, limit int) ([]BanditResult, error)
+}
+
+// InMemoryBanditStorage is a simple in-memory implementation
+type InMemoryBanditStorage struct {
+	experiments map[string]*BanditExperiment
+	results     map[string][]BanditResult // expID -> results
+}
+
+func NewInMemoryBanditStorage() *InMemoryBanditStorage {
+	return &InMemoryBanditStorage{
+		experiments: make(map[string]*BanditExperiment),
+		results:     make(map[string][]BanditResult),
+	}
+}
+
+func (s *InMemoryBanditStorage) SaveExperiment(exp *BanditExperiment) error {
+	s.experiments[exp.ID] = exp
+	return nil
+}
+func (s *InMemoryBanditStorage) SaveArm(expID string, arm *BanditArm) error {
+	// No-op for in-memory, arms are part of experiment
+	return nil
+}
+func (s *InMemoryBanditStorage) SaveResult(result BanditResult) error {
+	s.results[result.ExperimentID] = append(s.results[result.ExperimentID], result)
+	return nil
+}
+func (s *InMemoryBanditStorage) ListResults(expID string, limit int) ([]BanditResult, error) {
+	results := s.results[expID]
+	if len(results) > limit {
+		results = results[:limit]
+	}
+	return results, nil
+}
+
+// BanditMetrics tracks operational metrics for bandit engine
+type BanditMetrics struct {
+	Pulls   int64
+	Rewards int64
+	Errors  int64
+	Regret  []float64
+}
+
 // BanditEngine manages multi-armed bandit experiments
 type BanditEngine struct {
 	experiments map[string]*BanditExperiment
 	results     []BanditResult
 	rng         *rand.Rand
-	mu          sync.RWMutex
+	storage     BanditStorage
+	metrics     BanditMetrics
 }
 
 // NewBanditEngine creates a new bandit engine
@@ -84,6 +134,25 @@ func NewBanditEngine() *BanditEngine {
 		experiments: make(map[string]*BanditExperiment),
 		results:     make([]BanditResult, 0),
 		rng:         rand.New(rand.NewSource(time.Now().UnixNano())),
+		storage:     NewInMemoryBanditStorage(),
+		metrics:     BanditMetrics{},
+	}
+}
+
+// NewBanditEngineWithStorage creates a new bandit engine with custom storage and metrics
+func NewBanditEngineWithStorage(storage BanditStorage, metrics *BanditMetrics) *BanditEngine {
+	if storage == nil {
+		storage = NewInMemoryBanditStorage()
+	}
+	if metrics == nil {
+		metrics = &BanditMetrics{}
+	}
+	return &BanditEngine{
+		experiments: make(map[string]*BanditExperiment),
+		results:     make([]BanditResult, 0),
+		rng:         rand.New(rand.NewSource(time.Now().UnixNano())),
+		storage:     storage,
+		metrics:     *metrics,
 	}
 }
 
@@ -122,22 +191,21 @@ func (b *BanditEngine) CreateBanditExperiment(exp *BanditExperiment) error {
 	exp.CreatedAt = time.Now()
 	exp.UpdatedAt = time.Now()
 
-	b.mu.Lock()
-	defer b.mu.Unlock()
 	b.experiments[exp.ID] = exp
+	_ = b.storage.SaveExperiment(exp)
 	return nil
 }
 
 // SelectArm selects an arm based on the bandit algorithm
 func (b *BanditEngine) SelectArm(experimentID, userID string, context map[string]any) (*BanditArm, error) {
-	b.mu.RLock()
 	exp, exists := b.experiments[experimentID]
-	b.mu.RUnlock()
 	if !exists {
+		b.metrics.Errors++
 		return nil, fmt.Errorf("experiment %s not found", experimentID)
 	}
 
 	if exp.Status != "active" {
+		b.metrics.Errors++
 		return nil, fmt.Errorf("experiment %s is not active", experimentID)
 	}
 
@@ -160,22 +228,21 @@ func (b *BanditEngine) SelectArm(experimentID, userID string, context map[string
 		return nil, fmt.Errorf("failed to select arm")
 	}
 
-	b.mu.Lock()
 	selectedArm.Pulls++
 	exp.TotalPulls++
 	selectedArm.UpdatedAt = time.Now()
 	exp.UpdatedAt = time.Now()
-	b.mu.Unlock()
+	_ = b.storage.SaveArm(experimentID, selectedArm)
+	b.metrics.Pulls++
 
 	return selectedArm, nil
 }
 
 // RecordReward records the reward for a bandit arm pull
 func (b *BanditEngine) RecordReward(experimentID, armID, userID string, reward float64, success bool, context map[string]any) error {
-	b.mu.RLock()
 	exp, exists := b.experiments[experimentID]
-	b.mu.RUnlock()
 	if !exists {
+		b.metrics.Errors++
 		return fmt.Errorf("experiment %s not found", experimentID)
 	}
 
@@ -192,12 +259,12 @@ func (b *BanditEngine) RecordReward(experimentID, armID, userID string, reward f
 		return fmt.Errorf("arm %s not found in experiment %s", armID, experimentID)
 	}
 
-	b.mu.Lock()
 	// Update arm statistics
 	arm.TotalReward += reward
 	if success {
 		arm.Rewards++
 		arm.Alpha++ // Increment success count for Bayesian
+		b.metrics.Rewards++
 	} else {
 		arm.Beta++ // Increment failure count for Bayesian
 	}
@@ -215,7 +282,7 @@ func (b *BanditEngine) RecordReward(experimentID, armID, userID string, reward f
 		Timestamp:    time.Now(),
 	}
 	b.results = append(b.results, result)
-	b.mu.Unlock()
+	_ = b.storage.SaveResult(result)
 
 	return nil
 }
@@ -329,9 +396,7 @@ func (b *BanditEngine) sampleGamma(shape, scale float64) float64 {
 
 // GetBanditResults returns analysis of bandit experiment results
 func (b *BanditEngine) GetBanditResults(experimentID string) (*BanditAnalysis, error) {
-	b.mu.RLock()
 	exp, exists := b.experiments[experimentID]
-	b.mu.RUnlock()
 	if !exists {
 		return nil, fmt.Errorf("experiment %s not found", experimentID)
 	}
@@ -470,10 +535,8 @@ func (b *BanditEngine) calculateTotalRegret(exp *BanditExperiment) float64 {
 
 // StopExperiment stops a bandit experiment
 func (b *BanditEngine) StopExperiment(experimentID string) error {
-	b.mu.Lock()
 	exp, exists := b.experiments[experimentID]
 	if !exists {
-		b.mu.Unlock()
 		return fmt.Errorf("experiment %s not found", experimentID)
 	}
 
@@ -481,7 +544,6 @@ func (b *BanditEngine) StopExperiment(experimentID string) error {
 	now := time.Now()
 	exp.EndTime = &now
 	exp.UpdatedAt = now
-	b.mu.Unlock()
 
 	return nil
 }

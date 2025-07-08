@@ -63,6 +63,65 @@ type Recommendation struct {
 	GeneratedAt time.Time              `json:"generated_at"`
 }
 
+// RecommendationStorage defines interface for persisting recommendations, users, items, and interactions
+// In production, implement this with Redis, SQL, or other backends
+type RecommendationStorage interface {
+	SaveUser(user *User) error
+	SaveItem(item *Item) error
+	SaveInteraction(interaction Interaction) error
+	SaveRecommendation(rec Recommendation) error
+	ListRecommendations(userID string, limit int) ([]Recommendation, error)
+}
+
+// InMemoryRecommendationStorage is a simple in-memory implementation
+// Not for production use
+type InMemoryRecommendationStorage struct {
+	users           map[string]*User
+	items           map[string]*Item
+	interactions    []Interaction
+	recommendations map[string][]Recommendation // userID -> recs
+}
+
+func NewInMemoryRecommendationStorage() *InMemoryRecommendationStorage {
+	return &InMemoryRecommendationStorage{
+		users:           make(map[string]*User),
+		items:           make(map[string]*Item),
+		interactions:    make([]Interaction, 0),
+		recommendations: make(map[string][]Recommendation),
+	}
+}
+
+func (s *InMemoryRecommendationStorage) SaveUser(user *User) error {
+	s.users[user.ID] = user
+	return nil
+}
+func (s *InMemoryRecommendationStorage) SaveItem(item *Item) error {
+	s.items[item.ID] = item
+	return nil
+}
+func (s *InMemoryRecommendationStorage) SaveInteraction(interaction Interaction) error {
+	s.interactions = append(s.interactions, interaction)
+	return nil
+}
+func (s *InMemoryRecommendationStorage) SaveRecommendation(rec Recommendation) error {
+	s.recommendations[rec.UserID] = append(s.recommendations[rec.UserID], rec)
+	return nil
+}
+func (s *InMemoryRecommendationStorage) ListRecommendations(userID string, limit int) ([]Recommendation, error) {
+	recs := s.recommendations[userID]
+	if len(recs) > limit {
+		recs = recs[:limit]
+	}
+	return recs, nil
+}
+
+// RecommendationMetrics tracks operational metrics for recommendations
+type RecommendationMetrics struct {
+	RecommendationsServed int64
+	RecommendationErrors  int64
+	RecommendationLatency []float64
+}
+
 // RecommendationEngine provides personalized recommendations
 type RecommendationEngine struct {
 	users        map[string]*User
@@ -74,6 +133,9 @@ type RecommendationEngine struct {
 	collaborativeWeight float64
 	popularityWeight    float64
 	trendingWeight      float64
+
+	storage RecommendationStorage
+	metrics RecommendationMetrics
 }
 
 // NewRecommendationEngine creates a new recommendation engine
@@ -86,6 +148,22 @@ func NewRecommendationEngine() *RecommendationEngine {
 		collaborativeWeight: 0.3,
 		popularityWeight:    0.2,
 		trendingWeight:      0.1,
+		storage:             NewInMemoryRecommendationStorage(),
+		metrics:             RecommendationMetrics{},
+	}
+}
+
+// NewRecommendationEngineWithStorage creates a new recommendation engine with custom storage and metrics
+func NewRecommendationEngineWithStorage(storage RecommendationStorage, metrics *RecommendationMetrics) *RecommendationEngine {
+	if storage == nil {
+		storage = NewInMemoryRecommendationStorage()
+	}
+	if metrics == nil {
+		metrics = &RecommendationMetrics{}
+	}
+	return &RecommendationEngine{
+		storage: storage,
+		metrics: *metrics,
 	}
 }
 
@@ -98,6 +176,7 @@ func (r *RecommendationEngine) AddUser(user *User) {
 		user.Demographics = make(map[string]string)
 	}
 	r.users[user.ID] = user
+	_ = r.storage.SaveUser(user)
 }
 
 // AddItem adds an item to the recommendation system
@@ -109,6 +188,7 @@ func (r *RecommendationEngine) AddItem(item *Item) {
 		item.Metadata = make(map[string]interface{})
 	}
 	r.items[item.ID] = item
+	_ = r.storage.SaveItem(item)
 }
 
 // RecordInteraction records a user-item interaction
@@ -132,6 +212,7 @@ func (r *RecommendationEngine) RecordInteraction(interaction Interaction) {
 	}
 
 	r.interactions = append(r.interactions, interaction)
+	_ = r.storage.SaveInteraction(interaction)
 
 	// Update user preferences and item popularity
 	r.updateUserPreferences(interaction)
@@ -140,8 +221,10 @@ func (r *RecommendationEngine) RecordInteraction(interaction Interaction) {
 
 // GetRecommendations generates recommendations for a user
 func (r *RecommendationEngine) GetRecommendations(ctx context.Context, userID string, count int, algorithm RecommendationType) ([]Recommendation, error) {
+	start := time.Now()
 	user, exists := r.users[userID]
 	if !exists {
+		r.metrics.RecommendationErrors++
 		return nil, fmt.Errorf("user %s not found", userID)
 	}
 
@@ -169,6 +252,14 @@ func (r *RecommendationEngine) GetRecommendations(ctx context.Context, userID st
 	if len(recommendations) > count {
 		recommendations = recommendations[:count]
 	}
+
+	// Save recommendations
+	for _, rec := range recommendations {
+		_ = r.storage.SaveRecommendation(rec)
+	}
+	r.metrics.RecommendationsServed += int64(len(recommendations))
+	latency := time.Since(start).Seconds() * 1000
+	r.metrics.RecommendationLatency = append(r.metrics.RecommendationLatency, latency)
 
 	return recommendations, nil
 }

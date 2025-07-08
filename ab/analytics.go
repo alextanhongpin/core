@@ -124,22 +124,98 @@ type StatisticalTest struct {
 	ConfidenceLevel  float64 `json:"confidence_level"`
 }
 
-// AnalyticsEngine provides comprehensive analytics capabilities
-type AnalyticsEngine struct {
-	metrics      map[string]*Metric
-	metricValues []MetricValue
-	segments     map[string]*Segment
-	assignments  map[string]*Assignment // From experiment engine
+// AnalyticsStorage defines the interface for persistent analytics storage
+// (e.g., for metric values, segments, etc.)
+type AnalyticsStorage interface {
+	SaveMetricValue(ctx context.Context, value MetricValue) error
+	GetMetricValues(ctx context.Context, experimentID string, timeRange TimeRange) ([]MetricValue, error)
+	SaveSegment(ctx context.Context, segment *Segment) error
+	GetSegments(ctx context.Context) ([]*Segment, error)
 }
 
-// NewAnalyticsEngine creates a new analytics engine
-func NewAnalyticsEngine() *AnalyticsEngine {
-	return &AnalyticsEngine{
-		metrics:      make(map[string]*Metric),
+// InMemoryAnalyticsStorage is an in-memory implementation of AnalyticsStorage
+// (for testing and development)
+type InMemoryAnalyticsStorage struct {
+	metricValues []MetricValue
+	segments     map[string]*Segment
+}
+
+func NewInMemoryAnalyticsStorage() *InMemoryAnalyticsStorage {
+	return &InMemoryAnalyticsStorage{
 		metricValues: make([]MetricValue, 0),
 		segments:     make(map[string]*Segment),
-		assignments:  make(map[string]*Assignment),
 	}
+}
+
+func (s *InMemoryAnalyticsStorage) SaveMetricValue(ctx context.Context, value MetricValue) error {
+	s.metricValues = append(s.metricValues, value)
+	return nil
+}
+
+func (s *InMemoryAnalyticsStorage) GetMetricValues(ctx context.Context, experimentID string, timeRange TimeRange) ([]MetricValue, error) {
+	var values []MetricValue
+	for _, v := range s.metricValues {
+		if v.ExperimentID == experimentID &&
+			v.Timestamp.After(timeRange.Start) &&
+			v.Timestamp.Before(timeRange.End) {
+			values = append(values, v)
+		}
+	}
+	return values, nil
+}
+
+func (s *InMemoryAnalyticsStorage) SaveSegment(ctx context.Context, segment *Segment) error {
+	s.segments[segment.ID] = segment
+	return nil
+}
+
+func (s *InMemoryAnalyticsStorage) GetSegments(ctx context.Context) ([]*Segment, error) {
+	var segs []*Segment
+	for _, seg := range s.segments {
+		segs = append(segs, seg)
+	}
+	return segs, nil
+}
+
+// AnalyticsMetrics holds operational metrics for observability
+// (e.g., counts, error rates, latency, etc.)
+type AnalyticsMetrics struct {
+	MetricValueCount int64
+	SegmentCount     int64
+	LastError        error
+	LastOperation    string
+}
+
+// AnalyticsEngine provides comprehensive analytics capabilities
+// Now supports pluggable storage and metrics
+type AnalyticsEngine struct {
+	metrics     map[string]*Metric
+	storage     AnalyticsStorage
+	metricsObs  *AnalyticsMetrics
+	segments    map[string]*Segment
+	assignments map[string]*Assignment // From experiment engine
+}
+
+// NewAnalyticsEngine creates a new analytics engine with storage and metrics
+func NewAnalyticsEngineWithStorage(storage AnalyticsStorage, metricsObs *AnalyticsMetrics) *AnalyticsEngine {
+	if storage == nil {
+		storage = NewInMemoryAnalyticsStorage()
+	}
+	if metricsObs == nil {
+		metricsObs = &AnalyticsMetrics{}
+	}
+	return &AnalyticsEngine{
+		metrics:     make(map[string]*Metric),
+		storage:     storage,
+		metricsObs:  metricsObs,
+		segments:    make(map[string]*Segment),
+		assignments: make(map[string]*Assignment),
+	}
+}
+
+// NewAnalyticsEngine creates a new analytics engine (default in-memory)
+func NewAnalyticsEngine() *AnalyticsEngine {
+	return NewAnalyticsEngineWithStorage(nil, nil)
 }
 
 // CreateMetric creates a new metric definition
@@ -152,24 +228,37 @@ func (a *AnalyticsEngine) CreateMetric(metric *Metric) error {
 	return nil
 }
 
-// RecordMetricValue records a value for a metric
+// RecordMetricValue records a value for a metric (now uses storage and metrics)
 func (a *AnalyticsEngine) RecordMetricValue(ctx context.Context, value MetricValue) error {
 	value.Timestamp = time.Now()
-	a.metricValues = append(a.metricValues, value)
-	return nil
+	err := a.storage.SaveMetricValue(ctx, value)
+	if err == nil {
+		a.metricsObs.MetricValueCount++
+		a.metricsObs.LastOperation = "RecordMetricValue"
+	} else {
+		a.metricsObs.LastError = err
+	}
+	return err
 }
 
-// CreateSegment creates a new user segment
+// CreateSegment creates a new user segment (now uses storage and metrics)
 func (a *AnalyticsEngine) CreateSegment(segment *Segment) error {
 	if segment.ID == "" {
 		segment.ID = generateID()
 	}
 	segment.CreatedAt = time.Now()
-	a.segments[segment.ID] = segment
-	return nil
+	err := a.storage.SaveSegment(context.Background(), segment)
+	if err == nil {
+		a.metricsObs.SegmentCount++
+		a.metricsObs.LastOperation = "CreateSegment"
+	} else {
+		a.metricsObs.LastError = err
+	}
+	a.segments[segment.ID] = segment // keep in-memory for fast access
+	return err
 }
 
-// GenerateAnalytics generates comprehensive analytics for an experiment
+// GenerateAnalytics generates comprehensive analytics for an experiment (now uses storage)
 func (a *AnalyticsEngine) GenerateAnalytics(ctx context.Context, experimentID string, timeRange TimeRange) (*ExperimentAnalytics, error) {
 	analytics := &ExperimentAnalytics{
 		ExperimentID:    experimentID,
@@ -180,7 +269,11 @@ func (a *AnalyticsEngine) GenerateAnalytics(ctx context.Context, experimentID st
 	}
 
 	// Get all metric values for this experiment in the time range
-	experimentValues := a.getExperimentMetricValues(experimentID, timeRange)
+	experimentValues, err := a.storage.GetMetricValues(ctx, experimentID, timeRange)
+	if err != nil {
+		a.metricsObs.LastError = err
+		return nil, err
+	}
 
 	// Calculate overall metrics
 	analytics.OverallMetrics = a.calculateOverallMetrics(experimentValues)
@@ -198,27 +291,17 @@ func (a *AnalyticsEngine) GenerateAnalytics(ctx context.Context, experimentID st
 	analytics.StatisticalTests = a.performStatisticalTests(analytics.VariantMetrics)
 
 	// Analyze segments
-	for segmentID := range a.segments {
-		segmentAnalysis := a.analyzeSegment(experimentID, segmentID, timeRange)
-		analytics.SegmentAnalysis[segmentID] = segmentAnalysis
+	segs, err := a.storage.GetSegments(ctx)
+	if err != nil {
+		a.metricsObs.LastError = err
+		return nil, err
+	}
+	for _, segment := range segs {
+		segmentAnalysis := a.analyzeSegment(experimentID, segment.ID, timeRange)
+		analytics.SegmentAnalysis[segment.ID] = segmentAnalysis
 	}
 
 	return analytics, nil
-}
-
-// getExperimentMetricValues gets all metric values for an experiment in a time range
-func (a *AnalyticsEngine) getExperimentMetricValues(experimentID string, timeRange TimeRange) []MetricValue {
-	var values []MetricValue
-
-	for _, value := range a.metricValues {
-		if value.ExperimentID == experimentID &&
-			value.Timestamp.After(timeRange.Start) &&
-			value.Timestamp.Before(timeRange.End) {
-			values = append(values, value)
-		}
-	}
-
-	return values
 }
 
 // getExperimentVariants gets all variant IDs for an experiment
@@ -233,8 +316,9 @@ func (a *AnalyticsEngine) getExperimentVariants(experimentID string) map[string]
 	}
 
 	// Also get variants from metric values
-	for _, value := range a.metricValues {
-		if value.ExperimentID == experimentID {
+	values, err := a.storage.GetMetricValues(context.Background(), experimentID, TimeRange{})
+	if err == nil {
+		for _, value := range values {
 			variants[value.VariantID] = true
 		}
 	}
@@ -542,12 +626,15 @@ func (a *AnalyticsEngine) analyzeSegment(experimentID, segmentID string, timeRan
 
 	// Filter metric values for segment users
 	segmentValues := make([]MetricValue, 0)
-	for _, value := range a.metricValues {
-		if value.ExperimentID == experimentID &&
-			value.Timestamp.After(timeRange.Start) &&
-			value.Timestamp.Before(timeRange.End) &&
-			segmentUsers[value.UserID] {
-			segmentValues = append(segmentValues, value)
+	values, err := a.storage.GetMetricValues(context.Background(), experimentID, timeRange)
+	if err == nil {
+		for _, value := range values {
+			if value.ExperimentID == experimentID &&
+				value.Timestamp.After(timeRange.Start) &&
+				value.Timestamp.Before(timeRange.End) &&
+				segmentUsers[value.UserID] {
+				segmentValues = append(segmentValues, value)
+			}
 		}
 	}
 

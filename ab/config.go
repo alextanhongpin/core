@@ -179,6 +179,8 @@ type ConfigManager struct {
 	cacheTTL     time.Duration
 	mu           sync.RWMutex
 	watchers     map[string][]chan ConfigChange
+	storage      ConfigStorage
+	metrics      ConfigMetrics
 }
 
 // NewConfigManager creates a new configuration manager
@@ -190,7 +192,75 @@ func NewConfigManager(provider ConfigProvider) *ConfigManager {
 		cache:        make(map[string]interface{}),
 		cacheTTL:     5 * time.Minute,
 		watchers:     make(map[string][]chan ConfigChange),
+		storage:      NewInMemoryConfigStorage(),
+		metrics:      ConfigMetrics{},
 	}
+}
+
+// NewConfigManagerWithStorage creates a new config manager with custom storage and metrics
+func NewConfigManagerWithStorage(storage ConfigStorage, metrics *ConfigMetrics) *ConfigManager {
+	if storage == nil {
+		storage = NewInMemoryConfigStorage()
+	}
+	if metrics == nil {
+		metrics = &ConfigMetrics{}
+	}
+	return &ConfigManager{
+		storage: storage,
+		metrics: *metrics,
+	}
+}
+
+// ConfigStorage defines interface for persisting feature flags and experiment configs
+// In production, implement with Redis, SQL, etc.
+type ConfigStorage interface {
+	SaveFeatureFlag(flag *FeatureFlag) error
+	SaveExperimentConfig(config *ExperimentConfig) error
+	ListFeatureFlags() ([]*FeatureFlag, error)
+	ListExperimentConfigs() ([]*ExperimentConfig, error)
+}
+
+// InMemoryConfigStorage is a simple in-memory implementation
+type InMemoryConfigStorage struct {
+	flags       map[string]*FeatureFlag
+	experiments map[string]*ExperimentConfig
+}
+
+func NewInMemoryConfigStorage() *InMemoryConfigStorage {
+	return &InMemoryConfigStorage{
+		flags:       make(map[string]*FeatureFlag),
+		experiments: make(map[string]*ExperimentConfig),
+	}
+}
+
+func (s *InMemoryConfigStorage) SaveFeatureFlag(flag *FeatureFlag) error {
+	s.flags[flag.ID] = flag
+	return nil
+}
+func (s *InMemoryConfigStorage) SaveExperimentConfig(config *ExperimentConfig) error {
+	s.experiments[config.ExperimentID] = config
+	return nil
+}
+func (s *InMemoryConfigStorage) ListFeatureFlags() ([]*FeatureFlag, error) {
+	var out []*FeatureFlag
+	for _, f := range s.flags {
+		out = append(out, f)
+	}
+	return out, nil
+}
+func (s *InMemoryConfigStorage) ListExperimentConfigs() ([]*ExperimentConfig, error) {
+	var out []*ExperimentConfig
+	for _, c := range s.experiments {
+		out = append(out, c)
+	}
+	return out, nil
+}
+
+// ConfigMetrics tracks operational metrics for config manager
+type ConfigMetrics struct {
+	FeatureFlagEvaluations int64
+	FeatureFlagErrors      int64
+	ConfigChanges          int64
 }
 
 // CreateFeatureFlag creates a new feature flag
@@ -208,11 +278,14 @@ func (c *ConfigManager) CreateFeatureFlag(ctx context.Context, flag *FeatureFlag
 	// Store in provider
 	key := fmt.Sprintf("feature_flags/%s", flag.ID)
 	if err := c.provider.SetConfig(ctx, key, flag); err != nil {
+		c.metrics.FeatureFlagErrors++
 		return err
 	}
 
 	// Update local cache
 	c.featureFlags[flag.ID] = flag
+	_ = c.storage.SaveFeatureFlag(flag)
+	c.metrics.ConfigChanges++
 
 	return nil
 }
@@ -250,6 +323,7 @@ func (c *ConfigManager) GetFeatureFlag(ctx context.Context, flagID string) (*Fea
 func (c *ConfigManager) EvaluateFeatureFlag(ctx context.Context, flagID, userID string, userAttributes map[string]interface{}) (*FeatureFlagResult, error) {
 	flag, err := c.GetFeatureFlag(ctx, flagID)
 	if err != nil {
+		c.metrics.FeatureFlagErrors++
 		return nil, err
 	}
 
@@ -266,12 +340,14 @@ func (c *ConfigManager) EvaluateFeatureFlag(ctx context.Context, flagID, userID 
 	// Check if flag is globally enabled
 	if !flag.Enabled {
 		result.Reason = "flag_disabled"
+		c.metrics.FeatureFlagEvaluations++
 		return result, nil
 	}
 
 	// Check rollout configuration
 	if flag.Rollout != nil && !c.evaluateRollout(flag.Rollout, userID, userAttributes) {
 		result.Reason = "not_in_rollout"
+		c.metrics.FeatureFlagEvaluations++
 		return result, nil
 	}
 
@@ -303,6 +379,7 @@ func (c *ConfigManager) EvaluateFeatureFlag(ctx context.Context, flagID, userID 
 				result.Config[k] = v
 			}
 
+			c.metrics.FeatureFlagEvaluations++
 			return result, nil
 		}
 	}
@@ -310,6 +387,7 @@ func (c *ConfigManager) EvaluateFeatureFlag(ctx context.Context, flagID, userID 
 	// Default behavior if no rules match
 	result.Enabled = flag.Enabled
 	result.Reason = "default"
+	c.metrics.FeatureFlagEvaluations++
 
 	return result, nil
 }
@@ -426,11 +504,14 @@ func (c *ConfigManager) CreateExperimentConfig(ctx context.Context, config *Expe
 	// Store in provider
 	key := fmt.Sprintf("experiments/%s", config.ExperimentID)
 	if err := c.provider.SetConfig(ctx, key, config); err != nil {
+		c.metrics.FeatureFlagErrors++
 		return err
 	}
 
 	// Update local cache
 	c.experiments[config.ExperimentID] = config
+	_ = c.storage.SaveExperimentConfig(config)
+	c.metrics.ConfigChanges++
 
 	return nil
 }
