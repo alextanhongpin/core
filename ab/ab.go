@@ -86,13 +86,15 @@ type ConversionEvent struct {
 type ExperimentEngine struct {
 	experiments map[string]*Experiment
 	assignments map[string]*Assignment // key: userID_experimentID
+	store       ExperimentStore
 }
 
 // NewExperimentEngine creates a new experiment engine
-func NewExperimentEngine() *ExperimentEngine {
+func NewExperimentEngine(store ExperimentStore) *ExperimentEngine {
 	return &ExperimentEngine{
 		experiments: make(map[string]*Experiment),
 		assignments: make(map[string]*Assignment),
+		store:       store,
 	}
 }
 
@@ -114,6 +116,14 @@ func (e *ExperimentEngine) CreateExperiment(exp *Experiment) error {
 	exp.CreatedAt = time.Now()
 	exp.UpdatedAt = time.Now()
 	e.experiments[exp.ID] = exp
+
+	// Save to store
+	if e.store != nil {
+		if err := e.store.SaveExperiment(exp); err != nil {
+			return fmt.Errorf("failed to save experiment to store: %w", err)
+		}
+	}
+
 	return nil
 }
 
@@ -157,6 +167,13 @@ func (e *ExperimentEngine) AssignVariant(ctx context.Context, userID, experiment
 		if exp.Variants[i].ID == variantID {
 			exp.Variants[i].Impressions++
 			break
+		}
+	}
+
+	// Save assignment to store
+	if e.store != nil {
+		if err := e.store.SaveAssignment(assignment); err != nil {
+			return nil, fmt.Errorf("failed to save assignment to store: %w", err)
 		}
 	}
 
@@ -216,6 +233,13 @@ func (e *ExperimentEngine) RecordConversion(ctx context.Context, event *Conversi
 		if exp.Variants[i].ID == event.VariantID {
 			exp.Variants[i].Conversions++
 			break
+		}
+	}
+
+	// Save conversion event to store
+	if e.store != nil {
+		if err := e.store.SaveConversion(event); err != nil {
+			return fmt.Errorf("failed to save conversion event to store: %w", err)
 		}
 	}
 
@@ -341,6 +365,83 @@ func (e *ExperimentEngine) calculateZTest(control, treatment VariantResults) (fl
 	pValue := 2 * (1 - math.Abs(z)/2.0) // Simplified approximation
 
 	return pValue, nil
+}
+
+// ExperimentStore defines the interface for persisting experiments, variants, assignments, and conversions
+// In production, implement with Redis, SQL, etc.
+type ExperimentStore interface {
+	SaveExperiment(exp *Experiment) error
+	GetExperiment(id string) (*Experiment, error)
+	ListExperiments() ([]*Experiment, error)
+	SaveAssignment(assignment *Assignment) error
+	GetAssignment(userID, experimentID string) (*Assignment, error)
+	ListAssignments(experimentID string) ([]*Assignment, error)
+	SaveConversion(event *ConversionEvent) error
+	ListConversions(experimentID string) ([]*ConversionEvent, error)
+}
+
+// InMemoryExperimentStore is a simple in-memory implementation
+// (for testing and development)
+type InMemoryExperimentStore struct {
+	experiments map[string]*Experiment
+	assignments map[string]*Assignment
+	conversions map[string][]*ConversionEvent // experimentID -> events
+}
+
+func NewInMemoryExperimentStore() *InMemoryExperimentStore {
+	return &InMemoryExperimentStore{
+		experiments: make(map[string]*Experiment),
+		assignments: make(map[string]*Assignment),
+		conversions: make(map[string][]*ConversionEvent),
+	}
+}
+
+func (s *InMemoryExperimentStore) SaveExperiment(exp *Experiment) error {
+	s.experiments[exp.ID] = exp
+	return nil
+}
+func (s *InMemoryExperimentStore) GetExperiment(id string) (*Experiment, error) {
+	exp, ok := s.experiments[id]
+	if !ok {
+		return nil, fmt.Errorf("experiment %s not found", id)
+	}
+	return exp, nil
+}
+func (s *InMemoryExperimentStore) ListExperiments() ([]*Experiment, error) {
+	var exps []*Experiment
+	for _, exp := range s.experiments {
+		exps = append(exps, exp)
+	}
+	return exps, nil
+}
+func (s *InMemoryExperimentStore) SaveAssignment(assignment *Assignment) error {
+	key := fmt.Sprintf("%s_%s", assignment.UserID, assignment.ExperimentID)
+	s.assignments[key] = assignment
+	return nil
+}
+func (s *InMemoryExperimentStore) GetAssignment(userID, experimentID string) (*Assignment, error) {
+	key := fmt.Sprintf("%s_%s", userID, experimentID)
+	assignment, ok := s.assignments[key]
+	if !ok {
+		return nil, fmt.Errorf("assignment not found")
+	}
+	return assignment, nil
+}
+func (s *InMemoryExperimentStore) ListAssignments(experimentID string) ([]*Assignment, error) {
+	var result []*Assignment
+	for _, a := range s.assignments {
+		if a.ExperimentID == experimentID {
+			result = append(result, a)
+		}
+	}
+	return result, nil
+}
+func (s *InMemoryExperimentStore) SaveConversion(event *ConversionEvent) error {
+	s.conversions[event.ExperimentID] = append(s.conversions[event.ExperimentID], event)
+	return nil
+}
+func (s *InMemoryExperimentStore) ListConversions(experimentID string) ([]*ConversionEvent, error) {
+	return s.conversions[experimentID], nil
 }
 
 // generateID generates a random ID
