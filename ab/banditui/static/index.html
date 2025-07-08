@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Bandit Experiments UI</title>
+  <style>
+    body { font-family: sans-serif; margin: 2em; }
+    table { border-collapse: collapse; width: 100%; margin-bottom: 2em; }
+    th, td { border: 1px solid #ccc; padding: 0.5em; }
+    th { background: #f0f0f0; }
+    .metrics { margin-bottom: 2em; }
+    .create-form { margin-bottom: 2em; }
+  </style>
+</head>
+<body>
+  <h1>Bandit Experiments</h1>
+  <div class="metrics">
+    <h2>Metrics</h2>
+    <pre id="metrics"></pre>
+  </div>
+  <div class="create-form">
+    <h2>Create Experiment</h2>
+    <form id="expForm">
+      <input name="name" placeholder="Name" required>
+      <select name="algorithm">
+        <option value="epsilon_greedy">Epsilon Greedy</option>
+        <option value="ucb">UCB</option>
+        <option value="thompson">Thompson Sampling</option>
+        <option value="bayesian">Bayesian</option>
+      </select>
+      <input name="arms" placeholder="Arms (comma separated)" required>
+      <button type="submit">Create</button>
+    </form>
+  </div>
+  <table id="experiments">
+    <thead>
+      <tr><th>ID</th><th>Name</th><th>Algorithm</th><th>Status</th><th>Arms</th></tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+  <script>
+    async function fetchExperiments() {
+      const res = await fetch('/api/experiments');
+      const exps = await res.json();
+      const tbody = document.querySelector('#experiments tbody');
+      tbody.innerHTML = '';
+      exps.forEach(exp => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td>${exp.id}</td><td>${exp.name}</td><td>${exp.algorithm}</td><td>${exp.status}</td><td>${exp.arms.map(a => a.name).join(', ')}</td>`;
+        tbody.appendChild(tr);
+      });
+    }
+    async function fetchMetrics() {
+      const res = await fetch('/api/metrics');
+      const metrics = await res.json();
+      document.getElementById('metrics').textContent = JSON.stringify(metrics, null, 2);
+    }
+    document.getElementById('expForm').onsubmit = async e => {
+      e.preventDefault();
+      const form = e.target;
+      const arms = form.arms.value.split(',').map(s => ({ name: s.trim(), id: s.trim() }));
+      const body = JSON.stringify({ name: form.name.value, algorithm: form.algorithm.value, arms });
+      await fetch('/api/experiments', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
+      form.reset();
+      fetchExperiments();
+    };
+    fetchExperiments();
+    fetchMetrics();
+    setInterval(fetchExperiments, 5000);
+    setInterval(fetchMetrics, 5000);
+  </script>
+</body>
+</html>

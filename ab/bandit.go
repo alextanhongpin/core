@@ -5,6 +5,7 @@ import (
 	"math"
 	"math/rand"
 	"sort"
+	"sync"
 	"time"
 )
 
@@ -126,6 +127,7 @@ type BanditEngine struct {
 	rng         *rand.Rand
 	storage     BanditStorage
 	metrics     BanditMetrics
+	mu          sync.RWMutex
 }
 
 // NewBanditEngine creates a new bandit engine
@@ -596,4 +598,28 @@ type BanditRecommendation struct {
 	WinnerArmID  string   `json:"winner_arm_id,omitempty"`
 	Confidence   string   `json:"confidence"` // "low", "medium", "high"
 	Reasons      []string `json:"reasons"`
+}
+
+func (b *BanditEngine) Experiments() []*BanditExperiment {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	exps := make([]*BanditExperiment, 0, len(b.experiments))
+	for _, exp := range b.experiments {
+		exps = append(exps, exp)
+	}
+	return exps
+}
+
+func (b *BanditEngine) Metrics() BanditMetrics {
+	return b.metrics
+}
+
+func (b *BanditEngine) DeleteExperiment(id string) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if _, ok := b.experiments[id]; ok {
+		delete(b.experiments, id)
+		return true
+	}
+	return false
 }
