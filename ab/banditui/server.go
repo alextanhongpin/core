@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"sync"
+	"time"
 
 	"github.com/alextanhongpin/core/ab"
 )
@@ -19,6 +20,10 @@ type apiServer struct {
 	e  *ab.BanditEngine
 	mu sync.Mutex
 }
+
+var (
+	configMgr *ab.ConfigManager
+)
 
 func main() {
 	var storage ab.BanditStorage
@@ -40,10 +45,16 @@ func main() {
 		log.Fatalf("Unknown storage type: %s", storageType)
 	}
 
+	provider := ab.NewInMemoryConfigProvider()
+	configMgr = ab.NewConfigManager(provider)
+
 	s := &apiServer{e: ab.NewBanditEngineWithStorage(storage, nil)}
 	http.HandleFunc("/api/experiments", s.handleExperiments)
 	http.HandleFunc("/api/experiments/", s.handleExperiment)
 	http.HandleFunc("/api/metrics", s.handleMetrics)
+	http.HandleFunc("/api/config/feature-flags", handleFeatureFlags)
+	http.HandleFunc("/api/config/experiments", handleExperimentConfigs)
+	http.HandleFunc("/api/analytics", s.handleAnalytics)
 	subFS, err := fs.Sub(static, "static")
 	if err != nil {
 		log.Fatalf("failed to create sub FS: %v", err)
@@ -146,4 +157,157 @@ func (s *apiServer) deleteExperiment(id string) bool {
 
 func (s *apiServer) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(s.e.Metrics())
+}
+
+func handleFeatureFlags(w http.ResponseWriter, r *http.Request) {
+	key := ""
+	if r.URL.Path != "/api/config/feature-flags" {
+		key = r.URL.Path[len("/api/config/feature-flags/"):]
+	}
+	switch r.Method {
+	case http.MethodGet:
+		flags, _ := configMgr.ListFeatureFlags(r.Context())
+		json.NewEncoder(w).Encode(flags)
+	case http.MethodPost:
+		var req struct {
+			ID          string                 `json:"id"`
+			Key         string                 `json:"key"`
+			Name        string                 `json:"name"`
+			Description string                 `json:"description"`
+			Enabled     *bool                  `json:"enabled"`
+			Rules       []ab.FeatureFlagRule   `json:"rules"`
+			Rollout     *ab.RolloutConfig      `json:"rollout"`
+			Metadata    map[string]interface{} `json:"metadata"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, err.Error(), 400)
+			return
+		}
+		id := req.ID
+		if id == "" {
+			id = req.Key
+		}
+		if id == "" && req.Name != "" {
+			id = req.Name
+		}
+		if id == "" {
+			http.Error(w, "missing id/key/name", 400)
+			return
+		}
+		flag := ab.FeatureFlag{
+			ID:          id,
+			Name:        req.Name,
+			Description: req.Description,
+			Enabled:     req.Enabled != nil && *req.Enabled,
+			Rules:       req.Rules,
+			Rollout:     req.Rollout,
+			Metadata:    req.Metadata,
+			CreatedAt:   time.Now(),
+			UpdatedAt:   time.Now(),
+		}
+		if err := configMgr.CreateFeatureFlag(r.Context(), &flag); err != nil {
+			http.Error(w, err.Error(), 400)
+			return
+		}
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(flag)
+	case http.MethodDelete:
+		if key == "" {
+			http.Error(w, "missing feature flag key", 400)
+			return
+		}
+		if err := configMgr.DeleteFeatureFlag(r.Context(), key); err != nil {
+			http.Error(w, err.Error(), 400)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func handleExperimentConfigs(w http.ResponseWriter, r *http.Request) {
+	key := ""
+	if r.URL.Path != "/api/config/experiments" {
+		key = r.URL.Path[len("/api/config/experiments/"):]
+	}
+	switch r.Method {
+	case http.MethodGet:
+		configs, _ := configMgr.ListExperimentConfigs(r.Context())
+		json.NewEncoder(w).Encode(configs)
+	case http.MethodPost:
+		var req struct {
+			ExperimentID   string                     `json:"experiment_id"`
+			Key            string                     `json:"key"`
+			TrafficSplit   map[string]float64         `json:"traffic_split"`
+			TargetingRules []ab.TargetingRule         `json:"targeting_rules"`
+			SampleSize     *ab.SampleSizeConfig       `json:"sample_size"`
+			StoppingRules  []ab.StoppingRule          `json:"stopping_rules"`
+			MetricConfig   map[string]ab.MetricConfig `json:"metric_config"`
+			QualityControl *ab.QualityControlConfig   `json:"quality_control"`
+			CreatedAt      *time.Time                 `json:"created_at"`
+			UpdatedAt      *time.Time                 `json:"updated_at"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, err.Error(), 400)
+			return
+		}
+		id := req.ExperimentID
+		if id == "" {
+			id = req.Key
+		}
+		if id == "" {
+			http.Error(w, "missing experiment_id/key", 400)
+			return
+		}
+		cfg := ab.ExperimentConfig{
+			ExperimentID:   id,
+			TrafficSplit:   req.TrafficSplit,
+			TargetingRules: req.TargetingRules,
+			SampleSize:     req.SampleSize,
+			StoppingRules:  req.StoppingRules,
+			MetricConfig:   req.MetricConfig,
+			QualityControl: req.QualityControl,
+			CreatedAt:      time.Now(),
+			UpdatedAt:      time.Now(),
+		}
+		if req.CreatedAt != nil {
+			cfg.CreatedAt = *req.CreatedAt
+		}
+		if req.UpdatedAt != nil {
+			cfg.UpdatedAt = *req.UpdatedAt
+		}
+		if cfg.TrafficSplit == nil || len(cfg.TrafficSplit) == 0 {
+			cfg.TrafficSplit = map[string]float64{"A": 50, "B": 50}
+		}
+		if cfg.MetricConfig == nil {
+			cfg.MetricConfig = map[string]ab.MetricConfig{}
+		}
+		if err := configMgr.CreateExperimentConfig(r.Context(), &cfg); err != nil {
+			http.Error(w, err.Error(), 400)
+			return
+		}
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(cfg)
+	case http.MethodDelete:
+		if key == "" {
+			http.Error(w, "missing experiment config key", 400)
+			return
+		}
+		if err := configMgr.DeleteExperimentConfig(r.Context(), key); err != nil {
+			http.Error(w, err.Error(), 400)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func (s *apiServer) handleAnalytics(w http.ResponseWriter, r *http.Request) {
+	resp := map[string]any{
+		"config": configMgr.GetMetrics(),
+		"bandit": s.e.Metrics(),
+	}
+	json.NewEncoder(w).Encode(resp)
 }

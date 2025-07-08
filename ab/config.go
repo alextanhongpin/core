@@ -767,3 +767,48 @@ func (p *InMemoryConfigProvider) Watch(ctx context.Context, key string) (<-chan 
 
 	return ch, nil
 }
+
+// ListFeatureFlags returns all feature flags
+func (c *ConfigManager) ListFeatureFlags(ctx context.Context) ([]*FeatureFlag, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	flags := make([]*FeatureFlag, 0, len(c.featureFlags))
+	for _, f := range c.featureFlags {
+		flags = append(flags, f)
+	}
+	return flags, nil
+}
+
+// ListExperimentConfigs returns all experiment configs
+func (c *ConfigManager) ListExperimentConfigs(ctx context.Context) ([]*ExperimentConfig, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	configs := make([]*ExperimentConfig, 0, len(c.experiments))
+	for _, cfg := range c.experiments {
+		configs = append(configs, cfg)
+	}
+	return configs, nil
+}
+
+// DeleteFeatureFlag deletes a feature flag by ID
+func (c *ConfigManager) DeleteFeatureFlag(ctx context.Context, flagID string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	delete(c.featureFlags, flagID)
+	c.metrics.ConfigChanges++
+	return c.provider.DeleteConfig(ctx, "feature_flags/"+flagID)
+}
+
+// DeleteExperimentConfig deletes an experiment config by ID
+func (c *ConfigManager) DeleteExperimentConfig(ctx context.Context, experimentID string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	delete(c.experiments, experimentID)
+	c.metrics.ConfigChanges++
+	return c.provider.DeleteConfig(ctx, "experiments/"+experimentID)
+}
+
+// GetMetrics returns config manager metrics
+func (c *ConfigManager) GetMetrics() ConfigMetrics {
+	return c.metrics
+}

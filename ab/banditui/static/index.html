@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Bandit Experiments UI</title>
+  <title>Experiment Platform UI</title>
   <style>
     body { font-family: sans-serif; margin: 2em; }
     table { border-collapse: collapse; width: 100%; margin-bottom: 2em; }
@@ -10,35 +10,106 @@
     th { background: #f0f0f0; }
     .metrics { margin-bottom: 2em; }
     .create-form { margin-bottom: 2em; }
+    .tabs { display: flex; gap: 1em; margin-bottom: 2em; }
+    .tab { cursor: pointer; padding: 0.5em 1em; border: 1px solid #ccc; border-bottom: none; background: #f9f9f9; }
+    .tab.active { background: #fff; font-weight: bold; }
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+    .delete-btn { color: red; cursor: pointer; }
   </style>
 </head>
 <body>
-  <h1>Bandit Experiments</h1>
-  <div class="metrics">
-    <h2>Metrics</h2>
-    <pre id="metrics"></pre>
+  <h1>Experiment Platform</h1>
+  <div class="tabs">
+    <div class="tab active" data-tab="bandit">Bandit Experiments</div>
+    <div class="tab" data-tab="feature-flags">Feature Flags</div>
+    <div class="tab" data-tab="experiment-configs">Experiment Configs</div>
+    <div class="tab" data-tab="analytics">Analytics</div>
   </div>
-  <div class="create-form">
-    <h2>Create Experiment</h2>
-    <form id="expForm">
-      <input name="name" placeholder="Name" required>
-      <select name="algorithm">
-        <option value="epsilon_greedy">Epsilon Greedy</option>
-        <option value="ucb">UCB</option>
-        <option value="thompson">Thompson Sampling</option>
-        <option value="bayesian">Bayesian</option>
-      </select>
-      <input name="arms" placeholder="Arms (comma separated)" required>
-      <button type="submit">Create</button>
-    </form>
+  <div class="tab-content active" id="tab-bandit">
+    <div class="metrics">
+      <h2>Bandit Metrics</h2>
+      <pre id="metrics"></pre>
+    </div>
+    <div class="create-form">
+      <h2>Create Experiment</h2>
+      <form id="expForm">
+        <input name="name" placeholder="Name" required>
+        <select name="algorithm">
+          <option value="epsilon_greedy">Epsilon Greedy</option>
+          <option value="ucb">UCB</option>
+          <option value="thompson">Thompson Sampling</option>
+          <option value="bayesian">Bayesian</option>
+        </select>
+        <input name="arms" placeholder="Arms (comma separated)" required>
+        <button type="submit">Create</button>
+      </form>
+    </div>
+    <table id="experiments">
+      <thead>
+        <tr><th>ID</th><th>Name</th><th>Algorithm</th><th>Status</th><th>Arms</th><th>Delete</th></tr>
+      </thead>
+      <tbody></tbody>
+    </table>
   </div>
-  <table id="experiments">
-    <thead>
-      <tr><th>ID</th><th>Name</th><th>Algorithm</th><th>Status</th><th>Arms</th></tr>
-    </thead>
-    <tbody></tbody>
-  </table>
+  <div class="tab-content" id="tab-feature-flags">
+    <div class="create-form">
+      <h2>Create Feature Flag</h2>
+      <form id="flagForm">
+        <input name="id" placeholder="ID (required)" required>
+        <input name="name" placeholder="Name">
+        <input name="description" placeholder="Description">
+        <label>Enabled <input name="enabled" type="checkbox"></label>
+        <textarea name="rules" placeholder='Rules (JSON array of FeatureFlagRule)'></textarea>
+        <textarea name="rollout" placeholder='Rollout (JSON object)'></textarea>
+        <textarea name="metadata" placeholder='Metadata (JSON object)'></textarea>
+        <button type="submit">Create</button>
+      </form>
+    </div>
+    <table id="feature-flags-table">
+      <thead>
+        <tr><th>ID</th><th>Name</th><th>Enabled</th><th>Delete</th></tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+  <div class="tab-content" id="tab-experiment-configs">
+    <div class="create-form">
+      <h2>Create Experiment Config</h2>
+      <form id="configForm">
+        <input name="experiment_id" placeholder="Experiment ID (required)" required>
+        <textarea name="traffic_split" placeholder='Traffic Split (JSON object, e.g. {"A":50,"B":50})'></textarea>
+        <textarea name="targeting_rules" placeholder='Targeting Rules (JSON array)'></textarea>
+        <textarea name="sample_size" placeholder='Sample Size (JSON object)'></textarea>
+        <textarea name="stopping_rules" placeholder='Stopping Rules (JSON array)'></textarea>
+        <textarea name="metric_config" placeholder='Metric Config (JSON object)'></textarea>
+        <textarea name="quality_control" placeholder='Quality Control (JSON object)'></textarea>
+        <button type="submit">Create</button>
+      </form>
+    </div>
+    <table id="experiment-configs-table">
+      <thead>
+        <tr><th>ID</th><th>Traffic Split</th><th>Delete</th></tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+  <div class="tab-content" id="tab-analytics">
+    <h2>Analytics Dashboard</h2>
+    <pre id="analytics"></pre>
+  </div>
   <script>
+    // Tab switching
+    document.querySelectorAll('.tab').forEach(tab => {
+      tab.onclick = () => {
+        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('.tab-content').forEach(tc => tc.classList.remove('active'));
+        tab.classList.add('active');
+        document.getElementById('tab-' + tab.dataset.tab).classList.add('active');
+      };
+    });
+
+    // Bandit Experiments
     async function fetchExperiments() {
       const res = await fetch('/api/experiments');
       const exps = await res.json();
@@ -46,8 +117,15 @@
       tbody.innerHTML = '';
       exps.forEach(exp => {
         const tr = document.createElement('tr');
-        tr.innerHTML = `<td>${exp.id}</td><td>${exp.name}</td><td>${exp.algorithm}</td><td>${exp.status}</td><td>${exp.arms.map(a => a.name).join(', ')}</td>`;
+        tr.innerHTML = `<td>${exp.id}</td><td>${exp.name}</td><td>${exp.algorithm}</td><td>${exp.status}</td><td>${exp.arms.map(a => a.name).join(', ')}</td><td><span class="delete-btn" data-id="${exp.id}">Delete</span></td>`;
         tbody.appendChild(tr);
+      });
+      // Delete handlers
+      tbody.querySelectorAll('.delete-btn').forEach(btn => {
+        btn.onclick = async () => {
+          await fetch(`/api/experiments/${btn.dataset.id}`, { method: 'DELETE' });
+          fetchExperiments();
+        };
       });
     }
     async function fetchMetrics() {
@@ -64,10 +142,106 @@
       form.reset();
       fetchExperiments();
     };
+
+    // Feature Flags
+    async function fetchFeatureFlags() {
+      const res = await fetch('/api/config/feature-flags');
+      const flags = await res.json();
+      const tbody = document.querySelector('#feature-flags-table tbody');
+      tbody.innerHTML = '';
+      flags.forEach(flag => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td>${flag.id}</td><td>${flag.name||''}</td><td>${flag.enabled?'✅':'❌'}</td><td><span class="delete-btn" data-key="${flag.id}">Delete</span></td>`;
+        tbody.appendChild(tr);
+      });
+      tbody.querySelectorAll('.delete-btn').forEach(btn => {
+        btn.onclick = async () => {
+          await fetch(`/api/config/feature-flags/${btn.dataset.key}`, { method: 'DELETE' });
+          fetchFeatureFlags();
+        };
+      });
+    }
+    document.getElementById('flagForm').onsubmit = async e => {
+      e.preventDefault();
+      const form = e.target;
+      let rules = undefined, rollout = undefined, metadata = undefined;
+      try { rules = form.rules.value ? JSON.parse(form.rules.value) : undefined; } catch { alert('Invalid JSON in rules'); return; }
+      try { rollout = form.rollout.value ? JSON.parse(form.rollout.value) : undefined; } catch { alert('Invalid JSON in rollout'); return; }
+      try { metadata = form.metadata.value ? JSON.parse(form.metadata.value) : undefined; } catch { alert('Invalid JSON in metadata'); return; }
+      const body = JSON.stringify({
+        id: form.id.value,
+        name: form.name.value,
+        description: form.description.value,
+        enabled: form.enabled.checked,
+        rules,
+        rollout,
+        metadata
+      });
+      await fetch('/api/config/feature-flags', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
+      form.reset();
+      fetchFeatureFlags();
+    };
+
+    // Experiment Configs
+    async function fetchExperimentConfigs() {
+      const res = await fetch('/api/config/experiments');
+      const configs = await res.json();
+      const tbody = document.querySelector('#experiment-configs-table tbody');
+      tbody.innerHTML = '';
+      configs.forEach(cfg => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td>${cfg.experiment_id||cfg.experimentId||cfg.id}</td><td>${JSON.stringify(cfg.traffic_split||cfg.trafficSplit||{})}</td><td><span class="delete-btn" data-key="${cfg.experiment_id||cfg.experimentId||cfg.id}">Delete</span></td>`;
+        tbody.appendChild(tr);
+      });
+      tbody.querySelectorAll('.delete-btn').forEach(btn => {
+        btn.onclick = async () => {
+          await fetch(`/api/config/experiments/${btn.dataset.key}`, { method: 'DELETE' });
+          fetchExperimentConfigs();
+        };
+      });
+    }
+    document.getElementById('configForm').onsubmit = async e => {
+      e.preventDefault();
+      const form = e.target;
+      let traffic_split, targeting_rules, sample_size, stopping_rules, metric_config, quality_control;
+      try { traffic_split = form.traffic_split.value ? JSON.parse(form.traffic_split.value) : undefined; } catch { alert('Invalid JSON in traffic_split'); return; }
+      try { targeting_rules = form.targeting_rules.value ? JSON.parse(form.targeting_rules.value) : undefined; } catch { alert('Invalid JSON in targeting_rules'); return; }
+      try { sample_size = form.sample_size.value ? JSON.parse(form.sample_size.value) : undefined; } catch { alert('Invalid JSON in sample_size'); return; }
+      try { stopping_rules = form.stopping_rules.value ? JSON.parse(form.stopping_rules.value) : undefined; } catch { alert('Invalid JSON in stopping_rules'); return; }
+      try { metric_config = form.metric_config.value ? JSON.parse(form.metric_config.value) : undefined; } catch { alert('Invalid JSON in metric_config'); return; }
+      try { quality_control = form.quality_control.value ? JSON.parse(form.quality_control.value) : undefined; } catch { alert('Invalid JSON in quality_control'); return; }
+      const body = JSON.stringify({
+        experiment_id: form.experiment_id.value,
+        traffic_split,
+        targeting_rules,
+        sample_size,
+        stopping_rules,
+        metric_config,
+        quality_control
+      });
+      await fetch('/api/config/experiments', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
+      form.reset();
+      fetchExperimentConfigs();
+    };
+
+    // Analytics
+    async function fetchAnalytics() {
+      const res = await fetch('/api/analytics');
+      const analytics = await res.json();
+      document.getElementById('analytics').textContent = JSON.stringify(analytics, null, 2);
+    }
+
+    // Initial load
     fetchExperiments();
     fetchMetrics();
+    fetchFeatureFlags();
+    fetchExperimentConfigs();
+    fetchAnalytics();
     setInterval(fetchExperiments, 5000);
     setInterval(fetchMetrics, 5000);
+    setInterval(fetchFeatureFlags, 5000);
+    setInterval(fetchExperimentConfigs, 5000);
+    setInterval(fetchAnalytics, 5000);
   </script>
 </body>
 </html>
