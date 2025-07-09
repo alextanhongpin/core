@@ -9,6 +9,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 var ErrTerminated = errors.New("worker: terminated")
@@ -42,6 +44,60 @@ type Options struct {
 	// OnTaskComplete is called after each task is processed.
 	// The function receives the task and the processing duration.
 	OnTaskComplete func(task interface{}, duration time.Duration)
+
+	// Metrics is an optional custom metrics collector.
+	Metrics MetricsCollector
+}
+
+// MetricsCollector defines the interface for collecting worker pool metrics.
+type MetricsCollector interface {
+	IncTasksQueued()
+	IncTasksProcessed()
+	IncTasksRejected()
+	IncActiveWorkers()
+	DecActiveWorkers()
+	GetMetrics() Metrics
+}
+
+// AtomicMetricsCollector is the default atomic-based metrics implementation.
+type AtomicMetricsCollector struct {
+	tasksQueued    int64
+	tasksProcessed int64
+	tasksRejected  int64
+	activeWorkers  int64
+}
+
+func (m *AtomicMetricsCollector) IncTasksQueued()    { atomic.AddInt64(&m.tasksQueued, 1) }
+func (m *AtomicMetricsCollector) IncTasksProcessed() { atomic.AddInt64(&m.tasksProcessed, 1) }
+func (m *AtomicMetricsCollector) IncTasksRejected()  { atomic.AddInt64(&m.tasksRejected, 1) }
+func (m *AtomicMetricsCollector) IncActiveWorkers()  { atomic.AddInt64(&m.activeWorkers, 1) }
+func (m *AtomicMetricsCollector) DecActiveWorkers()  { atomic.AddInt64(&m.activeWorkers, -1) }
+func (m *AtomicMetricsCollector) GetMetrics() Metrics {
+	return Metrics{
+		TasksQueued:    atomic.LoadInt64(&m.tasksQueued),
+		TasksProcessed: atomic.LoadInt64(&m.tasksProcessed),
+		TasksRejected:  atomic.LoadInt64(&m.tasksRejected),
+		ActiveWorkers:  atomic.LoadInt64(&m.activeWorkers),
+	}
+}
+
+// PrometheusMetricsCollector implements MetricsCollector using prometheus metrics.
+// (Requires github.com/prometheus/client_golang/prometheus)
+type PrometheusMetricsCollector struct {
+	TasksQueued    prometheus.Counter
+	TasksProcessed prometheus.Counter
+	TasksRejected  prometheus.Counter
+	ActiveWorkers  prometheus.Gauge
+}
+
+func (m *PrometheusMetricsCollector) IncTasksQueued()    { m.TasksQueued.Inc() }
+func (m *PrometheusMetricsCollector) IncTasksProcessed() { m.TasksProcessed.Inc() }
+func (m *PrometheusMetricsCollector) IncTasksRejected()  { m.TasksRejected.Inc() }
+func (m *PrometheusMetricsCollector) IncActiveWorkers()  { m.ActiveWorkers.Inc() }
+func (m *PrometheusMetricsCollector) DecActiveWorkers()  { m.ActiveWorkers.Dec() }
+func (m *PrometheusMetricsCollector) GetMetrics() Metrics {
+	// Prometheus metrics are scraped via /metrics endpoint. This method returns zeros.
+	return Metrics{}
 }
 
 type Worker[T any] struct {
@@ -50,7 +106,7 @@ type Worker[T any] struct {
 	fn      func(ctx context.Context, v T)
 	n       int
 	opts    Options
-	metrics Metrics
+	metrics MetricsCollector
 }
 
 // New returns a new background manager.
@@ -75,11 +131,17 @@ func NewWithOptions[T any](ctx context.Context, opts Options, fn func(context.Co
 		ch = make(chan T)
 	}
 
+	metrics := opts.Metrics
+	if metrics == nil {
+		metrics = &AtomicMetricsCollector{}
+	}
+
 	w := &Worker[T]{
-		ch:   ch,
-		fn:   fn,
-		n:    opts.WorkerCount,
-		opts: opts,
+		ch:      ch,
+		fn:      fn,
+		n:       opts.WorkerCount,
+		opts:    opts,
+		metrics: metrics,
 	}
 
 	return w, w.init(ctx)
@@ -90,10 +152,10 @@ func (w *Worker[T]) Send(vs ...T) error {
 	for _, v := range vs {
 		select {
 		case <-w.ctx.Done():
-			atomic.AddInt64(&w.metrics.TasksRejected, 1)
+			w.metrics.IncTasksRejected()
 			return context.Cause(w.ctx)
 		case w.ch <- v:
-			atomic.AddInt64(&w.metrics.TasksQueued, 1)
+			w.metrics.IncTasksQueued()
 		}
 	}
 
@@ -105,25 +167,20 @@ func (w *Worker[T]) Send(vs ...T) error {
 func (w *Worker[T]) TrySend(v T) bool {
 	select {
 	case <-w.ctx.Done():
-		atomic.AddInt64(&w.metrics.TasksRejected, 1)
+		w.metrics.IncTasksRejected()
 		return false
 	case w.ch <- v:
-		atomic.AddInt64(&w.metrics.TasksQueued, 1)
+		w.metrics.IncTasksQueued()
 		return true
 	default:
-		atomic.AddInt64(&w.metrics.TasksRejected, 1)
+		w.metrics.IncTasksRejected()
 		return false
 	}
 }
 
 // Metrics returns a copy of the current metrics.
 func (w *Worker[T]) Metrics() Metrics {
-	return Metrics{
-		TasksQueued:    atomic.LoadInt64(&w.metrics.TasksQueued),
-		TasksProcessed: atomic.LoadInt64(&w.metrics.TasksProcessed),
-		TasksRejected:  atomic.LoadInt64(&w.metrics.TasksRejected),
-		ActiveWorkers:  atomic.LoadInt64(&w.metrics.ActiveWorkers),
-	}
+	return w.metrics.GetMetrics()
 }
 
 func (w *Worker[T]) init(ctx context.Context) func() {
@@ -133,11 +190,11 @@ func (w *Worker[T]) init(ctx context.Context) func() {
 	var wg sync.WaitGroup
 	wg.Add(w.n)
 
-	for range w.n {
+	for i := 0; i < w.n; i++ {
 		go func() {
 			defer wg.Done()
-			atomic.AddInt64(&w.metrics.ActiveWorkers, 1)
-			defer atomic.AddInt64(&w.metrics.ActiveWorkers, -1)
+			w.metrics.IncActiveWorkers()
+			defer w.metrics.DecActiveWorkers()
 
 			for {
 				select {
@@ -170,7 +227,7 @@ func (w *Worker[T]) processTask(ctx context.Context, task T) {
 	start := time.Now()
 	defer func() {
 		duration := time.Since(start)
-		atomic.AddInt64(&w.metrics.TasksProcessed, 1)
+		w.metrics.IncTasksProcessed()
 
 		if w.opts.OnTaskComplete != nil {
 			w.opts.OnTaskComplete(task, duration)
