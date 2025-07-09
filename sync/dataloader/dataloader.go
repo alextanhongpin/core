@@ -238,7 +238,7 @@ type DataLoader[K comparable, V any] struct {
 
 	// Metrics (using atomic operations for thread safety)
 	metrics     DataLoaderMetricsCollector
-	queueLength int64 // local field for queue length
+	queueLength int64 // local queue length for metrics
 }
 
 // New returns a new DataLoader. The context is passed in to control the lifecycle.
@@ -322,6 +322,10 @@ func (d *DataLoader[K, V]) load(k K) *promise.Promise[V] {
 		return promise.Resolve(v)
 	}
 
+	// Only fetch from the db if the cache returns
+	// ErrNotExist.
+	// The cache can return ErrNoResult if the intended
+	// cached value is nil.
 	if !errors.Is(err, ErrNotExist) {
 		d.metrics.IncErrorCount()
 		if d.opts.OnError != nil {
@@ -348,8 +352,8 @@ func (d *DataLoader[K, V]) load(k K) *promise.Promise[V] {
 		p.Reject(err)
 		d.group.Delete(fmt.Sprint(k))
 	case d.ch <- k:
-		d.queueLength++
-		d.metrics.SetQueueLength(d.queueLength)
+		atomic.AddInt64(&d.queueLength, 1)
+		d.metrics.SetQueueLength(atomic.LoadInt64(&d.queueLength))
 	}
 
 	return p
@@ -408,9 +412,9 @@ func (d *DataLoader[K, V]) batch(ctx context.Context, keys []K) {
 			d.group.Delete(key)
 		}
 	}
-	// After processing a batch, decrement queue length
-	d.queueLength -= int64(len(keys))
-	d.metrics.SetQueueLength(d.queueLength)
+	// After processing a batch, decrement queue length by len(keys)
+	atomic.AddInt64(&d.queueLength, -int64(len(keys)))
+	d.metrics.SetQueueLength(atomic.LoadInt64(&d.queueLength))
 }
 
 func newKeyError(k any, err error) *KeyError {
