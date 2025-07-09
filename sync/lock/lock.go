@@ -6,6 +6,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 var (
@@ -73,21 +75,97 @@ type lockEntry struct {
 	waiters   int64 // Number of waiting goroutines
 }
 
+// LockMetricsCollector defines the interface for collecting lock metrics.
+type LockMetricsCollector interface {
+	IncActiveLocks()
+	DecActiveLocks()
+	IncTotalLocks()
+	IncLockAcquisitions()
+	IncLockContentions()
+	AddWaitTime(d time.Duration)
+	SetMaxWaitTime(d time.Duration)
+	GetMetrics() Metrics
+}
+
+// AtomicLockMetricsCollector is the default atomic-based metrics implementation.
+type AtomicLockMetricsCollector struct {
+	activeLocks      int64
+	totalLocks       int64
+	lockAcquisitions int64
+	lockContentions  int64
+	totalWaitTime    int64 // nanoseconds
+	maxWaitTime      int64 // nanoseconds
+}
+
+func (m *AtomicLockMetricsCollector) IncActiveLocks()      { atomic.AddInt64(&m.activeLocks, 1) }
+func (m *AtomicLockMetricsCollector) DecActiveLocks()      { atomic.AddInt64(&m.activeLocks, -1) }
+func (m *AtomicLockMetricsCollector) IncTotalLocks()       { atomic.AddInt64(&m.totalLocks, 1) }
+func (m *AtomicLockMetricsCollector) IncLockAcquisitions() { atomic.AddInt64(&m.lockAcquisitions, 1) }
+func (m *AtomicLockMetricsCollector) IncLockContentions()  { atomic.AddInt64(&m.lockContentions, 1) }
+func (m *AtomicLockMetricsCollector) AddWaitTime(d time.Duration) {
+	atomic.AddInt64(&m.totalWaitTime, int64(d))
+}
+func (m *AtomicLockMetricsCollector) SetMaxWaitTime(d time.Duration) {
+	for {
+		current := atomic.LoadInt64(&m.maxWaitTime)
+		if int64(d) <= current {
+			break
+		}
+		if atomic.CompareAndSwapInt64(&m.maxWaitTime, current, int64(d)) {
+			break
+		}
+	}
+}
+func (m *AtomicLockMetricsCollector) GetMetrics() Metrics {
+	acquisitions := atomic.LoadInt64(&m.lockAcquisitions)
+	var avgWaitTime time.Duration
+	if acquisitions > 0 {
+		avgWaitTime = time.Duration(atomic.LoadInt64(&m.totalWaitTime) / acquisitions)
+	}
+	return Metrics{
+		ActiveLocks:      atomic.LoadInt64(&m.activeLocks),
+		TotalLocks:       atomic.LoadInt64(&m.totalLocks),
+		LockAcquisitions: acquisitions,
+		LockContentions:  atomic.LoadInt64(&m.lockContentions),
+		AverageWaitTime:  avgWaitTime,
+		MaxWaitTime:      time.Duration(atomic.LoadInt64(&m.maxWaitTime)),
+	}
+}
+
+// PrometheusLockMetricsCollector implements LockMetricsCollector using prometheus metrics.
+// (Requires github.com/prometheus/client_golang/prometheus)
+type PrometheusLockMetricsCollector struct {
+	ActiveLocks      prometheus.Gauge
+	TotalLocks       prometheus.Counter
+	LockAcquisitions prometheus.Counter
+	LockContentions  prometheus.Counter
+	TotalWaitTime    prometheus.Counter
+	MaxWaitTime      prometheus.Gauge
+}
+
+func (m *PrometheusLockMetricsCollector) IncActiveLocks()      { m.ActiveLocks.Inc() }
+func (m *PrometheusLockMetricsCollector) DecActiveLocks()      { m.ActiveLocks.Dec() }
+func (m *PrometheusLockMetricsCollector) IncTotalLocks()       { m.TotalLocks.Inc() }
+func (m *PrometheusLockMetricsCollector) IncLockAcquisitions() { m.LockAcquisitions.Inc() }
+func (m *PrometheusLockMetricsCollector) IncLockContentions()  { m.LockContentions.Inc() }
+func (m *PrometheusLockMetricsCollector) AddWaitTime(d time.Duration) {
+	m.TotalWaitTime.Add(float64(d.Nanoseconds()))
+}
+func (m *PrometheusLockMetricsCollector) SetMaxWaitTime(d time.Duration) {
+	m.MaxWaitTime.Set(float64(d.Nanoseconds()))
+}
+func (m *PrometheusLockMetricsCollector) GetMetrics() Metrics {
+	// Prometheus metrics are scraped via /metrics endpoint. This method returns zeros.
+	return Metrics{}
+}
+
 // Lock provides named locks with automatic cleanup and metrics.
 type Lock struct {
 	mu   sync.RWMutex
 	data map[string]*lockEntry
 	opts Options
 
-	// Metrics (using atomic operations for thread safety)
-	metrics struct {
-		activeLocks      int64
-		totalLocks       int64
-		lockAcquisitions int64
-		lockContentions  int64
-		totalWaitTime    int64 // In nanoseconds
-		maxWaitTime      int64 // In nanoseconds
-	}
+	metrics LockMetricsCollector
 
 	// Cleanup management
 	stopCleanup chan struct{}
@@ -105,7 +183,7 @@ func New() *Lock {
 }
 
 // NewWithOptions creates a new lock manager with custom options.
-func NewWithOptions(opts Options) *Lock {
+func NewWithOptions(opts Options, metrics ...LockMetricsCollector) *Lock {
 	if opts.DefaultTimeout <= 0 {
 		opts.DefaultTimeout = 30 * time.Second
 	}
@@ -116,10 +194,18 @@ func NewWithOptions(opts Options) *Lock {
 		opts.MaxLocks = 10000
 	}
 
+	var m LockMetricsCollector
+	if len(metrics) > 0 && metrics[0] != nil {
+		m = metrics[0]
+	} else {
+		m = &AtomicLockMetricsCollector{}
+	}
+
 	l := &Lock{
 		data:        make(map[string]*lockEntry),
 		opts:        opts,
 		stopCleanup: make(chan struct{}),
+		metrics:     m,
 	}
 
 	// Start cleanup goroutine
@@ -141,8 +227,8 @@ func (l *Lock) Get(key string) sync.Locker {
 	if !exists {
 		entry = l.createLockEntry()
 		l.data[key] = entry
-		atomic.AddInt64(&l.metrics.totalLocks, 1)
-		atomic.AddInt64(&l.metrics.activeLocks, 1)
+		l.metrics.IncTotalLocks()
+		l.metrics.IncActiveLocks()
 	}
 
 	atomic.AddInt64(&entry.refCount, 1)
@@ -171,8 +257,8 @@ func (l *Lock) GetRW(key string) *sync.RWMutex {
 	if !exists {
 		entry = l.createLockEntry()
 		l.data[key] = entry
-		atomic.AddInt64(&l.metrics.totalLocks, 1)
-		atomic.AddInt64(&l.metrics.activeLocks, 1)
+		l.metrics.IncTotalLocks()
+		l.metrics.IncActiveLocks()
 	}
 
 	atomic.AddInt64(&entry.refCount, 1)
@@ -253,22 +339,7 @@ func (l *Lock) LockWithContext(ctx context.Context, key string) (func(), error) 
 
 // Metrics returns a copy of the current metrics.
 func (l *Lock) Metrics() Metrics {
-	totalWaitTime := atomic.LoadInt64(&l.metrics.totalWaitTime)
-	acquisitions := atomic.LoadInt64(&l.metrics.lockAcquisitions)
-
-	var avgWaitTime time.Duration
-	if acquisitions > 0 {
-		avgWaitTime = time.Duration(totalWaitTime / acquisitions)
-	}
-
-	return Metrics{
-		ActiveLocks:      atomic.LoadInt64(&l.metrics.activeLocks),
-		TotalLocks:       atomic.LoadInt64(&l.metrics.totalLocks),
-		LockAcquisitions: acquisitions,
-		LockContentions:  atomic.LoadInt64(&l.metrics.lockContentions),
-		AverageWaitTime:  avgWaitTime,
-		MaxWaitTime:      time.Duration(atomic.LoadInt64(&l.metrics.maxWaitTime)),
-	}
+	return l.metrics.GetMetrics()
 }
 
 // Stop gracefully stops the lock manager and cleanup goroutine.
@@ -332,7 +403,7 @@ func (l *Lock) cleanup() {
 		if atomic.LoadInt64(&entry.refCount) == 0 &&
 			now-atomic.LoadInt64(&entry.lastUsed) > cleanupThreshold {
 			delete(l.data, key)
-			atomic.AddInt64(&l.metrics.activeLocks, -1)
+			l.metrics.DecActiveLocks()
 		}
 	}
 
@@ -346,7 +417,7 @@ func (l *Lock) cleanup() {
 				break
 			}
 			delete(l.data, key)
-			atomic.AddInt64(&l.metrics.activeLocks, -1)
+			l.metrics.DecActiveLocks()
 			count++
 		}
 	}
@@ -366,7 +437,7 @@ func (lw *lockWrapper) Lock() {
 	// Track contention
 	waiters := atomic.AddInt64(&lw.entry.waiters, 1)
 	if waiters > 1 {
-		atomic.AddInt64(&lw.lock.metrics.lockContentions, 1)
+		lw.lock.metrics.IncLockContentions()
 		if lw.lock.opts.OnLockContention != nil {
 			lw.lock.opts.OnLockContention(lw.key, int(waiters))
 		}
@@ -375,22 +446,14 @@ func (lw *lockWrapper) Lock() {
 	lw.entry.locker.Lock()
 
 	atomic.AddInt64(&lw.entry.waiters, -1)
-	atomic.AddInt64(&lw.lock.metrics.lockAcquisitions, 1)
+	lw.lock.metrics.IncLockAcquisitions()
 
 	// Track wait time
 	waitTime := time.Since(lw.startTime)
-	atomic.AddInt64(&lw.lock.metrics.totalWaitTime, int64(waitTime))
+	lw.lock.metrics.AddWaitTime(waitTime)
 
 	// Update max wait time
-	for {
-		current := atomic.LoadInt64(&lw.lock.metrics.maxWaitTime)
-		if int64(waitTime) <= current {
-			break
-		}
-		if atomic.CompareAndSwapInt64(&lw.lock.metrics.maxWaitTime, current, int64(waitTime)) {
-			break
-		}
-	}
+	lw.lock.metrics.SetMaxWaitTime(waitTime)
 
 	if lw.lock.opts.OnLockAcquired != nil {
 		lw.lock.opts.OnLockAcquired(lw.key, waitTime)
