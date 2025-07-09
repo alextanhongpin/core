@@ -10,6 +10,8 @@ import (
 
 	"github.com/alextanhongpin/core/sync/rate"
 	"golang.org/x/sync/semaphore"
+	// Prometheus is only required if using PrometheusPipelineMetricsCollector
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 // Common errors
@@ -1038,4 +1040,81 @@ func Merge[T any](mergeFn func(T, T) T, channels ...<-chan T) <-chan T {
 	}
 
 	return result
+}
+
+// PipelineMetricsCollector defines the interface for collecting pipeline metrics.
+type PipelineMetricsCollector interface {
+	IncProcessedCount()
+	IncErrorCount()
+	IncPanicCount()
+	SetStartTime(t time.Time)
+	SetDuration(d time.Duration)
+	SetThroughputRate(rate float64)
+	SetErrorRate(rate float64)
+	GetMetrics() Metrics
+}
+
+// AtomicPipelineMetricsCollector is the default atomic-based metrics implementation.
+type AtomicPipelineMetricsCollector struct {
+	processedCount int64
+	errorCount     int64
+	panicCount     int64
+	startTime      atomic.Value // time.Time
+	duration       int64        // nanoseconds
+	throughputRate atomic.Value // float64
+	errorRate      atomic.Value // float64
+}
+
+func (m *AtomicPipelineMetricsCollector) IncProcessedCount() { atomic.AddInt64(&m.processedCount, 1) }
+func (m *AtomicPipelineMetricsCollector) IncErrorCount()     { atomic.AddInt64(&m.errorCount, 1) }
+func (m *AtomicPipelineMetricsCollector) IncPanicCount()     { atomic.AddInt64(&m.panicCount, 1) }
+func (m *AtomicPipelineMetricsCollector) SetStartTime(t time.Time) { m.startTime.Store(t) }
+func (m *AtomicPipelineMetricsCollector) SetDuration(d time.Duration) { atomic.StoreInt64(&m.duration, int64(d)) }
+func (m *AtomicPipelineMetricsCollector) SetThroughputRate(rate float64) { m.throughputRate.Store(rate) }
+func (m *AtomicPipelineMetricsCollector) SetErrorRate(rate float64)      { m.errorRate.Store(rate) }
+func (m *AtomicPipelineMetricsCollector) GetMetrics() Metrics {
+	var startTime time.Time
+	if v := m.startTime.Load(); v != nil {
+		startTime = v.(time.Time)
+	}
+	var throughputRate, errorRate float64
+	if v := m.throughputRate.Load(); v != nil {
+		throughputRate = v.(float64)
+	}
+	if v := m.errorRate.Load(); v != nil {
+		errorRate = v.(float64)
+	}
+	return Metrics{
+		ProcessedCount: atomic.LoadInt64(&m.processedCount),
+		ErrorCount:     atomic.LoadInt64(&m.errorCount),
+		PanicCount:     atomic.LoadInt64(&m.panicCount),
+		StartTime:      startTime,
+		Duration:       time.Duration(atomic.LoadInt64(&m.duration)),
+		ThroughputRate: throughputRate,
+		ErrorRate:      errorRate,
+	}
+}
+
+// PrometheusPipelineMetricsCollector implements PipelineMetricsCollector using prometheus metrics.
+// (Requires github.com/prometheus/client_golang/prometheus)
+type PrometheusPipelineMetricsCollector struct {
+	ProcessedCount prometheus.Counter
+	ErrorCount     prometheus.Counter
+	PanicCount     prometheus.Counter
+	StartTime      prometheus.Gauge
+	Duration       prometheus.Gauge
+	ThroughputRate prometheus.Gauge
+	ErrorRate      prometheus.Gauge
+}
+
+func (m *PrometheusPipelineMetricsCollector) IncProcessedCount() { m.ProcessedCount.Inc() }
+func (m *PrometheusPipelineMetricsCollector) IncErrorCount()     { m.ErrorCount.Inc() }
+func (m *PrometheusPipelineMetricsCollector) IncPanicCount()     { m.PanicCount.Inc() }
+func (m *PrometheusPipelineMetricsCollector) SetStartTime(t time.Time) { m.StartTime.Set(float64(t.Unix())) }
+func (m *PrometheusPipelineMetricsCollector) SetDuration(d time.Duration) { m.Duration.Set(float64(d.Seconds())) }
+func (m *PrometheusPipelineMetricsCollector) SetThroughputRate(rate float64) { m.ThroughputRate.Set(rate) }
+func (m *PrometheusPipelineMetricsCollector) SetErrorRate(rate float64)      { m.ErrorRate.Set(rate) }
+func (m *PrometheusPipelineMetricsCollector) GetMetrics() Metrics {
+	// Prometheus metrics are scraped via /metrics endpoint. This method returns zeros.
+	return Metrics{}
 }
