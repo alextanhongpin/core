@@ -11,6 +11,7 @@ import (
 
 	"github.com/alextanhongpin/core/sync/pipeline"
 	"github.com/alextanhongpin/core/sync/promise"
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 var (
@@ -132,6 +133,92 @@ func (o *Options[K, V]) Valid() error {
 	return nil
 }
 
+// DataLoaderMetricsCollector defines the interface for collecting dataloader metrics.
+type DataLoaderMetricsCollector interface {
+	IncTotalRequests()
+	IncKeysRequested(n int64)
+	IncCacheHits(n int64)
+	IncCacheMisses(n int64)
+	IncBatchCalls()
+	IncErrorCount()
+	IncNoResultCount()
+	SetCacheSize(n int64)
+	SetQueueLength(n int64)
+	GetMetrics() Metrics
+}
+
+// AtomicDataLoaderMetricsCollector is the default atomic-based metrics implementation.
+type AtomicDataLoaderMetricsCollector struct {
+	totalRequests int64
+	keysRequested int64
+	cacheHits     int64
+	cacheMisses   int64
+	batchCalls    int64
+	errorCount    int64
+	noResultCount int64
+	cacheSize     int64
+	queueLength   int64
+}
+
+func (m *AtomicDataLoaderMetricsCollector) IncTotalRequests() { atomic.AddInt64(&m.totalRequests, 1) }
+func (m *AtomicDataLoaderMetricsCollector) IncKeysRequested(n int64) {
+	atomic.AddInt64(&m.keysRequested, n)
+}
+func (m *AtomicDataLoaderMetricsCollector) IncCacheHits(n int64) { atomic.AddInt64(&m.cacheHits, n) }
+func (m *AtomicDataLoaderMetricsCollector) IncCacheMisses(n int64) {
+	atomic.AddInt64(&m.cacheMisses, n)
+}
+func (m *AtomicDataLoaderMetricsCollector) IncBatchCalls()       { atomic.AddInt64(&m.batchCalls, 1) }
+func (m *AtomicDataLoaderMetricsCollector) IncErrorCount()       { atomic.AddInt64(&m.errorCount, 1) }
+func (m *AtomicDataLoaderMetricsCollector) IncNoResultCount()    { atomic.AddInt64(&m.noResultCount, 1) }
+func (m *AtomicDataLoaderMetricsCollector) SetCacheSize(n int64) { atomic.StoreInt64(&m.cacheSize, n) }
+func (m *AtomicDataLoaderMetricsCollector) SetQueueLength(n int64) {
+	atomic.StoreInt64(&m.queueLength, n)
+}
+func (m *AtomicDataLoaderMetricsCollector) GetMetrics() Metrics {
+	return Metrics{
+		TotalRequests: atomic.LoadInt64(&m.totalRequests),
+		KeysRequested: atomic.LoadInt64(&m.keysRequested),
+		CacheHits:     atomic.LoadInt64(&m.cacheHits),
+		CacheMisses:   atomic.LoadInt64(&m.cacheMisses),
+		BatchCalls:    atomic.LoadInt64(&m.batchCalls),
+		ErrorCount:    atomic.LoadInt64(&m.errorCount),
+		NoResultCount: atomic.LoadInt64(&m.noResultCount),
+		CacheSize:     atomic.LoadInt64(&m.cacheSize),
+		QueueLength:   atomic.LoadInt64(&m.queueLength),
+	}
+}
+
+// PrometheusDataLoaderMetricsCollector implements DataLoaderMetricsCollector using prometheus metrics.
+// (Requires github.com/prometheus/client_golang/prometheus)
+type PrometheusDataLoaderMetricsCollector struct {
+	TotalRequests prometheus.Counter
+	KeysRequested prometheus.Counter
+	CacheHits     prometheus.Counter
+	CacheMisses   prometheus.Counter
+	BatchCalls    prometheus.Counter
+	ErrorCount    prometheus.Counter
+	NoResultCount prometheus.Counter
+	CacheSize     prometheus.Gauge
+	QueueLength   prometheus.Gauge
+}
+
+func (m *PrometheusDataLoaderMetricsCollector) IncTotalRequests() { m.TotalRequests.Inc() }
+func (m *PrometheusDataLoaderMetricsCollector) IncKeysRequested(n int64) {
+	m.KeysRequested.Add(float64(n))
+}
+func (m *PrometheusDataLoaderMetricsCollector) IncCacheHits(n int64)   { m.CacheHits.Add(float64(n)) }
+func (m *PrometheusDataLoaderMetricsCollector) IncCacheMisses(n int64) { m.CacheMisses.Add(float64(n)) }
+func (m *PrometheusDataLoaderMetricsCollector) IncBatchCalls()         { m.BatchCalls.Inc() }
+func (m *PrometheusDataLoaderMetricsCollector) IncErrorCount()         { m.ErrorCount.Inc() }
+func (m *PrometheusDataLoaderMetricsCollector) IncNoResultCount()      { m.NoResultCount.Inc() }
+func (m *PrometheusDataLoaderMetricsCollector) SetCacheSize(n int64)   { m.CacheSize.Set(float64(n)) }
+func (m *PrometheusDataLoaderMetricsCollector) SetQueueLength(n int64) { m.QueueLength.Set(float64(n)) }
+func (m *PrometheusDataLoaderMetricsCollector) GetMetrics() Metrics {
+	// Prometheus metrics are scraped via /metrics endpoint. This method returns zeros.
+	return Metrics{}
+}
+
 type DataLoader[K comparable, V any] struct {
 	// Lifecycle control.
 	begin sync.Once
@@ -150,32 +237,30 @@ type DataLoader[K comparable, V any] struct {
 	opts *Options[K, V]
 
 	// Metrics (using atomic operations for thread safety)
-	metrics struct {
-		totalRequests int64
-		keysRequested int64
-		cacheHits     int64
-		cacheMisses   int64
-		batchCalls    int64
-		errorCount    int64
-		noResultCount int64
-		cacheSize     int64
-		queueLength   int64
-	}
+	metrics     DataLoaderMetricsCollector
+	queueLength int64 // local field for queue length
 }
 
 // New returns a new DataLoader. The context is passed in to control the lifecycle.
-func New[K comparable, V any](ctx context.Context, opts *Options[K, V]) *DataLoader[K, V] {
+func New[K comparable, V any](ctx context.Context, opts *Options[K, V], metrics ...DataLoaderMetricsCollector) *DataLoader[K, V] {
 	if err := opts.Valid(); err != nil {
 		panic(err)
 	}
 
 	ctx, cancel := context.WithCancelCause(ctx)
+	var m DataLoaderMetricsCollector
+	if len(metrics) > 0 && metrics[0] != nil {
+		m = metrics[0]
+	} else {
+		m = &AtomicDataLoaderMetricsCollector{}
+	}
 	return &DataLoader[K, V]{
-		group:  promise.NewMap[V](),
-		ch:     make(chan K),
-		opts:   opts,
-		ctx:    ctx,
-		cancel: cancel,
+		group:   promise.NewMap[V](),
+		ch:      make(chan K),
+		opts:    opts,
+		ctx:     ctx,
+		cancel:  cancel,
+		metrics: m,
 	}
 }
 
@@ -187,20 +272,18 @@ func (d *DataLoader[K, V]) Set(k K, v V) {
 }
 
 func (d *DataLoader[K, V]) Load(k K) (V, error) {
-	atomic.AddInt64(&d.metrics.totalRequests, 1)
-	atomic.AddInt64(&d.metrics.keysRequested, 1)
+	d.metrics.IncTotalRequests()
+	d.metrics.IncKeysRequested(1)
 	return d.load(k).Await()
 }
 
 func (d *DataLoader[K, V]) LoadMany(ks []K) ([]promise.Result[V], error) {
-	atomic.AddInt64(&d.metrics.totalRequests, 1)
-	atomic.AddInt64(&d.metrics.keysRequested, int64(len(ks)))
-
+	d.metrics.IncTotalRequests()
+	d.metrics.IncKeysRequested(int64(len(ks)))
 	res := make(promise.Promises[V], len(ks))
 	for i, k := range ks {
 		res[i] = d.load(k)
 	}
-
 	return res.AllSettled(), nil
 }
 
@@ -232,26 +315,22 @@ func (d *DataLoader[K, V]) load(k K) *promise.Promise[V] {
 
 	v, err := d.opts.Cache.Get(k)
 	if err == nil {
-		atomic.AddInt64(&d.metrics.cacheHits, 1)
+		d.metrics.IncCacheHits(1)
 		if d.opts.OnCacheHit != nil {
 			d.opts.OnCacheHit(k)
 		}
 		return promise.Resolve(v)
 	}
 
-	// Only fetch from the db if the cache returns
-	// ErrNotExist.
-	// The cache can return ErrNoResult if the intended
-	// cached value is nil.
 	if !errors.Is(err, ErrNotExist) {
-		atomic.AddInt64(&d.metrics.errorCount, 1)
+		d.metrics.IncErrorCount()
 		if d.opts.OnError != nil {
 			d.opts.OnError(k, err)
 		}
 		return promise.Reject[V](err)
 	}
 
-	atomic.AddInt64(&d.metrics.cacheMisses, 1)
+	d.metrics.IncCacheMisses(1)
 	if d.opts.OnCacheMiss != nil {
 		d.opts.OnCacheMiss(k)
 	}
@@ -266,11 +345,11 @@ func (d *DataLoader[K, V]) load(k K) *promise.Promise[V] {
 	case <-ctx.Done():
 		err := newKeyError(k, context.Cause(ctx))
 		d.opts.Cache.Set(k, v, err)
-
 		p.Reject(err)
 		d.group.Delete(fmt.Sprint(k))
 	case d.ch <- k:
-		atomic.AddInt64(&d.metrics.queueLength, 1)
+		d.queueLength++
+		d.metrics.SetQueueLength(d.queueLength)
 	}
 
 	return p
@@ -287,7 +366,7 @@ func (d *DataLoader[K, V]) loop() {
 }
 
 func (d *DataLoader[K, V]) batch(ctx context.Context, keys []K) {
-	atomic.AddInt64(&d.metrics.batchCalls, 1)
+	d.metrics.IncBatchCalls()
 	if d.opts.OnBatchStart != nil {
 		d.opts.OnBatchStart(keys)
 	}
@@ -312,7 +391,7 @@ func (d *DataLoader[K, V]) batch(ctx context.Context, keys []K) {
 				return v, nil
 			}
 
-			atomic.AddInt64(&d.metrics.noResultCount, 1)
+			d.metrics.IncNoResultCount()
 			return v, newKeyError(k, ErrNoResult)
 		}
 		v, err := fn()
@@ -329,6 +408,9 @@ func (d *DataLoader[K, V]) batch(ctx context.Context, keys []K) {
 			d.group.Delete(key)
 		}
 	}
+	// After processing a batch, decrement queue length
+	d.queueLength -= int64(len(keys))
+	d.metrics.SetQueueLength(d.queueLength)
 }
 
 func newKeyError(k any, err error) *KeyError {
@@ -357,17 +439,7 @@ func (e *KeyError) Unwrap() error {
 
 // Metrics returns a copy of the current metrics.
 func (d *DataLoader[K, V]) Metrics() Metrics {
-	return Metrics{
-		TotalRequests: atomic.LoadInt64(&d.metrics.totalRequests),
-		KeysRequested: atomic.LoadInt64(&d.metrics.keysRequested),
-		CacheHits:     atomic.LoadInt64(&d.metrics.cacheHits),
-		CacheMisses:   atomic.LoadInt64(&d.metrics.cacheMisses),
-		BatchCalls:    atomic.LoadInt64(&d.metrics.batchCalls),
-		ErrorCount:    atomic.LoadInt64(&d.metrics.errorCount),
-		NoResultCount: atomic.LoadInt64(&d.metrics.noResultCount),
-		CacheSize:     atomic.LoadInt64(&d.metrics.cacheSize),
-		QueueLength:   atomic.LoadInt64(&d.metrics.queueLength),
-	}
+	return d.metrics.GetMetrics()
 }
 
 // LoadWithTimeout loads a single key with a timeout.
@@ -404,6 +476,6 @@ func (d *DataLoader[K, V]) LoadWithTimeout(ctx context.Context, k K) (V, error) 
 func (d *DataLoader[K, V]) ClearCache() {
 	if clearer, ok := d.opts.Cache.(interface{ Clear() }); ok {
 		clearer.Clear()
-		atomic.StoreInt64(&d.metrics.cacheSize, 0)
+		d.metrics.SetCacheSize(0)
 	}
 }
