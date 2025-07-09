@@ -26,10 +26,11 @@ type User struct {
     ID    int    `json:"id" validate:"required"`
     Name  string `json:"name" validate:"required"`
     Email string `json:"email" validate:"required,email"`
+    Active bool   `json:"active" validate:"required"`
 }
 
 func main() {
-    user := User{ID: 1, Name: "Alice", Email: "alice@example.com"}
+    user := User{ID: 1, Name: "Alice", Email: "alice@example.com", Active: true}
     
     // Type introspection
     fmt.Println("Type:", structs.Type(user))     // Type: main.User
@@ -38,7 +39,7 @@ func main() {
     
     // Field operations
     names, _ := structs.GetFieldNames(user)
-    fmt.Println("Fields:", names)                // Fields: [ID Name Email]
+    fmt.Println("Fields:", names)                // Fields: [ID Name Email Active]
     
     // Validation
     if err := structs.NonZero(user); err != nil {
