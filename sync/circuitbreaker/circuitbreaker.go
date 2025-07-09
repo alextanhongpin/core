@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/alextanhongpin/core/sync/rate"
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 const (
@@ -94,6 +95,83 @@ func (s Status) String() string {
 	return statusText[s]
 }
 
+// CircuitBreakerMetricsCollector defines the interface for collecting circuit breaker metrics.
+type CircuitBreakerMetricsCollector interface {
+	IncTotalRequests()
+	IncSuccessfulRequests()
+	IncFailedRequests()
+	IncRejectedRequests()
+	IncStateTransitions()
+	SetCurrentState(state string)
+	GetMetrics() Metrics
+}
+
+// AtomicCircuitBreakerMetricsCollector is the default atomic-based metrics implementation.
+type AtomicCircuitBreakerMetricsCollector struct {
+	totalRequests      int64
+	successfulRequests int64
+	failedRequests     int64
+	rejectedRequests   int64
+	stateTransitions   int64
+	currentState       atomic.Value // string
+}
+
+func (m *AtomicCircuitBreakerMetricsCollector) IncTotalRequests() {
+	atomic.AddInt64(&m.totalRequests, 1)
+}
+func (m *AtomicCircuitBreakerMetricsCollector) IncSuccessfulRequests() {
+	atomic.AddInt64(&m.successfulRequests, 1)
+}
+func (m *AtomicCircuitBreakerMetricsCollector) IncFailedRequests() {
+	atomic.AddInt64(&m.failedRequests, 1)
+}
+func (m *AtomicCircuitBreakerMetricsCollector) IncRejectedRequests() {
+	atomic.AddInt64(&m.rejectedRequests, 1)
+}
+func (m *AtomicCircuitBreakerMetricsCollector) IncStateTransitions() {
+	atomic.AddInt64(&m.stateTransitions, 1)
+}
+func (m *AtomicCircuitBreakerMetricsCollector) SetCurrentState(state string) {
+	m.currentState.Store(state)
+}
+func (m *AtomicCircuitBreakerMetricsCollector) GetMetrics() Metrics {
+	cs, _ := m.currentState.Load().(string)
+	return Metrics{
+		TotalRequests:      atomic.LoadInt64(&m.totalRequests),
+		SuccessfulRequests: atomic.LoadInt64(&m.successfulRequests),
+		FailedRequests:     atomic.LoadInt64(&m.failedRequests),
+		RejectedRequests:   atomic.LoadInt64(&m.rejectedRequests),
+		StateTransitions:   atomic.LoadInt64(&m.stateTransitions),
+		CurrentState:       cs,
+	}
+}
+
+// PrometheusCircuitBreakerMetricsCollector implements CircuitBreakerMetricsCollector using prometheus metrics.
+// (Requires github.com/prometheus/client_golang/prometheus)
+type PrometheusCircuitBreakerMetricsCollector struct {
+	TotalRequests      prometheus.Counter
+	SuccessfulRequests prometheus.Counter
+	FailedRequests     prometheus.Counter
+	RejectedRequests   prometheus.Counter
+	StateTransitions   prometheus.Counter
+	CurrentState       prometheus.GaugeVec // label: state
+}
+
+func (m *PrometheusCircuitBreakerMetricsCollector) IncTotalRequests() { m.TotalRequests.Inc() }
+func (m *PrometheusCircuitBreakerMetricsCollector) IncSuccessfulRequests() {
+	m.SuccessfulRequests.Inc()
+}
+func (m *PrometheusCircuitBreakerMetricsCollector) IncFailedRequests()   { m.FailedRequests.Inc() }
+func (m *PrometheusCircuitBreakerMetricsCollector) IncRejectedRequests() { m.RejectedRequests.Inc() }
+func (m *PrometheusCircuitBreakerMetricsCollector) IncStateTransitions() { m.StateTransitions.Inc() }
+func (m *PrometheusCircuitBreakerMetricsCollector) SetCurrentState(state string) {
+	m.CurrentState.WithLabelValues(state).Set(1)
+}
+func (m *PrometheusCircuitBreakerMetricsCollector) GetMetrics() Metrics {
+	// Prometheus metrics are scraped via /metrics endpoint. This method returns zeros.
+	return Metrics{}
+}
+
 // Breaker implements a circuit breaker with pluggable clock, hooks, and metrics.
 type Breaker struct {
 	// Configuration (copied from Options for performance).
@@ -124,13 +202,7 @@ type Breaker struct {
 	probeInFlight bool
 
 	// Metrics (using atomic operations for thread safety)
-	metrics struct {
-		totalRequests      int64
-		successfulRequests int64
-		failedRequests     int64
-		rejectedRequests   int64
-		stateTransitions   int64
-	}
+	metrics CircuitBreakerMetricsCollector
 }
 
 func New() *Breaker {
@@ -138,7 +210,7 @@ func New() *Breaker {
 }
 
 // NewWithOptions creates a new circuit breaker with custom options.
-func NewWithOptions(opts Options) *Breaker {
+func NewWithOptions(opts Options, metrics ...CircuitBreakerMetricsCollector) *Breaker {
 	// Set defaults
 	if opts.BreakDuration <= 0 {
 		opts.BreakDuration = breakDuration
@@ -162,7 +234,13 @@ func NewWithOptions(opts Options) *Breaker {
 		opts.SlowCallCount = defaultSlowCallCount
 	}
 
-	return &Breaker{
+	var m CircuitBreakerMetricsCollector
+	if len(metrics) > 0 && metrics[0] != nil {
+		m = metrics[0]
+	} else {
+		m = &AtomicCircuitBreakerMetricsCollector{}
+	}
+	b := &Breaker{
 		BreakDuration:    opts.BreakDuration,
 		Counter:          rate.NewErrors(opts.SamplingDuration),
 		FailureCount:     opts.FailureCount,
@@ -176,11 +254,13 @@ func NewWithOptions(opts Options) *Breaker {
 		OnSuccess:        opts.OnSuccess,
 		OnFailure:        opts.OnFailure,
 		OnReject:         opts.OnReject,
-		// Inject defaults for testability.
-		Now:       time.Now,
-		AfterFunc: time.AfterFunc,
-		status:    Closed,
+		Now:              time.Now,
+		AfterFunc:        time.AfterFunc,
+		status:           Closed,
+		metrics:          m,
 	}
+	m.SetCurrentState(b.status.String())
+	return b
 }
 
 func defaultFailureCount(err error) int {
@@ -212,18 +292,11 @@ func (b *Breaker) Status() Status {
 
 // Metrics returns a copy of the current metrics.
 func (b *Breaker) Metrics() Metrics {
-	return Metrics{
-		TotalRequests:      atomic.LoadInt64(&b.metrics.totalRequests),
-		SuccessfulRequests: atomic.LoadInt64(&b.metrics.successfulRequests),
-		FailedRequests:     atomic.LoadInt64(&b.metrics.failedRequests),
-		RejectedRequests:   atomic.LoadInt64(&b.metrics.rejectedRequests),
-		StateTransitions:   atomic.LoadInt64(&b.metrics.stateTransitions),
-		CurrentState:       b.Status().String(),
-	}
+	return b.metrics.GetMetrics()
 }
 
 func (b *Breaker) Do(fn func() error) error {
-	atomic.AddInt64(&b.metrics.totalRequests, 1)
+	b.metrics.IncTotalRequests()
 
 	if b.OnRequest != nil {
 		b.OnRequest()
@@ -254,7 +327,8 @@ func (b *Breaker) setStatus(s Status) {
 	b.mu.Unlock()
 
 	if old != s {
-		atomic.AddInt64(&b.metrics.stateTransitions, 1)
+		b.metrics.IncStateTransitions()
+		b.metrics.SetCurrentState(s.String())
 		if hook != nil {
 			go hook(old, s)
 		}
@@ -279,7 +353,7 @@ func (b *Breaker) open() {
 }
 
 func (b *Breaker) opened() error {
-	atomic.AddInt64(&b.metrics.rejectedRequests, 1)
+	b.metrics.IncRejectedRequests()
 	if b.OnReject != nil {
 		b.OnReject()
 	}
@@ -302,7 +376,7 @@ func (b *Breaker) closed(fn func() error) error {
 	duration := b.Now().Sub(start)
 
 	if err != nil {
-		atomic.AddInt64(&b.metrics.failedRequests, 1)
+		b.metrics.IncFailedRequests()
 		if b.OnFailure != nil {
 			b.OnFailure(err, duration)
 		}
@@ -316,7 +390,7 @@ func (b *Breaker) closed(fn func() error) error {
 		return err
 	}
 
-	atomic.AddInt64(&b.metrics.successfulRequests, 1)
+	b.metrics.IncSuccessfulRequests()
 	if b.OnSuccess != nil {
 		b.OnSuccess(duration)
 	}
@@ -341,7 +415,7 @@ func (b *Breaker) halfOpened(fn func() error) error {
 	b.mu.Lock()
 	if b.probeInFlight {
 		b.mu.Unlock()
-		atomic.AddInt64(&b.metrics.rejectedRequests, 1)
+		b.metrics.IncRejectedRequests()
 		if b.OnReject != nil {
 			b.OnReject()
 		}
@@ -361,7 +435,7 @@ func (b *Breaker) halfOpened(fn func() error) error {
 	duration := b.Now().Sub(start)
 
 	if err != nil {
-		atomic.AddInt64(&b.metrics.failedRequests, 1)
+		b.metrics.IncFailedRequests()
 		if b.OnFailure != nil {
 			b.OnFailure(err, duration)
 		}
@@ -369,7 +443,7 @@ func (b *Breaker) halfOpened(fn func() error) error {
 		return err
 	}
 
-	atomic.AddInt64(&b.metrics.successfulRequests, 1)
+	b.metrics.IncSuccessfulRequests()
 	if b.OnSuccess != nil {
 		b.OnSuccess(duration)
 	}
