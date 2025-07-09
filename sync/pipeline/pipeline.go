@@ -10,6 +10,7 @@ import (
 
 	"github.com/alextanhongpin/core/sync/rate"
 	"golang.org/x/sync/semaphore"
+
 	// Prometheus is only required if using PrometheusPipelineMetricsCollector
 	"github.com/prometheus/client_golang/prometheus"
 )
@@ -1065,13 +1066,17 @@ type AtomicPipelineMetricsCollector struct {
 	errorRate      atomic.Value // float64
 }
 
-func (m *AtomicPipelineMetricsCollector) IncProcessedCount() { atomic.AddInt64(&m.processedCount, 1) }
-func (m *AtomicPipelineMetricsCollector) IncErrorCount()     { atomic.AddInt64(&m.errorCount, 1) }
-func (m *AtomicPipelineMetricsCollector) IncPanicCount()     { atomic.AddInt64(&m.panicCount, 1) }
+func (m *AtomicPipelineMetricsCollector) IncProcessedCount()       { atomic.AddInt64(&m.processedCount, 1) }
+func (m *AtomicPipelineMetricsCollector) IncErrorCount()           { atomic.AddInt64(&m.errorCount, 1) }
+func (m *AtomicPipelineMetricsCollector) IncPanicCount()           { atomic.AddInt64(&m.panicCount, 1) }
 func (m *AtomicPipelineMetricsCollector) SetStartTime(t time.Time) { m.startTime.Store(t) }
-func (m *AtomicPipelineMetricsCollector) SetDuration(d time.Duration) { atomic.StoreInt64(&m.duration, int64(d)) }
-func (m *AtomicPipelineMetricsCollector) SetThroughputRate(rate float64) { m.throughputRate.Store(rate) }
-func (m *AtomicPipelineMetricsCollector) SetErrorRate(rate float64)      { m.errorRate.Store(rate) }
+func (m *AtomicPipelineMetricsCollector) SetDuration(d time.Duration) {
+	atomic.StoreInt64(&m.duration, int64(d))
+}
+func (m *AtomicPipelineMetricsCollector) SetThroughputRate(rate float64) {
+	m.throughputRate.Store(rate)
+}
+func (m *AtomicPipelineMetricsCollector) SetErrorRate(rate float64) { m.errorRate.Store(rate) }
 func (m *AtomicPipelineMetricsCollector) GetMetrics() Metrics {
 	var startTime time.Time
 	if v := m.startTime.Load(); v != nil {
@@ -1110,10 +1115,16 @@ type PrometheusPipelineMetricsCollector struct {
 func (m *PrometheusPipelineMetricsCollector) IncProcessedCount() { m.ProcessedCount.Inc() }
 func (m *PrometheusPipelineMetricsCollector) IncErrorCount()     { m.ErrorCount.Inc() }
 func (m *PrometheusPipelineMetricsCollector) IncPanicCount()     { m.PanicCount.Inc() }
-func (m *PrometheusPipelineMetricsCollector) SetStartTime(t time.Time) { m.StartTime.Set(float64(t.Unix())) }
-func (m *PrometheusPipelineMetricsCollector) SetDuration(d time.Duration) { m.Duration.Set(float64(d.Seconds())) }
-func (m *PrometheusPipelineMetricsCollector) SetThroughputRate(rate float64) { m.ThroughputRate.Set(rate) }
-func (m *PrometheusPipelineMetricsCollector) SetErrorRate(rate float64)      { m.ErrorRate.Set(rate) }
+func (m *PrometheusPipelineMetricsCollector) SetStartTime(t time.Time) {
+	m.StartTime.Set(float64(t.Unix()))
+}
+func (m *PrometheusPipelineMetricsCollector) SetDuration(d time.Duration) {
+	m.Duration.Set(float64(d.Seconds()))
+}
+func (m *PrometheusPipelineMetricsCollector) SetThroughputRate(rate float64) {
+	m.ThroughputRate.Set(rate)
+}
+func (m *PrometheusPipelineMetricsCollector) SetErrorRate(rate float64) { m.ErrorRate.Set(rate) }
 func (m *PrometheusPipelineMetricsCollector) GetMetrics() Metrics {
 	// Prometheus metrics are scraped via /metrics endpoint. This method returns zeros.
 	return Metrics{}

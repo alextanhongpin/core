@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -85,8 +86,10 @@ type Poll struct {
 
 	// Internal state
 	mu      sync.RWMutex
-	metrics PollMetrics
 	running int32 // atomic
+
+	// PollMetricsCollector interface for metrics collection
+	metricsCollector PollMetricsCollector
 }
 
 // New creates a new Poll instance with default configuration
@@ -127,14 +130,15 @@ func NewWithOptions(opts PollOptions) *Poll {
 		p.EventBufferSize = 100
 	}
 
+	// Initialize default metrics collector (atomic)
+	p.metricsCollector = &AtomicPollMetricsCollector{}
+
 	return p
 }
 
 // GetMetrics returns the current polling metrics
 func (p *Poll) GetMetrics() PollMetrics {
-	p.mu.RLock()
-	defer p.mu.RUnlock()
-	return p.metrics
+	return p.metricsCollector.GetMetrics()
 }
 
 // IsRunning returns true if the poller is currently running
@@ -168,10 +172,8 @@ func (p *Poll) PollWithContext(ctx context.Context, fn func(context.Context) err
 
 	// Initialize metrics
 	p.mu.Lock()
-	p.metrics = PollMetrics{
-		StartTime: time.Now(),
-		Running:   true,
-	}
+	p.metricsCollector.SetStartTime(time.Now())
+	p.metricsCollector.SetRunning(true)
 	p.mu.Unlock()
 
 	batch := func(batchCtx context.Context) (err error) {
@@ -237,11 +239,8 @@ func (p *Poll) PollWithContext(ctx context.Context, fn func(context.Context) err
 			}
 
 			// Update global metrics
-			p.mu.Lock()
-			p.metrics.TotalBatches++
-			p.metrics.TotalSuccess += int64(metrics.SuccessCount)
-			p.metrics.TotalFailures += int64(metrics.FailureCount)
-			p.mu.Unlock()
+			p.metricsCollector.AddTotalSuccess(int64(metrics.SuccessCount))
+			p.metricsCollector.AddTotalFailures(int64(metrics.FailureCount))
 
 			// Call batch complete handler if available
 			if p.OnBatchComplete != nil {
@@ -307,7 +306,7 @@ func (p *Poll) PollWithContext(ctx context.Context, fn func(context.Context) err
 		defer atomic.StoreInt32(&p.running, 0)
 		defer func() {
 			p.mu.Lock()
-			p.metrics.Running = false
+			p.metricsCollector.SetRunning(false)
 			p.mu.Unlock()
 		}()
 
@@ -359,9 +358,7 @@ func (p *Poll) PollWithContext(ctx context.Context, fn func(context.Context) err
 			}
 
 			// Update idle cycles metric
-			p.mu.Lock()
-			p.metrics.TotalIdleCycles++
-			p.mu.Unlock()
+			p.metricsCollector.IncTotalIdleCycles()
 
 			if err := batch(ctx); err != nil {
 				// Queue is empty, increment idle.
@@ -401,6 +398,13 @@ func (p *Poll) PollWithContext(ctx context.Context, fn func(context.Context) err
 	})
 
 	return ch, stopFunc
+}
+
+// SetMetricsCollector allows injecting a custom PollMetricsCollector (e.g., Prometheus).
+func (p *Poll) SetMetricsCollector(collector PollMetricsCollector) {
+	if collector != nil {
+		p.metricsCollector = collector
+	}
 }
 
 // ExponentialBackOff returns the duration to sleep before the next batch.
@@ -481,4 +485,82 @@ func (e Event) IsBatch() bool {
 // IsPoll returns true if the event is a poll event
 func (e Event) IsPoll() bool {
 	return e.Name == "poll"
+}
+
+// PollMetricsCollector defines the interface for collecting poll metrics.
+type PollMetricsCollector interface {
+	IncTotalBatches()
+	AddTotalSuccess(n int64)
+	AddTotalFailures(n int64)
+	IncTotalIdleCycles()
+	SetStartTime(t time.Time)
+	SetRunning(running bool)
+	GetMetrics() PollMetrics
+}
+
+// AtomicPollMetricsCollector is the default atomic-based metrics implementation.
+type AtomicPollMetricsCollector struct {
+	totalBatches    int64
+	totalSuccess    int64
+	totalFailures   int64
+	totalIdleCycles int64
+	startTime       atomic.Value // time.Time
+	running         int32
+}
+
+func (m *AtomicPollMetricsCollector) IncTotalBatches()         { atomic.AddInt64(&m.totalBatches, 1) }
+func (m *AtomicPollMetricsCollector) AddTotalSuccess(n int64)  { atomic.AddInt64(&m.totalSuccess, n) }
+func (m *AtomicPollMetricsCollector) AddTotalFailures(n int64) { atomic.AddInt64(&m.totalFailures, n) }
+func (m *AtomicPollMetricsCollector) IncTotalIdleCycles()      { atomic.AddInt64(&m.totalIdleCycles, 1) }
+func (m *AtomicPollMetricsCollector) SetStartTime(t time.Time) { m.startTime.Store(t) }
+func (m *AtomicPollMetricsCollector) SetRunning(running bool) {
+	if running {
+		atomic.StoreInt32(&m.running, 1)
+	} else {
+		atomic.StoreInt32(&m.running, 0)
+	}
+}
+func (m *AtomicPollMetricsCollector) GetMetrics() PollMetrics {
+	var startTime time.Time
+	if v := m.startTime.Load(); v != nil {
+		startTime = v.(time.Time)
+	}
+	return PollMetrics{
+		TotalBatches:    atomic.LoadInt64(&m.totalBatches),
+		TotalSuccess:    atomic.LoadInt64(&m.totalSuccess),
+		TotalFailures:   atomic.LoadInt64(&m.totalFailures),
+		TotalIdleCycles: atomic.LoadInt64(&m.totalIdleCycles),
+		StartTime:       startTime,
+		Running:         atomic.LoadInt32(&m.running) == 1,
+	}
+}
+
+// PrometheusPollMetricsCollector implements PollMetricsCollector using prometheus metrics.
+// (Requires github.com/prometheus/client_golang/prometheus)
+type PrometheusPollMetricsCollector struct {
+	TotalBatches    prometheus.Counter
+	TotalSuccess    prometheus.Counter
+	TotalFailures   prometheus.Counter
+	TotalIdleCycles prometheus.Counter
+	StartTime       prometheus.Gauge
+	Running         prometheus.Gauge
+}
+
+func (m *PrometheusPollMetricsCollector) IncTotalBatches()         { m.TotalBatches.Inc() }
+func (m *PrometheusPollMetricsCollector) AddTotalSuccess(n int64)  { m.TotalSuccess.Add(float64(n)) }
+func (m *PrometheusPollMetricsCollector) AddTotalFailures(n int64) { m.TotalFailures.Add(float64(n)) }
+func (m *PrometheusPollMetricsCollector) IncTotalIdleCycles()      { m.TotalIdleCycles.Inc() }
+func (m *PrometheusPollMetricsCollector) SetStartTime(t time.Time) {
+	m.StartTime.Set(float64(t.Unix()))
+}
+func (m *PrometheusPollMetricsCollector) SetRunning(running bool) {
+	if running {
+		m.Running.Set(1)
+	} else {
+		m.Running.Set(0)
+	}
+}
+func (m *PrometheusPollMetricsCollector) GetMetrics() PollMetrics {
+	// Prometheus metrics are scraped via /metrics endpoint. This method returns zeros.
+	return PollMetrics{}
 }
