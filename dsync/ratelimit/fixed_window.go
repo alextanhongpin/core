@@ -18,9 +18,9 @@ var fixedWindow = redis.NewScript(fixedWindowScript)
 // It divides time into fixed intervals and allows a specified number
 // of requests per interval.
 type FixedWindow struct {
-	client *redis.Client
-	limit  int
-	period int64
+	client           *redis.Client
+	limit            int
+	period           int64
 	metricsCollector MetricsCollector
 }
 
@@ -42,9 +42,9 @@ func NewFixedWindow(client *redis.Client, limit int, period time.Duration, colle
 		collector = &AtomicMetricsCollector{}
 	}
 	return &FixedWindow{
-		client: client,
-		limit:  limit,
-		period: period.Milliseconds(),
+		client:           client,
+		limit:            limit,
+		period:           period.Milliseconds(),
 		metricsCollector: collector,
 	}
 }

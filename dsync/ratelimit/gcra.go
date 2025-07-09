@@ -17,11 +17,11 @@ var gcra = redis.NewScript(gcraScript)
 // It provides better traffic shaping compared to fixed windows by avoiding
 // burst behavior at window boundaries.
 type GCRA struct {
-	Now    func() time.Time
-	burst  int
-	client *redis.Client
-	limit  int
-	period int64
+	Now              func() time.Time
+	burst            int
+	client           *redis.Client
+	limit            int
+	period           int64
 	metricsCollector MetricsCollector
 }
 
