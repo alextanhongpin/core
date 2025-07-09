@@ -9,13 +9,87 @@
     th, td { border: 1px solid #ccc; padding: 0.5em; }
     th { background: #f0f0f0; }
     .metrics { margin-bottom: 2em; }
-    .create-form { margin-bottom: 2em; }
-    .tabs { display: flex; gap: 1em; margin-bottom: 2em; }
-    .tab { cursor: pointer; padding: 0.5em 1em; border: 1px solid #ccc; border-bottom: none; background: #f9f9f9; }
-    .tab.active { background: #fff; font-weight: bold; }
-    .tab-content { display: none; }
+    .create-form { margin-bottom: 2em; background: #f9f9f9; padding: 1.5em 2em; border-radius: 8px; box-shadow: 0 2px 8px #0001; max-width: 600px; }
+    .create-form h2 { margin-top: 0; }
+    .create-form form { display: flex; flex-direction: column; gap: 1em; }
+    .create-form input[type="text"],
+    .create-form input[type="number"],
+    .create-form input[type="email"],
+    .create-form input[type="password"],
+    .create-form input[type="checkbox"],
+    .create-form select,
+    .create-form textarea {
+      font-size: 1em;
+      padding: 0.5em;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      width: 100%;
+      box-sizing: border-box;
+    }
+    .create-form label { display: flex; align-items: center; gap: 0.5em; font-weight: 500; }
+    .create-form button {
+      background: #007bff;
+      color: #fff;
+      border: none;
+      border-radius: 4px;
+      padding: 0.7em 1.5em;
+      font-size: 1em;
+      cursor: pointer;
+      transition: background 0.2s;
+      align-self: flex-start;
+    }
+    .create-form button:hover { background: #0056b3; }
+    .create-form textarea { min-height: 60px; }
+    .tab-content { display: none; animation: fadein 0.3s; }
     .tab-content.active { display: block; }
-    .delete-btn { color: red; cursor: pointer; }
+    @keyframes fadein { from { opacity: 0; } to { opacity: 1; } }
+    .abtest-section { margin-top: 2em; }
+
+    /* Modern tab menu styles */
+    .tabs {
+      display: flex;
+      gap: 0.5em;
+      margin-bottom: 2em;
+      border-bottom: 2px solid #e0e0e0;
+      background: #fff;
+      border-radius: 8px 8px 0 0;
+      box-shadow: 0 2px 8px #0001;
+      overflow-x: auto;
+    }
+    .tab {
+      padding: 0.8em 2em;
+      cursor: pointer;
+      font-size: 1.1em;
+      font-weight: 600;
+      color: #555;
+      background: none;
+      border: none;
+      border-radius: 8px 8px 0 0;
+      transition: background 0.2s, color 0.2s, box-shadow 0.2s;
+      margin-bottom: -2px;
+      outline: none;
+      position: relative;
+    }
+    .tab.active {
+      background: #007bff;
+      color: #fff;
+      box-shadow: 0 2px 8px #007bff22;
+      border-bottom: 2px solid #007bff;
+      z-index: 2;
+    }
+    .tab:not(.active):hover {
+      background: #f0f6ff;
+      color: #007bff;
+    }
+    /* Responsive for mobile */
+    @media (max-width: 600px) {
+      .tabs { flex-wrap: wrap; }
+      .tab { font-size: 1em; padding: 0.7em 1em; }
+    }
+    /* Add a subtle shadow to the tab bar */
+    .tabs {
+      box-shadow: 0 2px 8px #0001, 0 1.5px 0 #e0e0e0;
+    }
   </style>
 </head>
 <body>
@@ -25,6 +99,7 @@
     <div class="tab" data-tab="feature-flags">Feature Flags</div>
     <div class="tab" data-tab="experiment-configs">Experiment Configs</div>
     <div class="tab" data-tab="analytics">Analytics</div>
+    <div class="tab" data-tab="ab-test">A/B Testing</div>
   </div>
   <div class="tab-content active" id="tab-bandit">
     <div class="metrics">
@@ -34,14 +109,20 @@
     <div class="create-form">
       <h2>Create Experiment</h2>
       <form id="expForm">
-        <input name="name" placeholder="Name" required>
-        <select name="algorithm">
-          <option value="epsilon_greedy">Epsilon Greedy</option>
-          <option value="ucb">UCB</option>
-          <option value="thompson">Thompson Sampling</option>
-          <option value="bayesian">Bayesian</option>
-        </select>
-        <input name="arms" placeholder="Arms (comma separated)" required>
+        <label>Name
+          <input name="name" placeholder="Name" required>
+        </label>
+        <label>Algorithm
+          <select name="algorithm">
+            <option value="epsilon_greedy">Epsilon Greedy</option>
+            <option value="ucb">UCB</option>
+            <option value="thompson">Thompson Sampling</option>
+            <option value="bayesian">Bayesian</option>
+          </select>
+        </label>
+        <label>Arms (comma separated)
+          <input name="arms" placeholder="Arms (comma separated)" required>
+        </label>
         <button type="submit">Create</button>
       </form>
     </div>
@@ -51,24 +132,43 @@
       </thead>
       <tbody></tbody>
     </table>
+    <div id="ab-results-section" style="margin-top:2em; display:none;">
+      <h2>A/B Test Results</h2>
+      <div id="ab-results-table"></div>
+      <canvas id="ab-results-graph" width="600" height="300" style="margin-top:1em;"></canvas>
+    </div>
   </div>
   <div class="tab-content" id="tab-feature-flags">
     <div class="create-form">
       <h2>Create Feature Flag</h2>
       <form id="flagForm">
-        <input name="id" placeholder="ID (required)" required>
-        <input name="name" placeholder="Name">
-        <input name="description" placeholder="Description">
-        <label>Enabled <input name="enabled" type="checkbox"></label>
-        <textarea name="rules" placeholder='Rules (JSON array of FeatureFlagRule)'></textarea>
-        <textarea name="rollout" placeholder='Rollout (JSON object)'></textarea>
-        <textarea name="metadata" placeholder='Metadata (JSON object)'></textarea>
+        <label>ID (required)
+          <input name="id" placeholder="ID (required)" required>
+        </label>
+        <label>Name
+          <input name="name" placeholder="Name">
+        </label>
+        <label>Description
+          <input name="description" placeholder="Description">
+        </label>
+        <label>Enabled
+          <input name="enabled" type="checkbox">
+        </label>
+        <label>Rules (JSON array of FeatureFlagRule)
+          <textarea name="rules" placeholder='Rules (JSON array of FeatureFlagRule)'></textarea>
+        </label>
+        <label>Rollout (JSON object)
+          <textarea name="rollout" placeholder='Rollout (JSON object)'></textarea>
+        </label>
+        <label>Metadata (JSON object)
+          <textarea name="metadata" placeholder='Metadata (JSON object)'></textarea>
+        </label>
         <button type="submit">Create</button>
       </form>
     </div>
     <table id="feature-flags-table">
       <thead>
-        <tr><th>ID</th><th>Name</th><th>Enabled</th><th>Delete</th></tr>
+        <tr><th>ID</th><th>Name</th><th>Enabled</th><th>Toggle</th><th>Delete</th></tr>
       </thead>
       <tbody></tbody>
     </table>
@@ -77,13 +177,27 @@
     <div class="create-form">
       <h2>Create Experiment Config</h2>
       <form id="configForm">
-        <input name="experiment_id" placeholder="Experiment ID (required)" required>
-        <textarea name="traffic_split" placeholder='Traffic Split (JSON object, e.g. {"A":50,"B":50})'></textarea>
-        <textarea name="targeting_rules" placeholder='Targeting Rules (JSON array)'></textarea>
-        <textarea name="sample_size" placeholder='Sample Size (JSON object)'></textarea>
-        <textarea name="stopping_rules" placeholder='Stopping Rules (JSON array)'></textarea>
-        <textarea name="metric_config" placeholder='Metric Config (JSON object)'></textarea>
-        <textarea name="quality_control" placeholder='Quality Control (JSON object)'></textarea>
+        <label>Experiment ID (required)
+          <input name="experiment_id" placeholder="Experiment ID (required)" required>
+        </label>
+        <label>Traffic Split (JSON object, e.g. {"A":50,"B":50})
+          <textarea name="traffic_split" placeholder='Traffic Split (JSON object, e.g. {"A":50,"B":50})'></textarea>
+        </label>
+        <label>Targeting Rules (JSON array)
+          <textarea name="targeting_rules" placeholder='Targeting Rules (JSON array)'></textarea>
+        </label>
+        <label>Sample Size (JSON object)
+          <textarea name="sample_size" placeholder='Sample Size (JSON object)'></textarea>
+        </label>
+        <label>Stopping Rules (JSON array)
+          <textarea name="stopping_rules" placeholder='Stopping Rules (JSON array)'></textarea>
+        </label>
+        <label>Metric Config (JSON object)
+          <textarea name="metric_config" placeholder='Metric Config (JSON object)'></textarea>
+        </label>
+        <label>Quality Control (JSON object)
+          <textarea name="quality_control" placeholder='Quality Control (JSON object)'></textarea>
+        </label>
         <button type="submit">Create</button>
       </form>
     </div>
@@ -98,150 +212,303 @@
     <h2>Analytics Dashboard</h2>
     <pre id="analytics"></pre>
   </div>
+  <div class="tab-content" id="tab-ab-test">
+    <div class="abtest-section">
+      <h2>A/B Test Statistical Difference</h2>
+      <form id="abTestForm" class="create-form">
+        <label>Group A - Conversions
+          <input type="number" name="a_conversions" min="0" required>
+        </label>
+        <label>Group A - Total
+          <input type="number" name="a_total" min="1" required>
+        </label>
+        <label>Group B - Conversions
+          <input type="number" name="b_conversions" min="0" required>
+        </label>
+        <label>Group B - Total
+          <input type="number" name="b_total" min="1" required>
+        </label>
+        <button type="submit">Calculate</button>
+      </form>
+      <div id="abTestResult"></div>
+    </div>
+  </div>
   <script>
-    // Tab switching
-    document.querySelectorAll('.tab').forEach(tab => {
-      tab.onclick = () => {
-        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-        document.querySelectorAll('.tab-content').forEach(tc => tc.classList.remove('active'));
-        tab.classList.add('active');
-        document.getElementById('tab-' + tab.dataset.tab).classList.add('active');
+    document.addEventListener('DOMContentLoaded', function() {
+      // Hide all tab-content except the active one on load
+      document.querySelectorAll('.tab-content').forEach(tc => tc.classList.remove('active'));
+      document.querySelector('.tab-content#tab-bandit').classList.add('active');
+      // Tab switching
+      document.querySelectorAll('.tab').forEach(tab => {
+        tab.onclick = () => {
+          document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+          document.querySelectorAll('.tab-content').forEach(tc => tc.classList.remove('active'));
+          tab.classList.add('active');
+          document.getElementById('tab-' + tab.dataset.tab).classList.add('active');
+        };
+      });
+
+      // Bandit Experiments
+      async function fetchExperiments() {
+        const res = await fetch('/api/experiments');
+        const exps = await res.json();
+        const tbody = document.querySelector('#experiments tbody');
+        tbody.innerHTML = '';
+        exps.forEach(exp => {
+          const tr = document.createElement('tr');
+          tr.innerHTML = `<td>${exp.id}</td><td>${exp.name}</td><td>${exp.algorithm}</td><td>${exp.status}</td><td>${exp.arms.map(a => a.name).join(', ')}</td><td><span class="delete-btn" data-id="${exp.id}">Delete</span></td>`;
+          tbody.appendChild(tr);
+        });
+        // Delete handlers
+        tbody.querySelectorAll('.delete-btn').forEach(btn => {
+          btn.onclick = async () => {
+            await fetch(`/api/experiments/${btn.dataset.id}`, { method: 'DELETE' });
+            fetchExperiments();
+          };
+        });
+      }
+      async function fetchMetrics() {
+        const res = await fetch('/api/metrics');
+        const metrics = await res.json();
+        document.getElementById('metrics').textContent = JSON.stringify(metrics, null, 2);
+      }
+      document.getElementById('expForm').onsubmit = async e => {
+        e.preventDefault();
+        const form = e.target;
+        const arms = form.arms.value.split(',').map(s => ({ name: s.trim(), id: s.trim() }));
+        const body = JSON.stringify({ name: form.name.value, algorithm: form.algorithm.value, arms });
+        await fetch('/api/experiments', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
+        form.reset();
+        fetchExperiments();
       };
-    });
 
-    // Bandit Experiments
-    async function fetchExperiments() {
-      const res = await fetch('/api/experiments');
-      const exps = await res.json();
-      const tbody = document.querySelector('#experiments tbody');
-      tbody.innerHTML = '';
-      exps.forEach(exp => {
-        const tr = document.createElement('tr');
-        tr.innerHTML = `<td>${exp.id}</td><td>${exp.name}</td><td>${exp.algorithm}</td><td>${exp.status}</td><td>${exp.arms.map(a => a.name).join(', ')}</td><td><span class="delete-btn" data-id="${exp.id}">Delete</span></td>`;
-        tbody.appendChild(tr);
-      });
-      // Delete handlers
-      tbody.querySelectorAll('.delete-btn').forEach(btn => {
-        btn.onclick = async () => {
-          await fetch(`/api/experiments/${btn.dataset.id}`, { method: 'DELETE' });
-          fetchExperiments();
-        };
-      });
-    }
-    async function fetchMetrics() {
-      const res = await fetch('/api/metrics');
-      const metrics = await res.json();
-      document.getElementById('metrics').textContent = JSON.stringify(metrics, null, 2);
-    }
-    document.getElementById('expForm').onsubmit = async e => {
-      e.preventDefault();
-      const form = e.target;
-      const arms = form.arms.value.split(',').map(s => ({ name: s.trim(), id: s.trim() }));
-      const body = JSON.stringify({ name: form.name.value, algorithm: form.algorithm.value, arms });
-      await fetch('/api/experiments', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
-      form.reset();
+      // Feature Flags
+      async function fetchFeatureFlags() {
+        const res = await fetch('/api/config/feature-flags');
+        const flags = await res.json();
+        const tbody = document.querySelector('#feature-flags-table tbody');
+        tbody.innerHTML = '';
+        flags.forEach(flag => {
+          const tr = document.createElement('tr');
+          tr.innerHTML = `<td>${flag.id}</td><td>${flag.name||''}</td><td>${flag.enabled?'✅':'❌'}</td><td><input type="checkbox" class="toggle-flag" data-id="${flag.id}" ${flag.enabled?'checked':''}></td><td><span class="delete-btn" data-key="${flag.id}">Delete</span></td>`;
+          tbody.appendChild(tr);
+        });
+        tbody.querySelectorAll('.delete-btn').forEach(btn => {
+          btn.onclick = async () => {
+            await fetch(`/api/config/feature-flags/${btn.dataset.key}`, { method: 'DELETE' });
+            fetchFeatureFlags();
+          };
+        });
+        tbody.querySelectorAll('.toggle-flag').forEach(cb => {
+          cb.onchange = async () => {
+            if (cb.checked) {
+              await fetch(`/api/config/feature-flags/enable/${cb.dataset.id}`, { method: 'POST' });
+            } else {
+              await fetch(`/api/config/feature-flags/disable/${cb.dataset.id}`, { method: 'POST' });
+            }
+            fetchFeatureFlags();
+          };
+        });
+      }
+      document.getElementById('flagForm').onsubmit = async e => {
+        e.preventDefault();
+        const form = e.target;
+        let rules = undefined, rollout = undefined, metadata = undefined;
+        try { rules = form.rules.value ? JSON.parse(form.rules.value) : undefined; } catch { alert('Invalid JSON in rules'); return; }
+        try { rollout = form.rollout.value ? JSON.parse(form.rollout.value) : undefined; } catch { alert('Invalid JSON in rollout'); return; }
+        try { metadata = form.metadata.value ? JSON.parse(form.metadata.value) : undefined; } catch { alert('Invalid JSON in metadata'); return; }
+        const body = JSON.stringify({
+          id: form.id.value,
+          name: form.name.value,
+          description: form.description.value,
+          enabled: form.enabled.checked,
+          rules,
+          rollout,
+          metadata
+        });
+        await fetch('/api/config/feature-flags', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
+        form.reset();
+        fetchFeatureFlags();
+      };
+
+      // Experiment Configs
+      async function fetchExperimentConfigs() {
+        const res = await fetch('/api/config/experiments');
+        const configs = await res.json();
+        const tbody = document.querySelector('#experiment-configs-table tbody');
+        tbody.innerHTML = '';
+        configs.forEach(cfg => {
+          const tr = document.createElement('tr');
+          tr.innerHTML = `<td>${cfg.experiment_id||cfg.experimentId||cfg.id}</td><td>${JSON.stringify(cfg.traffic_split||cfg.trafficSplit||{})}</td><td><span class="delete-btn" data-key="${cfg.experiment_id||cfg.experimentId||cfg.id}">Delete</span></td>`;
+          tbody.appendChild(tr);
+        });
+        tbody.querySelectorAll('.delete-btn').forEach(btn => {
+          btn.onclick = async () => {
+            await fetch(`/api/config/experiments/${btn.dataset.key}`, { method: 'DELETE' });
+            fetchExperimentConfigs();
+          };
+        });
+      }
+      document.getElementById('configForm').onsubmit = async e => {
+        e.preventDefault();
+        const form = e.target;
+        let traffic_split, targeting_rules, sample_size, stopping_rules, metric_config, quality_control;
+        try { traffic_split = form.traffic_split.value ? JSON.parse(form.traffic_split.value) : undefined; } catch { alert('Invalid JSON in traffic_split'); return; }
+        try { targeting_rules = form.targeting_rules.value ? JSON.parse(form.targeting_rules.value) : undefined; } catch { alert('Invalid JSON in targeting_rules'); return; }
+        try { sample_size = form.sample_size.value ? JSON.parse(form.sample_size.value) : undefined; } catch { alert('Invalid JSON in sample_size'); return; }
+        try { stopping_rules = form.stopping_rules.value ? JSON.parse(form.stopping_rules.value) : undefined; } catch { alert('Invalid JSON in stopping_rules'); return; }
+        try { metric_config = form.metric_config.value ? JSON.parse(form.metric_config.value) : undefined; } catch { alert('Invalid JSON in metric_config'); return; }
+        try { quality_control = form.quality_control.value ? JSON.parse(form.quality_control.value) : undefined; } catch { alert('Invalid JSON in quality_control'); return; }
+        const body = JSON.stringify({
+          experiment_id: form.experiment_id.value,
+          traffic_split,
+          targeting_rules,
+          sample_size,
+          stopping_rules,
+          metric_config,
+          quality_control
+        });
+        await fetch('/api/config/experiments', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
+        form.reset();
+        fetchExperimentConfigs();
+      };
+
+      // Analytics
+      async function fetchAnalytics() {
+        const res = await fetch('/api/analytics');
+        const analytics = await res.json();
+        document.getElementById('analytics').textContent = JSON.stringify(analytics, null, 2);
+      }
+
+      // A/B Test Statistical Difference
+      document.getElementById('abTestForm').onsubmit = function(e) {
+        e.preventDefault();
+        const form = e.target;
+        const a_conv = parseInt(form.a_conversions.value, 10);
+        const a_total = parseInt(form.a_total.value, 10);
+        const b_conv = parseInt(form.b_conversions.value, 10);
+        const b_total = parseInt(form.b_total.value, 10);
+        if (a_conv > a_total || b_conv > b_total) {
+          document.getElementById('abTestResult').innerHTML = '<span style="color:red">Conversions cannot exceed total.</span>';
+          return;
+        }
+        // Calculate conversion rates
+        const p1 = a_conv / a_total;
+        const p2 = b_conv / b_total;
+        // Pooled probability
+        const p = (a_conv + b_conv) / (a_total + b_total);
+        // Standard error
+        const se = Math.sqrt(p * (1 - p) * (1 / a_total + 1 / b_total));
+        // Z-score
+        const z = (p1 - p2) / se;
+        // Two-tailed p-value
+        const pval = 2 * (1 - normalCdf(Math.abs(z)));
+        let result = `<b>Group A:</b> ${a_conv}/${a_total} (${(p1*100).toFixed(2)}%)<br>`;
+        result += `<b>Group B:</b> ${b_conv}/${b_total} (${(p2*100).toFixed(2)}%)<br>`;
+        result += `<b>Z-score:</b> ${z.toFixed(4)}<br>`;
+        result += `<b>P-value:</b> ${pval.toExponential(4)}<br>`;
+        if (pval < 0.05) {
+          result += '<span style="color:green">Statistically significant difference (p < 0.05)</span>';
+        } else {
+          result += '<span style="color:orange">No statistically significant difference (p ≥ 0.05)</span>';
+        }
+        document.getElementById('abTestResult').innerHTML = result;
+      };
+      // Standard normal CDF
+      function normalCdf(x) {
+        return (1 + erf(x / Math.sqrt(2))) / 2;
+      }
+      // Error function approximation
+      function erf(x) {
+        // Abramowitz and Stegun formula 7.1.26
+        const sign = x >= 0 ? 1 : -1;
+        x = Math.abs(x);
+        const a1 =  0.254829592;
+        const a2 = -0.284496736;
+        const a3 =  1.421413741;
+        const a4 = -1.453152027;
+        const a5 =  1.061405429;
+        const p  =  0.3275911;
+        const t = 1.0/(1.0 + p*x);
+        const y = 1.0 - (((((a5*t + a4)*t) + a3)*t + a2)*t + a1)*t*Math.exp(-x*x);
+        return sign*y;
+      }
+
+      // A/B Test Results
+      async function fetchABResults(expId) {
+        const res = await fetch(`/api/experiments/${expId}/results`);
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!data.variants || data.variants.length < 2) return;
+        // Show section
+        document.getElementById('ab-results-section').style.display = '';
+        // Table
+        let html = `<table><thead><tr><th>Variant</th><th>Impressions</th><th>Conversions</th><th>Rate</th><th>CI</th><th>P-value</th><th>Significant?</th></tr></thead><tbody>`;
+        data.variants.forEach(v => {
+          html += `<tr><td>${v.variant_id}</td><td>${v.impressions}</td><td>${v.conversions}</td><td>${(v.conversion_rate*100).toFixed(2)}%</td><td>[${(v.confidence_interval.lower*100).toFixed(2)}%, ${(v.confidence_interval.upper*100).toFixed(2)}%]</td><td>${v.p_value !== undefined ? v.p_value.toExponential(4) : ''}</td><td>${v.is_significant ? '✅' : ''}</td></tr>`;
+        });
+        html += '</tbody></table>';
+        document.getElementById('ab-results-table').innerHTML = html;
+        // Graph
+        drawABGraph(data.variants);
+      }
+      function drawABGraph(variants) {
+        const canvas = document.getElementById('ab-results-graph');
+        const ctx = canvas.getContext('2d');
+        ctx.clearRect(0,0,canvas.width,canvas.height);
+        // Axes
+        ctx.strokeStyle = '#888';
+        ctx.beginPath(); ctx.moveTo(50,20); ctx.lineTo(50,260); ctx.lineTo(550,260); ctx.stroke();
+        // Bars
+        const barWidth = 60;
+        const gap = 40;
+        const maxRate = Math.max(...variants.map(v=>v.conversion_rate));
+        variants.forEach((v,i) => {
+          const x = 70 + i*(barWidth+gap);
+          const y = 260 - (v.conversion_rate/maxRate)*200;
+          ctx.fillStyle = '#007bff';
+          ctx.fillRect(x, y, barWidth, 260-y);
+          // Error bars (CI)
+          const ciLow = 260 - (v.confidence_interval.lower/maxRate)*200;
+          const ciHigh = 260 - (v.confidence_interval.upper/maxRate)*200;
+          ctx.strokeStyle = '#f00';
+          ctx.beginPath();
+          ctx.moveTo(x+barWidth/2, ciLow);
+          ctx.lineTo(x+barWidth/2, ciHigh);
+          ctx.stroke();
+          // Variant label
+          ctx.fillStyle = '#000';
+          ctx.textAlign = 'center';
+          ctx.fillText(v.variant_id, x+barWidth/2, 280);
+        });
+        // Y axis labels
+        ctx.textAlign = 'right';
+        for(let i=0;i<=5;i++) {
+          const y = 260 - i*40;
+          ctx.fillText(((maxRate*i/5)*100).toFixed(1)+'%', 45, y+5);
+        }
+      }
+
+      // Add click handler to show A/B results for experiment
+      document.querySelector('#experiments tbody').onclick = function(e) {
+        const tr = e.target.closest('tr');
+        if (!tr) return;
+        const expId = tr.firstChild.textContent;
+        fetchABResults(expId);
+      };
+
+      // Initial load
       fetchExperiments();
-    };
-
-    // Feature Flags
-    async function fetchFeatureFlags() {
-      const res = await fetch('/api/config/feature-flags');
-      const flags = await res.json();
-      const tbody = document.querySelector('#feature-flags-table tbody');
-      tbody.innerHTML = '';
-      flags.forEach(flag => {
-        const tr = document.createElement('tr');
-        tr.innerHTML = `<td>${flag.id}</td><td>${flag.name||''}</td><td>${flag.enabled?'✅':'❌'}</td><td><span class="delete-btn" data-key="${flag.id}">Delete</span></td>`;
-        tbody.appendChild(tr);
-      });
-      tbody.querySelectorAll('.delete-btn').forEach(btn => {
-        btn.onclick = async () => {
-          await fetch(`/api/config/feature-flags/${btn.dataset.key}`, { method: 'DELETE' });
-          fetchFeatureFlags();
-        };
-      });
-    }
-    document.getElementById('flagForm').onsubmit = async e => {
-      e.preventDefault();
-      const form = e.target;
-      let rules = undefined, rollout = undefined, metadata = undefined;
-      try { rules = form.rules.value ? JSON.parse(form.rules.value) : undefined; } catch { alert('Invalid JSON in rules'); return; }
-      try { rollout = form.rollout.value ? JSON.parse(form.rollout.value) : undefined; } catch { alert('Invalid JSON in rollout'); return; }
-      try { metadata = form.metadata.value ? JSON.parse(form.metadata.value) : undefined; } catch { alert('Invalid JSON in metadata'); return; }
-      const body = JSON.stringify({
-        id: form.id.value,
-        name: form.name.value,
-        description: form.description.value,
-        enabled: form.enabled.checked,
-        rules,
-        rollout,
-        metadata
-      });
-      await fetch('/api/config/feature-flags', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
-      form.reset();
+      fetchMetrics();
       fetchFeatureFlags();
-    };
-
-    // Experiment Configs
-    async function fetchExperimentConfigs() {
-      const res = await fetch('/api/config/experiments');
-      const configs = await res.json();
-      const tbody = document.querySelector('#experiment-configs-table tbody');
-      tbody.innerHTML = '';
-      configs.forEach(cfg => {
-        const tr = document.createElement('tr');
-        tr.innerHTML = `<td>${cfg.experiment_id||cfg.experimentId||cfg.id}</td><td>${JSON.stringify(cfg.traffic_split||cfg.trafficSplit||{})}</td><td><span class="delete-btn" data-key="${cfg.experiment_id||cfg.experimentId||cfg.id}">Delete</span></td>`;
-        tbody.appendChild(tr);
-      });
-      tbody.querySelectorAll('.delete-btn').forEach(btn => {
-        btn.onclick = async () => {
-          await fetch(`/api/config/experiments/${btn.dataset.key}`, { method: 'DELETE' });
-          fetchExperimentConfigs();
-        };
-      });
-    }
-    document.getElementById('configForm').onsubmit = async e => {
-      e.preventDefault();
-      const form = e.target;
-      let traffic_split, targeting_rules, sample_size, stopping_rules, metric_config, quality_control;
-      try { traffic_split = form.traffic_split.value ? JSON.parse(form.traffic_split.value) : undefined; } catch { alert('Invalid JSON in traffic_split'); return; }
-      try { targeting_rules = form.targeting_rules.value ? JSON.parse(form.targeting_rules.value) : undefined; } catch { alert('Invalid JSON in targeting_rules'); return; }
-      try { sample_size = form.sample_size.value ? JSON.parse(form.sample_size.value) : undefined; } catch { alert('Invalid JSON in sample_size'); return; }
-      try { stopping_rules = form.stopping_rules.value ? JSON.parse(form.stopping_rules.value) : undefined; } catch { alert('Invalid JSON in stopping_rules'); return; }
-      try { metric_config = form.metric_config.value ? JSON.parse(form.metric_config.value) : undefined; } catch { alert('Invalid JSON in metric_config'); return; }
-      try { quality_control = form.quality_control.value ? JSON.parse(form.quality_control.value) : undefined; } catch { alert('Invalid JSON in quality_control'); return; }
-      const body = JSON.stringify({
-        experiment_id: form.experiment_id.value,
-        traffic_split,
-        targeting_rules,
-        sample_size,
-        stopping_rules,
-        metric_config,
-        quality_control
-      });
-      await fetch('/api/config/experiments', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
-      form.reset();
       fetchExperimentConfigs();
-    };
-
-    // Analytics
-    async function fetchAnalytics() {
-      const res = await fetch('/api/analytics');
-      const analytics = await res.json();
-      document.getElementById('analytics').textContent = JSON.stringify(analytics, null, 2);
-    }
-
-    // Initial load
-    fetchExperiments();
-    fetchMetrics();
-    fetchFeatureFlags();
-    fetchExperimentConfigs();
-    fetchAnalytics();
-    setInterval(fetchExperiments, 5000);
-    setInterval(fetchMetrics, 5000);
-    setInterval(fetchFeatureFlags, 5000);
-    setInterval(fetchExperimentConfigs, 5000);
-    setInterval(fetchAnalytics, 5000);
+      fetchAnalytics();
+      setInterval(fetchExperiments, 5000);
+      setInterval(fetchMetrics, 5000);
+      setInterval(fetchFeatureFlags, 5000);
+      setInterval(fetchExperimentConfigs, 5000);
+      setInterval(fetchAnalytics, 5000);
+    });
   </script>
 </body>
 </html>

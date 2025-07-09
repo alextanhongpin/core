@@ -53,6 +53,10 @@ func main() {
 	http.HandleFunc("/api/experiments/", s.handleExperiment)
 	http.HandleFunc("/api/metrics", s.handleMetrics)
 	http.HandleFunc("/api/config/feature-flags", handleFeatureFlags)
+	http.HandleFunc("/api/config/feature-flags/", handleFeatureFlags)
+	// Add endpoint to enable a feature flag
+	http.HandleFunc("/api/config/feature-flags/enable/", handleEnableFeatureFlag)
+	http.HandleFunc("/api/config/feature-flags/disable/", handleDisableFeatureFlag)
 	http.HandleFunc("/api/config/experiments", handleExperimentConfigs)
 	http.HandleFunc("/api/analytics", s.handleAnalytics)
 	subFS, err := fs.Sub(static, "static")
@@ -226,6 +230,78 @@ func handleFeatureFlags(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// Handler to enable a feature flag by key
+func handleEnableFeatureFlag(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost && r.Method != http.MethodPatch {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	key := r.URL.Path[len("/api/config/feature-flags/enable/"):]
+	if key == "" {
+		http.Error(w, "missing feature flag key", 400)
+		return
+	}
+	flags, _ := configMgr.ListFeatureFlags(r.Context())
+	var flag *ab.FeatureFlag
+	for _, f := range flags {
+		if f.ID == key {
+			flag = f
+			break
+		}
+	}
+	if flag == nil {
+		http.Error(w, "feature flag not found", 404)
+		return
+	}
+	flag.Enabled = true
+	flag.UpdatedAt = time.Now()
+	if err := configMgr.DeleteFeatureFlag(r.Context(), flag.ID); err != nil {
+		http.Error(w, err.Error(), 400)
+		return
+	}
+	if err := configMgr.CreateFeatureFlag(r.Context(), flag); err != nil {
+		http.Error(w, err.Error(), 400)
+		return
+	}
+	json.NewEncoder(w).Encode(flag)
+}
+
+// Handler to disable a feature flag by key
+func handleDisableFeatureFlag(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost && r.Method != http.MethodPatch {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	key := r.URL.Path[len("/api/config/feature-flags/disable/"):]
+	if key == "" {
+		http.Error(w, "missing feature flag key", 400)
+		return
+	}
+	flags, _ := configMgr.ListFeatureFlags(r.Context())
+	var flag *ab.FeatureFlag
+	for _, f := range flags {
+		if f.ID == key {
+			flag = f
+			break
+		}
+	}
+	if flag == nil {
+		http.Error(w, "feature flag not found", 404)
+		return
+	}
+	flag.Enabled = false
+	flag.UpdatedAt = time.Now()
+	if err := configMgr.DeleteFeatureFlag(r.Context(), flag.ID); err != nil {
+		http.Error(w, err.Error(), 400)
+		return
+	}
+	if err := configMgr.CreateFeatureFlag(r.Context(), flag); err != nil {
+		http.Error(w, err.Error(), 400)
+		return
+	}
+	json.NewEncoder(w).Encode(flag)
+}
+
 func handleExperimentConfigs(w http.ResponseWriter, r *http.Request) {
 	key := ""
 	if r.URL.Path != "/api/config/experiments" {
@@ -277,7 +353,7 @@ func handleExperimentConfigs(w http.ResponseWriter, r *http.Request) {
 		if req.UpdatedAt != nil {
 			cfg.UpdatedAt = *req.UpdatedAt
 		}
-		if cfg.TrafficSplit == nil || len(cfg.TrafficSplit) == 0 {
+		if len(cfg.TrafficSplit) == 0 {
 			cfg.TrafficSplit = map[string]float64{"A": 50, "B": 50}
 		}
 		if cfg.MetricConfig == nil {
