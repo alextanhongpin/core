@@ -12,6 +12,7 @@ var (
 	ErrInvalidSlidingWindowPeriod = errors.New("sliding window period must be positive")
 )
 
+// SlidingWindow implements a sliding window rate limiter.
 type SlidingWindow struct {
 	// State.
 	mu     sync.RWMutex
@@ -24,6 +25,8 @@ type SlidingWindow struct {
 	period int64
 
 	Now func() time.Time
+
+	metricsCollector MetricsCollector
 }
 
 func NewSlidingWindow(limit int, period time.Duration) (*SlidingWindow, error) {
@@ -35,9 +38,10 @@ func NewSlidingWindow(limit int, period time.Duration) (*SlidingWindow, error) {
 	}
 
 	return &SlidingWindow{
-		limit:  limit,
-		period: period.Nanoseconds(),
-		Now:    time.Now,
+		limit:            limit,
+		period:           period.Nanoseconds(),
+		Now:              time.Now,
+		metricsCollector: &AtomicMetricsCollector{},
 	}, nil
 }
 
@@ -51,12 +55,28 @@ func MustNewSlidingWindow(limit int, period time.Duration) *SlidingWindow {
 	return sw
 }
 
+func (r *SlidingWindow) WithMetricsCollector(collector MetricsCollector) *SlidingWindow {
+	if collector != nil {
+		r.metricsCollector = collector
+	}
+	return r
+}
+
 func (r *SlidingWindow) Allow() bool {
-	return r.AllowN(1)
+	r.metricsCollector.IncTotalRequests()
+	allowed := r.AllowN(1)
+	if allowed {
+		r.metricsCollector.IncAllowed()
+	} else {
+		r.metricsCollector.IncDenied()
+	}
+	return allowed
 }
 
 func (r *SlidingWindow) AllowN(n int) bool {
+	r.metricsCollector.IncTotalRequests()
 	if n <= 0 {
+		r.metricsCollector.IncDenied()
 		return false
 	}
 
@@ -65,7 +85,6 @@ func (r *SlidingWindow) AllowN(n int) bool {
 
 	if r.remaining() >= n {
 		r.add(n)
-
 		return true
 	}
 

@@ -22,6 +22,8 @@ type GCRA struct {
 	offset   int64
 	interval int64
 	Now      func() time.Time
+
+	metricsCollector MetricsCollector
 }
 
 func NewGCRA(limit int, period time.Duration, burst int) (*GCRA, error) {
@@ -53,9 +55,10 @@ func NewGCRA(limit int, period time.Duration, burst int) (*GCRA, error) {
 
 	return &GCRA{
 		// NOTE: The burst is only applied once.
-		offset:   offset,
-		interval: interval,
-		Now:      time.Now,
+		offset:           offset,
+		interval:         interval,
+		Now:              time.Now,
+		metricsCollector: &AtomicMetricsCollector{},
 	}, nil
 }
 
@@ -69,12 +72,28 @@ func MustNewGCRA(limit int, period time.Duration, burst int) *GCRA {
 	return gcra
 }
 
+func (g *GCRA) WithMetricsCollector(collector MetricsCollector) *GCRA {
+	if collector != nil {
+		g.metricsCollector = collector
+	}
+	return g
+}
+
 func (r *GCRA) Allow() bool {
-	return r.AllowN(1)
+	r.metricsCollector.IncTotalRequests()
+	allowed := r.AllowN(1)
+	if allowed {
+		r.metricsCollector.IncAllowed()
+	} else {
+		r.metricsCollector.IncDenied()
+	}
+	return allowed
 }
 
 func (r *GCRA) AllowN(n int) bool {
+	r.metricsCollector.IncTotalRequests()
 	if n <= 0 {
+		r.metricsCollector.IncDenied()
 		return false
 	}
 

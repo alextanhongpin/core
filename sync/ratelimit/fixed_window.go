@@ -49,10 +49,9 @@ func MustNewFixedWindow(limit int, period time.Duration) *FixedWindow {
 	return fw
 }
 
-// Allow checks if a request is allowed. Special case of AllowN that consumes
-// only 1 token.
 func (r *FixedWindow) Allow() bool {
-	return r.AllowN(1)
+	allowed := r.AllowN(1)
+	return allowed
 }
 
 // AllowN checks if a request is allowed. Consumes n token
