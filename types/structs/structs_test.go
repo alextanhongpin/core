@@ -144,3 +144,35 @@ func TestIsNil(t *testing.T) {
 	is.False(structs.IsNil(""))
 	is.False(structs.IsNil(false))
 }
+
+type testStruct struct{}
+
+func (testStruct) Foo()  {}
+func (testStruct) Bar()  {}
+func (*testStruct) Baz() {}
+func (*testStruct) qux() {}
+
+func TestGetMethodNames(t *testing.T) {
+	ts := &testStruct{}
+	methods, err := structs.GetMethodNames(ts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := map[string]bool{"Foo": true, "Bar": true, "Baz": true}
+	for _, m := range methods {
+		if !want[m] {
+			t.Errorf("unexpected method: %s", m)
+		}
+		delete(want, m)
+	}
+	for m := range want {
+		t.Errorf("missing method: %s", m)
+	}
+}
+
+func TestGetMethodNames_Nil(t *testing.T) {
+	_, err := structs.GetMethodNames(nil)
+	if err == nil {
+		t.Error("expected error for nil value")
+	}
+}
