@@ -147,6 +147,33 @@ color := "#" + random.Hex(6)
 - API keys
 - Test data
 
+### Deterministic (Seeded) Collection Operations
+
+You can use a custom RNG for deterministic or reproducible results:
+
+```go
+seed := uint64(42)
+rng := random.New().WithSeed(seed)
+items := []string{"a", "b", "c", "d", "e"}
+
+// Deterministic choice
+winner := random.ChoiceWithRNG(rng, items)
+
+// Deterministic multiple selections
+participants := random.ChoicesWithRNG(rng, items, 3)
+
+// Deterministic sampling
+finalists := random.SampleWithRNG(rng, items, 2)
+
+// Deterministic shuffle
+random.ShuffleWithRNG(rng, items)
+```
+
+**Use Cases:**
+- Reproducible tests
+- Simulations with fixed seeds
+- Debugging random-dependent logic
+
 ## Real-World Examples
 
 ### Load Testing with Jitter
@@ -289,16 +316,16 @@ func chaosMiddleware(next http.Handler) http.Handler {
 The random package is optimized for high-frequency use:
 
 ```
-BenchmarkDuration-8      	50000000	    25.3 ns/op
-BenchmarkIntBetween-8    	100000000	    12.1 ns/op
-BenchmarkChoice-8        	30000000	    38.7 ns/op
-BenchmarkAlphaNumeric-8  	5000000	       321 ns/op
-BenchmarkShuffle-8       	200000	      7543 ns/op
+BenchmarkDuration-8       50000000     25.3 ns/op
+BenchmarkIntBetween-8     100000000    12.1 ns/op
+BenchmarkChoice-8         30000000     38.7 ns/op
+BenchmarkAlphaNumeric-8   5000000      321 ns/op
+BenchmarkShuffle-8        200000       7543 ns/op
 ```
 
 ## Thread Safety
 
-All functions in this package are thread-safe and can be called concurrently from multiple goroutines without additional synchronization.
+All functions in this package are safe for concurrent use except for seeding. If you need deterministic output, create your own RNG instance using `random.New()` and do not call `SetSeed` globally.
 
 ## Security
 

@@ -9,14 +9,27 @@ type RNG struct {
 	rand *rand.Rand
 }
 
+// New creates a new RNG instance seeded with two random values.
 func New() *RNG {
 	return new(RNG).WithSeeds(rand.Uint64(), rand.Uint64())
 }
 
+// SeedFromTime seeds the RNG using the current time in nanoseconds.
+func SeedFromTime() *RNG {
+	seed := uint64(time.Now().UnixNano())
+	return New().WithSeed(seed)
+}
+
+// WithSeed seeds the RNG with a single value, returning a new RNG instance.
+// The returned RNG will produce the same sequence of values as the original
+// RNG if seeded with the same value.
 func (r *RNG) WithSeed(seed uint64) *RNG {
 	return r.WithSeeds(seed, seed)
 }
 
+// WithSeeds seeds the RNG with two values, returning a new RNG instance.
+// The returned RNG will produce the same sequence of values as the original
+// RNG if seeded with the same values.
 func (r *RNG) WithSeeds(seed1, seed2 uint64) *RNG {
 	return &RNG{
 		rand: rand.New(rand.NewPCG(seed1, seed2)),

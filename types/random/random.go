@@ -11,10 +11,6 @@ import (
 
 var rng = New()
 
-func SetSeed(seed uint64) {
-	rng = rng.WithSeed(seed)
-}
-
 // Duration generates a random duration between 0 and the given maximum duration.
 // The result is always less than the input duration.
 //
@@ -99,11 +95,7 @@ func BoolWithProbability(probability float64) bool {
 //	colors := []string{"red", "green", "blue"}
 //	color := random.Choice(colors)
 func Choice[T any](items []T) T {
-	var zero T
-	if len(items) == 0 {
-		return zero
-	}
-	return items[rng.Int(len(items))]
+	return ChoiceWithRNG(rng, items)
 }
 
 // Choices returns n random elements from the given slice with replacement.
@@ -114,15 +106,7 @@ func Choice[T any](items []T) T {
 //	names := []string{"Alice", "Bob", "Charlie"}
 //	selected := random.Choices(names, 5) // May contain duplicates
 func Choices[T any](items []T, n int) []T {
-	if len(items) == 0 || n <= 0 {
-		return []T{}
-	}
-
-	result := make([]T, n)
-	for i := range n {
-		result[i] = items[rng.Int(len(items))]
-	}
-	return result
+	return ChoicesWithRNG(rng, items, n)
 }
 
 // Sample returns n random elements from the given slice without replacement.
@@ -133,23 +117,7 @@ func Choices[T any](items []T, n int) []T {
 //	deck := []string{"A", "K", "Q", "J", "10"}
 //	hand := random.Sample(deck, 3) // 3 unique cards
 func Sample[T any](items []T, n int) []T {
-	if len(items) == 0 || n <= 0 {
-		return []T{}
-	}
-
-	if n >= len(items) {
-		// Return all items in random order
-		result := make([]T, len(items))
-		copy(result, items)
-		Shuffle(result)
-		return result
-	}
-
-	// Create a copy and shuffle, then take first n elements
-	shuffled := make([]T, len(items))
-	copy(shuffled, items)
-	Shuffle(shuffled)
-	return shuffled[:n]
+	return SampleWithRNG(rng, items, n)
 }
 
 // Shuffle randomly shuffles the elements in the given slice in place.
@@ -159,9 +127,7 @@ func Sample[T any](items []T, n int) []T {
 //	playlist := []string{"song1", "song2", "song3"}
 //	random.Shuffle(playlist) // playlist is now shuffled
 func Shuffle[T any](items []T) {
-	rng.rand.Shuffle(len(items), func(i, j int) {
-		items[i], items[j] = items[j], items[i]
-	})
+	ShuffleWithRNG(rng, items)
 }
 
 // String generates a random string of the given length using the provided character set.
@@ -191,4 +157,51 @@ func AlphaNumeric(length int) string {
 //	color := "#" + random.Hex(6) // "#a1b2c3"
 func Hex(length int) string {
 	return rng.Hex(length)
+}
+
+// Only keep WithRNG for generic (slice-based) methods
+
+// ChoiceWithRNG returns a random element from the given slice using the provided RNG.
+func ChoiceWithRNG[T any](r *RNG, items []T) T {
+	var zero T
+	if len(items) == 0 {
+		return zero
+	}
+	return items[r.Int(len(items))]
+}
+
+// ChoicesWithRNG returns n random elements from the given slice with replacement using the provided RNG.
+func ChoicesWithRNG[T any](r *RNG, items []T, n int) []T {
+	if len(items) == 0 || n <= 0 {
+		return []T{}
+	}
+	result := make([]T, n)
+	for i := range result {
+		result[i] = items[r.Int(len(items))]
+	}
+	return result
+}
+
+// SampleWithRNG returns n random elements from the given slice without replacement using the provided RNG.
+func SampleWithRNG[T any](r *RNG, items []T, n int) []T {
+	if len(items) == 0 || n <= 0 {
+		return []T{}
+	}
+	if n >= len(items) {
+		result := make([]T, len(items))
+		copy(result, items)
+		ShuffleWithRNG(r, result)
+		return result
+	}
+	shuffled := make([]T, len(items))
+	copy(shuffled, items)
+	ShuffleWithRNG(r, shuffled)
+	return shuffled[:n]
+}
+
+// ShuffleWithRNG shuffles the elements in the given slice in place using the provided RNG.
+func ShuffleWithRNG[T any](r *RNG, items []T) {
+	r.rand.Shuffle(len(items), func(i, j int) {
+		items[i], items[j] = items[j], items[i]
+	})
 }
