@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"sync/atomic"
 	"time"
+
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 var ErrKeyNotExist = errors.New("batch: key does not exist")
@@ -54,30 +56,84 @@ func (o *LoaderOptions[K, V]) Valid() error {
 	return nil
 }
 
-type Loader[K comparable, V any] struct {
-	opts    *LoaderOptions[K, V]
-	metrics Metrics
+// LoaderMetricsCollector defines the interface for collecting loader metrics.
+type LoaderMetricsCollector interface {
+	IncCacheHits(n int64)
+	IncCacheMisses(n int64)
+	IncBatchCalls(n int64)
+	IncTotalKeys(n int64)
+	IncErrorCount(n int64)
+	GetMetrics() Metrics
 }
 
-func NewLoader[K comparable, V any](opts *LoaderOptions[K, V]) *Loader[K, V] {
+// AtomicLoaderMetricsCollector is the default atomic-based metrics implementation.
+type AtomicLoaderMetricsCollector struct {
+	cacheHits   int64
+	cacheMisses int64
+	batchCalls  int64
+	totalKeys   int64
+	errorCount  int64
+}
+
+func (m *AtomicLoaderMetricsCollector) IncCacheHits(n int64)   { atomic.AddInt64(&m.cacheHits, n) }
+func (m *AtomicLoaderMetricsCollector) IncCacheMisses(n int64) { atomic.AddInt64(&m.cacheMisses, n) }
+func (m *AtomicLoaderMetricsCollector) IncBatchCalls(n int64)  { atomic.AddInt64(&m.batchCalls, n) }
+func (m *AtomicLoaderMetricsCollector) IncTotalKeys(n int64)   { atomic.AddInt64(&m.totalKeys, n) }
+func (m *AtomicLoaderMetricsCollector) IncErrorCount(n int64)  { atomic.AddInt64(&m.errorCount, n) }
+func (m *AtomicLoaderMetricsCollector) GetMetrics() Metrics {
+	return Metrics{
+		CacheHits:   atomic.LoadInt64(&m.cacheHits),
+		CacheMisses: atomic.LoadInt64(&m.cacheMisses),
+		BatchCalls:  atomic.LoadInt64(&m.batchCalls),
+		TotalKeys:   atomic.LoadInt64(&m.totalKeys),
+		ErrorCount:  atomic.LoadInt64(&m.errorCount),
+	}
+}
+
+// PrometheusLoaderMetricsCollector implements LoaderMetricsCollector using prometheus metrics.
+// (Requires github.com/prometheus/client_golang/prometheus)
+type PrometheusLoaderMetricsCollector struct {
+	CacheHits   prometheus.Counter
+	CacheMisses prometheus.Counter
+	BatchCalls  prometheus.Counter
+	TotalKeys   prometheus.Counter
+	ErrorCount  prometheus.Counter
+}
+
+func (m *PrometheusLoaderMetricsCollector) IncCacheHits(n int64)   { m.CacheHits.Add(float64(n)) }
+func (m *PrometheusLoaderMetricsCollector) IncCacheMisses(n int64) { m.CacheMisses.Add(float64(n)) }
+func (m *PrometheusLoaderMetricsCollector) IncBatchCalls(n int64)  { m.BatchCalls.Add(float64(n)) }
+func (m *PrometheusLoaderMetricsCollector) IncTotalKeys(n int64)   { m.TotalKeys.Add(float64(n)) }
+func (m *PrometheusLoaderMetricsCollector) IncErrorCount(n int64)  { m.ErrorCount.Add(float64(n)) }
+func (m *PrometheusLoaderMetricsCollector) GetMetrics() Metrics {
+	// Prometheus metrics are scraped via /metrics endpoint. This method returns zeros.
+	return Metrics{}
+}
+
+type Loader[K comparable, V any] struct {
+	opts    *LoaderOptions[K, V]
+	metrics LoaderMetricsCollector
+}
+
+func NewLoader[K comparable, V any](opts *LoaderOptions[K, V], metrics ...LoaderMetricsCollector) *Loader[K, V] {
 	if err := opts.Valid(); err != nil {
 		panic(err)
 	}
-
+	var m LoaderMetricsCollector
+	if len(metrics) > 0 && metrics[0] != nil {
+		m = metrics[0]
+	} else {
+		m = &AtomicLoaderMetricsCollector{}
+	}
 	return &Loader[K, V]{
-		opts: opts,
+		opts:    opts,
+		metrics: m,
 	}
 }
 
 // Metrics returns a copy of the current metrics.
 func (l *Loader[K, V]) Metrics() Metrics {
-	return Metrics{
-		CacheHits:   atomic.LoadInt64(&l.metrics.CacheHits),
-		CacheMisses: atomic.LoadInt64(&l.metrics.CacheMisses),
-		BatchCalls:  atomic.LoadInt64(&l.metrics.BatchCalls),
-		TotalKeys:   atomic.LoadInt64(&l.metrics.TotalKeys),
-		ErrorCount:  atomic.LoadInt64(&l.metrics.ErrorCount),
-	}
+	return l.metrics.GetMetrics()
 }
 
 func (l *Loader[K, V]) Load(ctx context.Context, k K) (v V, err error) {
@@ -111,11 +167,11 @@ func (l *Loader[K, V]) LoadMany(ctx context.Context, ks []K) ([]V, error) {
 }
 
 func (l *Loader[K, V]) LoadManyResult(ctx context.Context, ks []K) (map[K]*Result[V], error) {
-	atomic.AddInt64(&l.metrics.TotalKeys, int64(len(ks)))
+	l.metrics.IncTotalKeys(int64(len(ks)))
 
 	m, err := l.opts.Cache.LoadMany(ctx, ks...)
 	if err != nil {
-		atomic.AddInt64(&l.metrics.ErrorCount, 1)
+		l.metrics.IncErrorCount(1)
 		return nil, err
 	}
 
@@ -134,8 +190,8 @@ func (l *Loader[K, V]) LoadManyResult(ctx context.Context, ks []K) (map[K]*Resul
 	}
 
 	// Update metrics and call callbacks
-	atomic.AddInt64(&l.metrics.CacheHits, int64(len(cacheHitKeys)))
-	atomic.AddInt64(&l.metrics.CacheMisses, int64(len(pks)))
+	l.metrics.IncCacheHits(int64(len(cacheHitKeys)))
+	l.metrics.IncCacheMisses(int64(len(pks)))
 
 	if len(cacheHitKeys) > 0 && l.opts.OnCacheHit != nil {
 		l.opts.OnCacheHit(cacheHitKeys)
@@ -177,7 +233,7 @@ func (l *Loader[K, V]) processBatch(ctx context.Context, batch []K, res map[K]*R
 	b, err := l.opts.BatchFn(batch)
 	duration := time.Since(start)
 
-	atomic.AddInt64(&l.metrics.BatchCalls, 1)
+	l.metrics.IncBatchCalls(1)
 
 	// Call batch callback
 	if l.opts.OnBatchCall != nil {
@@ -185,7 +241,7 @@ func (l *Loader[K, V]) processBatch(ctx context.Context, batch []K, res map[K]*R
 	}
 
 	if err != nil {
-		atomic.AddInt64(&l.metrics.ErrorCount, 1)
+		l.metrics.IncErrorCount(1)
 		return err
 	}
 
@@ -210,7 +266,7 @@ func (l *Loader[K, V]) processBatch(ctx context.Context, batch []K, res map[K]*R
 	}
 
 	if err := l.opts.Cache.StoreMany(ctx, n, l.opts.TTL); err != nil {
-		atomic.AddInt64(&l.metrics.ErrorCount, 1)
+		l.metrics.IncErrorCount(1)
 		return err
 	}
 
