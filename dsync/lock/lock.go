@@ -34,10 +34,12 @@ import (
 	"log/slog"
 	"math"
 	"math/rand/v2"
+	"sync/atomic"
 	"time"
 
 	"github.com/alextanhongpin/core/dsync/cache"
 	"github.com/google/uuid"
+	"github.com/prometheus/client_golang/prometheus"
 	redis "github.com/redis/go-redis/v9"
 )
 
@@ -79,26 +81,72 @@ func NewLockOption() *LockOption {
 	}
 }
 
+// MetricsCollector defines the interface for collecting lock metrics.
+type MetricsCollector interface {
+	IncLockAttempts()
+	IncLockSuccess()
+	IncLockFailures()
+	IncUnlocks()
+	IncExtends()
+}
+
+type AtomicLockMetrics struct {
+	lockAttempts int64
+	lockSuccess  int64
+	lockFailures int64
+	unlocks      int64
+	extends      int64
+}
+
+func (m *AtomicLockMetrics) IncLockAttempts() { atomic.AddInt64(&m.lockAttempts, 1) }
+func (m *AtomicLockMetrics) IncLockSuccess()  { atomic.AddInt64(&m.lockSuccess, 1) }
+func (m *AtomicLockMetrics) IncLockFailures() { atomic.AddInt64(&m.lockFailures, 1) }
+func (m *AtomicLockMetrics) IncUnlocks()      { atomic.AddInt64(&m.unlocks, 1) }
+func (m *AtomicLockMetrics) IncExtends()      { atomic.AddInt64(&m.extends, 1) }
+
+// PrometheusLockMetrics implements MetricsCollector using prometheus metrics.
+type PrometheusLockMetrics struct {
+	LockAttempts prometheus.Counter
+	LockSuccess  prometheus.Counter
+	LockFailures prometheus.Counter
+	Unlocks      prometheus.Counter
+	Extends      prometheus.Counter
+}
+
+func (m *PrometheusLockMetrics) IncLockAttempts() { m.LockAttempts.Inc() }
+func (m *PrometheusLockMetrics) IncLockSuccess()  { m.LockSuccess.Inc() }
+func (m *PrometheusLockMetrics) IncLockFailures() { m.LockFailures.Inc() }
+func (m *PrometheusLockMetrics) IncUnlocks()      { m.Unlocks.Inc() }
+func (m *PrometheusLockMetrics) IncExtends()      { m.Extends.Inc() }
+
 // Locker represents a distributed lock implementation using Redis.
 // Works on with a single redis node.
 type Locker struct {
 	mu *KeyedMutex
 
-	BackOff backOffPolicy // Optional backoff policy for retrying lock acquisition.
-	Cache   cacheable
-	Logger  *slog.Logger // Optional logger for debugging purposes.
+	BackOff          backOffPolicy // Optional backoff policy for retrying lock acquisition.
+	Cache            cacheable
+	Logger           *slog.Logger // Optional logger for debugging purposes.
+	metricsCollector MetricsCollector
 }
 
 // New returns a pointer to Locker.
-func New(client *redis.Client) *Locker {
+func New(client *redis.Client, collectors ...MetricsCollector) *Locker {
+	var collector MetricsCollector
+	if len(collectors) > 0 && collectors[0] != nil {
+		collector = collectors[0]
+	} else {
+		collector = &AtomicLockMetrics{}
+	}
 	return &Locker{
 		mu: NewKeyedMutex(),
 		BackOff: &exponentialBackOff{
 			base:  time.Second, // Base backoff duration.
 			limit: time.Minute, // Maximum backoff duration.
 		},
-		Cache:  cache.New(client),
-		Logger: slog.Default(), // Default logger, can be overridden.
+		Cache:            cache.New(client),
+		Logger:           slog.Default(), // Default logger, can be overridden.
+		metricsCollector: collector,
 	}
 }
 
@@ -250,3 +298,34 @@ func mapError(err error) error {
 
 	return err
 }
+
+// Example Prometheus integration
+//
+// import (
+//   "github.com/prometheus/client_golang/prometheus"
+//   "github.com/prometheus/client_golang/prometheus/promhttp"
+//   "github.com/redis/go-redis/v9"
+//   "github.com/alextanhongpin/core/dsync/lock"
+//   "net/http"
+// )
+//
+// func main() {
+//   lockAttempts := prometheus.NewCounter(prometheus.CounterOpts{Name: "lock_attempts", Help: "Lock attempts."})
+//   lockSuccess := prometheus.NewCounter(prometheus.CounterOpts{Name: "lock_success", Help: "Lock successes."})
+//   lockFailures := prometheus.NewCounter(prometheus.CounterOpts{Name: "lock_failures", Help: "Lock failures."})
+//   unlocks := prometheus.NewCounter(prometheus.CounterOpts{Name: "lock_unlocks", Help: "Unlocks."})
+//   extends := prometheus.NewCounter(prometheus.CounterOpts{Name: "lock_extends", Help: "Extends."})
+//   prometheus.MustRegister(lockAttempts, lockSuccess, lockFailures, unlocks, extends)
+//
+//   metrics := &lock.PrometheusLockMetrics{
+//     LockAttempts: lockAttempts,
+//     LockSuccess: lockSuccess,
+//     LockFailures: lockFailures,
+//     Unlocks: unlocks,
+//     Extends: extends,
+//   }
+//   rdb := redis.NewClient(&redis.Options{Addr: "localhost:6379"})
+//   locker := lock.New(rdb, metrics)
+//   http.Handle("/metrics", promhttp.Handler())
+//   http.ListenAndServe(":8080", nil)
+// }
