@@ -8,10 +8,12 @@ import (
 	"encoding/json"
 	"errors"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/alextanhongpin/core/dsync/cache"
 	"github.com/google/uuid"
+	"github.com/prometheus/client_golang/prometheus"
 	redis "github.com/redis/go-redis/v9"
 )
 
@@ -43,19 +45,65 @@ type cacheable interface {
 	LoadOrStore(ctx context.Context, key string, value []byte, ttl time.Duration) (curr []byte, loaded bool, err error)
 }
 
+// MetricsCollector defines the interface for collecting idempotent store metrics.
+type MetricsCollector interface {
+	IncTotalRequests()
+	IncHits()
+	IncMisses()
+	IncLocks()
+	IncConflicts()
+}
+
+type AtomicIdemMetrics struct {
+	totalRequests int64
+	hits          int64
+	misses        int64
+	locks         int64
+	conflicts     int64
+}
+
+func (m *AtomicIdemMetrics) IncTotalRequests() { atomic.AddInt64(&m.totalRequests, 1) }
+func (m *AtomicIdemMetrics) IncHits()          { atomic.AddInt64(&m.hits, 1) }
+func (m *AtomicIdemMetrics) IncMisses()        { atomic.AddInt64(&m.misses, 1) }
+func (m *AtomicIdemMetrics) IncLocks()         { atomic.AddInt64(&m.locks, 1) }
+func (m *AtomicIdemMetrics) IncConflicts()     { atomic.AddInt64(&m.conflicts, 1) }
+
+// PrometheusIdemMetrics implements MetricsCollector using prometheus metrics.
+type PrometheusIdemMetrics struct {
+	TotalRequests prometheus.Counter
+	Hits          prometheus.Counter
+	Misses        prometheus.Counter
+	Locks         prometheus.Counter
+	Conflicts     prometheus.Counter
+}
+
+func (m *PrometheusIdemMetrics) IncTotalRequests() { m.TotalRequests.Inc() }
+func (m *PrometheusIdemMetrics) IncHits()          { m.Hits.Inc() }
+func (m *PrometheusIdemMetrics) IncMisses()        { m.Misses.Inc() }
+func (m *PrometheusIdemMetrics) IncLocks()         { m.Locks.Inc() }
+func (m *PrometheusIdemMetrics) IncConflicts()     { m.Conflicts.Inc() }
+
 type RedisStore struct {
-	cache  cacheable
-	client *redis.Client
-	mu     *muKey
+	cache            cacheable
+	client           *redis.Client
+	mu               *muKey
+	metricsCollector MetricsCollector
 }
 
 // NewRedisStore creates a new RedisStore instance with the specified Redis
 // client, lock TTL, and keep TTL.
-func NewRedisStore(client *redis.Client) *RedisStore {
+func NewRedisStore(client *redis.Client, collectors ...MetricsCollector) *RedisStore {
+	var collector MetricsCollector
+	if len(collectors) > 0 && collectors[0] != nil {
+		collector = collectors[0]
+	} else {
+		collector = &AtomicIdemMetrics{}
+	}
 	return &RedisStore{
-		cache:  cache.New(client),
-		client: client,
-		mu:     newMuKey(),
+		cache:            cache.New(client),
+		client:           client,
+		mu:               newMuKey(),
+		metricsCollector: collector,
 	}
 }
 
@@ -316,3 +364,34 @@ func (k *keyLock) Unlock() {
 	k.entry.refs--
 	k.mk.mu.Unlock()
 }
+
+// Example Prometheus integration
+//
+// import (
+//   "github.com/prometheus/client_golang/prometheus"
+//   "github.com/prometheus/client_golang/prometheus/promhttp"
+//   "github.com/redis/go-redis/v9"
+//   "github.com/alextanhongpin/core/dsync/idempotent"
+//   "net/http"
+// )
+//
+// func main() {
+//   totalRequests := prometheus.NewCounter(prometheus.CounterOpts{Name: "idempotent_total_requests", Help: "Total idempotent requests."})
+//   hits := prometheus.NewCounter(prometheus.CounterOpts{Name: "idempotent_hits", Help: "Idempotent hits."})
+//   misses := prometheus.NewCounter(prometheus.CounterOpts{Name: "idempotent_misses", Help: "Idempotent misses."})
+//   locks := prometheus.NewCounter(prometheus.CounterOpts{Name: "idempotent_locks", Help: "Idempotent locks."})
+//   conflicts := prometheus.NewCounter(prometheus.CounterOpts{Name: "idempotent_conflicts", Help: "Idempotent lock conflicts."})
+//   prometheus.MustRegister(totalRequests, hits, misses, locks, conflicts)
+//
+//   metrics := &idempotent.PrometheusIdemMetrics{
+//     TotalRequests: totalRequests,
+//     Hits: hits,
+//     Misses: misses,
+//     Locks: locks,
+//     Conflicts: conflicts,
+//   }
+//   rdb := redis.NewClient(&redis.Options{Addr: "localhost:6379"})
+//   store := idempotent.NewRedisStore(rdb, metrics)
+//   http.Handle("/metrics", promhttp.Handler())
+//   http.ListenAndServe(":8080", nil)
+// }
