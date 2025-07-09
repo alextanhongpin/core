@@ -4,8 +4,10 @@ package cache
 import (
 	"context"
 	"errors"
+	"sync/atomic"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	redis "github.com/redis/go-redis/v9"
 )
 
@@ -19,6 +21,44 @@ var (
 	ErrValueMismatch  = errors.New("compare operation failed: value mismatch")
 	ErrUnexpectedType = errors.New("unexpected value type from Redis")
 )
+
+// MetricsCollector defines the interface for collecting cache metrics.
+type MetricsCollector interface {
+	IncTotalRequests()
+	IncHits()
+	IncMisses()
+	IncSets()
+	IncDeletes()
+}
+
+type AtomicCacheMetrics struct {
+	totalRequests int64
+	hits          int64
+	misses        int64
+	sets          int64
+	deletes       int64
+}
+
+func (m *AtomicCacheMetrics) IncTotalRequests() { atomic.AddInt64(&m.totalRequests, 1) }
+func (m *AtomicCacheMetrics) IncHits()          { atomic.AddInt64(&m.hits, 1) }
+func (m *AtomicCacheMetrics) IncMisses()        { atomic.AddInt64(&m.misses, 1) }
+func (m *AtomicCacheMetrics) IncSets()          { atomic.AddInt64(&m.sets, 1) }
+func (m *AtomicCacheMetrics) IncDeletes()       { atomic.AddInt64(&m.deletes, 1) }
+
+// PrometheusCacheMetrics implements MetricsCollector using prometheus metrics.
+type PrometheusCacheMetrics struct {
+	TotalRequests prometheus.Counter
+	Hits          prometheus.Counter
+	Misses        prometheus.Counter
+	Sets          prometheus.Counter
+	Deletes       prometheus.Counter
+}
+
+func (m *PrometheusCacheMetrics) IncTotalRequests() { m.TotalRequests.Inc() }
+func (m *PrometheusCacheMetrics) IncHits()          { m.Hits.Inc() }
+func (m *PrometheusCacheMetrics) IncMisses()        { m.Misses.Inc() }
+func (m *PrometheusCacheMetrics) IncSets()          { m.Sets.Inc() }
+func (m *PrometheusCacheMetrics) IncDeletes()       { m.Deletes.Inc() }
 
 // Cacheable defines the interface for cache operations with atomic guarantees.
 // All operations are thread-safe and provide strong consistency through Redis.
@@ -63,15 +103,23 @@ type Cacheable interface {
 // Cache provides a Redis-based implementation of the Cacheable interface.
 // It wraps a Redis client and provides atomic cache operations.
 type Cache struct {
-	client *redis.Client
+	client           *redis.Client
+	metricsCollector MetricsCollector
 }
 
 var _ Cacheable = (*Cache)(nil)
 
 // New creates a new Cache instance with the provided Redis client.
-func New(client *redis.Client) *Cache {
+func New(client *redis.Client, collectors ...MetricsCollector) *Cache {
+	var collector MetricsCollector
+	if len(collectors) > 0 && collectors[0] != nil {
+		collector = collectors[0]
+	} else {
+		collector = &AtomicCacheMetrics{}
+	}
 	return &Cache{
-		client: client,
+		client:           client,
+		metricsCollector: collector,
 	}
 }
 
@@ -258,3 +306,34 @@ func (c *Cache) Expire(ctx context.Context, key string, ttl time.Duration) error
 func (c *Cache) Delete(ctx context.Context, keys ...string) (int64, error) {
 	return c.client.Del(ctx, keys...).Result()
 }
+
+// Example Prometheus integration
+//
+// import (
+//   "github.com/prometheus/client_golang/prometheus"
+//   "github.com/prometheus/client_golang/prometheus/promhttp"
+//   "github.com/redis/go-redis/v9"
+//   "github.com/alextanhongpin/core/dsync/cache"
+//   "net/http"
+// )
+//
+// func main() {
+//   totalRequests := prometheus.NewCounter(prometheus.CounterOpts{Name: "cache_total_requests", Help: "Total cache requests."})
+//   hits := prometheus.NewCounter(prometheus.CounterOpts{Name: "cache_hits", Help: "Cache hits."})
+//   misses := prometheus.NewCounter(prometheus.CounterOpts{Name: "cache_misses", Help: "Cache misses."})
+//   sets := prometheus.NewCounter(prometheus.CounterOpts{Name: "cache_sets", Help: "Cache sets."})
+//   deletes := prometheus.NewCounter(prometheus.CounterOpts{Name: "cache_deletes", Help: "Cache deletes."})
+//   prometheus.MustRegister(totalRequests, hits, misses, sets, deletes)
+//
+//   metrics := &cache.PrometheusCacheMetrics{
+//     TotalRequests: totalRequests,
+//     Hits: hits,
+//     Misses: misses,
+//     Sets: sets,
+//     Deletes: deletes,
+//   }
+//   rdb := redis.NewClient(&redis.Options{Addr: "localhost:6379"})
+//   c := cache.New(rdb, metrics)
+//   http.Handle("/metrics", promhttp.Handler())
+//   http.ListenAndServe(":8080", nil)
+// }
