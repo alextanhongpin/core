@@ -7,9 +7,11 @@ import (
 	"fmt"
 	"math"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/alextanhongpin/core/sync/rate"
+	"github.com/prometheus/client_golang/prometheus"
 	redis "github.com/redis/go-redis/v9"
 )
 
@@ -65,6 +67,44 @@ var (
 	ErrForcedOpen  = errors.New("circuit-breaker: forced open")
 )
 
+// MetricsCollector defines the interface for collecting circuit breaker metrics.
+type MetricsCollector interface {
+	IncRequests()
+	IncSuccesses()
+	IncFailures()
+	IncOpen()
+	IncClose()
+}
+
+type AtomicCBMetrics struct {
+	requests  int64
+	successes int64
+	failures  int64
+	open      int64
+	close     int64
+}
+
+func (m *AtomicCBMetrics) IncRequests()  { atomic.AddInt64(&m.requests, 1) }
+func (m *AtomicCBMetrics) IncSuccesses() { atomic.AddInt64(&m.successes, 1) }
+func (m *AtomicCBMetrics) IncFailures()  { atomic.AddInt64(&m.failures, 1) }
+func (m *AtomicCBMetrics) IncOpen()      { atomic.AddInt64(&m.open, 1) }
+func (m *AtomicCBMetrics) IncClose()     { atomic.AddInt64(&m.close, 1) }
+
+// PrometheusCBMetrics implements MetricsCollector using prometheus metrics.
+type PrometheusCBMetrics struct {
+	Requests  prometheus.Counter
+	Successes prometheus.Counter
+	Failures  prometheus.Counter
+	Open      prometheus.Counter
+	Close     prometheus.Counter
+}
+
+func (m *PrometheusCBMetrics) IncRequests()  { m.Requests.Inc() }
+func (m *PrometheusCBMetrics) IncSuccesses() { m.Successes.Inc() }
+func (m *PrometheusCBMetrics) IncFailures()  { m.Failures.Inc() }
+func (m *PrometheusCBMetrics) IncOpen()      { m.Open.Inc() }
+func (m *PrometheusCBMetrics) IncClose()     { m.Close.Inc() }
+
 type CircuitBreaker struct {
 	mu sync.RWMutex
 
@@ -87,6 +127,9 @@ type CircuitBreaker struct {
 	Counter *rate.Errors
 	channel string
 	client  *redis.Client
+
+	// Metrics.
+	metricsCollector MetricsCollector
 }
 
 // Config represents the circuit breaker configuration
@@ -103,12 +146,19 @@ type Config struct {
 }
 
 // New creates a new circuit breaker with default configuration.
-func New(client *redis.Client, channel string) (*CircuitBreaker, func()) {
+func New(client *redis.Client, channel string, collectors ...MetricsCollector) (*CircuitBreaker, func()) {
 	if client == nil {
 		panic("circuitbreaker: client cannot be nil")
 	}
 	if channel == "" {
 		panic("circuitbreaker: channel cannot be empty")
+	}
+
+	var collector MetricsCollector
+	if len(collectors) > 0 && collectors[0] != nil {
+		collector = collectors[0]
+	} else {
+		collector = &AtomicCBMetrics{}
 	}
 
 	b := &CircuitBreaker{
@@ -135,9 +185,10 @@ func New(client *redis.Client, channel string) (*CircuitBreaker, func()) {
 			// Every 5th second, penalize the slow call.
 			return int(duration / (5 * time.Second))
 		},
-		channel: channel,
-		client:  client,
-		Counter: rate.NewErrors(samplingDuration),
+		channel:          channel,
+		client:           client,
+		Counter:          rate.NewErrors(samplingDuration),
+		metricsCollector: collector,
 	}
 
 	// Validate configuration
@@ -494,3 +545,34 @@ func failureRate(successes, failures float64) float64 {
 
 	return num / den
 }
+
+// Example Prometheus integration
+//
+// import (
+//   "github.com/prometheus/client_golang/prometheus"
+//   "github.com/prometheus/client_golang/prometheus/promhttp"
+//   "github.com/redis/go-redis/v9"
+//   "github.com/alextanhongpin/core/dsync/circuitbreaker"
+//   "net/http"
+// )
+//
+// func main() {
+//   requests := prometheus.NewCounter(prometheus.CounterOpts{Name: "cb_requests", Help: "Total circuit breaker requests."})
+//   successes := prometheus.NewCounter(prometheus.CounterOpts{Name: "cb_successes", Help: "Circuit breaker successes."})
+//   failures := prometheus.NewCounter(prometheus.CounterOpts{Name: "cb_failures", Help: "Circuit breaker failures."})
+//   open := prometheus.NewCounter(prometheus.CounterOpts{Name: "cb_open", Help: "Circuit breaker opened."})
+//   close := prometheus.NewCounter(prometheus.CounterOpts{Name: "cb_close", Help: "Circuit breaker closed."})
+//   prometheus.MustRegister(requests, successes, failures, open, close)
+//
+//   metrics := &circuitbreaker.PrometheusCBMetrics{
+//     Requests: requests,
+//     Successes: successes,
+//     Failures: failures,
+//     Open: open,
+//     Close: close,
+//   }
+//   rdb := redis.NewClient(&redis.Options{Addr: "localhost:6379"})
+//   cb, _ := circuitbreaker.New(rdb, "cb:myservice", metrics)
+//   http.Handle("/metrics", promhttp.Handler())
+//   http.ListenAndServe(":8080", nil)
+// }
