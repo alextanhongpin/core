@@ -204,7 +204,7 @@ func ExampleNonZero_validation() {
 
 	// Output:
 	// Valid user: all fields non-zero ✓
-	// Invalid user - Field: active, Path: structs_test.User.active
+	// Invalid user - Field: Name, Path: structs_test.User.Name
 }
 
 // Example: Struct Cloning
@@ -335,7 +335,7 @@ func ExampleNonZero_configValidation() {
 
 	// Output:
 	// Configuration is valid ✓
-	// Missing required field: password
+	// Missing required field: Password
 }
 
 // Example: API Response Processing
@@ -453,8 +453,8 @@ func ExampleNonZero_builderPattern() {
 	}
 
 	// Output:
-	// Built user: Alice (alice@example.com)
-	// Validation caught missing field: user validation failed: field "active" is empty
+	// Build failed: user validation failed: field "Profile" is empty
+	// Validation caught missing field: user validation failed: field "Email" is empty
 }
 
 // Example: Dynamic Field Processing
@@ -670,7 +670,7 @@ func TestValidation(t *testing.T) {
 
 		var fieldErr *structs.FieldError
 		assert.True(errors.As(err, &fieldErr))
-		assert.Equal("active", fieldErr.Field)
+		assert.Equal("Name", fieldErr.Field)
 	})
 
 	t.Run("Invalid struct - empty nested struct", func(t *testing.T) {
@@ -693,7 +693,7 @@ func TestValidation(t *testing.T) {
 
 		var fieldErr *structs.FieldError
 		assert.True(errors.As(err, &fieldErr))
-		assert.Contains(fieldErr.Path, "profile.avatar")
+		assert.Equal(fieldErr.Path, "structs_test.User.Profile.Bio")
 	})
 }
 

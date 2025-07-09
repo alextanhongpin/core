@@ -5,9 +5,7 @@ package structs
 import (
 	"encoding/json"
 	"fmt"
-	"maps"
 	"reflect"
-	"slices"
 	"strings"
 )
 
@@ -96,19 +94,60 @@ func IsNil(v any) bool {
 }
 
 // NonZero validates that all fields in a struct are non-zero values.
-// It recursively checks nested structs, slices, and maps.
+// It recursively checks nested structs, slices, arrays, and maps using reflection.
 // Returns a FieldError indicating the first empty field found.
 func NonZero(v any) error {
-	if v == nil {
-		return newFieldError("nil")
+	return nonZeroReflect(PkgName(v), reflect.ValueOf(v))
+}
+
+// nonZeroReflect recursively checks if a value is non-zero using reflection.
+func nonZeroReflect(path string, val reflect.Value) error {
+	if !val.IsValid() {
+		return newFieldError(path)
 	}
 
-	data, err := toMap(v)
-	if err != nil {
-		return fmt.Errorf("failed to convert to map: %w", err)
+	switch val.Kind() {
+	case reflect.Ptr, reflect.Interface:
+		if val.IsNil() {
+			return newFieldError(path)
+		}
+		return nonZeroReflect(path, val.Elem())
+	case reflect.Struct:
+		for i := 0; i < val.NumField(); i++ {
+			field := val.Type().Field(i)
+			if !field.IsExported() {
+				continue
+			}
+			fieldVal := val.Field(i)
+			if err := nonZeroReflect(joinPath(path, field.Name), fieldVal); err != nil {
+				return err
+			}
+		}
+	case reflect.Slice, reflect.Array:
+		if val.Len() == 0 {
+			return newFieldError(path)
+		}
+		for i := 0; i < val.Len(); i++ {
+			if err := nonZeroReflect(joinPath(path, fmt.Sprintf("[%d]", i)), val.Index(i)); err != nil {
+				return err
+			}
+		}
+	case reflect.Map:
+		if val.Len() == 0 {
+			return newFieldError(path)
+		}
+		for _, key := range val.MapKeys() {
+			if err := nonZeroReflect(joinPath(path, fmt.Sprintf("[%v]", key.Interface())), val.MapIndex(key)); err != nil {
+				return err
+			}
+		}
+	default:
+		zero := reflect.Zero(val.Type())
+		if reflect.DeepEqual(val.Interface(), zero.Interface()) {
+			return newFieldError(path)
+		}
 	}
-
-	return validateNonZero(PkgName(v), data)
+	return nil
 }
 
 // GetFields returns a map of field names to their values for a struct.
@@ -231,38 +270,6 @@ func Clone[T any](v T) (T, error) {
 
 // Helper functions
 
-// validateNonZero recursively validates that all fields are non-zero.
-func validateNonZero(path string, v any) error {
-	switch data := v.(type) {
-	case map[string]any:
-		if len(data) == 0 {
-			return newFieldError(path)
-		}
-
-		keys := slices.Sorted(maps.Keys(data))
-		for _, key := range keys {
-			value := data[key]
-			if err := validateNonZero(joinPath(path, key), value); err != nil {
-				return err
-			}
-		}
-	case []any:
-		if len(data) == 0 {
-			return newFieldError(path)
-		}
-		for i, value := range data {
-			if err := validateNonZero(joinPath(path, fmt.Sprintf("[%d]", i)), value); err != nil {
-				return err
-			}
-		}
-	default:
-		if isEmpty(data) {
-			return newFieldError(path)
-		}
-	}
-	return nil
-}
-
 // joinPath joins path components with dots, handling empty components.
 func joinPath(components ...string) string {
 	var parts []string
@@ -272,26 +279,6 @@ func joinPath(components ...string) string {
 		}
 	}
 	return strings.Join(parts, ".")
-}
-
-// isEmpty checks if a value is considered empty.
-func isEmpty(v any) bool {
-	return v == nil || v == 0.0 || v == false || v == ""
-}
-
-// toMap converts a value to a map using JSON marshaling/unmarshaling.
-func toMap(v any) (any, error) {
-	data, err := json.Marshal(v)
-	if err != nil {
-		return nil, err
-	}
-
-	var result any
-	if err := json.Unmarshal(data, &result); err != nil {
-		return nil, err
-	}
-
-	return result, nil
 }
 
 // FieldError represents an error for a specific field.

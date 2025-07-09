@@ -82,3 +82,65 @@ func TestNonZero(t *testing.T) {
 		is.Equal(fieldErr.Field, "nil")
 	})
 }
+
+func TestIsNil(t *testing.T) {
+	is := assert.New(t)
+
+	// nil interface
+	var v any = nil
+	is.True(structs.IsNil(v))
+
+	// nil pointer
+	var p *int = nil
+	is.True(structs.IsNil(p))
+
+	// non-nil pointer
+	x := 42
+	p = &x
+	is.False(structs.IsNil(p))
+
+	// nil slice
+	var s []int = nil
+	is.True(structs.IsNil(s))
+
+	// non-nil slice
+	s = []int{1, 2, 3}
+	is.False(structs.IsNil(s))
+
+	// nil map
+	var m map[string]int = nil
+	is.True(structs.IsNil(m))
+
+	// non-nil map
+	m = map[string]int{"a": 1}
+	is.False(structs.IsNil(m))
+
+	// nil channel
+	var ch chan int = nil
+	is.True(structs.IsNil(ch))
+
+	// non-nil channel
+	ch = make(chan int)
+	is.False(structs.IsNil(ch))
+
+	// nil func
+	var fn func() = nil
+	is.True(structs.IsNil(fn))
+
+	// non-nil func
+	fn = func() {}
+	is.False(structs.IsNil(fn))
+
+	// nil interface value
+	var i interface{} = nil
+	is.True(structs.IsNil(i))
+
+	// non-nil interface value
+	i = 123
+	is.False(structs.IsNil(i))
+
+	// zero value (not nil)
+	is.False(structs.IsNil(0))
+	is.False(structs.IsNil(""))
+	is.False(structs.IsNil(false))
+}
