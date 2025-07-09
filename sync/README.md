@@ -568,6 +568,10 @@ defer timer.Stop()
 **Key Features**: Configurable timers, schedulers, recurring tasks  
 **Use Cases**: Scheduled tasks, timeout handling, periodic operations
 
+## 📊 Metrics & Observability
+
+All concurrency utilities in this workspace support pluggable metrics collectors for tracking key events (requests, allowed, denied, state changes, etc). You can use the built-in atomic collector for in-memory stats, or integrate with Prometheus for production monitoring. See each package's README for code examples and integration details.
+
 ## 🛠️ Installation
 
 Install individual packages:

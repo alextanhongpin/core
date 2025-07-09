@@ -15,3 +15,7 @@ There are several options, such as
 
 The issue with distributed implementation is that it requires a distributed store.
 In case of failures, we can just fallback to the in-memory implementation that has the same interface.
+
+## Metrics & Observability
+
+All distributed primitives in `dsync` support pluggable metrics collectors for observability. See each subpackage's README for details and Prometheus integration examples.

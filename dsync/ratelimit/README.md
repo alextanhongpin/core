@@ -369,6 +369,54 @@ func (m *rateLimitMetrics) trackRequest(allowed bool, err error, duration time.D
 }
 ```
 
+## Metrics & Observability
+
+Both `FixedWindow` and `GCRA` support pluggable metrics collectors for tracking requests, allowed, and denied counts. You can use the built-in atomic collector for in-memory stats, or integrate with Prometheus for production monitoring.
+
+### Using the Atomic Metrics Collector (default)
+
+By default, if you do not provide a metrics collector, an atomic in-memory collector is used:
+
+```go
+rl := ratelimit.NewFixedWindow(client, 10, time.Minute) // uses AtomicMetricsCollector by default
+```
+
+### Using Prometheus for Metrics
+
+To collect metrics with Prometheus, inject a `PrometheusMetricsCollector`:
+
+```go
+import (
+    "github.com/prometheus/client_golang/prometheus"
+    "github.com/alextanhongpin/core/dsync/ratelimit"
+)
+
+totalRequests := prometheus.NewCounter(prometheus.CounterOpts{Name: "fw_total_requests", Help: "Total FixedWindow requests."})
+allowed := prometheus.NewCounter(prometheus.CounterOpts{Name: "fw_allowed", Help: "Allowed requests."})
+denied := prometheus.NewCounter(prometheus.CounterOpts{Name: "fw_denied", Help: "Denied requests."})
+prometheus.MustRegister(totalRequests, allowed, denied)
+
+metrics := &ratelimit.PrometheusMetricsCollector{
+    TotalRequests: totalRequests,
+    Allowed:       allowed,
+    Denied:        denied,
+}
+rl := ratelimit.NewFixedWindow(client, 10, time.Minute, metrics)
+```
+
+The same pattern applies to `GCRA`:
+
+```go
+metrics := &ratelimit.PrometheusMetricsCollector{
+    TotalRequests: prometheus.NewCounter(...),
+    Allowed:       prometheus.NewCounter(...),
+    Denied:        prometheus.NewCounter(...),
+}
+rl := ratelimit.NewGCRA(client, 100, time.Second, 10, metrics)
+```
+
+See the GoDoc for the `MetricsCollector` interface and available implementations.
+
 ## Configuration Examples
 
 ### High-Throughput API

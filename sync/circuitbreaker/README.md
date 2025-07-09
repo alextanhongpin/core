@@ -122,24 +122,39 @@ cb := &circuitbreaker.Breaker{
 2. **Open**: calls immediately reject with `ErrBrokenCircuit`; after `BreakDuration`, transitions to half-open.
 3. **Half-Open**: allows exactly one probe call; if it succeeds and thresholds pass, closes; otherwise reopens.
 
-## 🔍 Monitoring & Observability
+## Metrics & Observability
 
-The circuit breaker provides hooks for monitoring:
+The circuit breaker supports pluggable metrics collectors for tracking state transitions, failures, and recoveries. You can use the built-in atomic collector for in-memory stats, or integrate with Prometheus for production monitoring.
+
+### Using the Atomic Metrics Collector (default)
+
+By default, if you do not provide a metrics collector, an atomic in-memory collector is used:
 
 ```go
-cb := circuitbreaker.New()
-cb.OnStateChange = func(old, new circuitbreaker.Status) {
-    // Log state changes
-    log.Printf("Circuit breaker state: %s -> %s", old, new)
-    
-    // Send metrics to monitoring system
-    metrics.RecordStateChange(old.String(), new.String())
-    
-    // Send alerts for critical state changes
-    if new == circuitbreaker.Open {
-        alerting.SendAlert("Circuit breaker opened", "Service may be down")
-    }
+cb := circuitbreaker.New() // uses AtomicMetricsCollector by default
+```
+
+### Using Prometheus for Metrics
+
+To collect metrics with Prometheus, inject a `PrometheusMetricsCollector`:
+
+```go
+import (
+    "github.com/prometheus/client_golang/prometheus"
+    "github.com/alextanhongpin/core/sync/circuitbreaker"
+)
+
+stateChanges := prometheus.NewCounter(prometheus.CounterOpts{Name: "cb_state_changes", Help: "Circuit breaker state changes."})
+opened := prometheus.NewCounter(prometheus.CounterOpts{Name: "cb_opened", Help: "Circuit opened events."})
+closed := prometheus.NewCounter(prometheus.CounterOpts{Name: "cb_closed", Help: "Circuit closed events."})
+prometheus.MustRegister(stateChanges, opened, closed)
+
+metrics := &circuitbreaker.PrometheusMetricsCollector{
+    StateChanges: stateChanges,
+    Opened:       opened,
+    Closed:       closed,
 }
+cb := circuitbreaker.New(circuitbreaker.WithMetrics(metrics))
 ```
 
 ## Testing

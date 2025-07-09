@@ -520,3 +520,40 @@ This implementation is part of the [alextanhongpin/core](https://github.com/alex
 - [Token Bucket Algorithm](https://en.wikipedia.org/wiki/Token_bucket) - Alternative approach comparison
 - [Sliding Window Rate Limiting](https://konghq.com/blog/how-to-design-a-scalable-rate-limiting-algorithm) - Algorithm comparison and analysis
 - [Traffic Shaping and Rate Limiting Techniques](https://tools.ietf.org/html/rfc2475) - IETF standards for traffic control
+
+# Metrics & Observability
+
+All rate limiters in this package support pluggable metrics collectors for tracking requests, allowed, and denied counts. You can use the built-in atomic collector for in-memory stats, or integrate with Prometheus for production monitoring.
+
+### Using the Atomic Metrics Collector (default)
+
+By default, if you do not provide a metrics collector, an atomic in-memory collector is used:
+
+```go
+rl, _ := ratelimit.NewGCRA(5, time.Second, 2) // uses AtomicMetricsCollector by default
+```
+
+### Using Prometheus for Metrics
+
+To collect metrics with Prometheus, inject a `PrometheusMetricsCollector`:
+
+```go
+import (
+    "github.com/prometheus/client_golang/prometheus"
+    "github.com/alextanhongpin/core/sync/ratelimit"
+)
+
+totalRequests := prometheus.NewCounter(prometheus.CounterOpts{Name: "gcra_total_requests", Help: "Total GCRA requests."})
+allowed := prometheus.NewCounter(prometheus.CounterOpts{Name: "gcra_allowed", Help: "Allowed requests."})
+denied := prometheus.NewCounter(prometheus.CounterOpts{Name: "gcra_denied", Help: "Denied requests."})
+prometheus.MustRegister(totalRequests, allowed, denied)
+
+metrics := &ratelimit.PrometheusMetricsCollector{
+    TotalRequests: totalRequests,
+    Allowed:       allowed,
+    Denied:        denied,
+}
+rl, _ := ratelimit.NewGCRA(5, time.Second, 2, metrics)
+```
+
+The same pattern applies to all other rate limiters in this package.

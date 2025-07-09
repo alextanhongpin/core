@@ -138,6 +138,41 @@ if err != nil {
 defer unlock()
 ```
 
+## Metrics & Observability
+
+This lock package supports pluggable metrics collectors for tracking lock acquisition, contention, and usage. You can use the built-in atomic collector for in-memory stats, or integrate with Prometheus for production monitoring.
+
+### Using the Atomic Metrics Collector (default)
+
+By default, if you do not provide a metrics collector, an atomic in-memory collector is used:
+
+```go
+l := lock.New() // uses AtomicMetricsCollector by default
+```
+
+### Using Prometheus for Metrics
+
+To collect metrics with Prometheus, inject a `PrometheusMetricsCollector`:
+
+```go
+import (
+    "github.com/prometheus/client_golang/prometheus"
+    "github.com/alextanhongpin/core/sync/lock"
+)
+
+totalLocks := prometheus.NewCounter(prometheus.CounterOpts{Name: "lock_total", Help: "Total lock attempts."})
+acquired := prometheus.NewCounter(prometheus.CounterOpts{Name: "lock_acquired", Help: "Locks acquired."})
+denied := prometheus.NewCounter(prometheus.CounterOpts{Name: "lock_denied", Help: "Locks denied."})
+prometheus.MustRegister(totalLocks, acquired, denied)
+
+metrics := &lock.PrometheusMetricsCollector{
+    TotalRequests: totalLocks,
+    Allowed:       acquired,
+    Denied:        denied,
+}
+l := lock.New(lock.WithMetrics(metrics))
+```
+
 ## Metrics and Observability
 
 ### Getting Metrics
