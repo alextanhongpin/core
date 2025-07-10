@@ -1,6 +1,8 @@
 package mock
 
 import (
+	"fmt"
+	"maps"
 	"runtime"
 	"slices"
 	"strings"
@@ -8,12 +10,21 @@ import (
 	"github.com/alextanhongpin/core/types/structs"
 )
 
+type Options map[string]string
+
+func (o Options) With(method, option string) Options {
+	opts := maps.Clone(o)
+	opts[method] = option
+
+	return opts
+}
+
 type Mock struct {
 	methods []string
 	options map[string]string
 }
 
-func New(v any, options ...string) *Mock {
+func New(v any, options Options) *Mock {
 	methods, err := structs.GetMethodNames(v)
 	if err != nil {
 		panic(err)
@@ -24,15 +35,11 @@ func New(v any, options ...string) *Mock {
 		options: make(map[string]string),
 	}
 
-	for _, opt := range options {
-		method, option, ok := strings.Cut(opt, "=")
-		if !ok {
-			panic("mock: option must be in the format method=option")
-		}
+	for method := range options {
 		if !slices.Contains(base.methods, method) {
-			panic("mock: unknown method " + method)
+			panic(fmt.Errorf("mock: unknown method %q, available methods: %v", method, base.methods))
 		}
-		base.options[method] = option
+		base.options[method] = options[method]
 	}
 
 	return base
