@@ -14,7 +14,8 @@ func main() {
 	ctx := context.Background()
 
 	// Initialize all engines
-	experimentEngine := ab.NewExperimentEngine()
+	experimentStore := ab.NewInMemoryExperimentStore()
+	experimentEngine := ab.NewExperimentEngine(experimentStore)
 	recommendationEngine := ab.NewRecommendationEngine()
 	banditEngine := ab.NewBanditEngine()
 	analyticsEngine := ab.NewAnalyticsEngine()
