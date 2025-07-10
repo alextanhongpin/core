@@ -26,7 +26,8 @@ func TestBasicABTesting(t *testing.T) {
 
 func TestExperimentEngine(t *testing.T) {
 	ctx := context.Background()
-	engine := NewExperimentEngine()
+	store := NewInMemoryExperimentStore()
+	engine := NewExperimentEngine(store)
 
 	// Create an experiment
 	exp := &Experiment{
@@ -404,7 +405,8 @@ func TestIntegration(t *testing.T) {
 	ctx := context.Background()
 
 	// Setup all engines
-	experimentEngine := NewExperimentEngine()
+	store := NewInMemoryExperimentStore()
+	experimentEngine := NewExperimentEngine(store)
 	recommendationEngine := NewRecommendationEngine()
 	analyticsEngine := NewAnalyticsEngine()
 	configProvider := NewInMemoryConfigProvider()
