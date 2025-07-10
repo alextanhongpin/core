@@ -4,9 +4,9 @@ A minimalistic mock utility for Go, designed to help with method-based option in
 
 ## Features
 - Register all exported methods of a struct or interface
-- Attach options to specific methods
-- Validate method names at runtime
-- Panic on unknown methods or invalid option formats
+- Attach options to specific methods (type-safe)
+- Validate method names at construction (panic on unknown)
+- Nil-safe options map and fluent API
 
 ## Quick Start
 
@@ -18,27 +18,38 @@ import (
     "github.com/alextanhongpin/core/types/mock"
 )
 
-type Service struct{}
-func (Service) Foo() {}
-func (Service) Bar() {}
-
-func (s Service) FooWithMock(m *mock.Mock) string {
-    return m.Option()
+type Service struct {
+    *mock.Mock
 }
 
+func (s *Service) WithOptions(options mock.Options) *Service {
+    s.Mock = mock.New(s, options)
+    return s
+}
+
+func (s *Service) Foo() string { return s.Option() }
+func (s *Service) Bar() string { return s.Option() }
+
 func main() {
-    m := mock.New(Service{}, "Foo=fast", "Bar=slow")
-    fmt.Println(Service{}.FooWithMock(m)) // prints "fast"
+    opts := mock.Options{}.
+        With("Foo", "fast").
+        With("Bar", "slow")
+    s := new(Service).WithOptions(opts)
+    fmt.Println(s.Foo()) // fast
+    fmt.Println(s.Bar()) // slow
 }
 ```
 
 ## API
 
-### func New(v any, options ...string) *Mock
-Registers all exported method names of the given value and attaches options. Panics on error.
+### type Options
+A type-safe map for method options. Use `Options{}.With("Method", "option")` to build options fluently.
 
-### func (Mock) Option() string
-Returns the option for the calling method. Panics if called outside a registered method.
+### func New(v any, options Options) *Mock
+Creates a new Mock for the exported methods of v, with the given options. Panics if any option is for an unknown method.
+
+### func (*Mock) Option() string
+Returns the option for the calling method, or an empty string if not set.
 
 ---
 MIT License
