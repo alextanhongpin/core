@@ -1,7 +1,9 @@
 package auth
 
 import (
+	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/hex"
 	"fmt"
 	"net/http"
 )
@@ -72,30 +74,32 @@ func BasicHandlerWithConfig(h http.Handler, config BasicAuthConfig) http.Handler
 		// Extract username and password from Authorization header
 		username, password, ok := r.BasicAuth()
 		if !ok {
-			// No credentials provided, challenge the client
 			w.Header().Set("WWW-Authenticate", fmt.Sprintf(`Basic realm="%s"`, realm))
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
 
-		// Check if username exists and password matches
-		expectedPassword, exists := config.Credentials[username]
-		if !exists || !constantTimeCompare(expectedPassword, password) {
-			// Invalid credentials, challenge the client again
+		// Check if username exists and password matches (SHA-256 hashed)
+		hashedPassword, exists := config.Credentials[username]
+		if !exists || !ComparePasswordHashSHA256(hashedPassword, password) {
 			w.Header().Set("WWW-Authenticate", fmt.Sprintf(`Basic realm="%s"`, realm))
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
 
-		// Authentication successful - store username in context for downstream handlers
 		ctx := UsernameContext.WithValue(r.Context(), username)
 		h.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 
-// constantTimeCompare performs constant-time string comparison to prevent timing attacks.
-// This is critical for password comparison as it ensures that the time taken to compare
-// passwords doesn't leak information about correct vs incorrect passwords.
-func constantTimeCompare(a, b string) bool {
-	return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1
+// HashPasswordSHA256 hashes a plain-text password using SHA-256.
+// Use this when storing credentials in production.
+func HashPasswordSHA256(password string) string {
+	hash := sha256.Sum256([]byte(password))
+	return hex.EncodeToString(hash[:])
+}
+
+// ComparePasswordHashSHA256 compares a SHA-256 hashed password with its possible plaintext equivalent.
+func ComparePasswordHashSHA256(hashedPassword, password string) bool {
+	return subtle.ConstantTimeCompare([]byte(hashedPassword), []byte(HashPasswordSHA256(password))) == 1
 }

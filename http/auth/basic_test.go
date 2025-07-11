@@ -15,7 +15,7 @@ func TestBasicAuth(t *testing.T) {
 		fmt.Fprint(w, "hello world")
 	})
 	h = auth.BasicHandler(h, map[string]string{
-		"john": "123456",
+		"john": auth.HashPasswordSHA256("123456"),
 	})
 
 	t.Run("success", func(t *testing.T) {
