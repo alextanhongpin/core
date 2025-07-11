@@ -11,6 +11,7 @@ import (
 	"github.com/alextanhongpin/core/http/handler"
 	"github.com/alextanhongpin/errors/cause"
 	"github.com/alextanhongpin/errors/codes"
+	"github.com/alextanhongpin/errors/validator"
 	"github.com/alextanhongpin/testdump/httpdump"
 )
 
@@ -19,9 +20,9 @@ type HelloRequest struct {
 }
 
 func (r HelloRequest) Validate() error {
-	return cause.Map{
-		"name": cause.Required(r.Name).Err(),
-	}.Err()
+	return validator.Map(map[string]error{
+		"name": validator.Required(r.Name),
+	})
 }
 
 type HelloResponse struct {

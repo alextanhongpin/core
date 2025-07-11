@@ -12,6 +12,7 @@ import (
 	"github.com/alextanhongpin/core/http/handler"
 	"github.com/alextanhongpin/errors/cause"
 	"github.com/alextanhongpin/errors/codes"
+	"github.com/alextanhongpin/errors/validator"
 )
 
 // Test structs
@@ -21,17 +22,10 @@ type ValidatableRequest struct {
 }
 
 func (r ValidatableRequest) Validate() error {
-	if r.Name == "" {
-		return cause.Map{
-			"name": errors.New("name is required"),
-		}.Err()
-	}
-	if r.Email == "" {
-		return cause.Map{
-			"email": errors.New("email is required"),
-		}.Err()
-	}
-	return nil
+	return validator.Map(map[string]error{
+		"name":  validator.Required(r.Name),
+		"email": validator.Required(r.Email),
+	})
 }
 
 type SimpleRequest struct {
@@ -221,9 +215,9 @@ func TestBaseHandler_Next(t *testing.T) {
 	}{
 		{
 			name: "validation error",
-			err: cause.Map{
+			err: validator.Map(map[string]error{
 				"field": errors.New("validation error"),
-			}.Err(),
+			}),
 		},
 		{
 			name: "cause error",

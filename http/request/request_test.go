@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/alextanhongpin/core/http/request"
-	"github.com/alextanhongpin/errors/cause"
+	"github.com/alextanhongpin/errors/validator"
 	"github.com/alextanhongpin/testdump/jsondump"
 	"github.com/google/go-cmp/cmp"
 	"github.com/stretchr/testify/assert"
@@ -19,9 +19,9 @@ type loginRequest struct {
 }
 
 func (req *loginRequest) Validate() error {
-	return cause.Map{
-		"email": cause.Required(req.Email).When(!strings.Contains(req.Email, "@"), "The email is invalid"),
-	}.Err()
+	return validator.Map(map[string]error{
+		"email": validator.Required(req.Email, validator.Assert(strings.Contains(req.Email, "@"), "The email is invalid")),
+	})
 }
 
 func TestBody(t *testing.T) {

@@ -11,6 +11,7 @@ import (
 	"github.com/alextanhongpin/core/http/response"
 	"github.com/alextanhongpin/errors/cause"
 	"github.com/alextanhongpin/errors/codes"
+	"github.com/alextanhongpin/errors/validator"
 	"github.com/alextanhongpin/testdump/httpdump"
 )
 
@@ -33,9 +34,9 @@ func TestErrorJSON(t *testing.T) {
 
 	t.Run("validation errors", func(t *testing.T) {
 		email := "xyz"
-		err := cause.Map{
-			"email": cause.Required(email).When(!strings.Contains(email, "@"), "The email is invalid"),
-		}.Err()
+		err := validator.Map(map[string]error{
+			"email": validator.Required(email, validator.Assert(strings.Contains(email, "@"), "The email is invalid")),
+		})
 		dumpError(t, err)
 	})
 
