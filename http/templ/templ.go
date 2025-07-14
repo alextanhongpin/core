@@ -6,12 +6,11 @@ import (
 	"maps"
 	"path/filepath"
 	"slices"
-	"sync"
 	"text/template"
 )
 
 type Template struct {
-	fn       func() *template.Template
+	cached   *template.Template
 	patterns []string
 
 	// FS is the filesystem to load templates from (e.g. os.DirFS(".") or embed.FS)
@@ -29,23 +28,34 @@ func (t *Template) Compile(patterns ...string) *Template {
 	t.patterns = slices.Clone(patterns)
 	// ParseFS returns the first file, which is the "" in the template.New("").
 	// We want to lookup the first file we passed in instead.
-	fn := func() *template.Template {
-		return template.Must(template.New("").Funcs(t.Funcs).ParseFS(t.FS, t.patterns...)).Lookup(filepath.Base(t.patterns[0]))
-	}
+
 	if !t.HotReload {
-		fn = sync.OnceValue(fn)
+		t.cached = t.compile()
 	}
-	t.fn = fn
 
 	return t
 }
 
 func (t *Template) Execute(wr io.Writer, data any) error {
-	return t.fn().Execute(wr, data)
+	if t.HotReload {
+		// If hot reload is enabled, compile the template each time
+		return t.compile().Execute(wr, data)
+	}
+
+	return t.cached.Execute(wr, data)
 }
 
 func (t *Template) ExecuteTemplate(wr io.Writer, name string, data any) error {
-	return t.fn().ExecuteTemplate(wr, name, data)
+	if t.HotReload {
+		// If hot reload is enabled, compile the template each time
+		return t.compile().ExecuteTemplate(wr, name, data)
+	}
+
+	return t.cached.ExecuteTemplate(wr, name, data)
+}
+
+func (t *Template) compile() *template.Template {
+	return template.Must(template.New("").Funcs(t.Funcs).ParseFS(t.FS, t.patterns...)).Lookup(filepath.Base(t.patterns[0]))
 }
 
 func (t *Template) Extend(patterns ...string) *Template {
