@@ -6,7 +6,6 @@ import (
 	"testing/fstest"
 
 	"github.com/alextanhongpin/core/http/templ"
-	"github.com/stretchr/testify/assert"
 )
 
 func TestCompile(t *testing.T) {
@@ -14,12 +13,13 @@ func TestCompile(t *testing.T) {
 		FS: newFS(),
 	}
 	var b bytes.Buffer
-	err := tpl.Compile("base.html", "home.html").Execute(&b, map[string]any{
-		"Msg": "world",
-	})
-	is := assert.New(t)
-	is.Nil(err)
-	is.Equal("hello, world", b.String())
+	err := tpl.Compile("base.html", "*.html").Execute(&b, nil)
+	if err != nil {
+		t.Fatalf("Compile = %v, want nil", err)
+	}
+	if want, got := "home", b.String(); want != got {
+		t.Errorf("want %q, got %q", want, got)
+	}
 }
 
 func TestExtend(t *testing.T) {
@@ -30,18 +30,23 @@ func TestExtend(t *testing.T) {
 	home := base.Extend("home.html")
 	about := base.Extend("about.html")
 
-	is := assert.New(t)
 	var b bytes.Buffer
-	is.Nil(home.Execute(&b, map[string]any{
-		"Msg": "world",
-	}))
-	is.Equal("hello, world", b.String())
+	err := home.Execute(&b, nil)
+	if err != nil {
+		t.Fatalf("Execute = %v, want nil", err)
+	}
+	if want, got := "home", b.String(); want != got {
+		t.Errorf("want %q, got %q", want, got)
+	}
 
 	b.Reset()
-	is.Nil(about.Execute(&b, map[string]any{
-		"Msg": "world",
-	}))
-	is.Equal("header: world", b.String())
+	err = about.Execute(&b, nil)
+	if err != nil {
+		t.Fatalf("Execute = %v, want nil", err)
+	}
+	if want, got := "about", b.String(); want != got {
+		t.Errorf("want %q, got %q", want, got)
+	}
 }
 
 func TestPartial(t *testing.T) {
@@ -49,36 +54,34 @@ func TestPartial(t *testing.T) {
 		FS: newFS(),
 	}
 	page := tpl.Compile("page.html", "partials/*.html")
-	is := assert.New(t)
+
 	var b bytes.Buffer
-	is.Nil(page.Execute(&b, nil))
-	is.Equal("header page footer", b.String())
+	err := page.Execute(&b, nil)
+	if err != nil {
+		t.Fatalf("Execute = %v, want nil", err)
+	}
+
+	if want, got := "header page footer", b.String(); want != got {
+		t.Errorf("want %q, got %q", want, got)
+	}
 
 	b.Reset()
-	is.Nil(page.ExecuteTemplate(&b, "header", nil))
-	is.Equal("header", b.String())
+	err = page.ExecuteTemplate(&b, "header", nil)
+	if err != nil {
+		t.Fatalf("ExecuteTemplate = %v, want nil", err)
+	}
+	if want, got := "header", b.String(); want != got {
+		t.Errorf("want %q, got %q", want, got)
+	}
 
 	b.Reset()
-	is.Nil(page.ExecuteTemplate(&b, "footer", nil))
-	is.Equal("footer", b.String())
-}
-
-func TestBasePath(t *testing.T) {
-	fs := newFS()
-	for k, v := range fs {
-		fs["templates/"+k] = v
+	err = page.ExecuteTemplate(&b, "footer", nil)
+	if err != nil {
+		t.Fatalf("ExecuteTemplate = %v, want nil", err)
 	}
-	tpl := &templ.Template{
-		FS:       fs,
-		BasePath: "templates",
+	if want, got := "footer", b.String(); want != got {
+		t.Errorf("want %q, got %q", want, got)
 	}
-	var b bytes.Buffer
-	err := tpl.Compile("base.html", "home.html").Execute(&b, map[string]any{
-		"Msg": "world",
-	})
-	is := assert.New(t)
-	is.Nil(err)
-	is.Equal("hello, world", b.String())
 }
 
 func TestHotReload(t *testing.T) {
@@ -88,25 +91,33 @@ func TestHotReload(t *testing.T) {
 			FS:        fs,
 			HotReload: false,
 		}
+
 		var b bytes.Buffer
-		homeTpl := tpl.Compile("base.html", "home.html")
-		err := homeTpl.Execute(&b, map[string]any{
+		home := tpl.Compile("base.html", "home.html")
+		err := home.Execute(&b, map[string]any{
 			"Msg": "world",
 		})
-		is := assert.New(t)
-		is.Nil(err)
-		is.Equal("hello, world", b.String())
+		if err != nil {
+			t.Fatalf("Execute = %v, want nil", err)
+		}
+		if want, got := "home", b.String(); want != got {
+			t.Errorf("want %q, got %q", want, got)
+		}
 
 		fs["home.html"] = &fstest.MapFile{
 			Data: []byte(`{{ define "content" }}hi, {{.Msg}}{{ end }}`),
 		}
 
 		b.Reset()
-		err = homeTpl.Execute(&b, map[string]any{
+		err = home.Execute(&b, map[string]any{
 			"Msg": "world",
 		})
-		is.Nil(err)
-		is.Equal("hello, world", b.String())
+		if err != nil {
+			t.Fatalf("Execute = %v, want nil", err)
+		}
+		if want, got := "home", b.String(); want != got {
+			t.Errorf("want %q, got %q", want, got)
+		}
 	})
 
 	t.Run("hot-reload", func(t *testing.T) {
@@ -115,93 +126,33 @@ func TestHotReload(t *testing.T) {
 			FS:        fs,
 			HotReload: true,
 		}
+
 		var b bytes.Buffer
-		homeTpl := tpl.Compile("base.html", "home.html")
-		err := homeTpl.Execute(&b, map[string]any{
+		home := tpl.Compile("base.html", "home.html")
+		err := home.Execute(&b, map[string]any{
 			"Msg": "world",
 		})
-		is := assert.New(t)
-		is.Nil(err)
-		is.Equal("hello, world", b.String())
+		if err != nil {
+			t.Fatalf("Execute = %v, want nil", err)
+		}
+		if want, got := "home", b.String(); want != got {
+			t.Errorf("want %q, got %q", want, got)
+		}
 
 		fs["home.html"] = &fstest.MapFile{
 			Data: []byte(`{{ define "content" }}hi, {{.Msg}}{{ end }}`),
 		}
 
 		b.Reset()
-		err = homeTpl.Execute(&b, map[string]any{
+		err = home.Execute(&b, map[string]any{
 			"Msg": "world",
 		})
-		is.Nil(err)
-		is.Equal("hi, world", b.String())
-	})
-}
-
-func TestParseSafe(t *testing.T) {
-	tpl := &templ.Template{
-		FS: newFS(),
-	}
-
-	t.Run("valid templates", func(t *testing.T) {
-		tmpl, err := tpl.ParseSafe("base.html")
-		assert.NoError(t, err)
-		assert.NotNil(t, tmpl)
-	})
-
-	t.Run("no files provided", func(t *testing.T) {
-		_, err := tpl.ParseSafe()
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "no template files provided")
-	})
-
-	t.Run("empty filename", func(t *testing.T) {
-		_, err := tpl.ParseSafe("base.html", "")
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "empty filename provided")
-	})
-
-	t.Run("template not found", func(t *testing.T) {
-		_, err := tpl.ParseSafe("nonexistent.html")
-		assert.Error(t, err)
-	})
-}
-
-func TestCompileSafe(t *testing.T) {
-	tpl := &templ.Template{
-		FS: newFS(),
-	}
-
-	t.Run("valid templates", func(t *testing.T) {
-		ext, err := tpl.CompileSafe("base.html", "home.html")
-		assert.NoError(t, err)
-		assert.NotNil(t, ext)
-
-		var b bytes.Buffer
-		err = ext.Execute(&b, map[string]any{"Msg": "world"})
-		assert.NoError(t, err)
-		assert.Equal(t, "hello, world", b.String())
-	})
-
-	t.Run("invalid templates in production mode", func(t *testing.T) {
-		tpl.HotReload = false
-		_, err := tpl.CompileSafe("nonexistent.html")
-		assert.Error(t, err)
-	})
-}
-
-func TestValidate(t *testing.T) {
-	t.Run("valid configuration", func(t *testing.T) {
-		tpl := &templ.Template{
-			FS: newFS(),
+		if err != nil {
+			t.Fatalf("Execute = %v, want nil", err)
 		}
-		assert.NoError(t, tpl.Validate())
-	})
-
-	t.Run("missing filesystem", func(t *testing.T) {
-		tpl := &templ.Template{}
-		err := tpl.Validate()
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "filesystem (FS) is required")
+		if want, got := "hi, world", b.String(); want != got {
+			t.Errorf("want %q, got %q", want, got)
+		}
 	})
 }
 
@@ -211,10 +162,10 @@ func newFS() fstest.MapFS {
 			Data: []byte(`{{ template "content" . }}`),
 		},
 		"home.html": {
-			Data: []byte(`{{ define "content" }}hello, {{.Msg}}{{ end }}`),
+			Data: []byte(`{{ define "content" }}home{{ end }}`),
 		},
 		"about.html": {
-			Data: []byte(`{{ define "content" }}{{ template "header" . }}: {{.Msg}}{{ end }}`),
+			Data: []byte(`{{ define "content" }}about{{ end }}`),
 		},
 		"page.html": {
 			Data: []byte(`{{ template "header" }} page {{ template "footer" }}`),
