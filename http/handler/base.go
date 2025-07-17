@@ -63,6 +63,10 @@ func (h BaseHandler) WithLogger(logger *slog.Logger) BaseHandler {
 	return h
 }
 
+func (h BaseHandler) Logger() *slog.Logger {
+	return h.logger
+}
+
 // ReadJSON decodes JSON from the request body into the provided struct.
 // It handles content-type validation and JSON parsing errors automatically.
 //
