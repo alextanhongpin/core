@@ -1,5 +1,7 @@
 package list
 
+import "slices"
+
 // All returns true if all elements satisfy the predicate.
 // Returns false for empty slices.
 func All[T any](slice []T, predicate func(T) bool) bool {
@@ -18,13 +20,13 @@ func All[T any](slice []T, predicate func(T) bool) bool {
 
 // AllIndex returns true if all elements satisfy the index-based predicate.
 // Returns false for empty slices.
-func AllIndex[T any](slice []T, predicate func(int, T) bool) bool {
+func AllIndex[T any](slice []T, predicate func(int) bool) bool {
 	if len(slice) == 0 {
 		return false
 	}
 
-	for i, item := range slice {
-		if !predicate(i, item) {
+	for i := range slice {
+		if !predicate(i) {
 			return false
 		}
 	}
@@ -35,20 +37,14 @@ func AllIndex[T any](slice []T, predicate func(int, T) bool) bool {
 // Any returns true if any element satisfies the predicate.
 // Returns false for empty slices.
 func Any[T any](slice []T, predicate func(T) bool) bool {
-	for _, item := range slice {
-		if predicate(item) {
-			return true
-		}
-	}
-
-	return false
+	return slices.ContainsFunc(slice, predicate)
 }
 
 // AnyIndex returns true if any element satisfies the index-based predicate.
 // Returns false for empty slices.
-func AnyIndex[T any](slice []T, predicate func(int, T) bool) bool {
-	for i, item := range slice {
-		if predicate(i, item) {
+func AnyIndex[T any](slice []T, predicate func(int) bool) bool {
+	for i := range slice {
+		if predicate(i) {
 			return true
 		}
 	}
@@ -75,9 +71,9 @@ func None[T any](slice []T, predicate func(T) bool) bool {
 
 // NoneIndex returns true if no elements satisfy the index-based predicate.
 // Returns true for empty slices.
-func NoneIndex[T any](slice []T, predicate func(int, T) bool) bool {
-	for i, item := range slice {
-		if predicate(i, item) {
+func NoneIndex[T any](slice []T, predicate func(int) bool) bool {
+	for i := range slice {
+		if predicate(i) {
 			return false
 		}
 	}

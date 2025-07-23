@@ -3,6 +3,7 @@ package list_test
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -203,7 +204,7 @@ func ExampleSum_salesAnalytics() {
 	dailySales := []float64{1500.50, 2300.75, 1800.25, 2100.00, 1650.80}
 
 	totalSales := list.Sum(dailySales)
-	average, _ := list.Average(dailySales)
+	average := list.Average(dailySales)
 
 	fmt.Printf("Total sales: $%.2f\n", totalSales)
 	fmt.Printf("Average daily sales: $%.2f\n", average)
@@ -268,9 +269,9 @@ func ExampleDedupFunc_caseInsensitive() {
 func ExampleMin_temperatureAnalysis() {
 	temperatures := []float64{23.5, 18.2, 31.8, 15.9, 28.7, 22.1}
 
-	minTemp, _ := list.Min(temperatures)
-	maxTemp, _ := list.Max(temperatures)
-	avgTemp, _ := list.Average(temperatures)
+	minTemp := slices.Min(temperatures)
+	maxTemp := slices.Max(temperatures)
+	avgTemp := list.Average(temperatures)
 
 	fmt.Printf("Temperature Analysis:\n")
 	fmt.Printf("Min: %.1f°C\n", minTemp)

@@ -51,10 +51,10 @@ func Filter[T any](slice []T, predicate func(T) bool) []T {
 }
 
 // FilterIndex returns a new slice with all elements that satisfy the index-based predicate.
-func FilterIndex[T any](slice []T, predicate func(int, T) bool) []T {
+func FilterIndex[T any](slice []T, predicate func(int) bool) []T {
 	result := make([]T, 0, len(slice))
 	for i, item := range slice {
-		if predicate(i, item) {
+		if predicate(i) {
 			result = append(result, item)
 		}
 	}
@@ -129,16 +129,6 @@ func DropLast[T any](slice []T, n int) []T {
 		return []T{}
 	}
 	return slice[:len(slice)-n]
-}
-
-// Contains checks if the slice contains the given element.
-func Contains[T comparable](slice []T, element T) bool {
-	for _, item := range slice {
-		if item == element {
-			return true
-		}
-	}
-	return false
 }
 
 // IndexOf returns the index of the first occurrence of the element.

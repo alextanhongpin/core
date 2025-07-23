@@ -20,8 +20,13 @@ func Of[T any](items ...T) *List[T] {
 	return &List[T]{data: items}
 }
 
-// ToSlice returns the underlying slice.
-func (l *List[T]) ToSlice() []T {
+// Iter returns the iterator.
+func (l *List[T]) Iter() *Iter[T] {
+	return IterFrom(l.data)
+}
+
+// Slice returns the underlying slice.
+func (l *List[T]) Slice() []T {
 	return l.data
 }
 
@@ -68,10 +73,10 @@ func Map[T, U any](slice []T, transform func(T) U) []U {
 }
 
 // MapIndex transforms each element of the slice using the provided function with index.
-func MapIndex[T, U any](slice []T, transform func(int, T) U) []U {
+func MapIndex[T, U any](slice []T, transform func(int) U) []U {
 	result := make([]U, len(slice))
-	for i, item := range slice {
-		result[i] = transform(i, item)
+	for i := range slice {
+		result[i] = transform(i)
 	}
 	return result
 }
@@ -92,10 +97,10 @@ func MapError[T, U any](slice []T, transform func(T) (U, error)) ([]U, error) {
 
 // MapIndexError transforms each element of the slice using the provided function with index that can return an error.
 // Returns the first error encountered, or nil if all transformations succeed.
-func MapIndexError[T, U any](slice []T, transform func(int, T) (U, error)) ([]U, error) {
+func MapIndexError[T, U any](slice []T, transform func(int) (U, error)) ([]U, error) {
 	result := make([]U, len(slice))
-	for i, item := range slice {
-		transformed, err := transform(i, item)
+	for i := range slice {
+		transformed, err := transform(i)
 		if err != nil {
 			return nil, err
 		}
@@ -123,10 +128,10 @@ func Reduce[T, U any](slice []T, initial U, reducer func(U, T) U) U {
 }
 
 // ReduceIndex applies a function against all elements in the slice with index to reduce it to a single value.
-func ReduceIndex[T, U any](slice []T, initial U, reducer func(U, int, T) U) U {
+func ReduceIndex[T, U any](slice []T, initial U, reducer func(int, U) U) U {
 	result := initial
-	for i, item := range slice {
-		result = reducer(result, i, item)
+	for i := range slice {
+		result = reducer(i, result)
 	}
 	return result
 }
@@ -198,9 +203,7 @@ func Chunk[T any](slice []T, size int) [][]T {
 	chunks := make([][]T, 0, (len(slice)+size-1)/size)
 	for i := 0; i < len(slice); i += size {
 		end := i + size
-		if end > len(slice) {
-			end = len(slice)
-		}
+		end = min(end, len(slice))
 		chunks = append(chunks, slice[i:end])
 	}
 
@@ -249,16 +252,12 @@ func Zip[T, U any](slice1 []T, slice2 []U) []struct {
 	First  T
 	Second U
 } {
-	minLen := len(slice1)
-	if len(slice2) < minLen {
-		minLen = len(slice2)
-	}
-
+	minLen := min(len(slice1), len(slice2))
 	result := make([]struct {
 		First  T
 		Second U
 	}, minLen)
-	for i := 0; i < minLen; i++ {
+	for i := range minLen {
 		result[i] = struct {
 			First  T
 			Second U
@@ -331,7 +330,7 @@ func (l *List[T]) Partition(predicate func(T) bool) (*List[T], *List[T]) {
 }
 
 // Reduce applies a function against all elements in the list to reduce it to a single value.
-func (l *List[T]) Reduce(initial interface{}, reducer func(interface{}, T) interface{}) interface{} {
+func (l *List[T]) Reduce(initial any, reducer func(any, T) any) any {
 	result := initial
 	for _, item := range l.data {
 		result = reducer(result, item)

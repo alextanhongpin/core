@@ -25,49 +25,49 @@ func Product[T constraints.Integer | constraints.Float](numbers []T) T {
 	return result
 }
 
-// Min finds the minimum value in the slice.
-// Returns zero value and false for empty slices.
-func Min[T constraints.Ordered](slice []T) (T, bool) {
-	if len(slice) == 0 {
-		var zero T
-		return zero, false
-	}
-
-	min := slice[0]
-	for _, v := range slice[1:] {
-		if v < min {
-			min = v
-		}
-	}
-	return min, true
-}
-
-// Max finds the maximum value in the slice.
-// Returns zero value and false for empty slices.
-func Max[T constraints.Ordered](slice []T) (T, bool) {
-	if len(slice) == 0 {
-		var zero T
-		return zero, false
-	}
-
-	max := slice[0]
-	for _, v := range slice[1:] {
-		if v > max {
-			max = v
-		}
-	}
-	return max, true
-}
-
 // Average calculates the arithmetic mean of the slice.
 // Returns zero and false for empty slices.
-func Average[T constraints.Integer | constraints.Float](numbers []T) (float64, bool) {
+func Average[T constraints.Integer | constraints.Float](numbers []T) float64 {
 	if len(numbers) == 0 {
-		return 0, false
+		panic("list.Average: empty list")
 	}
 
 	sum := Sum(numbers)
-	return float64(sum) / float64(len(numbers)), true
+	return float64(sum) / float64(len(numbers))
+}
+
+// ArgMax returns the index of the maximum value in the slice.
+// Returns -1 and false for empty slices.
+func ArgMax[T constraints.Ordered](slice []T) int {
+	if len(slice) == 0 {
+		panic("list.ArgMax: empty list")
+	}
+	maxIdx := 0
+	maxVal := slice[0]
+	for i, v := range slice[1:] {
+		if v > maxVal {
+			maxVal = v
+			maxIdx = i + 1
+		}
+	}
+	return maxIdx
+}
+
+// ArgMin returns the index of the minimum value in the slice.
+// Returns -1 and false for empty slices.
+func ArgMin[T constraints.Ordered](slice []T) int {
+	if len(slice) == 0 {
+		panic("list.ArgMin: empty list")
+	}
+	minIdx := 0
+	minVal := slice[0]
+	for i, v := range slice[1:] {
+		if v < minVal {
+			minVal = v
+			minIdx = i + 1
+		}
+	}
+	return minIdx
 }
 
 // Note: Math methods for List type would require type constraints,

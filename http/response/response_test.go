@@ -3,6 +3,8 @@ package response_test
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -30,6 +32,17 @@ func TestErrorJSON(t *testing.T) {
 
 	t.Run("known error", func(t *testing.T) {
 		dumpError(t, cause.New(codes.BadRequest, "BAD_REQUEST", "The request provided is invalid"))
+	})
+
+	t.Run("error wrapped", func(t *testing.T) {
+		err := cause.New(codes.BadRequest, "BAD_REQUEST", "The request provided is invalid")
+		dumpError(t, fmt.Errorf("wrapped error: %w", err))
+	})
+
+	t.Run("error joined", func(t *testing.T) {
+		err1 := cause.New(codes.BadRequest, "BAD_REQUEST", "The request provided is invalid")
+		err2 := errors.New("another error")
+		dumpError(t, errors.Join(err1, err2))
 	})
 
 	t.Run("validation errors", func(t *testing.T) {
