@@ -41,6 +41,20 @@ func (l *Iter[T]) Filter(fn func(T) bool) *Iter[T] {
 	return l
 }
 
+// IterMap creates a new iterator by applying the function to each element of
+// the input iterator.
+func IterMap[T, V any](iterator Iter[T], fn func(T) V) *Iter[V] {
+	return &Iter[V]{
+		iter: func(yield func(V) bool) {
+			for v := range iterator.Iter() {
+				if !yield(fn(v)) {
+					return
+				}
+			}
+		},
+	}
+}
+
 // Map transforms each element using the provided function.
 func (l *Iter[T]) Map(fn func(T) T) *Iter[T] {
 	old := l.iter
