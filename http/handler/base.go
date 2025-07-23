@@ -225,9 +225,14 @@ func (h BaseHandler) Body(w http.ResponseWriter, data any, code int) {
 
 // ErrorHandler wraps a handler function and automatically handles errors.
 func (h BaseHandler) ErrorHandler(next func(w http.ResponseWriter, r *http.Request) error) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return http.HandlerFunc(h.ErrorHandlerFunc(next))
+}
+
+// ErrorHandlerFunc wraps a handler function and automatically handles errors.
+func (h BaseHandler) ErrorHandlerFunc(next func(w http.ResponseWriter, r *http.Request) error) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
 		if err := next(w, r); err != nil {
 			h.Next(w, r, err)
 		}
-	})
+	}
 }
