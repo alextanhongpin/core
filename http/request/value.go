@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -374,6 +375,15 @@ func (v Value) Int64Or(n int64) int64 {
 	return cmp.Or(v.Int64(), n)
 }
 
+// Int64RangeOr returns the int64 value within a range or a default value if out of range.
+func (v Value) Int64RangeOr(min, max, def int64) int64 {
+	val, err := v.Int64Range(min, max)
+	if err != nil {
+		return def
+	}
+	return val
+}
+
 // Int64Range validates that the int64 value is within a range
 func (v Value) Int64Range(min, max int64) (int64, error) {
 	val := v.Int64()
@@ -391,6 +401,15 @@ func (v Value) Int32Or(n int32) int32 {
 	return cmp.Or(v.Int32(), n)
 }
 
+// Int32RangeOr returns the int32 value within a range or a default value if out of range.
+func (v Value) Int32RangeOr(min, max, def int32) int32 {
+	val, err := v.Int32Range(min, max)
+	if err != nil {
+		return def
+	}
+	return val
+}
+
 // Int32Range validates that the int32 value is within a range
 func (v Value) Int32Range(min, max int32) (int32, error) {
 	val := v.Int32()
@@ -406,6 +425,14 @@ func (v Value) Int() int {
 
 func (v Value) IntOr(n int) int {
 	return cmp.Or(v.Int(), n)
+}
+
+func (v Value) IntRangeOr(min, max, def int) int {
+	val, err := v.IntRange(min, max)
+	if err != nil {
+		return def
+	}
+	return val
 }
 
 // IntRange validates that the int value is within a range
@@ -429,6 +456,15 @@ func (v Value) Float64Or(n float64) float64 {
 		return n
 	}
 	return v.Float64()
+}
+
+// Float64RangeOr returns the float64 value within a range or a default value if out of range.
+func (v Value) Float64RangeOr(min, max, def float64) float64 {
+	val, err := v.Float64Range(min, max)
+	if err != nil {
+		return def
+	}
+	return val
 }
 
 // Float64Range validates that the float64 value is within a range
@@ -532,12 +568,15 @@ func (v Value) Match(pattern string) bool {
 // InSlice checks if the value is in a slice of strings
 func (v Value) InSlice(slice []string) bool {
 	str := v.String()
-	for _, s := range slice {
-		if s == str {
-			return true
-		}
+	return slices.Contains(slice, str)
+}
+
+func (v Value) InSliceOr(slice []string, def string) string {
+	str := v.String()
+	if slices.Contains(slice, str) {
+		return str
 	}
-	return false
+	return def
 }
 
 // CSV parses comma-separated values and trims whitespace
