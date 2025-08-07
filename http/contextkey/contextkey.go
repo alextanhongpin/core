@@ -69,6 +69,28 @@ func (k Key[T]) WithValue(ctx context.Context, t T) context.Context {
 	return context.WithValue(ctx, k, t)
 }
 
+// WithValueNX returns a new context with the given value stored under this key
+// only if the key does not already exist in the context.
+//
+// Parameters:
+//   - ctx: The parent context to derive from
+//   - t: The value to store (must be of type T)
+//
+// Returns:
+//   - A new context containing the stored value if the key was not already present
+//   - A boolean indicating whether the value was stored (true if stored, false if key already exists)
+//
+// Example:
+// var UserIDKey contextkey.Key[int] = "user_id"
+// ctx, stored := UserIDKey.WithValueNX(ctx, 123)
+func (k Key[T]) WithValueNX(ctx context.Context, t T) (context.Context, bool) {
+	if _, ok := k.Value(ctx); ok {
+		return ctx, false
+	}
+
+	return context.WithValue(ctx, k, t), true
+}
+
 // Value retrieves the value associated with this key from the context.
 //
 // This method provides type-safe retrieval of context values, returning
