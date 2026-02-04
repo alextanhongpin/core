@@ -1,6 +1,7 @@
 package ratelimit_test
 
 import (
+	"errors"
 	"testing"
 	"time"
 
@@ -20,35 +21,35 @@ func TestGCRANewValidation(t *testing.T) {
 			limit:     0,
 			period:    time.Second,
 			burst:     0,
-			wantError: ratelimit.ErrInvalidLimit,
+			wantError: ratelimit.ErrInvalidNumber,
 		},
 		{
 			name:      "negative limit",
 			limit:     -1,
 			period:    time.Second,
 			burst:     0,
-			wantError: ratelimit.ErrInvalidLimit,
+			wantError: ratelimit.ErrInvalidNumber,
 		},
 		{
 			name:      "zero period",
 			limit:     1,
 			period:    0,
 			burst:     0,
-			wantError: ratelimit.ErrInvalidPeriod,
+			wantError: ratelimit.ErrInvalidNumber,
 		},
 		{
 			name:      "negative period",
 			limit:     1,
 			period:    -time.Second,
 			burst:     0,
-			wantError: ratelimit.ErrInvalidPeriod,
+			wantError: ratelimit.ErrInvalidNumber,
 		},
 		{
 			name:      "negative burst",
 			limit:     1,
 			period:    time.Second,
 			burst:     -1,
-			wantError: ratelimit.ErrInvalidBurst,
+			wantError: ratelimit.ErrInvalidNumber,
 		},
 		{
 			name:      "valid parameters",
@@ -69,7 +70,7 @@ func TestGCRANewValidation(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := ratelimit.NewGCRA(tt.limit, tt.period, tt.burst)
-			if err != tt.wantError {
+			if !errors.Is(err, tt.wantError) {
 				t.Errorf("NewGCRA() error = %v, want %v", err, tt.wantError)
 			}
 		})

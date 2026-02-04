@@ -1,40 +1,42 @@
-package ratelimit
+package bench
 
 import (
 	"fmt"
-	"sync"
+	"sync/atomic"
 	"time"
+
+	"github.com/alextanhongpin/core/sync/ratelimit"
 )
 
 type GCRA struct {
 	// State.
-	mu   sync.RWMutex
-	last int64
+	last *atomic.Int64
 
 	// Option.
-	Now       func() time.Time
-	increment int64
 	offset    int64
+	increment int64
+	Now       func() time.Time
 }
 
 func NewGCRA(limit int, period time.Duration, burst int) (*GCRA, error) {
 	if limit <= 0 {
-		return nil, fmt.Errorf("%w: limit", ErrInvalidNumber)
+		return nil, fmt.Errorf("%w: limit", ratelimit.ErrInvalidNumber)
 	}
 	if period <= 0 {
-		return nil, fmt.Errorf("%w: period", ErrInvalidNumber)
+		return nil, fmt.Errorf("%w: period", ratelimit.ErrInvalidNumber)
 	}
 	if burst < 0 {
-		return nil, fmt.Errorf("%w: burst", ErrInvalidNumber)
+		return nil, fmt.Errorf("%w: burst", ratelimit.ErrInvalidNumber)
 	}
 
-	increment := div(period.Nanoseconds(), int64(limit))
+	increment := period.Nanoseconds() / int64(limit)
 	if increment <= 0 {
-		return nil, fmt.Errorf("%w: period divided by limit", ErrInvalidNumber)
+		return nil, fmt.Errorf("%w: period divided by limit", ratelimit.ErrInvalidNumber)
 	}
-	offset := mul(increment, int64(burst))
+	offset := increment * int64(burst)
 
 	return &GCRA{
+		last: new(atomic.Int64),
 		// NOTE: The burst is only applied once.
 		Now:       time.Now,
 		increment: increment,
@@ -61,14 +63,11 @@ func (r *GCRA) AllowN(n int) bool {
 		return false
 	}
 
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
 	now := r.Now().UnixNano()
-	r.last = max(r.last, now)
-	if r.last-r.offset <= now {
-		increment := mul(r.increment, int64(n))
-		r.last = add(r.last, increment)
+	r.last.Store(max(r.last.Load(), now))
+	if r.last.Load()-r.offset <= now {
+		increment := r.increment * int64(n)
+		r.last.Add(increment)
 		return true
 	}
 
@@ -76,13 +75,11 @@ func (r *GCRA) AllowN(n int) bool {
 }
 
 func (r *GCRA) RetryAt() time.Time {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-
 	now := r.Now()
-	if r.last <= now.UnixNano() {
+	last := r.last.Load()
+	if last <= now.UnixNano() {
 		return now
 	}
 
-	return time.Unix(0, r.last+r.increment)
+	return time.Unix(0, last+r.increment)
 }

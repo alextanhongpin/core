@@ -1,14 +1,9 @@
 package ratelimit
 
 import (
-	"errors"
+	"fmt"
 	"sync"
 	"time"
-)
-
-var (
-	ErrInvalidMultiFixedWindowLimit  = errors.New("multi fixed window limit must be positive")
-	ErrInvalidMultiFixedWindowPeriod = errors.New("multi fixed window period must be positive")
 )
 
 type fixedWindowState struct {
@@ -29,10 +24,10 @@ type MultiFixedWindow struct {
 
 func NewMultiFixedWindow(limit int, period time.Duration) (*MultiFixedWindow, error) {
 	if limit <= 0 {
-		return nil, ErrInvalidMultiFixedWindowLimit
+		return nil, fmt.Errorf("%w: limit", ErrInvalidNumber)
 	}
 	if period <= 0 {
-		return nil, ErrInvalidMultiFixedWindowPeriod
+		return nil, fmt.Errorf("%w: period", ErrInvalidNumber)
 	}
 
 	return &MultiFixedWindow{

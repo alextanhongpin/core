@@ -1,15 +1,9 @@
 package ratelimit
 
 import (
-	"errors"
+	"fmt"
 	"sync"
 	"time"
-)
-
-var (
-	ErrInvalidMultiGCRALimit  = errors.New("multi GCRA limit must be positive")
-	ErrInvalidMultiGCRAPeriod = errors.New("multi GCRA period must be positive")
-	ErrInvalidMultiGCRABurst  = errors.New("multi GCRA burst cannot be negative")
 )
 
 type MultiGCRA struct {
@@ -18,46 +12,35 @@ type MultiGCRA struct {
 	state map[string]int64
 
 	// Option.
-	interval int64
-	offset   int64
-	period   int64
-	Now      func() time.Time
+	Now       func() time.Time
+	increment int64
+	offset    int64
+	period    int64
 }
 
 func NewMultiGCRA(limit int, period time.Duration, burst int) (*MultiGCRA, error) {
 	if limit <= 0 {
-		return nil, ErrInvalidMultiGCRALimit
+		return nil, fmt.Errorf("%w: limit", ErrInvalidNumber)
 	}
 	if period <= 0 {
-		return nil, ErrInvalidMultiGCRAPeriod
+		return nil, fmt.Errorf("%w: period", ErrInvalidNumber)
 	}
 	if burst < 0 {
-		return nil, ErrInvalidMultiGCRABurst
+		return nil, fmt.Errorf("%w: burst", ErrInvalidNumber)
 	}
 
-	interval := period.Nanoseconds() / int64(limit)
-	if interval == 0 {
-		interval = 1
+	increment := div(period.Nanoseconds(), int64(limit))
+	if increment == 0 {
+		return nil, fmt.Errorf("%w: period divided by limit", ErrInvalidNumber)
 	}
-
-	// Prevent integer overflow in burst calculations
-	var offset int64
-	if burst > 0 && interval > 0 {
-		maxBurst := (1<<63 - 1) / interval
-		if int64(burst) > maxBurst {
-			offset = 1<<63 - 1
-		} else {
-			offset = interval * int64(burst)
-		}
-	}
-
+	offset := mul(increment, int64(burst))
 	return &MultiGCRA{
 		// NOTE: The burst is only applied once.
-		state:    make(map[string]int64),
-		interval: interval,
-		offset:   offset,
-		period:   period.Nanoseconds(),
-		Now:      time.Now,
+		increment: increment,
+		offset:    offset,
+		period:    period.Nanoseconds(),
+		state:     make(map[string]int64),
+		Now:       time.Now,
 	}, nil
 }
 
@@ -86,19 +69,8 @@ func (r *MultiGCRA) AllowN(key string, n int) bool {
 	now := r.Now().UnixNano()
 	r.state[key] = max(r.state[key], now)
 	if r.state[key]-r.offset <= now {
-		// Check for potential overflow before adding
-		if r.state[key] > 0 && int64(n) > 0 && r.interval > 0 {
-			maxAdd := (1<<63 - 1) - r.state[key]
-			if int64(n)*r.interval > maxAdd {
-				// Handle overflow by setting to max value
-				r.state[key] = 1<<63 - 1
-			} else {
-				r.state[key] += int64(n) * r.interval
-			}
-		} else {
-			r.state[key] += int64(n) * r.interval
-		}
-
+		increment := mul(r.increment, int64(n))
+		r.state[key] = add(r.state[key], increment)
 		return true
 	}
 
@@ -114,7 +86,7 @@ func (r *MultiGCRA) RetryAt(key string) time.Time {
 		return now
 	}
 
-	return time.Unix(0, r.state[key]+r.interval)
+	return time.Unix(0, r.state[key]+r.increment)
 }
 
 func (r *MultiGCRA) Clear() {

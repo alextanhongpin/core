@@ -1,14 +1,9 @@
 package ratelimit
 
 import (
-	"errors"
+	"fmt"
 	"sync"
 	"time"
-)
-
-var (
-	ErrInvalidFixedWindowLimit  = errors.New("fixed window limit must be positive")
-	ErrInvalidFixedWindowPeriod = errors.New("fixed window period must be positive")
 )
 
 // FixedWindow acts as a counter for a given time period.
@@ -26,10 +21,10 @@ type FixedWindow struct {
 
 func NewFixedWindow(limit int, period time.Duration) (*FixedWindow, error) {
 	if limit <= 0 {
-		return nil, ErrInvalidFixedWindowLimit
+		return nil, fmt.Errorf("%w: limit", ErrInvalidNumber)
 	}
 	if period <= 0 {
-		return nil, ErrInvalidFixedWindowPeriod
+		return nil, fmt.Errorf("%w: period", ErrInvalidNumber)
 	}
 
 	return &FixedWindow{
@@ -50,14 +45,15 @@ func MustNewFixedWindow(limit int, period time.Duration) *FixedWindow {
 }
 
 func (r *FixedWindow) Allow() bool {
-	allowed := r.AllowN(1)
-	return allowed
+	return r.AllowN(1)
 }
 
 // AllowN checks if a request is allowed. Consumes n token
 // if allowed.
 func (r *FixedWindow) AllowN(n int) bool {
 	if n <= 0 {
+		// TODO:
+		// panic(ErrInvalidNumber)
 		return false
 	}
 

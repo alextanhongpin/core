@@ -1,6 +1,7 @@
 package ratelimit_test
 
 import (
+	"errors"
 	"testing"
 	"time"
 
@@ -19,25 +20,25 @@ func TestFixedWindowNewValidation(t *testing.T) {
 			name:      "zero limit",
 			limit:     0,
 			period:    time.Second,
-			wantError: ratelimit.ErrInvalidFixedWindowLimit,
+			wantError: ratelimit.ErrInvalidNumber,
 		},
 		{
 			name:      "negative limit",
 			limit:     -1,
 			period:    time.Second,
-			wantError: ratelimit.ErrInvalidFixedWindowLimit,
+			wantError: ratelimit.ErrInvalidNumber,
 		},
 		{
 			name:      "zero period",
 			limit:     1,
 			period:    0,
-			wantError: ratelimit.ErrInvalidFixedWindowPeriod,
+			wantError: ratelimit.ErrInvalidNumber,
 		},
 		{
 			name:      "negative period",
 			limit:     1,
 			period:    -time.Second,
-			wantError: ratelimit.ErrInvalidFixedWindowPeriod,
+			wantError: ratelimit.ErrInvalidNumber,
 		},
 		{
 			name:      "valid parameters",
@@ -50,7 +51,7 @@ func TestFixedWindowNewValidation(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := ratelimit.NewFixedWindow(tt.limit, tt.period)
-			if err != tt.wantError {
+			if !errors.Is(err, tt.wantError) {
 				t.Errorf("NewFixedWindow() error = %v, want %v", err, tt.wantError)
 			}
 		})
@@ -92,25 +93,25 @@ func TestSlidingWindowNewValidation(t *testing.T) {
 			name:      "zero limit",
 			limit:     0,
 			period:    time.Second,
-			wantError: ratelimit.ErrInvalidSlidingWindowLimit,
+			wantError: ratelimit.ErrInvalidNumber,
 		},
 		{
 			name:      "negative limit",
 			limit:     -1,
 			period:    time.Second,
-			wantError: ratelimit.ErrInvalidSlidingWindowLimit,
+			wantError: ratelimit.ErrInvalidNumber,
 		},
 		{
 			name:      "zero period",
 			limit:     1,
 			period:    0,
-			wantError: ratelimit.ErrInvalidSlidingWindowPeriod,
+			wantError: ratelimit.ErrInvalidNumber,
 		},
 		{
 			name:      "negative period",
 			limit:     1,
 			period:    -time.Second,
-			wantError: ratelimit.ErrInvalidSlidingWindowPeriod,
+			wantError: ratelimit.ErrInvalidNumber,
 		},
 		{
 			name:      "valid parameters",
@@ -123,8 +124,8 @@ func TestSlidingWindowNewValidation(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := ratelimit.NewSlidingWindow(tt.limit, tt.period)
-			if err != tt.wantError {
-				t.Errorf("NewSlidingWindow() error = %v, want %v", err, tt.wantError)
+			if !errors.Is(err, tt.wantError) {
+				t.Errorf("NewSlidingWindow(%d, %v) error = %v, want %v", tt.limit, tt.period, err, tt.wantError)
 			}
 		})
 	}
@@ -165,25 +166,25 @@ func TestMultiFixedWindowNewValidation(t *testing.T) {
 			name:      "zero limit",
 			limit:     0,
 			period:    time.Second,
-			wantError: ratelimit.ErrInvalidMultiFixedWindowLimit,
+			wantError: ratelimit.ErrInvalidNumber,
 		},
 		{
 			name:      "negative limit",
 			limit:     -1,
 			period:    time.Second,
-			wantError: ratelimit.ErrInvalidMultiFixedWindowLimit,
+			wantError: ratelimit.ErrInvalidNumber,
 		},
 		{
 			name:      "zero period",
 			limit:     1,
 			period:    0,
-			wantError: ratelimit.ErrInvalidMultiFixedWindowPeriod,
+			wantError: ratelimit.ErrInvalidNumber,
 		},
 		{
 			name:      "negative period",
 			limit:     1,
 			period:    -time.Second,
-			wantError: ratelimit.ErrInvalidMultiFixedWindowPeriod,
+			wantError: ratelimit.ErrInvalidNumber,
 		},
 		{
 			name:      "valid parameters",
@@ -196,7 +197,7 @@ func TestMultiFixedWindowNewValidation(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := ratelimit.NewMultiFixedWindow(tt.limit, tt.period)
-			if err != tt.wantError {
+			if !errors.Is(err, tt.wantError) {
 				t.Errorf("NewMultiFixedWindow() error = %v, want %v", err, tt.wantError)
 			}
 		})
@@ -240,25 +241,25 @@ func TestMultiSlidingWindowNewValidation(t *testing.T) {
 			name:      "zero limit",
 			limit:     0,
 			period:    time.Second,
-			wantError: ratelimit.ErrInvalidMultiSlidingWindowLimit,
+			wantError: ratelimit.ErrInvalidNumber,
 		},
 		{
 			name:      "negative limit",
 			limit:     -1,
 			period:    time.Second,
-			wantError: ratelimit.ErrInvalidMultiSlidingWindowLimit,
+			wantError: ratelimit.ErrInvalidNumber,
 		},
 		{
 			name:      "zero period",
 			limit:     1,
 			period:    0,
-			wantError: ratelimit.ErrInvalidMultiSlidingWindowPeriod,
+			wantError: ratelimit.ErrInvalidNumber,
 		},
 		{
 			name:      "negative period",
 			limit:     1,
 			period:    -time.Second,
-			wantError: ratelimit.ErrInvalidMultiSlidingWindowPeriod,
+			wantError: ratelimit.ErrInvalidNumber,
 		},
 		{
 			name:      "valid parameters",
@@ -271,8 +272,8 @@ func TestMultiSlidingWindowNewValidation(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := ratelimit.NewMultiSlidingWindow(tt.limit, tt.period)
-			if err != tt.wantError {
-				t.Errorf("NewMultiSlidingWindow() error = %v, want %v", err, tt.wantError)
+			if !errors.Is(err, tt.wantError) {
+				t.Errorf("NewMultiSlidingWindow(%d, %v) error = %v, want %v", tt.limit, tt.period, err, tt.wantError)
 			}
 		})
 	}
@@ -317,35 +318,35 @@ func TestMultiGCRANewValidation(t *testing.T) {
 			limit:     0,
 			period:    time.Second,
 			burst:     0,
-			wantError: ratelimit.ErrInvalidMultiGCRALimit,
+			wantError: ratelimit.ErrInvalidNumber,
 		},
 		{
 			name:      "negative limit",
 			limit:     -1,
 			period:    time.Second,
 			burst:     0,
-			wantError: ratelimit.ErrInvalidMultiGCRALimit,
+			wantError: ratelimit.ErrInvalidNumber,
 		},
 		{
 			name:      "zero period",
 			limit:     1,
 			period:    0,
 			burst:     0,
-			wantError: ratelimit.ErrInvalidMultiGCRAPeriod,
+			wantError: ratelimit.ErrInvalidNumber,
 		},
 		{
 			name:      "negative period",
 			limit:     1,
 			period:    -time.Second,
 			burst:     0,
-			wantError: ratelimit.ErrInvalidMultiGCRAPeriod,
+			wantError: ratelimit.ErrInvalidNumber,
 		},
 		{
 			name:      "negative burst",
 			limit:     1,
 			period:    time.Second,
 			burst:     -1,
-			wantError: ratelimit.ErrInvalidMultiGCRABurst,
+			wantError: ratelimit.ErrInvalidNumber,
 		},
 		{
 			name:      "valid parameters",
@@ -366,7 +367,7 @@ func TestMultiGCRANewValidation(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := ratelimit.NewMultiGCRA(tt.limit, tt.period, tt.burst)
-			if err != tt.wantError {
+			if !errors.Is(err, tt.wantError) {
 				t.Errorf("NewMultiGCRA() error = %v, want %v", err, tt.wantError)
 			}
 		})
