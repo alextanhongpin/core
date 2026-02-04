@@ -21,6 +21,7 @@ func main() {
 	})
 	_ = rdb.FlushDB(ctx).Err()
 	defer rdb.Close()
+	ratelimit.Setup(ctx, rdb)
 
 	fmt.Println("=== Rate Limiting Examples ===\n")
 
@@ -32,6 +33,9 @@ func main() {
 
 	// 3. Performance comparison
 	demonstratePerformanceComparison(ctx, rdb)
+
+	// 4. LLM specific examples
+	demonstrateLLMRateLimits(ctx, rdb)
 
 	fmt.Println("\n=== All Examples Complete ===")
 }
@@ -165,6 +169,39 @@ func demonstratePerformanceComparison(ctx context.Context, client *redis.Client)
 	} else {
 		fmt.Printf("   Fixed Window is %.1fx faster\n", 1/ratio)
 	}
+}
+
+// demonstrateLLMRateLimits shows how to limit LLM usage by request count and
+// token count, both per minute and per day. It uses fixed‑window rate
+// limiters and demonstrates combined checks.
+func demonstrateLLMRateLimits(ctx context.Context, client *redis.Client) {
+	fmt.Println("4. LLM Rate Limiting Examples")
+
+	// Request limits
+	reqPerMin := ratelimit.NewFixedWindow(client, 60, time.Minute)
+	reqPerDay := ratelimit.NewFixedWindow(client, 1_000, 24*time.Hour)
+
+	// Token limits – example values
+	tokenPerMin := ratelimit.NewFixedWindow(client, 5_000, time.Minute)
+	tokenPerDay := ratelimit.NewFixedWindow(client, 200_000, 24*time.Hour)
+
+	// Simulate 10 requests; each consumes a deterministic token amount
+	for i := 1; i <= 100; i++ {
+		tokenCount := 500 + i*20 // deterministic for reproducibility
+		allowedReq, _ := reqPerMin.Allow(ctx, "llm:request:123")
+		allowedToken, _ := tokenPerMin.AllowN(ctx, "llm:token:123", tokenCount)
+		allowedReqDay, _ := reqPerDay.Allow(ctx, "llm:request:123")
+		allowedTokenDay, _ := tokenPerDay.AllowN(ctx, "llm:token:123", tokenCount)
+
+		status := "✅"
+		if !(allowedReq && allowedToken && allowedReqDay && allowedTokenDay) {
+			status = "❌"
+		}
+		fmt.Printf("   Request %d: %s (tokens %d) – req/min %t, token/min %t, req/day %t, token/day %t\n",
+			i, status, tokenCount, allowedReq, allowedToken, allowedReqDay, allowedTokenDay)
+		time.Sleep(100 * time.Millisecond)
+	}
+	fmt.Println()
 }
 
 // Legacy functions for backward compatibility

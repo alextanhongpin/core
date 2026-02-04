@@ -5,6 +5,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/alextanhongpin/core/dsync/ratelimit"
 	"github.com/alextanhongpin/core/storage/redis/redistest"
 	redis "github.com/redis/go-redis/v9"
 )
@@ -26,5 +27,10 @@ func newClient(t *testing.T) *redis.Client {
 		client.FlushAll(context.Background())
 		client.Close()
 	})
+
+	if err := ratelimit.Setup(t.Context(), client); err != nil {
+		t.Fatalf("setup failed: %v", err)
+	}
+
 	return client
 }

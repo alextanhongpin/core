@@ -8,21 +8,14 @@ import (
 	redis "github.com/redis/go-redis/v9"
 )
 
-//go:embed gcra.lua
-var gcraScript string
-
-var gcra = redis.NewScript(gcraScript)
-
 // GCRA implements the Generic Cell Rate Algorithm for smooth rate limiting.
 // It provides better traffic shaping compared to fixed windows by avoiding
 // burst behavior at window boundaries.
 type GCRA struct {
-	Now              func() time.Time
-	burst            int
-	client           *redis.Client
-	limit            int
-	period           int64
-	metricsCollector MetricsCollector
+	client    *redis.Client
+	increment int64
+	offset    int64
+	period    int64
 }
 
 // NewGCRA creates a new GCRA rate limiter.
@@ -36,66 +29,33 @@ type GCRA struct {
 // Example:
 //
 //	rl := NewGCRA(client, 100, time.Second, 10)  // 100 req/sec with 10 burst
-func NewGCRA(client *redis.Client, limit int, period time.Duration, burst int, collectors ...MetricsCollector) *GCRA {
-	var collector MetricsCollector
-	if len(collectors) > 0 && collectors[0] != nil {
-		collector = collectors[0]
-	} else {
-		collector = &AtomicMetricsCollector{}
-	}
+func NewGCRA(client *redis.Client, limit int, period time.Duration, burst int) *GCRA {
+	increment := period.Milliseconds() / int64(limit)
 	return &GCRA{
-		Now:              time.Now,
-		burst:            burst,
-		client:           client,
-		limit:            limit,
-		period:           period.Milliseconds(),
-		metricsCollector: collector,
+		increment: increment,
+		client:    client,
+		offset:    increment * int64(burst),
+		period:    period.Milliseconds(),
 	}
 }
 
 // Allow checks if a single request is allowed for the given key.
 func (g *GCRA) Allow(ctx context.Context, key string) (bool, error) {
-	g.metricsCollector.IncTotalRequests()
-	allowed, err := g.AllowN(ctx, key, 1)
-	if err != nil {
-		g.metricsCollector.IncDenied()
-		return false, err
-	}
-	if allowed {
-		g.metricsCollector.IncAllowed()
-	} else {
-		g.metricsCollector.IncDenied()
-	}
-	return allowed, nil
+	return g.AllowN(ctx, key, 1)
 }
 
 // AllowN checks if N requests are allowed for the given key.
 func (g *GCRA) AllowN(ctx context.Context, key string, n int) (bool, error) {
-	g.metricsCollector.IncTotalRequests()
-	burst := g.burst
-	limit := g.limit
-	now := g.Now()
-	period := g.period
-
-	interval := period / int64(limit)
-
 	keys := []string{key}
-	argv := []any{
-		burst,
-		interval,
-		now.UnixMilli(),
-		period,
+	args := []any{
+		g.increment,
+		g.offset,
+		g.period,
 		n,
 	}
-	ok, err := gcra.Run(ctx, g.client, keys, argv...).Int()
+	ok, err := g.client.FCall(ctx, "gcra", keys, args...).Int()
 	if err != nil {
-		g.metricsCollector.IncDenied()
 		return false, err
-	}
-	if ok == 1 {
-		g.metricsCollector.IncAllowed()
-	} else {
-		g.metricsCollector.IncDenied()
 	}
 	return ok == 1, nil
 }
@@ -120,8 +80,7 @@ func (g *GCRA) CheckN(ctx context.Context, key string, n int) (*Result, error) {
 
 	if !allowed {
 		// Calculate retry after based on the interval
-		interval := time.Duration(g.period/int64(g.limit)) * time.Millisecond
-		result.RetryAfter = interval * time.Duration(n)
+		result.RetryAfter = time.Duration(g.increment*int64(n)) * time.Millisecond
 	}
 
 	return result, nil
@@ -138,30 +97,3 @@ func (g *GCRA) Remaining(ctx context.Context, key string) (int, error) {
 func (g *GCRA) ResetAfter(ctx context.Context, key string) (time.Duration, error) {
 	return 0, nil
 }
-
-// Example Prometheus integration
-//
-// import (
-//   "github.com/prometheus/client_golang/prometheus"
-//   "github.com/prometheus/client_golang/prometheus/promhttp"
-//   "github.com/redis/go-redis/v9"
-//   "github.com/alextanhongpin/core/dsync/ratelimit"
-//   "net/http"
-// )
-//
-// func main() {
-//   totalRequests := prometheus.NewCounter(prometheus.CounterOpts{Name: "gcra_total_requests", Help: "Total GCRA requests."})
-//   allowed := prometheus.NewCounter(prometheus.CounterOpts{Name: "gcra_allowed", Help: "Allowed requests."})
-//   denied := prometheus.NewCounter(prometheus.CounterOpts{Name: "gcra_denied", Help: "Denied requests."})
-//   prometheus.MustRegister(totalRequests, allowed, denied)
-//
-//   metrics := &ratelimit.PrometheusMetricsCollector{
-//     TotalRequests: totalRequests,
-//     Allowed: allowed,
-//     Denied: denied,
-//   }
-//   rdb := redis.NewClient(&redis.Options{Addr: "localhost:6379"})
-//   rl := ratelimit.NewGCRA(rdb, 100, time.Second, 10, metrics)
-//   http.Handle("/metrics", promhttp.Handler())
-//   http.ListenAndServe(":8080", nil)
-// }

@@ -25,7 +25,9 @@ func main() {
 	}
 
 	// Clean up for demo
-	client.FlushAll(context.Background())
+	ctx := context.Background()
+	client.FlushAll(ctx)
+	ratelimit.Setup(ctx, client)
 
 	fmt.Println("=== Rate Limiting Examples ===\n")
 
