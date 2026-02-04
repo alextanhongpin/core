@@ -1,7 +1,6 @@
 package ratelimit
 
 import (
-	"fmt"
 	"math"
 	"sync"
 	"time"
@@ -25,11 +24,9 @@ type MultiSlidingWindow struct {
 }
 
 func NewMultiSlidingWindow(limit int, period time.Duration) (*MultiSlidingWindow, error) {
-	if limit <= 0 {
-		return nil, fmt.Errorf("%w: limit", ErrInvalidNumber)
-	}
-	if period <= 0 {
-		return nil, fmt.Errorf("%w: period", ErrInvalidNumber)
+	o := &option{limit: limit, period: period}
+	if err := o.Validate(); err != nil {
+		return nil, err
 	}
 
 	return &MultiSlidingWindow{

@@ -19,14 +19,9 @@ type MultiGCRA struct {
 }
 
 func NewMultiGCRA(limit int, period time.Duration, burst int) (*MultiGCRA, error) {
-	if limit <= 0 {
-		return nil, fmt.Errorf("%w: limit", ErrInvalidNumber)
-	}
-	if period <= 0 {
-		return nil, fmt.Errorf("%w: period", ErrInvalidNumber)
-	}
-	if burst < 0 {
-		return nil, fmt.Errorf("%w: burst", ErrInvalidNumber)
+	o := &option{limit: limit, period: period, burst: burst}
+	if err := o.Validate(); err != nil {
+		return nil, err
 	}
 
 	increment := div(period.Nanoseconds(), int64(limit))

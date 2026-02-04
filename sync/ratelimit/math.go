@@ -2,13 +2,34 @@ package ratelimit
 
 import (
 	"errors"
+	"fmt"
 	"math"
 	"math/big"
+	"time"
 )
 
 var (
 	ErrInvalidNumber = errors.New("ratelimit: value must be positive")
 )
+
+type option struct {
+	limit  int
+	period time.Duration
+	burst  int
+}
+
+func (o *option) Validate() error {
+	if o.limit <= 0 {
+		return fmt.Errorf("%w: limit", ErrInvalidNumber)
+	}
+	if o.period <= 0 {
+		return fmt.Errorf("%w: period", ErrInvalidNumber)
+	}
+	if o.burst < 0 {
+		return fmt.Errorf("%w: burst", ErrInvalidNumber)
+	}
+	return nil
+}
 
 var (
 	maxInt64 = big.NewInt(math.MaxInt64)

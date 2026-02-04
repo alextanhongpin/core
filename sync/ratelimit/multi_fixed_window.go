@@ -1,7 +1,6 @@
 package ratelimit
 
 import (
-	"fmt"
 	"sync"
 	"time"
 )
@@ -23,11 +22,9 @@ type MultiFixedWindow struct {
 }
 
 func NewMultiFixedWindow(limit int, period time.Duration) (*MultiFixedWindow, error) {
-	if limit <= 0 {
-		return nil, fmt.Errorf("%w: limit", ErrInvalidNumber)
-	}
-	if period <= 0 {
-		return nil, fmt.Errorf("%w: period", ErrInvalidNumber)
+	o := &option{limit: limit, period: period}
+	if err := o.Validate(); err != nil {
+		return nil, err
 	}
 
 	return &MultiFixedWindow{

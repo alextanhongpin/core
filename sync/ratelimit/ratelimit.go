@@ -1,11 +1,16 @@
 package ratelimit
 
+import (
+	"sync"
+)
+
 type ratelimiter interface {
 	Allow() bool
 	AllowN(int) bool
 }
 
 type RateLimiter struct {
+	mu  sync.RWMutex
 	rls []ratelimiter
 }
 
@@ -16,6 +21,9 @@ func New(rls ...ratelimiter) *RateLimiter {
 }
 
 func (r *RateLimiter) Allow() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
 	allow := true
 	for _, rl := range r.rls {
 		if !rl.Allow() {
@@ -26,6 +34,9 @@ func (r *RateLimiter) Allow() bool {
 }
 
 func (r *RateLimiter) AllowN(n int) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
 	allow := true
 	for _, rl := range r.rls {
 		if !rl.AllowN(n) {

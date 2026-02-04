@@ -1,16 +1,13 @@
 package ratelimit
 
 import (
-	"fmt"
 	"math"
-	"sync"
 	"time"
 )
 
 // SlidingWindow implements a sliding window rate limiter.
 type SlidingWindow struct {
 	// State.
-	mu     sync.RWMutex
 	prev   int
 	curr   int
 	window int64
@@ -23,11 +20,9 @@ type SlidingWindow struct {
 }
 
 func NewSlidingWindow(limit int, period time.Duration) (*SlidingWindow, error) {
-	if limit <= 0 {
-		return nil, fmt.Errorf("%w: limit", ErrInvalidNumber)
-	}
-	if period <= 0 {
-		return nil, fmt.Errorf("%w: period", ErrInvalidNumber)
+	o := &option{limit: limit, period: period}
+	if err := o.Validate(); err != nil {
+		return nil, err
 	}
 
 	return &SlidingWindow{
@@ -56,9 +51,6 @@ func (r *SlidingWindow) AllowN(n int) bool {
 		return false
 	}
 
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
 	if r.remaining() >= n {
 		r.add(n)
 		return true
@@ -67,17 +59,20 @@ func (r *SlidingWindow) AllowN(n int) bool {
 	return false
 }
 
-func (r *SlidingWindow) Remaining() int {
-	r.mu.RLock()
-	n := r.remaining()
-	r.mu.RUnlock()
+func (r *SlidingWindow) RetryAt() time.Time {
+	panic("not implemented")
+}
 
-	return n
+func (r *SlidingWindow) Remaining() int {
+	return r.remaining()
 }
 
 func (r *SlidingWindow) remaining() int {
 	now := r.Now().UnixNano()
 
+	// [t0 + dt][t1 + dt]
+	// ....t1... (now < t0 + dt)
+	// ...............t1 (now < t0 * 2*dt)
 	prev := r.prev
 	curr := r.curr
 	window := r.window
