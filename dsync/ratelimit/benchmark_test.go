@@ -71,7 +71,7 @@ func BenchmarkFixedWindow_Check(b *testing.B) {
 		i := 0
 		for pb.Next() {
 			key := "bench-fw-check-" + string(rune(i%10))
-			_, err := rl.Check(ctx, key)
+			_, err := rl.Limit(ctx, key)
 			if err != nil {
 				b.Fatal(err)
 			}
@@ -134,7 +134,7 @@ func BenchmarkGCRA_Check(b *testing.B) {
 		i := 0
 		for pb.Next() {
 			key := "bench-gcra-check-" + string(rune(i%10))
-			_, err := rl.Check(ctx, key)
+			_, err := rl.Limit(ctx, key)
 			if err != nil {
 				b.Fatal(err)
 			}

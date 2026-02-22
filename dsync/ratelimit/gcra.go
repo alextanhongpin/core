@@ -3,6 +3,7 @@ package ratelimit
 import (
 	"context"
 	_ "embed"
+	"math"
 	"time"
 
 	redis "github.com/redis/go-redis/v9"
@@ -12,10 +13,10 @@ import (
 // It provides better traffic shaping compared to fixed windows by avoiding
 // burst behavior at window boundaries.
 type GCRA struct {
-	client    *redis.Client
-	increment int64
-	offset    int64
-	period    int64
+	client *redis.Client
+	burst  int
+	limit  int
+	period time.Duration
 }
 
 // NewGCRA creates a new GCRA rate limiter.
@@ -24,76 +25,72 @@ type GCRA struct {
 //   - client: Redis client for distributed coordination
 //   - limit: Maximum number of requests per period
 //   - period: Time period for the rate limit
-//   - burst: Additional burst capacity (0 = no burst allowed)
+//   - burst: Additional burst capacity (0 = no burst allow)
 //
 // Example:
 //
 //	rl := NewGCRA(client, 100, time.Second, 10)  // 100 req/sec with 10 burst
 func NewGCRA(client *redis.Client, limit int, period time.Duration, burst int) *GCRA {
-	increment := period.Milliseconds() / int64(limit)
 	return &GCRA{
-		increment: increment,
-		client:    client,
-		offset:    increment * int64(burst),
-		period:    period.Milliseconds(),
+		limit:  limit,
+		client: client,
+		burst:  burst,
+		period: period,
 	}
 }
 
-// Allow checks if a single request is allowed for the given key.
+// Allow checks if a single request is allow for the given key.
 func (g *GCRA) Allow(ctx context.Context, key string) (bool, error) {
 	return g.AllowN(ctx, key, 1)
 }
 
-// AllowN checks if N requests are allowed for the given key.
+// AllowN checks if N requests are allow for the given key.
 func (g *GCRA) AllowN(ctx context.Context, key string, n int) (bool, error) {
-	keys := []string{key}
-	args := []any{
-		g.increment,
-		g.offset,
-		g.period,
-		n,
-	}
-	ok, err := g.client.FCall(ctx, "gcra", keys, args...).Int()
+	allow, _, err := g.allowN(ctx, key, n)
 	if err != nil {
 		return false, err
 	}
-	return ok == 1, nil
+
+	return allow, nil
 }
 
-// Check performs a rate limit check and returns detailed information.
-func (g *GCRA) Check(ctx context.Context, key string) (*Result, error) {
-	return g.CheckN(ctx, key, 1)
+func (g *GCRA) allowN(ctx context.Context, key string, n int) (bool, time.Duration, error) {
+	keys := []string{key}
+	args := []any{
+		g.burst,
+		g.limit,
+		g.period.Milliseconds(),
+		n,
+	}
+	results, err := g.client.FCall(ctx, "gcra", keys, args...).Int64Slice()
+	if err != nil {
+		return false, 0, err
+	}
+
+	allow := results[0] == 1
+	retryAfter := time.Duration(results[1]) * time.Millisecond
+
+	return allow, retryAfter, nil
 }
 
-// CheckN performs a rate limit check for N requests and returns detailed information.
-func (g *GCRA) CheckN(ctx context.Context, key string, n int) (*Result, error) {
-	allowed, err := g.AllowN(ctx, key, n)
+// Limit performs a rate limit check and returns detailed information.
+func (g *GCRA) Limit(ctx context.Context, key string) (*Result, error) {
+	return g.LimitN(ctx, key, 1)
+}
+
+// LimitN performs a rate limit check for N requests and returns detailed information.
+func (g *GCRA) LimitN(ctx context.Context, key string, n int) (*Result, error) {
+	allow, retryAfter, err := g.allowN(ctx, key, n)
 	if err != nil {
 		return nil, err
 	}
 
-	result := &Result{
-		Allowed:    allowed,
-		Remaining:  -1, // GCRA doesn't have a simple "remaining" concept
-		ResetAfter: 0,  // GCRA doesn't have a fixed reset time
-	}
-
-	if !allowed {
-		// Calculate retry after based on the interval
-		result.RetryAfter = time.Duration(g.increment*int64(n)) * time.Millisecond
-	}
-
-	return result, nil
-}
-
-// Remaining is not applicable for GCRA as it doesn't use fixed windows.
-// This method is provided for interface compatibility and always returns -1.
-func (g *GCRA) Remaining(ctx context.Context, key string) (int, error) {
-	return -1, nil
-}
-
-// ResetAfter is not applicable for GCRA as it doesn't use fixed windows.
-// This method is provided for interface compatibility and always returns 0.
-func (g *GCRA) ResetAfter(ctx context.Context, key string) (time.Duration, error) {
-	return 0, nil
+	delta := g.period.Milliseconds() / int64(g.limit)
+	remaining := int(math.Max(0, math.Floor(-float64(retryAfter.Milliseconds())/float64(delta))))
+	return &Result{
+		Allow:      allow,
+		Remaining:  remaining,
+		ResetAfter: max(retryAfter, 0),
+		RetryAfter: max(retryAfter, 0),
+	}, nil
 }

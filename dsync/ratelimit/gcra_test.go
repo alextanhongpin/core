@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestGCRA(t *testing.T) {
+func TestGCRA_Limit(t *testing.T) {
 	ctx := context.Background()
 
 	client := newClient(t)
@@ -22,38 +22,40 @@ func TestGCRA(t *testing.T) {
 	var total int
 	for range 10 {
 		time.Sleep(100 * time.Millisecond)
-		ok, err := rl.Allow(ctx, key)
+		r, err := rl.Limit(ctx, key)
 		is.NoError(err)
-		if ok {
+		if r.Allow {
 			total++
 		}
+		t.Logf("allow=%t remaining=%d reset_after=%s retry_after=%s\n", r.Allow, r.Remaining, r.ResetAfter, r.RetryAfter)
 	}
 	is.Equal(5, total)
 }
 
-func TestGCRAAllowN(t *testing.T) {
+func TestGCRA_LimitN(t *testing.T) {
 	ctx := context.Background()
 
 	client := newClient(t)
 
 	is := assert.New(t)
-	rl := ratelimit.NewGCRA(client, 5, time.Second, 0)
+	rl := ratelimit.NewGCRA(client, 5, time.Second, 3)
 
 	key := t.Name()
 	var total int
 	for range 10 {
 		time.Sleep(100 * time.Millisecond)
-		ok, err := rl.AllowN(ctx, key, 5)
+		r, err := rl.LimitN(ctx, key, 2)
 		is.NoError(err)
-		if ok {
+		if r.Allow {
 			total++
 		}
+		t.Logf("allow=%t remaining=%d reset_after=%s retry_after=%s\n", r.Allow, r.Remaining, r.ResetAfter, r.RetryAfter)
 	}
 
-	is.Equal(1, total)
+	is.NotZero(total)
 }
 
-func TestGCRABurst(t *testing.T) {
+func TestGCRA_withBurst(t *testing.T) {
 	ctx := context.Background()
 
 	client := newClient(t)

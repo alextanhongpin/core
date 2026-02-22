@@ -38,23 +38,18 @@ type RateLimiter interface {
 
 	// AllowN checks if N requests are allowed for the given key.
 	AllowN(ctx context.Context, key string, n int) (bool, error)
-}
 
-// WindowRateLimiter extends RateLimiter with window-based information.
-type WindowRateLimiter interface {
-	RateLimiter
+	// Limit checks if a single request is allowed for the given key.
+	Limit(ctx context.Context, key string) (*Result, error)
 
-	// Remaining returns the number of requests remaining in the current window.
-	Remaining(ctx context.Context, key string) (int, error)
-
-	// ResetAfter returns the duration until the rate limit resets.
-	ResetAfter(ctx context.Context, key string) (time.Duration, error)
+	// AllowN checks if N requests are allowed for the given key.
+	LimitN(ctx context.Context, key string, n int) (*Result, error)
 }
 
 // Result contains detailed information about a rate limit check.
 type Result struct {
-	// Allowed indicates if the request was allowed.
-	Allowed bool
+	// Allow indicates if the request was allowed.
+	Allow bool
 
 	// Remaining is the number of requests remaining (if applicable).
 	Remaining int
@@ -64,13 +59,4 @@ type Result struct {
 
 	// RetryAfter suggests when to retry if the request was denied.
 	RetryAfter time.Duration
-}
-
-// DetailedRateLimiter provides detailed rate limiting information.
-type DetailedRateLimiter interface {
-	// Check performs a rate limit check and returns detailed information.
-	Check(ctx context.Context, key string) (*Result, error)
-
-	// CheckN performs a rate limit check for N requests and returns detailed information.
-	CheckN(ctx context.Context, key string, n int) (*Result, error)
 }

@@ -19,19 +19,12 @@ func TestFixedWindow(t *testing.T) {
 	var count int
 
 	for range 10 {
-		allow, err := rl.Allow(ctx, key)
+		r, err := rl.Limit(ctx, key)
 		is.NoError(err)
-		if allow {
+		if r.Allow {
 			count++
 		}
-
-		remaining, err := rl.Remaining(ctx, key)
-		is.NoError(err)
-
-		resetAfter, err := rl.ResetAfter(ctx, key)
-		is.NoError(err)
-
-		t.Log(allow, remaining, resetAfter)
+		t.Logf("allow=%t remaining=%d reset_after=%s retry_after=%s\n", r.Allow, r.Remaining, r.ResetAfter, r.RetryAfter)
 	}
 	is.Equal(5, count)
 }
@@ -88,14 +81,13 @@ func TestFixedWindow_Expiry(t *testing.T) {
 		rl := ratelimit.NewFixedWindow(client, 5, 10*time.Second)
 
 		key := t.Name()
-		allow, err := rl.Allow(ctx, key)
+		result, err := rl.Limit(ctx, key)
 		is := assert.New(t)
 		is.NoError(err)
-		is.True(allow)
+		is.True(result.Allow)
 
-		resetAfter, err := rl.ResetAfter(ctx, key)
-		is.NoError(err)
-		is.Equal(time.Duration(0), resetAfter)
+		is.Equal(10*time.Second, result.ResetAfter)
+		is.Equal(time.Duration(0), result.RetryAfter)
 	})
 
 	t.Run("AllowN", func(t *testing.T) {
@@ -105,14 +97,11 @@ func TestFixedWindow_Expiry(t *testing.T) {
 
 		rl := ratelimit.NewFixedWindow(client, 5, 10*time.Second)
 		key := t.Name()
-		allow, err := rl.AllowN(ctx, key, 5)
+		result, err := rl.LimitN(ctx, key, 5)
 
 		is := assert.New(t)
 		is.NoError(err)
-		is.True(allow)
-
-		resetAfter, err := rl.ResetAfter(ctx, key)
-		is.NoError(err)
-		is.LessOrEqual(resetAfter, 10*time.Second)
+		is.True(result.Allow)
+		is.LessOrEqual(result.ResetAfter, 10*time.Second)
 	})
 }
