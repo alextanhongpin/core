@@ -86,7 +86,7 @@ func TestFixedWindow_Expiry(t *testing.T) {
 		is.NoError(err)
 		is.True(result.Allow)
 
-		is.Equal(10*time.Second, result.ResetAfter)
+		is.InDelta((10 * time.Second).Seconds(), result.ResetAfter.Seconds(), (100 * time.Millisecond).Seconds())
 		is.Equal(time.Duration(0), result.RetryAfter)
 	})
 

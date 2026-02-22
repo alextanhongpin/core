@@ -68,11 +68,12 @@ func TestGCRA_withBurst(t *testing.T) {
 	key := t.Name()
 	for range 10 {
 		time.Sleep(100 * time.Millisecond)
-		ok, err := rl.Allow(ctx, key)
+		r, err := rl.Limit(ctx, key)
 		is.NoError(err)
-		if ok {
+		if r.Allow {
 			total++
 		}
+		t.Logf("allow=%t remaining=%d reset_after=%s retry_after=%s\n", r.Allow, r.Remaining, r.ResetAfter, r.RetryAfter)
 	}
 	is.Equal(6, total)
 }

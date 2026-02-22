@@ -17,19 +17,21 @@ local function gcra(keys, args)
 	local delta = period / limit;
 	local now = now_ms()
 	local ts = tonumber(redis.call('GET', key) or 0)
-	local allow = 0
+	local remaining = -1
 	ts = math.max(ts, now)
 
 	-- Allow hitting above quantity*delta, because we can lazily evaluate the
 	-- usage later.
 	if ts - burst * delta <= now then
-		allow = 1
 		ts = ts + quantity * delta
+		local max = now + delta
+		local min = ts - burst * delta
+		remaining = math.max(0, math.floor((max - min) / delta))
 		redis.call('SET', key, ts, 'PX', period)
 	end
 
-	-- Retry After.
-	return {allow, (ts - burst * delta) - now}
+	local retryAfter = ts - burst * delta - now
+	return {remaining, math.max(0, retryAfter)}
 end
 
 redis.register_function('gcra', gcra)

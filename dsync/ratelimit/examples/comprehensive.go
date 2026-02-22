@@ -62,22 +62,19 @@ func demonstrateFixedWindow(client *redis.Client) {
 
 	fmt.Println("   Making 10 requests...")
 	for i := 0; i < 10; i++ {
-		allowed, err := rl.Allow(ctx, key)
+		r, err := rl.Limit(ctx, key)
 		if err != nil {
 			log.Printf("   Error: %v", err)
 			continue
 		}
 
-		remaining, _ := rl.Remaining(ctx, key)
-		resetAfter, _ := rl.ResetAfter(ctx, key)
-
 		status := "✅ ALLOWED"
-		if !allowed {
+		if !r.Allow {
 			status = "❌ DENIED"
 		}
 
 		fmt.Printf("   Request %d: %s (remaining: %d, reset in: %v)\n",
-			i+1, status, remaining, resetAfter.Truncate(time.Millisecond))
+			i+1, status, r.Remaining, r.ResetAfter.Truncate(time.Millisecond))
 
 		time.Sleep(200 * time.Millisecond)
 	}
@@ -134,14 +131,14 @@ func demonstrateDetailedChecks(client *redis.Client) {
 	fmt.Println("   Using Check() method for detailed information...")
 
 	for i := 0; i < 5; i++ {
-		result, err := rl.Check(ctx, key)
+		result, err := rl.Limit(ctx, key)
 		if err != nil {
 			log.Printf("   Error: %v", err)
 			continue
 		}
 
 		status := "✅ ALLOWED"
-		if !result.Allowed {
+		if !result.Allow {
 			status = "❌ DENIED"
 		}
 
@@ -165,9 +162,8 @@ func demonstrateRateLimitingPatterns(client *redis.Client) {
 
 	users := []string{"user:123", "user:456", "user:789"}
 	for _, userID := range users {
-		allowed, _ := userRL.Allow(ctx, userID)
-		remaining, _ := userRL.Remaining(ctx, userID)
-		fmt.Printf("     %s: allowed=%t, remaining=%d\n", userID, allowed, remaining)
+		result, _ := userRL.Limit(ctx, userID)
+		fmt.Printf("     %s: allowed=%t, remaining=%d\n", userID, result.Allow, result.Remaining)
 	}
 
 	// API key rate limiting with different tiers

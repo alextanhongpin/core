@@ -48,17 +48,15 @@ func demonstrateBasicUsage(ctx context.Context, client *redis.Client) {
 	fw := ratelimit.NewFixedWindow(client, 5, 2*time.Second)
 
 	for i := 0; i < 8; i++ {
-		allowed, _ := fw.Allow(ctx, "user:123")
-		remaining, _ := fw.Remaining(ctx, "user:123")
-		resetAfter, _ := fw.ResetAfter(ctx, "user:123")
+		r, _ := fw.Limit(ctx, "user:123")
 
 		status := "✅"
-		if !allowed {
+		if !r.Allow {
 			status = "❌"
 		}
 
 		fmt.Printf("     Request %d: %s (remaining: %d, reset: %v)\n",
-			i+1, status, remaining, resetAfter.Truncate(time.Millisecond))
+			i+1, status, r.Remaining, r.ResetAfter.Truncate(time.Millisecond))
 
 		if i == 4 { // After hitting limit, wait for reset
 			time.Sleep(2 * time.Second)
@@ -126,9 +124,9 @@ func demonstrateAdvancedPatterns(ctx context.Context, client *redis.Client) {
 	detailRL := ratelimit.NewFixedWindow(client, 3, 10*time.Second)
 
 	for i := 0; i < 4; i++ {
-		result, _ := detailRL.Check(ctx, "detail:check")
+		result, _ := detailRL.Limit(ctx, "detail:check")
 		status := "✅"
-		if !result.Allowed {
+		if !result.Allow {
 			status = "❌"
 		}
 		fmt.Printf("     Check %d: %s (remaining: %d, retry in: %v)\n",

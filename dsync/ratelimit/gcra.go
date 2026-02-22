@@ -3,7 +3,6 @@ package ratelimit
 import (
 	"context"
 	_ "embed"
-	"math"
 	"time"
 
 	redis "github.com/redis/go-redis/v9"
@@ -46,15 +45,15 @@ func (g *GCRA) Allow(ctx context.Context, key string) (bool, error) {
 
 // AllowN checks if N requests are allow for the given key.
 func (g *GCRA) AllowN(ctx context.Context, key string, n int) (bool, error) {
-	allow, _, err := g.allowN(ctx, key, n)
+	res, err := g.allowN(ctx, key, n)
 	if err != nil {
 		return false, err
 	}
 
-	return allow, nil
+	return res.Allow, nil
 }
 
-func (g *GCRA) allowN(ctx context.Context, key string, n int) (bool, time.Duration, error) {
+func (g *GCRA) allowN(ctx context.Context, key string, n int) (*Result, error) {
 	keys := []string{key}
 	args := []any{
 		g.burst,
@@ -62,15 +61,19 @@ func (g *GCRA) allowN(ctx context.Context, key string, n int) (bool, time.Durati
 		g.period.Milliseconds(),
 		n,
 	}
-	results, err := g.client.FCall(ctx, "gcra", keys, args...).Int64Slice()
+	result, err := g.client.FCall(ctx, "gcra", keys, args...).Int64Slice()
 	if err != nil {
-		return false, 0, err
+		return nil, err
 	}
+	remaining := int(result[0])
+	retryAfter := time.Duration(result[1]) * time.Millisecond
 
-	allow := results[0] == 1
-	retryAfter := time.Duration(results[1]) * time.Millisecond
-
-	return allow, retryAfter, nil
+	return &Result{
+		Allow:      remaining >= 0,
+		Remaining:  max(0, remaining),
+		RetryAfter: retryAfter,
+		ResetAfter: retryAfter,
+	}, nil
 }
 
 // Limit performs a rate limit check and returns detailed information.
@@ -80,17 +83,5 @@ func (g *GCRA) Limit(ctx context.Context, key string) (*Result, error) {
 
 // LimitN performs a rate limit check for N requests and returns detailed information.
 func (g *GCRA) LimitN(ctx context.Context, key string, n int) (*Result, error) {
-	allow, retryAfter, err := g.allowN(ctx, key, n)
-	if err != nil {
-		return nil, err
-	}
-
-	delta := g.period.Milliseconds() / int64(g.limit)
-	remaining := int(math.Max(0, math.Floor(-float64(retryAfter.Milliseconds())/float64(delta))))
-	return &Result{
-		Allow:      allow,
-		Remaining:  remaining,
-		ResetAfter: max(retryAfter, 0),
-		RetryAfter: max(retryAfter, 0),
-	}, nil
+	return g.allowN(ctx, key, n)
 }
