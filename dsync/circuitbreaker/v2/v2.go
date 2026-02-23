@@ -13,6 +13,10 @@ import (
 
 type Status int
 
+func (s Status) Int() int {
+	return int(s)
+}
+
 const (
 	Unknown    Status = 0
 	Closed     Status = 1
@@ -95,4 +99,24 @@ func (cb *CircuitBreaker) call(ctx context.Context, method, key string, cause er
 	}
 	status, err := cb.client.FCall(ctx, method, keys, args...).Int()
 	return Status(status), err
+}
+
+func (cb *CircuitBreaker) SetStatus(ctx context.Context, key string, status Status) error {
+	keys := []string{key}
+	args := []any{status.Int()}
+	_, err := cb.client.FCall(ctx, "set_status", keys, args...).Int()
+	return err
+}
+
+func (cb *CircuitBreaker) Status(ctx context.Context, key string) (Status, error) {
+	n, err := cb.client.HGet(ctx, key, "status").Int()
+	if errors.Is(err, redis.Nil) {
+		return Closed, nil
+	}
+
+	if err != nil {
+		return 0, err
+	}
+
+	return Status(n), nil
 }
