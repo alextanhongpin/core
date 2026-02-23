@@ -1,6 +1,6 @@
 module github.com/alextanhongpin/core/dsync/circuitbreaker
 
-go 1.23.1
+go 1.26.0
 
 require (
 	github.com/alextanhongpin/core/storage/redis v0.0.0-20241012071205-3b95b3c0db15
