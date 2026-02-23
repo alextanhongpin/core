@@ -14,13 +14,6 @@ local function now_ms()
 	return seconds * 1000 + microseconds/1000 -- in milliseconds
 end
 
-local function set_status(keys, args)
-	local key = keys[1]
-	local status = args[1]
-
-	return redis.pcall('HSET', keys[1], 'status', status)
-end
-
 local function get_status(keys)
 	return tonumber(redis.pcall('HGET', keys[1], 'status') or CLOSED)
 end
@@ -137,4 +130,3 @@ end
 
 redis.register_function('begin', begin)
 redis.register_function('commit', commit)
-redis.register_function('set_status', set_status)
