@@ -2,21 +2,24 @@ package v2
 
 import (
 	_ "embed"
-	"errors"
 
+	"cmp"
 	"context"
+	"errors"
 	"time"
 
 	redis "github.com/redis/go-redis/v9"
 )
 
+type Status int
+
 const (
-	Opened     = 1
-	HalfOpen   = 0
-	Closed     = -1
-	Disabled   = -3
-	ForcedOpen = -2
-	Unknown    = 99
+	Unknown    Status = 0
+	Closed     Status = 1
+	HalfOpen   Status = 2
+	Opened     Status = 3
+	Disabled   Status = 4
+	ForcedOpen Status = 5
 )
 
 var ErrOpened = errors.New("cb: opened")
@@ -43,61 +46,35 @@ func NewCircuitBreaker(client *redis.Client) *CircuitBreaker {
 }
 
 func (cb *CircuitBreaker) Do(ctx context.Context, key string, fn func() error) error {
-	status, err := cb.begin(ctx, key)
+	status, err := cb.call(ctx, "begin", key, nil)
 	if err != nil {
 		return err
 	}
 	switch status {
-	case HalfOpen:
-	case Closed:
+	case Closed, HalfOpen:
+	case Opened, ForcedOpen:
+		return ErrOpened
 	case Disabled:
 		return fn()
-	case ForcedOpen:
-		return ErrOpened
-	case Unknown:
-		panic("unknown status")
 	default:
-		return ErrOpened
+		panic("unknown status")
 	}
 
 	// Do not pass context, as the cancelation should not affect the redis cancelation.
 	err = fn()
 	if err != nil {
-		if _, err := cb.commit(ctx, key, err); err != nil {
-			return err
-		}
-		return err
+		_, callErr := cb.call(ctx, "commit", key, err)
+		return cmp.Or(callErr, err)
+	}
+	if status != HalfOpen {
+		return nil
 	}
 
-	if status == Closed {
-		return nil
-	}
-	switch status {
-	case Closed:
-		return nil
-	}
-	_, err = cb.commit(ctx, key, err)
+	_, err = cb.call(ctx, "commit", key, err)
 	return err
 }
 
-func (cb *CircuitBreaker) begin(ctx context.Context, key string) (int, error) {
-	var failureCount, successCount int
-	keys := []string{key}
-	args := []any{
-		failureCount,
-		cb.failureThreshold,
-		cb.failurePeriod.Milliseconds(),
-		successCount,
-		cb.successThreshold,
-		cb.successPeriod.Milliseconds(),
-		cb.openTimeout.Milliseconds(),
-	}
-
-	status, err := cb.client.FCall(ctx, "begin", keys, args...).Int()
-	return status, err
-}
-
-func (cb *CircuitBreaker) commit(ctx context.Context, key string, cause error) (int, error) {
+func (cb *CircuitBreaker) call(ctx context.Context, method, key string, cause error) (Status, error) {
 	var failureCount int
 	var successCount int
 	if cause != nil {
@@ -116,6 +93,6 @@ func (cb *CircuitBreaker) commit(ctx context.Context, key string, cause error) (
 		cb.successPeriod.Milliseconds(),
 		cb.openTimeout.Milliseconds(),
 	}
-	status, err := cb.client.FCall(ctx, "commit", keys, args...).Int()
-	return status, err
+	status, err := cb.client.FCall(ctx, method, keys, args...).Int()
+	return Status(status), err
 }

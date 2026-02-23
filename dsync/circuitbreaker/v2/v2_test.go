@@ -6,8 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alextanhongpin/core/storage/redis/redistest"
 	redis "github.com/redis/go-redis/v9"
+
+	"github.com/alextanhongpin/core/storage/redis/redistest"
 )
 
 func TestMain(m *testing.M) {
@@ -31,6 +32,13 @@ func TestCircuitBreaker(t *testing.T) {
 	}
 
 	wantErr := errors.New("bad request")
+	err := cb.Do(ctx, key, func() error {
+		return nil
+	})
+	debug("CLOSED")
+	if err != nil {
+		t.Fatalf("want no error, got %v", err)
+	}
 	for range cb.failureThreshold {
 		err := cb.Do(ctx, key, func() error {
 			return wantErr
@@ -39,7 +47,7 @@ func TestCircuitBreaker(t *testing.T) {
 			t.Fatalf("unknown error: %v", err)
 		}
 	}
-	err := cb.Do(ctx, key, func() error {
+	err = cb.Do(ctx, key, func() error {
 		return wantErr
 	})
 	debug("OPENED")
@@ -65,15 +73,22 @@ func TestCircuitBreaker(t *testing.T) {
 		t.Fatalf("want open, got %v", err)
 	}
 	time.Sleep(cb.openTimeout)
-	//t.Log(client.HGetAll(ctx, key).Result())
+
+	for range cb.successThreshold {
+		err = cb.Do(ctx, key, func() error {
+			return nil
+		})
+
+		if err != nil {
+			t.Fatalf("got error: %v", err)
+		}
+	}
+	debug("HALF_OPEN SUCCESS")
+
 	err = cb.Do(ctx, key, func() error {
 		return nil
 	})
-
-	debug("HALF_OPEN SUCCESS")
-	if err != nil {
-		t.Fatalf("got error: %v", err)
-	}
+	debug("CLOSED")
 }
 
 func newClient(t *testing.T) *redis.Client {
