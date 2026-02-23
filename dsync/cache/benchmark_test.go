@@ -3,6 +3,7 @@ package cache_test
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"testing"
 	"time"
 
@@ -153,15 +154,19 @@ func BenchmarkJSONCache(b *testing.B) {
 	})
 
 	b.Run("JSONLoadOrStore", func(b *testing.B) {
-		getter := func() (any, error) {
-			return data, nil
+		getter := func(ctx context.Context, key fmt.Stringer) (*cache.Item, error) {
+			return &cache.Item{
+				Key:   key.String(),
+				TTL:   time.Hour,
+				Value: data,
+			}, nil
 		}
 
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
-			key := fmt.Sprintf("bench:json:loadorstore:%d", i%100) // Reuse keys
+			key := cache.PrefixKey{Prefix: "bench:json:loadorstore", Key: strconv.Itoa(i % 100)}
 			var result BenchmarkData
-			_, err := jsonCache.LoadOrStore(ctx, key, &result, getter, time.Hour)
+			_, err := jsonCache.LoadOrStore(ctx, key, &result, getter)
 			if err != nil {
 				b.Fatal(err)
 			}

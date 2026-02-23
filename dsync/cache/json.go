@@ -5,9 +5,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 
 	redis "github.com/redis/go-redis/v9"
+
+	"golang.org/x/sync/singleflight"
 )
 
 // JSON-specific errors
@@ -20,6 +23,7 @@ var (
 // All methods that take value parameters expect pointers for unmarshaling operations.
 type JSON struct {
 	Cache Cacheable
+	Group *singleflight.Group
 }
 
 // NewJSON creates a new JSON cache wrapper with the provided Redis client.
@@ -28,6 +32,7 @@ type JSON struct {
 func NewJSON(client *redis.Client) *JSON {
 	return &JSON{
 		Cache: New(client),
+		Group: new(singleflight.Group),
 	}
 }
 
@@ -97,9 +102,24 @@ func (s *JSON) CompareAndSwap(ctx context.Context, key string, old, value any, t
 	return s.Cache.CompareAndSwap(ctx, key, a, b, ttl)
 }
 
-func (s *JSON) LoadOrStore(ctx context.Context, key string, value any, getter func() (any, error), ttl time.Duration) (loaded bool, err error) {
+type PrefixKey struct {
+	Prefix string
+	Key    string
+}
+
+func (k PrefixKey) String() string {
+	return fmt.Sprintf("%s:%s", k.Prefix, k.Key)
+}
+
+type Item struct {
+	Key   string
+	TTL   time.Duration
+	Value any
+}
+
+func (s *JSON) LoadOrStore(ctx context.Context, key fmt.Stringer, value any, getter func(ctx context.Context, key fmt.Stringer) (*Item, error)) (loaded bool, err error) {
 	// First, try to load from cache
-	err = s.Load(ctx, key, value)
+	err = s.Load(ctx, key.String(), value)
 	if err == nil {
 		return true, nil
 	}
@@ -108,30 +128,37 @@ func (s *JSON) LoadOrStore(ctx context.Context, key string, value any, getter fu
 		return false, err
 	}
 
-	// Call getter to get the value to store
-	v, err := getter()
+	res, err, shared := s.Group.Do(key.String(), func() (any, error) {
+		// Call getter to get the value to store
+		i, err := getter(ctx, key)
+		if err != nil {
+			return false, err
+		}
+
+		// Marshal the value from getter
+		b, err := json.Marshal(i.Value)
+		if err != nil {
+			return false, err
+		}
+
+		// Use atomic LoadOrStore operation to prevent race conditions
+		curr, loaded, err := s.Cache.LoadOrStore(ctx, i.Key, b, i.TTL)
+		if err != nil {
+			return false, err
+		}
+
+		// Unmarshal the current value (either from cache or what we just stored)
+		if err := json.Unmarshal(curr, value); err != nil {
+			return false, err
+		}
+
+		return loaded, nil
+	})
 	if err != nil {
 		return false, err
 	}
 
-	// Marshal the value from getter
-	b, err := json.Marshal(v)
-	if err != nil {
-		return false, err
-	}
-
-	// Use atomic LoadOrStore operation to prevent race conditions
-	curr, loaded, err := s.Cache.LoadOrStore(ctx, key, b, ttl)
-	if err != nil {
-		return false, err
-	}
-
-	// Unmarshal the current value (either from cache or what we just stored)
-	if err := json.Unmarshal(curr, value); err != nil {
-		return false, err
-	}
-
-	return loaded, nil
+	return res.(bool) && shared, nil
 }
 
 // Exists checks if a key exists in the cache.
