@@ -70,7 +70,7 @@ func (g *GCRA) allowN(ctx context.Context, key string, n int) (*Result, error) {
 
 	return &Result{
 		Allow:      remaining >= 0,
-		Remaining:  max(0, remaining),
+		Remaining:  remaining,
 		RetryAfter: retryAfter,
 		ResetAfter: retryAfter,
 	}, nil
