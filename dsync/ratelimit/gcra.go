@@ -54,6 +54,9 @@ func (g *GCRA) AllowN(ctx context.Context, key string, n int) (bool, error) {
 }
 
 func (g *GCRA) allowN(ctx context.Context, key string, n int) (*Result, error) {
+	if n < 0 {
+		return nil, ErrNegative
+	}
 	keys := []string{key}
 	args := []any{
 		g.burst,

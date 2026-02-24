@@ -37,6 +37,9 @@ func NewFixedWindow(client *redis.Client, limit int, period time.Duration) *Fixe
 
 // allowN checks if N requests are allowed for the given key.
 func (r *FixedWindow) allowN(ctx context.Context, key string, n int) (int, error) {
+	if n < 0 {
+		return 0, ErrNegative
+	}
 	keys := []string{key}
 	args := []any{
 		r.limit,

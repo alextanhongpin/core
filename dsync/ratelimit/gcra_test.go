@@ -77,3 +77,51 @@ func TestGCRA_withBurst(t *testing.T) {
 	}
 	is.Equal(6, total)
 }
+
+func TestGCRA_retryAfter(t *testing.T) {
+	ctx := context.Background()
+
+	client := newClient(t)
+	timeout := time.After(time.Second)
+
+	is := assert.New(t)
+	// 5 request per second, each request takes 200ms.
+	rl := ratelimit.NewGCRA(client, 5, time.Second, 1)
+
+	key := t.Name()
+
+	var total int
+loop:
+	for {
+		select {
+		case <-timeout:
+			break loop
+		default:
+			r, err := rl.Limit(ctx, key)
+			is.NoError(err)
+			if r.Allow {
+				total++
+			}
+			t.Logf("allow=%t remaining=%d reset_after=%s retry_after=%s\n", r.Allow, r.Remaining, r.ResetAfter, r.RetryAfter)
+			time.Sleep(r.RetryAfter)
+		}
+	}
+	is.Equal(6, total)
+}
+
+func TestGCRA_zero(t *testing.T) {
+	ctx := context.Background()
+
+	client := newClient(t)
+	is := assert.New(t)
+	// 5 request per second, each request takes 200ms.
+	rl := ratelimit.NewGCRA(client, 5, time.Second, 1)
+
+	key := t.Name()
+
+	for range 2 {
+		r, err := rl.LimitN(ctx, key, 0)
+		is.NoError(err)
+		t.Logf("allow=%t remaining=%d reset_after=%s retry_after=%s\n", r.Allow, r.Remaining, r.ResetAfter, r.RetryAfter)
+	}
+}
