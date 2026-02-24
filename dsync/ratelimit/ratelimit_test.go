@@ -1,7 +1,6 @@
 package ratelimit_test
 
 import (
-	"context"
 	"os"
 	"testing"
 
@@ -19,15 +18,8 @@ func TestMain(m *testing.M) {
 
 func newClient(t *testing.T) *redis.Client {
 	t.Helper()
-	client := redis.NewClient(&redis.Options{
-		Addr: redistest.Addr(),
-	})
 
-	t.Cleanup(func() {
-		client.FlushAll(context.Background())
-		client.Close()
-	})
-
+	client := redistest.Client(t)
 	if err := ratelimit.Setup(t.Context(), client); err != nil {
 		t.Fatalf("setup failed: %v", err)
 	}
