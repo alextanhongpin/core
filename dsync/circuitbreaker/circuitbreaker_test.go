@@ -7,6 +7,7 @@ import (
 
 	redis "github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/suite"
 
 	"github.com/alextanhongpin/core/dsync/circuitbreaker"
 	"github.com/alextanhongpin/core/storage/redis/redistest"
@@ -31,109 +32,123 @@ func newClient(t *testing.T) *redis.Client {
 	return client
 }
 
-func TestCircuitBreaker(t *testing.T) {
-	s := newSuite(t)
-	s.runErr(t, nil, nil)
-
-	// Initial state.
-	s.statusIs(t, circuitbreaker.Closed)
-
-	// Trigger open.
-	for range s.options.FailureThreshold {
-		s.runErr(t, assert.AnError, assert.AnError)
-	}
-
-	s.statusIs(t, circuitbreaker.Opened)
-	time.Sleep(s.options.OpenTimeout)
-
-	// Half-open, but trigger an error.
-	s.runErr(t, assert.AnError, assert.AnError)
-	s.statusIs(t, circuitbreaker.Opened)
-	s.runErr(t, assert.AnError, circuitbreaker.ErrOpened)
-
-	time.Sleep(s.options.OpenTimeout)
-	s.runErr(t, nil, nil)
-	s.statusIs(t, circuitbreaker.HalfOpen)
-
-	// Half-open, but make it successful.
-	for range s.options.SuccessThreshold {
-		s.runErr(t, nil, nil)
-	}
-
-	s.statusIs(t, circuitbreaker.Closed)
+func TestCircuitBreakerSuite(t *testing.T) {
+	suite.Run(t, new(CircuitBreakerSuite))
 }
 
-func TestCircuitBreaker_SetStatus(t *testing.T) {
-	t.Run("forced open", func(t *testing.T) {
-		s := newSuite(t)
-		s.setStatus(t, circuitbreaker.ForcedOpen)
-		s.runErr(t, nil, circuitbreaker.ErrOpened)
-	})
+type CircuitBreakerSuite struct {
+	suite.Suite
 
-	t.Run("disabled", func(t *testing.T) {
-		s := newSuite(t)
-		s.setStatus(t, circuitbreaker.Disabled)
-		for range s.options.FailureThreshold + 1 {
-			s.runErr(t, assert.AnError, assert.AnError)
-		}
-	})
-}
-
-type suite struct {
 	client  *redis.Client
 	options *circuitbreaker.Options
 	cb      *circuitbreaker.CircuitBreaker
 }
 
-func newSuite(t *testing.T) *suite {
-	client := newClient(t)
-
+func (s *CircuitBreakerSuite) SetupTest() {
 	options := circuitbreaker.NewOptions()
 	options.FailureThreshold = 10
 	options.SuccessThreshold = 10
 	options.OpenTimeout = 100 * time.Millisecond
-	cb := circuitbreaker.New(client, options)
 
-	return &suite{
-		client:  client,
-		options: options,
-		cb:      cb,
-	}
+	s.client = newClient(s.T())
+	s.options = options
+	s.cb = circuitbreaker.New(s.client, options)
 }
 
-func (s *suite) statusIs(t *testing.T, status circuitbreaker.Status) {
-	t.Helper()
+func (s *CircuitBreakerSuite) statusIs(status circuitbreaker.Status) {
+	t := s.T()
 
 	ctx := t.Context()
 	key := t.Name()
 
 	got, err := s.cb.Status(ctx, key)
 
-	is := assert.New(t)
-	is.NoError(err)
-	is.Equal(status, got)
+	s.NoError(err)
+	s.Equal(status, got)
 }
 
-func (s *suite) setStatus(t *testing.T, status circuitbreaker.Status) {
-	t.Helper()
+func (s *CircuitBreakerSuite) setStatus(status circuitbreaker.Status) {
+	t := s.T()
 
 	ctx := t.Context()
 	key := t.Name()
-	is := assert.New(t)
 
 	err := s.cb.SetStatus(ctx, key, status)
-	is.NoError(err)
-
-	s.statusIs(t, status)
+	s.NoError(err)
 }
 
-func (s *suite) runErr(t *testing.T, with error, want error) {
-	t.Helper()
+func (s *CircuitBreakerSuite) runErr(want error) {
+	t := s.T()
 
 	ctx := t.Context()
 	key := t.Name()
 	got := s.cb.Do(ctx, key, func() error {
-		return with
+		return assert.AnError
 	})
-	assert.ErrorIs(t, got, want)
+	s.ErrorIs(got, want)
+}
+
+func (s *CircuitBreakerSuite) run(want error) {
+	t := s.T()
+
+	ctx := t.Context()
+	key := t.Name()
+	got := s.cb.Do(ctx, key, func() error {
+		return nil
+	})
+	s.ErrorIs(got, want)
+}
+
+func (s *CircuitBreakerSuite) triggerOpen() {
+	for range s.options.FailureThreshold {
+		s.runErr(assert.AnError)
+	}
+}
+
+func (s *CircuitBreakerSuite) TestClosed() {
+	s.run(nil)
+	s.statusIs(circuitbreaker.Closed)
+}
+
+func (s *CircuitBreakerSuite) TestOpened() {
+	s.triggerOpen()
+	s.statusIs(circuitbreaker.Opened)
+}
+
+func (s *CircuitBreakerSuite) TestHalfOpenError() {
+	s.triggerOpen()
+	s.statusIs(circuitbreaker.Opened)
+	time.Sleep(s.options.OpenTimeout)
+
+	s.runErr(assert.AnError)
+	s.statusIs(circuitbreaker.Opened)
+	s.run(circuitbreaker.ErrOpened)
+}
+
+func (s *CircuitBreakerSuite) TestHalfOpenSuccess() {
+	s.triggerOpen()
+	s.statusIs(circuitbreaker.Opened)
+	time.Sleep(s.options.OpenTimeout)
+
+	s.run(nil)
+	s.statusIs(circuitbreaker.HalfOpen)
+
+	for range s.options.SuccessThreshold {
+		s.run(nil)
+	}
+	s.statusIs(circuitbreaker.Closed)
+}
+
+func (s *CircuitBreakerSuite) TestForcedOpen() {
+	s.setStatus(circuitbreaker.ForcedOpen)
+	s.run(circuitbreaker.ErrOpened)
+	s.statusIs(circuitbreaker.ForcedOpen)
+}
+
+func (s *CircuitBreakerSuite) TestDisabled() {
+	s.setStatus(circuitbreaker.Disabled)
+	for range s.options.FailureThreshold + 1 {
+		s.runErr(assert.AnError)
+	}
+	s.statusIs(circuitbreaker.Disabled)
 }
