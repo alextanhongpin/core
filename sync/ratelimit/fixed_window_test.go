@@ -9,33 +9,33 @@ import (
 )
 
 func TestFixedWindow(t *testing.T) {
-	rl := ratelimit.MustNewFixedWindow(3, time.Second)
-
-	is := assert.New(t)
-
-	// Succeed.
-	got := rl.Limit()
-	is.True(got.Allow)
-	is.Equal(int64(2), got.Remaining)
-
-	got = rl.Limit()
-	is.True(got.Allow)
-	is.Equal(int64(1), got.Remaining)
-
-	got = rl.Limit()
-	is.True(got.Allow)
-	is.Equal(int64(0), got.Remaining)
-
-	got = rl.Limit()
-	is.False(got.Allow)
-	is.Equal(int64(0), got.Remaining)
-
-	// Call after the next period succeeds.
-	rl.Now = func() time.Time {
-		return time.Now().Add(time.Second)
+	var (
+		key    = t.Name()
+		limit  = 5
+		n      = 15
+		period = time.Second
+	)
+	rl, err := ratelimit.NewFixedWindow(limit, period)
+	if err != nil {
+		t.Fatal(err)
 	}
 
-	got = rl.Limit()
-	is.True(got.Allow)
-	is.Equal(int64(2), got.Remaining)
+	now := time.Now()
+	for range n {
+		rl.Now = func() time.Time {
+			return now
+		}
+		res := rl.Limit(key)
+		t.Log(res.String())
+		now = now.Add(period / time.Duration(n))
+	}
+
+	is := assert.New(t)
+	is.Equal(1, rl.Size())
+
+	rl.Now = func() time.Time {
+		return now.Add(time.Second)
+	}
+	rl.Clear()
+	is.Zero(rl.Size())
 }

@@ -9,23 +9,39 @@ import (
 )
 
 func TestSlidingWindow(t *testing.T) {
-	rl := ratelimit.MustNewSlidingWindow(1, time.Second)
-
-	is := assert.New(t)
-	is.True(rl.Allow())
-	is.False(rl.Allow())
-}
-
-func TestSlidingWindow_RateLimited(t *testing.T) {
-	rl := ratelimit.MustNewSlidingWindow(5, time.Second)
-
-	var count int
-	for i := 0; i < 10; i++ {
-		if rl.Allow() {
-			count++
-		}
+	var (
+		limit  = 5
+		period = time.Second
+		n      = 15
+	)
+	rl, err := ratelimit.NewSlidingWindow(limit, period)
+	if err != nil {
+		t.Fatal(err)
 	}
 
+	var count int
+
+	now := time.Now()
+	for range 2 * n {
+		rl.Now = func() time.Time {
+			return now
+		}
+		res := rl.Limit(t.Name())
+		if res.Allow {
+			count++
+		}
+		t.Log(res.String())
+		now = now.Add(period / time.Duration(n))
+	}
+
+	assert.Equal(t, 11, count)
+
 	is := assert.New(t)
-	is.Equal(5, count)
+	is.Equal(1, rl.Size())
+
+	rl.Now = func() time.Time {
+		return now.Add(time.Second)
+	}
+	rl.Clear()
+	is.Zero(rl.Size())
 }
