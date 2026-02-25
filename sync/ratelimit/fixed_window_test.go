@@ -14,23 +14,28 @@ func TestFixedWindow(t *testing.T) {
 	is := assert.New(t)
 
 	// Succeed.
-	is.True(rl.Allow())
-	is.Equal(2, rl.Remaining())
+	got := rl.Limit()
+	is.True(got.Allow)
+	is.Equal(int64(2), got.Remaining)
 
-	is.True(rl.Allow())
-	is.Equal(1, rl.Remaining())
+	got = rl.Limit()
+	is.True(got.Allow)
+	is.Equal(int64(1), got.Remaining)
 
-	is.True(rl.Allow())
-	is.Equal(0, rl.Remaining())
+	got = rl.Limit()
+	is.True(got.Allow)
+	is.Equal(int64(0), got.Remaining)
 
-	is.False(rl.Allow())
-	is.Equal(0, rl.Remaining())
+	got = rl.Limit()
+	is.False(got.Allow)
+	is.Equal(int64(0), got.Remaining)
 
 	// Call after the next period succeeds.
 	rl.Now = func() time.Time {
 		return time.Now().Add(time.Second)
 	}
 
-	is.True(rl.Allow())
-	is.Equal(2, rl.Remaining())
+	got = rl.Limit()
+	is.True(got.Allow)
+	is.Equal(int64(2), got.Remaining)
 }

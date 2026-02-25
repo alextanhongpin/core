@@ -1,29 +1,30 @@
 package ratelimit
 
 import (
+	"sync"
 	"time"
 )
 
 // FixedWindow acts as a counter for a given time period.
 type FixedWindow struct {
+	mu sync.RWMutex
 	// State.
-	last  int64
-	count int
+	last      int64
+	remaining int64
 
 	// Options.
-	limit  int
+	limit  int64
 	period int64
 	Now    func() time.Time
 }
 
 func NewFixedWindow(limit int, period time.Duration) (*FixedWindow, error) {
-	o := &option{limit: limit, period: period}
-	if err := o.Validate(); err != nil {
+	if err := validate(limit, period, 0); err != nil {
 		return nil, err
 	}
 
 	return &FixedWindow{
-		limit:  limit,
+		limit:  int64(limit),
 		period: period.Nanoseconds(),
 		Now:    time.Now,
 	}, nil
@@ -46,40 +47,31 @@ func (r *FixedWindow) Allow() bool {
 // AllowN checks if a request is allowed. Consumes n token
 // if allowed.
 func (r *FixedWindow) AllowN(n int) bool {
-	if n <= 0 {
-		return false
-	}
+	return r.LimitN(n).Allow
+}
+
+func (r *FixedWindow) Limit() *Result {
+	return r.LimitN(1)
+}
+func (r *FixedWindow) LimitN(n int) *Result {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 
 	now := r.Now().UnixNano()
 	if r.last+r.period <= now {
 		r.last = now
-		r.count = 0
+		r.remaining = r.limit
 	}
-	if r.count+n <= r.limit {
-		r.count += n
-		return true
+	r.remaining = max(-1, r.remaining-1)
+
+	res := &Result{
+		Allow:      r.remaining >= 0,
+		Remaining:  max(0, r.remaining),
+		ResetAfter: time.Duration(now-(r.last+r.period)) * time.Nanosecond,
+		RetryAfter: time.Duration(now-(r.last+r.period)) * time.Nanosecond,
 	}
-
-	return false
-}
-
-func (r *FixedWindow) Remaining() int {
-	if r.last+r.period <= r.Now().UnixNano() {
-		return r.limit
+	if res.Allow {
+		res.RetryAfter = 0
 	}
-
-	return r.limit - r.count
-}
-
-func (r *FixedWindow) RetryAt() time.Time {
-	now := r.Now()
-	if r.last+r.period <= now.UnixNano() {
-		return now
-	}
-
-	if r.limit-r.count > 0 {
-		return now
-	}
-
-	return time.Unix(0, r.last+r.period)
+	return res
 }

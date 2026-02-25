@@ -1,7 +1,6 @@
 package ratelimit
 
 import (
-	"fmt"
 	"sync"
 	"time"
 )
@@ -12,30 +11,24 @@ type MultiGCRA struct {
 	state map[string]int64
 
 	// Option.
-	Now       func() time.Time
-	increment int64
-	offset    int64
-	period    int64
+	Now    func() time.Time
+	burst  int64
+	limit  int64
+	period int64
 }
 
 func NewMultiGCRA(limit int, period time.Duration, burst int) (*MultiGCRA, error) {
-	o := &option{limit: limit, period: period, burst: burst}
-	if err := o.Validate(); err != nil {
+	if err := validate(limit, period, burst); err != nil {
 		return nil, err
 	}
 
-	increment := div(period.Nanoseconds(), int64(limit))
-	if increment == 0 {
-		return nil, fmt.Errorf("%w: period divided by limit", ErrInvalidNumber)
-	}
-	offset := mul(increment, int64(burst))
 	return &MultiGCRA{
 		// NOTE: The burst is only applied once.
-		increment: increment,
-		offset:    offset,
-		period:    period.Nanoseconds(),
-		state:     make(map[string]int64),
-		Now:       time.Now,
+		Now:    time.Now,
+		burst:  int64(burst),
+		limit:  int64(limit),
+		period: period.Nanoseconds(),
+		state:  make(map[string]int64),
 	}, nil
 }
 
@@ -54,34 +47,43 @@ func (r *MultiGCRA) Allow(key string) bool {
 }
 
 func (r *MultiGCRA) AllowN(key string, n int) bool {
-	if key == "" || n <= 0 {
-		return false
+	return r.limitN(key, 1).Allow
+}
+
+func (r *MultiGCRA) LimitN(key string, n int) *Result {
+	return r.limitN(key, 1)
+}
+
+func (r *MultiGCRA) limitN(key string, n int) *Result {
+	if key == "" || n < 0 {
+		return new(Result)
 	}
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	quantity := int64(n)
+	remaining := int64(-1)
+	delta := r.period / r.limit
 	now := r.Now().UnixNano()
-	r.state[key] = max(r.state[key], now)
-	if r.state[key]-r.offset <= now {
-		increment := mul(r.increment, int64(n))
-		r.state[key] = add(r.state[key], increment)
-		return true
+
+	last := r.state[key]
+	last = max(last, now)
+	if last-r.burst*delta <= now {
+		last += quantity * delta
+		up, lo := now+delta, last-r.burst*delta
+		remaining = max(0, (up-lo)/delta)
 	}
+	r.state[key] = last
 
-	return false
-}
+	retryAfter := max(0, last-r.burst*delta-now)
 
-func (r *MultiGCRA) RetryAt(key string) time.Time {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-
-	now := r.Now()
-	if r.state[key] < now.UnixNano() {
-		return now
+	return &Result{
+		Allow:      remaining >= 0,
+		Remaining:  max(0, remaining),
+		RetryAfter: time.Duration(retryAfter) * time.Nanosecond,
+		ResetAfter: time.Duration(retryAfter) * time.Nanosecond,
 	}
-
-	return time.Unix(0, r.state[key]+r.increment)
 }
 
 func (r *MultiGCRA) Clear() {

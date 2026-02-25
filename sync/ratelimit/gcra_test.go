@@ -39,12 +39,12 @@ func TestGCRAFullRange(t *testing.T) {
 			return now.Add(p)
 		}
 		want := p.Milliseconds()%2 == 0
-		got := rl.Allow()
-		if want != got {
+		got := rl.Limit()
+		if want != got.Allow {
 			t.Fatalf("doesn't allow: %v", p)
 		}
 
-		t.Log(now.Add(p).Sub(now), got, rl.RetryAt())
+		t.Logf("allow=%t retry_after=%v reset_after=%v remaining=%d", got.Allow, got.RetryAfter, got.ResetAfter, got.Remaining)
 	}
 }
 
@@ -73,12 +73,12 @@ func TestGCRAPartial(t *testing.T) {
 		}
 
 		want := p.Milliseconds()%2 == 0
-		got := rl.Allow()
-		if want != got {
+		got := rl.Limit()
+		if want != got.Allow {
 			t.Fatalf("doesn't allow: %v", p)
 		}
 
-		t.Log(now.Add(p).Sub(now), got, rl.RetryAt())
+		t.Logf("allow=%t retry_after=%v reset_after=%v remaining=%d", got.Allow, got.RetryAfter, got.ResetAfter, got.Remaining)
 	}
 }
 
@@ -115,12 +115,12 @@ func TestGCRABurst(t *testing.T) {
 			return now.Add(p)
 		}
 		want := p.Milliseconds()%2 == 0
-		got := rl.Allow()
-		if want != got {
-			t.Fatalf("want %t, got %t: %v", want, got, p)
+		got := rl.Limit()
+		if want != got.Allow {
+			t.Fatalf("want %t, got %t: %v", want, got.Allow, p)
 		}
 
-		t.Log(now.Add(p).Sub(now), got, rl.RetryAt())
+		t.Logf("allow=%t retry_after=%v reset_after=%v remaining=%d", got.Allow, got.RetryAfter, got.ResetAfter, got.Remaining)
 	}
 }
 
@@ -151,15 +151,15 @@ func TestGCRABurstPartial(t *testing.T) {
 			return now.Add(p)
 		}
 		want := p.Milliseconds()%2 == 0
-		got := rl.Allow()
-		if want != got {
-			t.Fatalf("want %t, got %t, %v", want, got, p)
+		got := rl.Limit()
+		if want != got.Allow {
+			t.Fatalf("want %t, got %t, %v", want, got.Allow, p)
 		}
-		if got {
+		if got.Allow {
 			count++
 		}
 
-		t.Log(now.Add(p).Sub(now), got, rl.RetryAt())
+		t.Logf("allow=%t retry_after=%v reset_after=%v remaining=%d", got.Allow, got.RetryAfter, got.ResetAfter, got.Remaining)
 	}
 	if 6 != count {
 		t.Fatalf("want %d, got %d", 6, count)
@@ -187,12 +187,12 @@ func TestGCRAMultipleBurst(t *testing.T) {
 		rl.Now = func() time.Time {
 			return now.Add(p)
 		}
-		got := rl.Allow()
-		if !got {
+		got := rl.Limit()
+		if !got.Allow {
 			t.Fatalf("doesn't allow: %v", p)
 		}
 
-		t.Log(now.Add(p).Sub(now), got, rl.RetryAt())
+		t.Logf("allow=%t retry_after=%v reset_after=%v remaining=%d", got.Allow, got.RetryAfter, got.ResetAfter, got.Remaining)
 	}
 }
 
@@ -228,12 +228,12 @@ func TestGCRAAllowN(t *testing.T) {
 			return now.Add(p)
 		}
 		want := p.Milliseconds()%2 == 0
-		got := rl.Allow()
-		if want != got {
+		got := rl.Limit()
+		if want != got.Allow {
 			t.Fatalf("doesn't allow: %v", p)
 		}
 
-		t.Log(now.Add(p).Sub(now), got, rl.RetryAt())
+		t.Logf("allow=%t retry_after=%v reset_after=%v remaining=%d", got.Allow, got.RetryAfter, got.ResetAfter, got.Remaining)
 	}
 }
 

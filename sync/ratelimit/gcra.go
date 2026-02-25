@@ -1,7 +1,6 @@
 package ratelimit
 
 import (
-	"fmt"
 	"sync"
 	"time"
 )
@@ -12,28 +11,23 @@ type GCRA struct {
 	last int64
 
 	// Option.
-	Now       func() time.Time
-	increment int64
-	offset    int64
+	Now    func() time.Time
+	burst  int64
+	limit  int64
+	period int64
 }
 
 func NewGCRA(limit int, period time.Duration, burst int) (*GCRA, error) {
-	o := &option{limit: limit, period: period, burst: burst}
-	if err := o.Validate(); err != nil {
+	if err := validate(limit, period, burst); err != nil {
 		return nil, err
 	}
 
-	increment := div(period.Nanoseconds(), int64(limit))
-	if increment <= 0 {
-		return nil, fmt.Errorf("%w: period divided by limit", ErrInvalidNumber)
-	}
-	offset := mul(increment, int64(burst))
-
 	return &GCRA{
 		// NOTE: The burst is only applied once.
-		Now:       time.Now,
-		increment: increment,
-		offset:    offset,
+		Now:    time.Now,
+		limit:  int64(limit),
+		period: period.Nanoseconds(),
+		burst:  int64(burst),
 	}, nil
 }
 
@@ -52,36 +46,49 @@ func (r *GCRA) Allow() bool {
 }
 
 func (r *GCRA) AllowN(n int) bool {
-	if n <= 0 {
-		return false
+	return r.limitN(n).Allow
+}
+
+func (r *GCRA) Limit() *Result {
+	return r.limitN(1)
+}
+
+func (r *GCRA) LimitN(n int) *Result {
+	return r.limitN(n)
+}
+
+func (r *GCRA) limitN(n int) *Result {
+	if n < 0 {
+		return new(Result)
 	}
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	quantity := int64(n)
+	remaining := int64(-1)
+	delta := r.period / r.limit
 	now := r.Now().UnixNano()
 	r.last = max(r.last, now)
-	if r.last-r.offset <= now {
-		increment := mul(r.increment, int64(n))
-		r.last = add(r.last, increment)
-		return true
+	if r.last-r.burst*delta <= now {
+		r.last += quantity * delta
+		up, lo := now+delta, r.last-r.burst*delta
+		remaining = max(0, (up-lo)/delta)
 	}
 
-	return false
-}
+	retryAfter := max(0, r.last-r.burst*delta-now)
 
-func (r *GCRA) RetryAt() time.Time {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-
-	now := r.Now()
-	if r.last <= now.UnixNano() {
-		return now
+	return &Result{
+		Allow:      remaining >= 0,
+		Remaining:  max(0, remaining),
+		RetryAfter: time.Duration(retryAfter) * time.Nanosecond,
+		ResetAfter: time.Duration(retryAfter) * time.Nanosecond,
 	}
-
-	return time.Unix(0, r.last+r.increment)
 }
 
-func (r *GCRA) Remaining() int {
-	return -1
+type Result struct {
+	RetryAfter time.Duration
+	ResetAfter time.Duration
+	Remaining  int64
+	Allow      bool
 }

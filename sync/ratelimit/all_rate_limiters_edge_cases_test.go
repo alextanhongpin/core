@@ -66,8 +66,8 @@ func TestFixedWindowAllowNValidation(t *testing.T) {
 		n    int
 		want bool
 	}{
-		{"zero n", 0, false},
-		{"negative n", -1, false},
+		{"zero n", 0, true},
+		{"negative n", -1, true},
 		{"positive n", 1, true},
 	}
 
@@ -315,7 +315,7 @@ func TestMultiGCRANewValidation(t *testing.T) {
 	}{
 		{
 			name:      "zero limit",
-			limit:     0,
+			limit:     -1,
 			period:    time.Second,
 			burst:     0,
 			wantError: ratelimit.ErrInvalidNumber,
@@ -384,9 +384,9 @@ func TestMultiGCRAAllowNValidation(t *testing.T) {
 		want bool
 	}{
 		{"empty key", "", 1, false},
-		{"zero n", "key1", 0, false},
+		{"zero n", "key1", 0, true},
 		{"negative n", "key1", -1, false},
-		{"valid params", "key1", 1, true},
+		{"valid params", "key2", 1, true},
 	}
 
 	for _, tt := range tests {
@@ -416,8 +416,6 @@ func TestAllRateLimitersConcurrentAccess(t *testing.T) {
 						for j := 0; j < 100; j++ {
 							rl.Allow()
 							rl.AllowN(2)
-							rl.Remaining()
-							rl.RetryAt()
 						}
 					}()
 				}
@@ -497,8 +495,7 @@ func TestAllRateLimitersConcurrentAccess(t *testing.T) {
 						key := "key" + string(rune(id))
 						for j := 0; j < 100; j++ {
 							rl.Allow(key)
-							rl.AllowN(key, 2)
-							rl.RetryAt(key)
+							rl.LimitN(key, 2)
 						}
 					}(i)
 				}

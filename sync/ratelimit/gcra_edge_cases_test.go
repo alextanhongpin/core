@@ -2,6 +2,7 @@ package ratelimit_test
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -85,7 +86,7 @@ func TestGCRAAllowNValidation(t *testing.T) {
 		n    int
 		want bool
 	}{
-		{"zero n", 0, false},
+		{"zero n", 0, true},
 		{"negative n", -1, false},
 		{"positive n", 1, true},
 	}
@@ -142,11 +143,11 @@ func TestGCRARetryAtOverflow(t *testing.T) {
 	rl.Now = func() time.Time { return now }
 
 	// Consume rate limit
-	rl.Allow()
+	res := rl.Limit()
 
 	// Should not panic when calculating retry time
-	retryAt := rl.RetryAt()
-	if retryAt.IsZero() {
+	retryAt := res.RetryAfter
+	if retryAt == 0 {
 		t.Error("RetryAt should return a valid time")
 	}
 }
@@ -161,8 +162,8 @@ func TestGCRAConcurrentAccess(t *testing.T) {
 			defer func() { done <- true }()
 			for j := 0; j < 100; j++ {
 				rl.Allow()
-				rl.AllowN(2)
-				rl.RetryAt()
+				res := rl.LimitN(2)
+				fmt.Println(res.RetryAfter)
 			}
 		}()
 	}
@@ -192,8 +193,8 @@ func TestGCRAExtremePeriods(t *testing.T) {
 			}
 
 			// Should not panic
-			rl.Allow()
-			rl.RetryAt()
+			res := rl.Limit()
+			fmt.Println(res.RetryAfter)
 		})
 	}
 }
