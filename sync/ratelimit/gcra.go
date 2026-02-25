@@ -72,8 +72,8 @@ func (r *GCRA) LimitN(key string, n int) *Result {
 	return &Result{
 		Allow:      remaining >= 0,
 		Remaining:  int(max(0, remaining)),
-		RetryAfter: time.Duration(retryAfter) * time.Nanosecond,
-		ResetAfter: time.Duration(retryAfter) * time.Nanosecond,
+		RetryAfter: time.Duration(retryAfter),
+		ResetAfter: time.Duration(retryAfter),
 	}
 }
 

@@ -13,7 +13,7 @@ func TestGCRA(t *testing.T) {
 		limit  = 5
 		period = time.Second
 		burst  = 1
-		n      = 15
+		n      = 20
 	)
 	rl, err := ratelimit.NewGCRA(limit, period, burst)
 	if err != nil {
@@ -23,7 +23,7 @@ func TestGCRA(t *testing.T) {
 	var count int
 
 	now := time.Now()
-	for range n {
+	for range 2 * n {
 		rl.Now = func() time.Time {
 			return now
 		}
@@ -31,11 +31,11 @@ func TestGCRA(t *testing.T) {
 		if res.Allow {
 			count++
 		}
-		t.Log(res.String())
 		now = now.Add(period / time.Duration(n))
+		t.Log(res.String())
 	}
 
-	assert.Equal(t, 6, count)
+	assert.Equal(t, 11, count)
 
 	is := assert.New(t)
 	is.Equal(1, rl.Size())
