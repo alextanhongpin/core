@@ -46,31 +46,20 @@ func main() {
     ctx := context.Background()
     userKey := "user:123"
     
-    // Check if request is allowed
-    allowed, err := rl.Allow(ctx, userKey)
+    // Perform a single check and receive a detailed Result.
+    result, err := rl.Limit(ctx, userKey)
     if err != nil {
         log.Fatal(err)
     }
-    
-    if allowed {
+
+    if result.Allow {
         log.Println("Request allowed")
     } else {
         log.Println("Rate limit exceeded")
     }
-    
-    // Check remaining capacity
-    remaining, err := rl.Remaining(ctx, userKey)
-    if err != nil {
-        log.Fatal(err)
-    }
-    log.Printf("Remaining requests: %d", remaining)
-    
-    // Check when limit resets
-    resetAfter, err := rl.ResetAfter(ctx, userKey)
-    if err != nil {
-        log.Fatal(err)
-    }
-    log.Printf("Resets in: %v", resetAfter)
+
+    log.Printf("Remaining requests: %d", result.Remaining)
+    log.Printf("Resets in: %v", result.ResetAfter)
 }
 ```
 
@@ -154,10 +143,9 @@ func (r *FixedWindow) Allow(ctx context.Context, key string) (bool, error)
 func (r *FixedWindow) AllowN(ctx context.Context, key string, n int) (bool, error)
 
 // Get remaining requests in current window
-func (r *FixedWindow) Remaining(ctx context.Context, key string) (int, error)
+func (r *FixedWindow) Limit(ctx context.Context, key string) (*Result, error)
 
-// Get time until window resets
-func (r *FixedWindow) ResetAfter(ctx context.Context, key string) (time.Duration, error)
+func (r *FixedWindow) LimitN(ctx context.Context, key string, n int) (*Result, error)
 ```
 
 ### GCRA
@@ -168,12 +156,46 @@ type GCRA struct {}
 // Create new GCRA rate limiter
 func NewGCRA(client *redis.Client, limit int, period time.Duration, burst int) *GCRA
 
-// Check if single request is allowed
+// Check if a single request is allowed
 func (g *GCRA) Allow(ctx context.Context, key string) (bool, error)
 
 // Check if N requests are allowed
 func (g *GCRA) AllowN(ctx context.Context, key string, n int) (bool, error)
+
+// Get detailed result for a single request
+func (g *GCRA) Limit(ctx context.Context, key string) (*Result, error)
+
+// Get detailed result for N requests
+func (g *GCRA) LimitN(ctx context.Context, key string, n int) (*Result, error)
 ```
+
+## How to Use the Package
+
+The package exposes two main limiter types:
+
+* **Fixed Window** – a simple counter that resets every *period*.
+* **GCRA** – a smooth rate‑limiter based on the Generic Cell Rate
+  Algorithm.
+
+Both are constructed with a Redis client and configured with the
+desired limits.  Once created, you can call `Allow`, `AllowN`,
+`Remaining` and `ResetAfter` on any key.  Keys are typically
+derived from user IDs, API keys, or any string that uniquely
+identifies a client.
+
+```go
+// Common pattern
+client := redis.NewClient(&redis.Options{Addr: "localhost:6379"})
+defer client.Close()
+
+// Fixed window – 100 requests per hour
+fixed := ratelimit.NewFixedWindow(client, 100, time.Hour)
+
+// GCRA – 50 requests per second with burst of 20
+gcra := ratelimit.NewGCRA(client, 50, time.Second, 20)
+```
+
+Now you can call the rate‑limit methods in your handlers.
 
 ## Usage Patterns
 
@@ -202,23 +224,52 @@ func handleAPIRequest(userID string) error {
 ```go
 func rateLimitMiddleware(next http.Handler) http.Handler {
     rl := ratelimit.NewGCRA(redisClient, 100, time.Minute, 10)
-    
+
     return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
         apiKey := r.Header.Get("X-API-Key")
-        
+
         allowed, err := rl.Allow(r.Context(), fmt.Sprintf("api:%s", apiKey))
         if err != nil {
-            http.Error(w, "Internal error", 500)
+            http.Error(w, "Internal error", http.StatusInternalServerError)
             return
         }
-        
+
         if !allowed {
-            http.Error(w, "Rate limit exceeded", 429)
+            http.Error(w, "Rate limit exceeded", http.StatusTooManyRequests)
             return
         }
-        
+
         next.ServeHTTP(w, r)
     })
+}
+```
+
+## Real‑World Example
+The following demonstrates a common pattern: protecting an API endpoint that
+creates resources for a user.  We limit each user to **10 writes per minute**.
+
+```go
+func createResourceHandler(db *sql.DB, rl *ratelimit.FixedWindow) http.HandlerFunc {
+    return func(w http.ResponseWriter, r *http.Request) {
+        userID := r.Header.Get("X-User-ID")
+        if userID == "" {
+            http.Error(w, "Missing user ID", http.StatusBadRequest)
+            return
+        }
+
+        allowed, err := rl.Allow(r.Context(), fmt.Sprintf("user:%s", userID))
+        if err != nil {
+            http.Error(w, "Internal error", http.StatusInternalServerError)
+            return
+        }
+        if !allowed {
+            http.Error(w, "Rate limit exceeded", http.StatusTooManyRequests)
+            return
+        }
+
+        // …create resource in db…
+        w.WriteHeader(http.StatusCreated)
+    }
 }
 ```
 

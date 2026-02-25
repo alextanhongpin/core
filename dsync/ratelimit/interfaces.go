@@ -33,17 +33,17 @@ import (
 
 // RateLimiter defines the common interface for all rate limiting algorithms.
 type RateLimiter interface {
-	// Allow checks if a single request is allowed for the given key.
-	Allow(ctx context.Context, key string) (bool, error)
+    // Allow returns true if a single request for `key` is permitted.
+    Allow(ctx context.Context, key string) (bool, error)
 
-	// AllowN checks if N requests are allowed for the given key.
-	AllowN(ctx context.Context, key string, n int) (bool, error)
+    // AllowN returns true if `n` requests for `key` are permitted.
+    AllowN(ctx context.Context, key string, n int) (bool, error)
 
-	// Limit checks if a single request is allowed for the given key.
-	Limit(ctx context.Context, key string) (*Result, error)
+    // Limit returns a detailed Result for a single request.
+    Limit(ctx context.Context, key string) (*Result, error)
 
-	// AllowN checks if N requests are allowed for the given key.
-	LimitN(ctx context.Context, key string, n int) (*Result, error)
+    // LimitN returns a detailed Result for `n` requests.
+    LimitN(ctx context.Context, key string, n int) (*Result, error)
 }
 
 // Result contains detailed information about a rate limit check.

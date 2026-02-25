@@ -45,7 +45,7 @@ func (g *GCRA) Allow(ctx context.Context, key string) (bool, error) {
 
 // AllowN checks if N requests are allow for the given key.
 func (g *GCRA) AllowN(ctx context.Context, key string, n int) (bool, error) {
-	res, err := g.allowN(ctx, key, n)
+	res, err := g.LimitN(ctx, key, n)
 	if err != nil {
 		return false, err
 	}
@@ -53,7 +53,8 @@ func (g *GCRA) AllowN(ctx context.Context, key string, n int) (bool, error) {
 	return res.Allow, nil
 }
 
-func (g *GCRA) allowN(ctx context.Context, key string, n int) (*Result, error) {
+// LimitN performs a rate limit check for N requests and returns detailed information.
+func (g *GCRA) LimitN(ctx context.Context, key string, n int) (*Result, error) {
 	if n < 0 {
 		return nil, ErrNegative
 	}
@@ -82,9 +83,4 @@ func (g *GCRA) allowN(ctx context.Context, key string, n int) (*Result, error) {
 // Limit performs a rate limit check and returns detailed information.
 func (g *GCRA) Limit(ctx context.Context, key string) (*Result, error) {
 	return g.LimitN(ctx, key, 1)
-}
-
-// LimitN performs a rate limit check for N requests and returns detailed information.
-func (g *GCRA) LimitN(ctx context.Context, key string, n int) (*Result, error) {
-	return g.allowN(ctx, key, n)
 }
