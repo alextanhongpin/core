@@ -16,20 +16,16 @@ var retryableStatusCodes = []int{
 	http.StatusGatewayTimeout,
 }
 
-type transporter interface {
-	RoundTrip(r *http.Request) (*http.Response, error)
-}
-
 type RoundTripper struct {
-	Transport  transporter
+	Transport  http.RoundTripper
 	MaxRetries int
 	StatusCode func(code int) error
 	retry      retry
 }
 
-func NewRoundTripper(t transporter, r retry) *RoundTripper {
+func NewRoundTripper(rt http.RoundTripper, r retry) *RoundTripper {
 	return &RoundTripper{
-		Transport:  t,
+		Transport:  rt,
 		MaxRetries: 10,
 		StatusCode: func(code int) error {
 			if slices.Contains(retryableStatusCodes, code) {

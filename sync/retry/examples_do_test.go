@@ -14,14 +14,16 @@ func ExampleDo() {
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Millisecond)
 	defer cancel()
 
+	collector := &retry.AtomicRetryMetricsCollector{}
+	ret := retry.New().WithMetricsCollector(collector)
 	// Success case.
-	err := retry.Do(ctx, func(ctx context.Context) error {
+	err := ret.Do(ctx, func(ctx context.Context) error {
 		return nil
 	}, 3)
 	fmt.Println(err)
 
 	// Timeout case.
-	err = retry.Do(ctx, func(ctx context.Context) error {
+	err = ret.Do(ctx, func(ctx context.Context) error {
 		return errors.ErrUnsupported
 	}, 3)
 	fmt.Println(err)
@@ -29,12 +31,13 @@ func ExampleDo() {
 	fmt.Println(errors.Is(err, context.DeadlineExceeded))
 
 	// Limit exceeded case.
-	err = retry.Do(context.Background(), func(ctx context.Context) error {
+	err = ret.Do(context.Background(), func(ctx context.Context) error {
 		return errors.ErrUnsupported
 	}, 1)
 	fmt.Println(err)
 	fmt.Println(errors.Is(err, errors.ErrUnsupported))
 	fmt.Println(errors.Is(err, retry.ErrLimitExceeded))
+	fmt.Printf("%#v\n", collector.GetMetrics())
 
 	// Output:
 	// <nil>
@@ -46,4 +49,5 @@ func ExampleDo() {
 	// unsupported operation
 	// true
 	// true
+	// retry.RetryMetrics{Attempts:5, Successes:2, Failures:5, Throttles:0, LimitExceeded:1}
 }
