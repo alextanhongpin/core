@@ -5,7 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
+	"strings"
 	"time"
 
 	redis "github.com/redis/go-redis/v9"
@@ -102,27 +102,24 @@ func (s *JSON) CompareAndSwap(ctx context.Context, key string, old, value any, t
 	return s.Cache.CompareAndSwap(ctx, key, a, b, ttl)
 }
 
-type PrefixKey struct {
-	Prefix string
-	Key    string
-}
+type Key []string
 
-func (k PrefixKey) String() string {
-	return fmt.Sprintf("%s:%s", k.Prefix, k.Key)
+func (k Key) String() string {
+	return strings.Join(k, ":")
 }
 
 type Item struct {
-	Key   string
 	TTL   time.Duration
 	Value any
 }
 
-func (s *JSON) LoadOrStore(ctx context.Context, key fmt.Stringer, value any, getter func(ctx context.Context, key fmt.Stringer) (*Item, error)) (loaded bool, err error) {
+func (s *JSON) LoadOrStore(ctx context.Context, key Key, value any, getter func(ctx context.Context, key Key) (*Item, error)) (loaded bool, err error) {
 	// First, try to load from cache
 	err = s.Load(ctx, key.String(), value)
 	if err == nil {
 		return true, nil
 	}
+
 	// If the error is not ErrNotExist, return the error
 	if !errors.Is(err, ErrNotExist) {
 		return false, err
@@ -142,7 +139,7 @@ func (s *JSON) LoadOrStore(ctx context.Context, key fmt.Stringer, value any, get
 		}
 
 		// Use atomic LoadOrStore operation to prevent race conditions
-		curr, loaded, err := s.Cache.LoadOrStore(ctx, i.Key, b, i.TTL)
+		curr, loaded, err := s.Cache.LoadOrStore(ctx, key.String(), b, i.TTL)
 		if err != nil {
 			return false, err
 		}
@@ -159,41 +156,4 @@ func (s *JSON) LoadOrStore(ctx context.Context, key fmt.Stringer, value any, get
 	}
 
 	return res.(bool) && shared, nil
-}
-
-// Exists checks if a key exists in the cache.
-func (s *JSON) Exists(ctx context.Context, key string) (bool, error) {
-	if c, ok := s.Cache.(*Cache); ok {
-		return c.Exists(ctx, key)
-	}
-	// Fallback for other Cacheable implementations
-	_, err := s.Cache.Load(ctx, key)
-	if errors.Is(err, ErrNotExist) {
-		return false, nil
-	}
-	return err == nil, err
-}
-
-// TTL returns the remaining time to live for a key.
-func (s *JSON) TTL(ctx context.Context, key string) (time.Duration, error) {
-	if c, ok := s.Cache.(*Cache); ok {
-		return c.TTL(ctx, key)
-	}
-	return 0, ErrOperationNotSupported
-}
-
-// Delete removes one or more keys from the cache.
-func (s *JSON) Delete(ctx context.Context, keys ...string) (int64, error) {
-	if c, ok := s.Cache.(*Cache); ok {
-		return c.Delete(ctx, keys...)
-	}
-	return 0, ErrOperationNotSupported
-}
-
-// Expire sets a timeout on a key. After the timeout has expired, the key will automatically be deleted.
-func (s *JSON) Expire(ctx context.Context, key string, ttl time.Duration) error {
-	if c, ok := s.Cache.(*Cache); ok {
-		return c.Expire(ctx, key, ttl)
-	}
-	return ErrOperationNotSupported
 }

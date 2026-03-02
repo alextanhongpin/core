@@ -2,7 +2,6 @@ package cache_test
 
 import (
 	"context"
-	"fmt"
 	"testing"
 	"time"
 
@@ -141,13 +140,11 @@ func TestJSON(t *testing.T) {
 	})
 
 	t.Run("load or store", func(t *testing.T) {
-		key := cache.PrefixKey{Prefix: "users", Key: t.Name()}
+		key := cache.Key{"users", t.Name()}
 		is := assert.New(t)
-		getter := func(ctx context.Context, key fmt.Stringer) (*cache.Item, error) {
-			pkey := key.(cache.PrefixKey)
-			t.Log("fetching", pkey.Key)
+		getter := func(ctx context.Context, key cache.Key) (*cache.Item, error) {
+			t.Log("fetching", key[1])
 			return &cache.Item{
-				Key:   key.String(),
 				Value: john,
 				TTL:   time.Minute,
 			}, nil

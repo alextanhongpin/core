@@ -4,10 +4,8 @@ package cache
 import (
 	"context"
 	"errors"
-	"sync/atomic"
 	"time"
 
-	"github.com/prometheus/client_golang/prometheus"
 	redis "github.com/redis/go-redis/v9"
 )
 
@@ -21,44 +19,6 @@ var (
 	ErrValueMismatch  = errors.New("compare operation failed: value mismatch")
 	ErrUnexpectedType = errors.New("unexpected value type from Redis")
 )
-
-// MetricsCollector defines the interface for collecting cache metrics.
-type MetricsCollector interface {
-	IncTotalRequests()
-	IncHits()
-	IncMisses()
-	IncSets()
-	IncDeletes()
-}
-
-type AtomicCacheMetrics struct {
-	totalRequests int64
-	hits          int64
-	misses        int64
-	sets          int64
-	deletes       int64
-}
-
-func (m *AtomicCacheMetrics) IncTotalRequests() { atomic.AddInt64(&m.totalRequests, 1) }
-func (m *AtomicCacheMetrics) IncHits()          { atomic.AddInt64(&m.hits, 1) }
-func (m *AtomicCacheMetrics) IncMisses()        { atomic.AddInt64(&m.misses, 1) }
-func (m *AtomicCacheMetrics) IncSets()          { atomic.AddInt64(&m.sets, 1) }
-func (m *AtomicCacheMetrics) IncDeletes()       { atomic.AddInt64(&m.deletes, 1) }
-
-// PrometheusCacheMetrics implements MetricsCollector using prometheus metrics.
-type PrometheusCacheMetrics struct {
-	TotalRequests prometheus.Counter
-	Hits          prometheus.Counter
-	Misses        prometheus.Counter
-	Sets          prometheus.Counter
-	Deletes       prometheus.Counter
-}
-
-func (m *PrometheusCacheMetrics) IncTotalRequests() { m.TotalRequests.Inc() }
-func (m *PrometheusCacheMetrics) IncHits()          { m.Hits.Inc() }
-func (m *PrometheusCacheMetrics) IncMisses()        { m.Misses.Inc() }
-func (m *PrometheusCacheMetrics) IncSets()          { m.Sets.Inc() }
-func (m *PrometheusCacheMetrics) IncDeletes()       { m.Deletes.Inc() }
 
 // Cacheable defines the interface for cache operations with atomic guarantees.
 // All operations are thread-safe and provide strong consistency through Redis.
@@ -103,23 +63,15 @@ type Cacheable interface {
 // Cache provides a Redis-based implementation of the Cacheable interface.
 // It wraps a Redis client and provides atomic cache operations.
 type Cache struct {
-	client           *redis.Client
-	metricsCollector MetricsCollector
+	client *redis.Client
 }
 
 var _ Cacheable = (*Cache)(nil)
 
 // New creates a new Cache instance with the provided Redis client.
-func New(client *redis.Client, collectors ...MetricsCollector) *Cache {
-	var collector MetricsCollector
-	if len(collectors) > 0 && collectors[0] != nil {
-		collector = collectors[0]
-	} else {
-		collector = &AtomicCacheMetrics{}
-	}
+func New(client *redis.Client) *Cache {
 	return &Cache{
-		client:           client,
-		metricsCollector: collector,
+		client: client,
 	}
 }
 
@@ -153,42 +105,33 @@ func (c *Cache) StoreOnce(ctx context.Context, key string, value []byte, ttl tim
 // was loaded, false if stored.
 // Also see usecase here: https://github.com/golang/go/issues/33762#issuecomment-523757434
 func (c *Cache) LoadOrStore(ctx context.Context, key string, value []byte, ttl time.Duration) (curr []byte, loaded bool, err error) {
-	v, err := c.client.Do(ctx, "SET", key, value, "NX", "GET", "PX", ttl.Milliseconds()).Result()
+	s, err := c.client.SetArgs(ctx, key, value, redis.SetArgs{
+		Get:  true,
+		Mode: "NX",
+		TTL:  ttl,
+	}).Result()
 	// If the previous value does not exist when GET, then it will be nil.
 	// But since we successfully set the value, we skip the error.
 	if errors.Is(err, redis.Nil) {
 		return value, false, nil
 	}
-
 	if err != nil {
 		return nil, false, err
 	}
 
-	// Safe type assertion to prevent panic
-	str, ok := v.(string)
-	if !ok {
-		return nil, false, ErrUnexpectedType
-	}
-
-	return []byte(str), true, nil
+	return []byte(s), true, nil
 }
 
 // LoadAndDelete deletes the value for a key, returning the previous value if
 // any. The loaded result reports whether the key was present.
 // Also see usecase here: https://github.com/golang/go/issues/33762#issuecomment-523757434
 func (c *Cache) LoadAndDelete(ctx context.Context, key string) (value []byte, err error) {
-	v, err := c.client.Do(ctx, "GETDEL", key).Result()
+	s, err := c.client.GetDel(ctx, key).Result()
 	if err != nil {
 		return value, err
 	}
 
-	// Safe type assertion to prevent panic
-	str, ok := v.(string)
-	if !ok {
-		return nil, ErrUnexpectedType
-	}
-
-	return []byte(str), nil
+	return []byte(s), nil
 }
 
 var compareAndDelete = redis.NewScript(`
@@ -220,14 +163,16 @@ func (c *Cache) CompareAndDelete(ctx context.Context, key string, old []byte) er
 
 	if err != nil {
 		// Check for our custom error messages and convert to appropriate errors
-		errStr := err.Error()
-		if errStr == "ERR key does not exist" {
+		switch err.Error() {
+		case "ERR key does not exist":
 			return ErrNotExist
-		}
-		if errStr == "ERR value mismatch" {
+
+		case "ERR value mismatch":
 			return ErrValueMismatch
+
+		default:
+			return err
 		}
-		return err
 	}
 
 	return nil
@@ -268,14 +213,16 @@ func (c *Cache) CompareAndSwap(ctx context.Context, key string, old, value []byt
 
 	if err != nil {
 		// Check for our custom error messages and convert to appropriate errors
-		errStr := err.Error()
-		if errStr == "ERR key does not exist" {
+		switch err.Error() {
+		case "ERR key does not exist":
 			return ErrNotExist
-		}
-		if errStr == "ERR value mismatch" {
+
+		case "ERR value mismatch":
 			return ErrValueMismatch
+
+		default:
+			return err
 		}
-		return err
 	}
 
 	return nil
