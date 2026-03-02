@@ -86,25 +86,23 @@ func NewLockOption() *LockOption {
 // Locker represents a distributed lock implementation using Redis.
 // Works on with a single redis node.
 type Locker struct {
-	mu *KeyedMutex
-
-	Cache  cacheable
-	Logger *slog.Logger // Optional logger for debugging purposes.
+	KeyLock *KeyLock
+	Cache   cacheable
+	Logger  *slog.Logger // Optional logger for debugging purposes.
 }
 
 // New returns a pointer to Locker.
 func New(client *redis.Client) *Locker {
 	return &Locker{
-		mu:     NewKeyedMutex(),
-		Cache:  cache.New(client),
-		Logger: slog.Default(), // Default logger, can be overridden.
+		KeyLock: NewKeyLock(),
+		Cache:   cache.New(client),
+		Logger:  slog.Default(), // Default logger, can be overridden.
 	}
 }
 
 func (l *Locker) Do(ctx context.Context, key string, fn func(ctx context.Context) error, opts *LockOption) error {
-	mu := l.mu.Key(key)
-	mu.Lock()
-	defer mu.Unlock()
+	unlock := l.KeyLock.Lock(key)
+	defer unlock()
 
 	opts = cmp.Or(opts, NewLockOption())
 	token := cmp.Or(opts.Token, newToken())

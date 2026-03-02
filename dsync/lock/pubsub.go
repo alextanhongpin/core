@@ -23,10 +23,6 @@ func NewPubSub(client *redis.Client) *PubSub {
 }
 
 func (l *PubSub) Do(ctx context.Context, key string, fn func(ctx context.Context) error, opts *LockOption) error {
-	mu := l.Locker.mu.Key(key)
-	mu.Lock()
-	defer mu.Unlock()
-
 	if opts == nil {
 		opts = NewLockOption()
 	}
