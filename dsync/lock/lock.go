@@ -34,12 +34,10 @@ import (
 	"log/slog"
 	"math"
 	"math/rand/v2"
-	"sync/atomic"
 	"time"
 
 	"github.com/alextanhongpin/core/dsync/cache"
 	"github.com/google/uuid"
-	"github.com/prometheus/client_golang/prometheus"
 	redis "github.com/redis/go-redis/v9"
 )
 
@@ -58,8 +56,8 @@ type cacheable interface {
 	StoreOnce(ctx context.Context, key string, value []byte, ttl time.Duration) error
 }
 
-type backOffPolicy interface {
-	BackOff(i int) time.Duration
+type backoff interface {
+	Sleep() <-chan time.Time
 }
 
 type LockOption struct {
@@ -71,6 +69,8 @@ type LockOption struct {
 	RefreshRatio float64
 	// Optional token to identify the lock owner.
 	Token string
+
+	Backoff backoff
 }
 
 func NewLockOption() *LockOption {
@@ -78,75 +78,25 @@ func NewLockOption() *LockOption {
 		Wait:         5 * time.Second,
 		Lock:         30 * time.Second,
 		RefreshRatio: 0.8,
+		Backoff:      &randomBackoff{base: 5 * time.Second},
 	}
 }
-
-// MetricsCollector defines the interface for collecting lock metrics.
-type MetricsCollector interface {
-	IncLockAttempts()
-	IncLockSuccess()
-	IncLockFailures()
-	IncUnlocks()
-	IncExtends()
-}
-
-type AtomicLockMetrics struct {
-	lockAttempts int64
-	lockSuccess  int64
-	lockFailures int64
-	unlocks      int64
-	extends      int64
-}
-
-func (m *AtomicLockMetrics) IncLockAttempts() { atomic.AddInt64(&m.lockAttempts, 1) }
-func (m *AtomicLockMetrics) IncLockSuccess()  { atomic.AddInt64(&m.lockSuccess, 1) }
-func (m *AtomicLockMetrics) IncLockFailures() { atomic.AddInt64(&m.lockFailures, 1) }
-func (m *AtomicLockMetrics) IncUnlocks()      { atomic.AddInt64(&m.unlocks, 1) }
-func (m *AtomicLockMetrics) IncExtends()      { atomic.AddInt64(&m.extends, 1) }
-
-// PrometheusLockMetrics implements MetricsCollector using prometheus metrics.
-type PrometheusLockMetrics struct {
-	LockAttempts prometheus.Counter
-	LockSuccess  prometheus.Counter
-	LockFailures prometheus.Counter
-	Unlocks      prometheus.Counter
-	Extends      prometheus.Counter
-}
-
-func (m *PrometheusLockMetrics) IncLockAttempts() { m.LockAttempts.Inc() }
-func (m *PrometheusLockMetrics) IncLockSuccess()  { m.LockSuccess.Inc() }
-func (m *PrometheusLockMetrics) IncLockFailures() { m.LockFailures.Inc() }
-func (m *PrometheusLockMetrics) IncUnlocks()      { m.Unlocks.Inc() }
-func (m *PrometheusLockMetrics) IncExtends()      { m.Extends.Inc() }
 
 // Locker represents a distributed lock implementation using Redis.
 // Works on with a single redis node.
 type Locker struct {
 	mu *KeyedMutex
 
-	BackOff          backOffPolicy // Optional backoff policy for retrying lock acquisition.
-	Cache            cacheable
-	Logger           *slog.Logger // Optional logger for debugging purposes.
-	metricsCollector MetricsCollector
+	Cache  cacheable
+	Logger *slog.Logger // Optional logger for debugging purposes.
 }
 
 // New returns a pointer to Locker.
-func New(client *redis.Client, collectors ...MetricsCollector) *Locker {
-	var collector MetricsCollector
-	if len(collectors) > 0 && collectors[0] != nil {
-		collector = collectors[0]
-	} else {
-		collector = &AtomicLockMetrics{}
-	}
+func New(client *redis.Client) *Locker {
 	return &Locker{
-		mu: NewKeyedMutex(),
-		BackOff: &exponentialBackOff{
-			base:  time.Second, // Base backoff duration.
-			limit: time.Minute, // Maximum backoff duration.
-		},
-		Cache:            cache.New(client),
-		Logger:           slog.Default(), // Default logger, can be overridden.
-		metricsCollector: collector,
+		mu:     NewKeyedMutex(),
+		Cache:  cache.New(client),
+		Logger: slog.Default(), // Default logger, can be overridden.
 	}
 }
 
@@ -155,35 +105,42 @@ func (l *Locker) Do(ctx context.Context, key string, fn func(ctx context.Context
 	mu.Lock()
 	defer mu.Unlock()
 
-	if opts == nil {
-		opts = NewLockOption()
-	}
+	opts = cmp.Or(opts, NewLockOption())
 	token := cmp.Or(opts.Token, newToken())
 	if opts.Lock <= 0 {
 		return fmt.Errorf("lock duration must be greater than zero, got %v", opts.Lock)
 	}
 
-	var cancel context.CancelFunc
-
-	noRefresh := opts.RefreshRatio <= 0
-	if noRefresh {
-		ctx, cancel = context.WithTimeoutCause(ctx, opts.Lock, ErrLockTimeout)
-	} else {
-		ctx, cancel = context.WithCancel(ctx)
-	}
-	defer cancel()
-
+	// Try to acquire the lock.
 	if err := l.Lock(ctx, key, token, opts.Lock, opts.Wait); err != nil {
 		return err
 	}
+
+	// Lock acquired. Remember to unlock.
 	defer func() {
 		if unlockErr := l.Unlock(context.WithoutCancel(ctx), key, token); unlockErr != nil {
 			l.Logger.Error("failed to unlock", "key", key, "err", unlockErr)
 		}
 	}()
 
-	if noRefresh {
-		return fn(ctx)
+	// No refresh.
+	if opts.RefreshRatio <= 0 {
+		// Strictly no refresh, the operation will timeout with error.
+		ctx, cancel := context.WithTimeoutCause(ctx, opts.Lock, ErrLockTimeout)
+		defer cancel()
+
+		ch := make(chan error, 1)
+		go func() {
+			ch <- fn(ctx)
+		}()
+
+		select {
+		case <-ctx.Done():
+			return context.Cause(ctx)
+
+		case err := <-ch:
+			return err
+		}
 	}
 
 	// Create a channel with a buffer of 1 to prevent goroutine leak.
@@ -201,8 +158,10 @@ func (l *Locker) Do(ctx context.Context, key string, fn func(ctx context.Context
 		select {
 		case <-ctx.Done():
 			return context.Cause(ctx)
+
 		case err := <-ch:
 			return err
+
 		case <-t.C:
 			if err := l.Extend(ctx, key, token, opts.Lock); err != nil {
 				return err
@@ -220,39 +179,46 @@ func (l *Locker) TryLock(ctx context.Context, key, token string, ttl time.Durati
 	return nil
 }
 
-func (l *Locker) Lock(ctx context.Context, key, token string, ttl, wait time.Duration) error {
-	if wait <= 0 {
+// LockWait waits until the lock is acquired.
+func (l *Locker) LockWait(ctx context.Context, key, token string, ttl, wait time.Duration) error {
+	// NOTE: We don't use context for cancellation because it will be passed down.
+	timeout := time.After(wait)
+	tryLock := func() error {
 		return l.TryLock(ctx, key, token, ttl)
 	}
 
-	// Fire at the timeout moment before the wait duration.
-	timeout := time.After(wait)
-
-	var i int
+	var sleep time.Duration
 	for {
-		sleep := l.BackOff.BackOff(i)
-
-		// Sleep for the remaining time before the key expires.
 		select {
-		case <-ctx.Done():
-			return context.Cause(ctx)
 		case <-timeout:
-			err := l.TryLock(ctx, key, token, ttl)
+			err := tryLock()
 			if errors.Is(err, ErrLocked) {
 				return ErrLockWaitTimeout
 			}
 
 			return err
+		case <-ctx.Done():
+			return context.Cause(ctx)
+
 		case <-time.After(sleep):
-			err := l.TryLock(ctx, key, token, ttl)
+			err := tryLock()
 			if errors.Is(err, ErrLocked) {
-				i++
+				sleep = rand.N(wait)
+
 				continue
 			}
 
 			return err
 		}
 	}
+}
+
+func (l *Locker) Lock(ctx context.Context, key, token string, ttl, wait time.Duration) error {
+	if wait <= 0 {
+		return l.TryLock(ctx, key, token, ttl)
+	}
+
+	return l.LockWait(ctx, key, token, ttl, wait)
 }
 
 // Unlocks the key with the given token.
@@ -278,13 +244,33 @@ func newToken() string {
 	return uuid.Must(uuid.NewV7()).String()
 }
 
-type exponentialBackOff struct {
-	base  time.Duration
-	limit time.Duration
+type randomBackoff struct {
+	started bool
+	base    time.Duration
 }
 
-func (b exponentialBackOff) BackOff(i int) time.Duration {
-	return rand.N(min(b.base*time.Duration(math.Pow(2, float64(i))), b.limit))
+func (r *randomBackoff) Sleep() <-chan time.Time {
+	if !r.started {
+		r.started = true
+		return time.After(0)
+	}
+
+	return time.After(rand.N(r.base))
+}
+
+type exponentialBackoff struct {
+	attempts int
+	base     time.Duration
+	limit    time.Duration
+}
+
+func (b exponentialBackoff) Sleep() <-chan time.Time {
+	defer func() {
+		b.attempts++
+	}()
+
+	sleep := rand.N(min(b.base*time.Duration(math.Pow(2, float64(b.attempts))), b.limit))
+	return time.After(sleep)
 }
 
 func mapError(err error) error {

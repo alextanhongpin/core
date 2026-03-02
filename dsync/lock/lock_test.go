@@ -340,11 +340,11 @@ func TestLock_DoTimeout(t *testing.T) {
 
 	err := lock.New(client).Do(t.Context(), key, func(ctx context.Context) error {
 		time.Sleep(100 * time.Millisecond)
-
 		return wantErr
 	}, &lock.LockOption{
-		Lock: 50 * time.Millisecond,
-		Wait: time.Second,
+		RefreshRatio: 0,
+		Lock:         50 * time.Millisecond,
+		Wait:         time.Second,
 	})
 	is.ErrorIs(err, lock.ErrLockTimeout)
 

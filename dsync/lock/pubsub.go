@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"errors"
+	"math/rand/v2"
 	"time"
 
 	redis "github.com/redis/go-redis/v9"
@@ -86,8 +87,6 @@ func (l *PubSub) Lock(ctx context.Context, key, token string, ttl, wait time.Dur
 
 	var i int
 	for {
-		sleep := l.Locker.BackOff.BackOff(i)
-
 		// Sleep for the remaining time before the key expires.
 		select {
 		case msg := <-pubsub.Channel():
@@ -110,7 +109,7 @@ func (l *PubSub) Lock(ctx context.Context, key, token string, ttl, wait time.Dur
 			}
 
 			return err
-		case <-time.After(sleep):
+		case <-time.After(rand.N(wait)):
 			err := l.Locker.TryLock(ctx, key, token, ttl)
 			if errors.Is(err, ErrLocked) {
 				i++
