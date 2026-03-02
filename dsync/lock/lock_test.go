@@ -3,6 +3,7 @@ package lock_test
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"sync"
 	"testing"
 	"time"
@@ -261,7 +262,10 @@ func TestLock_Unlock_Deleted(t *testing.T) {
 		is.Equal(int64(1), status)
 	}()
 
-	err := lock.New(client).Do(t.Context(), key, func(ctx context.Context) error {
+	logger := slog.New(slog.NewTextHandler(t.Output(), nil))
+	locker := lock.New(client)
+	locker.Logger = logger
+	err := locker.Do(t.Context(), key, func(ctx context.Context) error {
 		// Lock acquired. Signal deletion.
 		ch <- true
 		// Sleep for 2x the lock ttl duration.
@@ -338,7 +342,10 @@ func TestLock_DoTimeout(t *testing.T) {
 		key    = t.Name()
 	)
 
-	err := lock.New(client).Do(t.Context(), key, func(ctx context.Context) error {
+	logger := slog.New(slog.NewTextHandler(t.Output(), nil))
+	locker := lock.New(client)
+	locker.Logger = logger
+	err := locker.Do(t.Context(), key, func(ctx context.Context) error {
 		time.Sleep(100 * time.Millisecond)
 		return wantErr
 	}, &lock.LockOption{

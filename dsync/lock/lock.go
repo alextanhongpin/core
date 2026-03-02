@@ -34,6 +34,7 @@ import (
 	"log/slog"
 	"math"
 	"math/rand/v2"
+	"sync"
 	"time"
 
 	"github.com/alextanhongpin/core/dsync/cache"
@@ -116,9 +117,12 @@ func (l *Locker) Do(ctx context.Context, key string, fn func(ctx context.Context
 		return err
 	}
 
+	unlockOnce := sync.OnceValue(func() error {
+		return l.Unlock(context.WithoutCancel(ctx), key, token)
+	})
 	// Lock acquired. Remember to unlock.
 	defer func() {
-		if unlockErr := l.Unlock(context.WithoutCancel(ctx), key, token); unlockErr != nil {
+		if unlockErr := unlockOnce(); unlockErr != nil {
 			l.Logger.Error("failed to unlock", "key", key, "err", unlockErr)
 		}
 	}()
@@ -131,7 +135,7 @@ func (l *Locker) Do(ctx context.Context, key string, fn func(ctx context.Context
 
 		ch := make(chan error, 1)
 		go func() {
-			ch <- fn(ctx)
+			ch <- errors.Join(fn(ctx), unlockOnce())
 		}()
 
 		select {
@@ -147,8 +151,7 @@ func (l *Locker) Do(ctx context.Context, key string, fn func(ctx context.Context
 	ch := make(chan error, 1)
 
 	go func() {
-		ch <- fn(ctx)
-		close(ch)
+		ch <- errors.Join(fn(ctx), unlockOnce())
 	}()
 
 	t := time.NewTicker(time.Duration(float64(opts.Lock) * opts.RefreshRatio))
