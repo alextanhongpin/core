@@ -32,7 +32,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"math"
 	"math/rand/v2"
 	"sync"
 	"time"
@@ -41,8 +40,6 @@ import (
 	"github.com/google/uuid"
 	redis "github.com/redis/go-redis/v9"
 )
-
-const payload = "unlock"
 
 var (
 	ErrExpired         = errors.New("lock: lock expired")
@@ -79,29 +76,29 @@ func NewLockOption() *LockOption {
 		Wait:         5 * time.Second,
 		Lock:         30 * time.Second,
 		RefreshRatio: 0.8,
-		Backoff:      &randomBackoff{base: 5 * time.Second},
+		Backoff:      NewRandomBackoff(5 * time.Second),
 	}
 }
 
 // Locker represents a distributed lock implementation using Redis.
 // Works on with a single redis node.
 type Locker struct {
-	KeyLock *KeyLock
-	Cache   cacheable
-	Logger  *slog.Logger // Optional logger for debugging purposes.
+	KeyMutex *KeyMutex
+	Cache    cacheable
+	Logger   *slog.Logger // Optional logger for debugging purposes.
 }
 
 // New returns a pointer to Locker.
 func New(client *redis.Client) *Locker {
 	return &Locker{
-		KeyLock: NewKeyLock(),
-		Cache:   cache.New(client),
-		Logger:  slog.Default(), // Default logger, can be overridden.
+		KeyMutex: NewKeyMutex(),
+		Cache:    cache.New(client),
+		Logger:   slog.Default(), // Default logger, can be overridden.
 	}
 }
 
 func (l *Locker) Do(ctx context.Context, key string, fn func(ctx context.Context) error, opts *LockOption) error {
-	unlock := l.KeyLock.Lock(key)
+	unlock := l.KeyMutex.Lock(key)
 	defer unlock()
 
 	opts = cmp.Or(opts, NewLockOption())
@@ -134,6 +131,7 @@ func (l *Locker) Do(ctx context.Context, key string, fn func(ctx context.Context
 		ch := make(chan error, 1)
 		go func() {
 			ch <- errors.Join(fn(ctx), unlockOnce())
+			close(ch)
 		}()
 
 		select {
@@ -150,6 +148,7 @@ func (l *Locker) Do(ctx context.Context, key string, fn func(ctx context.Context
 
 	go func() {
 		ch <- errors.Join(fn(ctx), unlockOnce())
+		close(ch)
 	}()
 
 	t := time.NewTicker(time.Duration(float64(opts.Lock) * opts.RefreshRatio))
@@ -245,32 +244,45 @@ func newToken() string {
 	return uuid.Must(uuid.NewV7()).String()
 }
 
-type randomBackoff struct {
-	started bool
-	base    time.Duration
+func NewRandomBackoff(base time.Duration) *RandomBackoff {
+	return &RandomBackoff{
+		base: base,
+	}
 }
 
-func (r *randomBackoff) Sleep() <-chan time.Time {
-	if !r.started {
-		r.started = true
+type RandomBackoff struct {
+	load bool
+	base time.Duration
+}
+
+func (r *RandomBackoff) Sleep() <-chan time.Time {
+	if !r.load {
+		r.load = true
 		return time.After(0)
 	}
 
 	return time.After(rand.N(r.base))
 }
 
-type exponentialBackoff struct {
+func NewExponentialBackoff(base, limit time.Duration) *ExponentialBackoff {
+	return &ExponentialBackoff{
+		base:  base,
+		limit: limit,
+	}
+}
+
+type ExponentialBackoff struct {
 	attempts int
 	base     time.Duration
 	limit    time.Duration
 }
 
-func (b exponentialBackoff) Sleep() <-chan time.Time {
+func (b ExponentialBackoff) Sleep() <-chan time.Time {
 	defer func() {
 		b.attempts++
 	}()
 
-	sleep := rand.N(min(b.base*time.Duration(math.Pow(2, float64(b.attempts))), b.limit))
+	sleep := rand.N(min(b.base*time.Duration(1<<b.attempts), b.limit))
 	return time.After(sleep)
 }
 
