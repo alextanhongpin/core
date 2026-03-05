@@ -1,6 +1,7 @@
 package retry
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -16,45 +17,46 @@ var retryableStatusCodes = []int{
 	http.StatusGatewayTimeout,
 }
 
+type retryHandler interface {
+	Do(ctx context.Context, fn func(context.Context) error) error
+}
+
 type RoundTripper struct {
 	Transport  http.RoundTripper
 	MaxRetries int
 	StatusCode func(code int) error
-	retry      retry
+	Retry      retryHandler
 }
 
-func NewRoundTripper(rt http.RoundTripper, r retry) *RoundTripper {
+func NewRoundTripper(rt http.RoundTripper, r retryHandler) *RoundTripper {
 	return &RoundTripper{
 		Transport:  rt,
 		MaxRetries: 10,
 		StatusCode: func(code int) error {
+			// NOTE: We need to convert the status code into errors in order to retry it.
 			if slices.Contains(retryableStatusCodes, code) {
 				return errors.New(fmt.Sprint(code))
 			}
 
 			return nil
 		},
-		retry: r,
+		Retry: r,
 	}
 }
 
 func (t *RoundTripper) RoundTrip(r *http.Request) (resp *http.Response, err error) {
-	for _, err := range t.retry.Try(r.Context(), t.MaxRetries) {
+	defer func() {
 		if err != nil {
-			return nil, err
+			resp = nil
 		}
-
+	}()
+	err = t.Retry.Do(r.Context(), func(context.Context) error {
 		resp, err = t.Transport.RoundTrip(r)
 		if err != nil {
-			return nil, err
+			return err
 		}
 
-		if err := t.StatusCode(resp.StatusCode); err != nil {
-			return nil, err
-		}
-
-		return resp, nil
-	}
-
-	return nil, errors.ErrUnsupported
+		return t.StatusCode(resp.StatusCode)
+	})
+	return
 }

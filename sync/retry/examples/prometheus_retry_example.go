@@ -45,12 +45,12 @@ func newPrometheusRetryMetrics() *retry.PrometheusRetryMetricsCollector {
 
 func main() {
 	metrics := newPrometheusRetryMetrics()
-	r := retry.New().WithMetricsCollector(metrics)
+	r := retry.New(retry.WithMetricsCollector(metrics), retry.N(3))
 
 	ctx := context.Background()
 	_ = r.Do(ctx, func(ctx context.Context) error {
 		return context.DeadlineExceeded // always fail for demo
-	}, 3)
+	})
 
 	http.Handle("/metrics", promhttp.Handler())
 	log.Println("Prometheus retry metrics available at http://localhost:2116/metrics")

@@ -11,8 +11,7 @@ import (
 )
 
 func main() {
-	r := retry.New().WithBackOff(retry.NewConstantBackOff(0))
-	r.Throttler = retry.NewThrottler(retry.NewThrottlerOptions())
+	r := retry.New(retry.NoWait, retry.Throttle(), retry.N(3))
 
 	var mu sync.Mutex
 	counter := make(map[int]int)
@@ -24,43 +23,34 @@ func main() {
 	n := 100
 
 	var wg sync.WaitGroup
-	wg.Add(n)
 
 	for range n {
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
+			var i int
+			err := r.Do(ctx, func(context.Context) error {
+				i++
 
-			ratio := int64(2)
-			fn := func() error {
-				if rand.Int64N(10) < ratio {
-					return errors.New("failed")
-				}
-
-				return nil
-			}
-
-			for i, err := range r.Try(ctx, 10) {
 				mu.Lock()
 				counter[i]++
 				mu.Unlock()
 
-				if err != nil {
-					if errors.Is(err, retry.ErrThrottled) {
-						skipped++
-					}
-					if errors.Is(err, retry.ErrLimitExceeded) {
-						failed++
-					}
-					break
+				if rand.Float64() < 0.2 {
+					return errors.ErrUnsupported
 				}
 
-				if err := fn(); err == nil {
-					success++
-					break
-				}
+				return nil
+			})
 
+			if errors.Is(err, retry.ErrThrottled) {
+				skipped++
 			}
-		}()
+			if errors.Is(err, retry.ErrLimitExceeded) {
+				failed++
+			}
+			if err == nil {
+				success++
+			}
+		})
 	}
 
 	wg.Wait()

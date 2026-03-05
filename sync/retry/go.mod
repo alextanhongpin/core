@@ -1,8 +1,11 @@
 module github.com/alextanhongpin/core/sync/retry
 
-go 1.23.1
+go 1.24.0
 
-require github.com/prometheus/client_golang v1.22.0
+require (
+	github.com/go-openapi/testify v0.0.0-20251001202347-e909893202bd
+	github.com/prometheus/client_golang v1.22.0
+)
 
 require (
 	github.com/beorn7/perks v1.0.1 // indirect

@@ -5,6 +5,17 @@ import (
 	"sync"
 )
 
+func NewNoOpThrottler() *NoOpThrottler {
+	return &NoOpThrottler{}
+}
+
+type NoOpThrottler struct{}
+
+func (n *NoOpThrottler) Allow() bool {
+	return true
+}
+func (n *NoOpThrottler) Success() {}
+
 type throttler interface {
 	Allow() bool
 	Success()
