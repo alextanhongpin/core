@@ -44,7 +44,7 @@ func main() {
 	// Simple retry with default exponential backoff (base: 1s, cap: 1m)
 	err := retry.Do(ctx, func(ctx context.Context) error {
 		return callService()
-	}, 5) // Max 5 attempts (defaults to 10)
+	}, retry.N(5)) // Max 5 attempts
 
 	if err != nil {
 		log.Printf("Call failed after retries: %v", err)
@@ -66,7 +66,7 @@ func main() {
 	// DoValue returns the value when successful, or the final error
 	user, err := retry.DoValue(ctx, func(ctx context.Context) (string, error) {
 		return callService()
-	}, 3)
+	}, retry.N(3))
 
 	if err != nil {
 		log.Printf("Call failed after retries: %v", err)
@@ -89,7 +89,7 @@ Control how many times an operation will be attempted:
 
 ```go
 // Using the N helper (shorthand for WithAttempts)
-r := retry.New(retry.N(3)) // Max 3 attempts
+r := retry.New(retry.N(3)) // Max 3 retries after the initial attempt (up to 4 total)
 
 // Or using constant shorthand
 r := retry.New(retry.NoWait, retry.Throttle(), retry.N(3)) // No backoff + throttle
@@ -100,6 +100,8 @@ r := retry.New(retry.NoWait, retry.Throttle(), retry.N(3)) // No backoff + throt
 Choose from built-in backoff strategies or implement custom ones:
 
 #### Exponential Backoff with Jitter (Recommended for Production)
+
+// Exponential backoff with jitter: base * 2^attempts (randomized)
 
 ```go
 // Configure exponential backoff with 100ms base and 30s cap
@@ -113,7 +115,7 @@ err := r.Do(ctx, func(ctx context.Context) error {
 #### Constant Backoff for Predictable Timing
 
 ```go
-// Fixed delay between retries (no wait = immediate retry)
+// No delay: attempts are made immediately if they fail
 r := retry.New(retry.NoWait, retry.N(3))
 
 err := r.Do(ctx, func(ctx context.Context) error {
@@ -124,8 +126,8 @@ err := r.Do(ctx, func(ctx context.Context) error {
 #### Linear Backoff for Gradual Increase
 
 ```go
-// Linearly increasing delays: 1s, 2s, 3s, 4s...
-r := retry.New(retry.Linear(1 * time.Second))
+// Linearly increasing delays: 0s, 1s, 2s, 3s...
+// Formula: Period * attempt_number (where attempt_number starts at 0)
 
 err := r.Do(ctx, func(ctx context.Context) error {
 	return uploadFile()
@@ -138,7 +140,7 @@ Use adaptive throttling to prevent overwhelming downstream services:
 
 ```go
 // Configure throttling to prevent resource exhaustion
-r := retry.New(retry.Throttle()) // Uses default token bucket settings
+r := retry.New(retry.Throttle()) // Uses default settings: MaxTokens=10, TokenRatio=0.1
 
 err := r.Do(ctx, func(ctx context.Context) error {
 	return callRateLimitedAPI()
@@ -231,7 +233,6 @@ import (
 func main() {
 	retryableStatusCodes := []int{
 		http.StatusRequestTimeout,
-		http.StatusTooEarly,
 		http.StatusInternalServerError,
 		http.StatusBadGateway,
 		http.StatusServiceUnavailable,
@@ -399,7 +400,7 @@ func main() {
 
 	user, err := retry.DoValue(ctx, func(ctx context.Context) (*User, error) {
 		return getUserFromDatabase(ctx, "user123")
-	}, 3)
+	}, retry.N(3))
 
 	if err != nil {
 		log.Printf("Database query failed: %v", err)
@@ -434,7 +435,7 @@ func main() {
 			"order_id": "12345",
 			"amount":   99.99,
 		})
-	}, 5)
+	}, retry.N(5))
 
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
@@ -478,7 +479,7 @@ func main() {
 	for _, item := range items {
 		err := r.Do(ctx, func(ctx context.Context) error {
 			return processItem(item)
-		}, 3)
+		}, retry.N(3))
 
 		if err != nil {
 			log.Printf("Failed to process %s: %v", item, err)
