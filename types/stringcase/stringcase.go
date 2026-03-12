@@ -2,76 +2,73 @@ package stringcase
 
 import (
 	"regexp"
+	"slices"
 	"strings"
 	"unicode"
 )
 
 var (
-	matchFirstCap = regexp.MustCompile("(.)([A-Z][a-z]+)")
-	matchAllCap   = regexp.MustCompile("([a-z0-9])([A-Z])")
-	initialisms   = map[string]struct{}{
-		"API": {}, "ASCII": {}, "CPU": {}, "CSS": {}, "DNS": {}, "EOF": {}, "GUID": {}, "HTML": {}, "HTTP": {}, "HTTPS": {}, "ID": {}, "IP": {}, "JSON": {}, "LHS": {}, "QPS": {}, "RAM": {}, "RHS": {}, "RPC": {}, "SLA": {}, "SMTP": {}, "SQL": {}, "SSH": {}, "TCP": {}, "TLS": {}, "TTL": {}, "UDP": {}, "UI": {}, "UID": {}, "UUID": {}, "URI": {}, "URL": {}, "UTF8": {}, "VM": {}, "XML": {}, "XSRF": {}, "XSS": {},
-	}
+	titlecase = regexp.MustCompile(`([A-Z][a-z0-9]+)`)
+	// The order matters as regexp will match the longest first.
+	// We want to avoid false match with UUID/UID/UI.
+	initialism  = regexp.MustCompile(`(ASCII|HTTPS|GUID|HTML|HTTP|JSON|SMTP|UTF8|UUID|XSRF|API|CPU|CSS|DNS|EOF|LHS|QPS|RAM|RHS|RPC|SLA|SQL|SSH|TCP|TLS|TTL|UDP|UID|URI|URL|XML|XSS|ID|IP|UI|VM)|(ASCII|HTTPS|GUID|HTML|HTTP|JSON|SMTP|UTF8|UUID|XSRF|API|CPU|CSS|DNS|EOF|LHS|QPS|RAM|RHS|RPC|SLA|SQL|SSH|TCP|TLS|TTL|UDP|UID|URI|URL|XML|XSS|ID|IP|UI|VM)`)
+	initialisms = map[string]struct{}{
+		"API": {}, "ASCII": {}, "CPU": {}, "CSS": {}, "DNS": {}, "EOF": {}, "GUID": {}, "HTML": {}, "HTTP": {}, "HTTPS": {}, "ID": {}, "IP": {}, "JSON": {}, "LHS": {}, "QPS": {}, "RAM": {}, "RHS": {}, "RPC": {}, "SLA": {}, "SMTP": {}, "SQL": {}, "SSH": {}, "TCP": {}, "TLS": {}, "TTL": {}, "UDP": {}, "UI": {}, "UID": {}, "UUID": {}, "URI": {}, "URL": {}, "UTF8": {}, "VM": {}, "XML": {}, "XSRF": {}, "XSS": {}}
 )
 
 // ToKebab converts a string to kebab-case.
 func ToKebab(s string) string {
-	s = toWords(s)
-	return strings.ToLower(strings.ReplaceAll(s, " ", "-"))
+	return strings.Join(tokenize(s), "-")
 }
 
 // ToSnake converts a string to snake_case.
 func ToSnake(s string) string {
-	s = toWords(s)
-	return strings.ToLower(strings.ReplaceAll(s, " ", "_"))
+	return strings.Join(tokenize(s), "_")
 }
 
 // ToCamel converts a string to camelCase.
 func ToCamel(s string) string {
-	words := splitWordsWithInitialism(toWords(s))
-	if len(words) == 0 {
+	tokens := normalize(s)
+	if len(tokens) == 0 {
 		return ""
 	}
-	for i := range words {
-		words[i] = strings.ToLower(words[i])
-	}
-	words[0] = strings.ToLower(words[0])
-	for i := 1; i < len(words); i++ {
-		if _, ok := initialisms[strings.ToUpper(words[i])]; ok {
-			words[i] = strings.ToUpper(words[i])
-		} else {
-			words[i] = upperFirst(words[i])
-		}
-	}
-	return strings.Join(words, "")
+
+	tokens[0] = strings.ToLower(tokens[0])
+	return strings.Join(tokens, "")
 }
 
 // ToPascal converts a string to PascalCase.
 func ToPascal(s string) string {
-	words := splitWordsWithInitialism(toWords(s))
-	for i := range words {
-		words[i] = upperFirstInitialism(strings.ToLower(words[i]))
-	}
-	return strings.Join(words, "")
+	return strings.Join(normalize(s), "")
 }
 
 // ToTitle converts a string to Title Case.
 func ToTitle(s string) string {
-	words := splitWordsWithInitialism(toWords(s))
+	return strings.Join(normalize(s), " ")
+}
+
+func normalize(s string) []string {
+	words := preserveInitialism(tokenize(s))
 	for i := range words {
-		words[i] = upperFirstInitialism(strings.ToLower(words[i]))
+		words[i] = upperFirst(words[i])
 	}
-	return strings.Join(words, " ")
+	return words
 }
 
 // ToWords splits a string into space-separated words, collapsing multiple spaces.
-func toWords(s string) string {
-	s = matchFirstCap.ReplaceAllString(s, "$1 $2")
-	s = matchAllCap.ReplaceAllString(s, "$1 $2")
-	s = strings.ReplaceAll(s, "_", " ")
-	s = strings.ReplaceAll(s, "-", " ")
-	s = strings.Join(strings.Fields(s), " ") // collapse multiple spaces
-	return s
+func tokenize(s string) []string {
+	var result []string
+	sep := func(r rune) bool {
+		return r == '_' || r == '-' || r == ' '
+	}
+	for s := range strings.FieldsFuncSeq(s, sep) {
+		s = titlecase.ReplaceAllString(s, " $1 ")
+		s = initialism.ReplaceAllString(s, " $1 ")
+		for w := range strings.FieldsSeq(s) {
+			result = append(result, strings.ToLower(w))
+		}
+	}
+	return result
 }
 
 // FromKebab converts kebab-case to space-separated words.
@@ -84,10 +81,10 @@ func FromSnake(s string) string {
 	return strings.ReplaceAll(s, "_", " ")
 }
 
-// splitWordsWithInitialism splits words and preserves initialisms as uppercase.
-func splitWordsWithInitialism(s string) []string {
-	words := strings.Fields(s)
-	for i, w := range words {
+// preserveInitialism preserves initialisms as uppercase.
+func preserveInitialism(s []string) []string {
+	words := slices.Clone(s)
+	for i, w := range s {
 		upper := strings.ToUpper(w)
 		if _, ok := initialisms[upper]; ok {
 			words[i] = upper
@@ -104,13 +101,4 @@ func upperFirst(s string) string {
 	runes := []rune(s)
 	runes[0] = unicode.ToUpper(runes[0])
 	return string(runes)
-}
-
-// upperFirstInitialism uppercases the first rune, but preserves initialisms.
-func upperFirstInitialism(s string) string {
-	upper := strings.ToUpper(s)
-	if _, ok := initialisms[upper]; ok {
-		return upper
-	}
-	return upperFirst(s)
 }
