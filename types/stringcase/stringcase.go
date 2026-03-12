@@ -8,10 +8,9 @@ import (
 )
 
 var (
-	titlecase = regexp.MustCompile(`([A-Z][a-z0-9]+)`)
 	// The order matters as regexp will match the longest first.
 	// We want to avoid false match with UUID/UID/UI.
-	initialism  = regexp.MustCompile(`(ASCII|HTTPS|GUID|HTML|HTTP|JSON|SMTP|UTF8|UUID|XSRF|API|CPU|CSS|DNS|EOF|LHS|QPS|RAM|RHS|RPC|SLA|SQL|SSH|TCP|TLS|TTL|UDP|UID|URI|URL|XML|XSS|ID|IP|UI|VM)|(ASCII|HTTPS|GUID|HTML|HTTP|JSON|SMTP|UTF8|UUID|XSRF|API|CPU|CSS|DNS|EOF|LHS|QPS|RAM|RHS|RPC|SLA|SQL|SSH|TCP|TLS|TTL|UDP|UID|URI|URL|XML|XSS|ID|IP|UI|VM)`)
+	split       = regexp.MustCompile(`([A-Z][a-z0-9]+|ASCII|HTTPS|GUID|HTML|HTTP|JSON|SMTP|UTF8|UUID|XSRF|API|CPU|CSS|DNS|EOF|LHS|QPS|RAM|RHS|RPC|SLA|SQL|SSH|TCP|TLS|TTL|UDP|UID|URI|URL|XML|XSS|ID|IP|UI|VM)|(ASCII|HTTPS|GUID|HTML|HTTP|JSON|SMTP|UTF8|UUID|XSRF|API|CPU|CSS|DNS|EOF|LHS|QPS|RAM|RHS|RPC|SLA|SQL|SSH|TCP|TLS|TTL|UDP|UID|URI|URL|XML|XSS|ID|IP|UI|VM|-|_)`)
 	initialisms = map[string]struct{}{
 		"API": {}, "ASCII": {}, "CPU": {}, "CSS": {}, "DNS": {}, "EOF": {}, "GUID": {}, "HTML": {}, "HTTP": {}, "HTTPS": {}, "ID": {}, "IP": {}, "JSON": {}, "LHS": {}, "QPS": {}, "RAM": {}, "RHS": {}, "RPC": {}, "SLA": {}, "SMTP": {}, "SQL": {}, "SSH": {}, "TCP": {}, "TLS": {}, "TTL": {}, "UDP": {}, "UI": {}, "UID": {}, "UUID": {}, "URI": {}, "URL": {}, "UTF8": {}, "VM": {}, "XML": {}, "XSRF": {}, "XSS": {}}
 )
@@ -58,16 +57,11 @@ func normalize(s string) []string {
 // ToWords splits a string into space-separated words, collapsing multiple spaces.
 func tokenize(s string) []string {
 	var result []string
-	sep := func(r rune) bool {
-		return r == '_' || r == '-' || r == ' '
+	s = split.ReplaceAllString(s, " $1 ")
+	for w := range strings.FieldsSeq(s) {
+		result = append(result, strings.ToLower(w))
 	}
-	for s := range strings.FieldsFuncSeq(s, sep) {
-		s = titlecase.ReplaceAllString(s, " $1 ")
-		s = initialism.ReplaceAllString(s, " $1 ")
-		for w := range strings.FieldsSeq(s) {
-			result = append(result, strings.ToLower(w))
-		}
-	}
+
 	return result
 }
 

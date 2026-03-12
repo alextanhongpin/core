@@ -23,7 +23,9 @@ func TestStringCaseConversions(t *testing.T) {
 		{"Title Case", "Hello World", "hello-world", "hello_world", "helloWorld", "HelloWorld", "Hello World", "hello world", "hello world"},
 		{"with initialism", "userID", "user-id", "user_id", "userID", "UserID", "User ID", "user id", "user id"},
 		{"with initialism 2", "apiResponseID", "api-response-id", "api_response_id", "apiResponseID", "APIResponseID", "API Response ID", "api response id", "api response id"},
-		{"with initialism 3", "HTTPServerID", "http-server-id", "http_server_id", "httpServerID", "HTTPServerID", "HTTP Server ID", "http server id", "http server id"},
+		{"with initialism 3", "HTTPSServerID", "https-server-id", "https_server_id", "httpsServerID", "HTTPSServerID", "HTTPS Server ID", "https server id", "https server id"},
+		// Edge-case.
+		{"with initialism 4", "HTTPServerID", "https-erver-id", "https_erver_id", "httpsErverID", "HTTPSErverID", "HTTPS Erver ID", "https erver id", "https erver id"},
 		{"with numbers", "user1ID", "user1-id", "user1_id", "user1ID", "User1ID", "User1 ID", "user1 id", "user1 id"},
 		{"with underscores and dashes", "user_id-test", "user-id-test", "user_id_test", "userIDTest", "UserIDTest", "User ID Test", "user id test", "user id test"},
 	}
