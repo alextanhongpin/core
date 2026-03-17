@@ -3,6 +3,7 @@ module github.com/alextanhongpin/core/http
 go 1.24.2
 
 require (
+	github.com/alextanhongpin/errors v0.0.0-20250711090529-879e72b37593
 	github.com/alextanhongpin/errors/cause v0.2.0
 	github.com/alextanhongpin/errors/codes v0.0.1
 	github.com/alextanhongpin/testdump/httpdump v0.0.0-20250703151453-77514452c9aa
@@ -17,7 +18,6 @@ require (
 require (
 	cuelabs.dev/go/oci/ociregistry v0.0.0-20250530080122-d0efc28a5723 // indirect
 	cuelang.org/go v0.13.2 // indirect
-	github.com/alextanhongpin/errors v0.0.0-20250711090529-879e72b37593 // indirect
 	github.com/alextanhongpin/testdump/pkg/cuetest v0.0.0-20250703151453-77514452c9aa // indirect
 	github.com/alextanhongpin/testdump/pkg/diff v0.0.0-20250703151453-77514452c9aa // indirect
 	github.com/alextanhongpin/testdump/pkg/file v0.0.0-20250703151453-77514452c9aa // indirect

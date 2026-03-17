@@ -12,7 +12,7 @@ import (
 
 func TestBasicAuth(t *testing.T) {
 	var h http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, "hello world")
+		_, _ = fmt.Fprint(w, "hello world")
 	})
 	h = auth.BasicHandler(h, map[string]string{
 		"john": auth.HashPasswordSHA256("123456"),

@@ -36,7 +36,7 @@ const Bearer = "Bearer"
 // - The header starts with "Bearer "
 // - There is a non-empty token after "Bearer "
 func BearerAuth(r *http.Request) (string, bool) {
-	auth := r.Header.Get("Authorization")
-	bearer, token, ok := strings.Cut(auth, " ")
-	return token, ok && bearer == Bearer && len(token) > 0
+	authz := r.Header.Get("Authorization")
+	token, ok := strings.CutPrefix(authz, "Bearer ")
+	return token, ok
 }

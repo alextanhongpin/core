@@ -4,6 +4,7 @@ package middleware
 import (
 	"log/slog"
 	"net/http"
+	"slices"
 	"strconv"
 	"time"
 )
@@ -21,12 +22,12 @@ func Logger(logger *slog.Logger) func(http.Handler) http.Handler {
 			start := time.Now()
 
 			// Wrap the ResponseWriter to capture status and size
-			wrapped := &responseWriter{
+			rw := &responseWriter{
 				ResponseWriter: w,
 				statusCode:     http.StatusOK,
 			}
 
-			next.ServeHTTP(wrapped, r)
+			next.ServeHTTP(rw, r)
 
 			duration := time.Since(start)
 
@@ -35,8 +36,8 @@ func Logger(logger *slog.Logger) func(http.Handler) http.Handler {
 				slog.String("path", r.URL.Path),
 				slog.String("remote_addr", r.RemoteAddr),
 				slog.String("user_agent", r.UserAgent()),
-				slog.Int("status", wrapped.statusCode),
-				slog.Int("size", wrapped.size),
+				slog.Int("status", rw.statusCode),
+				slog.Int("size", rw.size),
 				slog.Duration("duration", duration),
 			)
 		})
@@ -60,6 +61,10 @@ func (rw *responseWriter) Write(b []byte) (int, error) {
 	return n, err
 }
 
+func (rw *responseWriter) Unwrap() http.ResponseWriter {
+	return rw.ResponseWriter
+}
+
 // Recovery creates a panic recovery middleware that catches panics and returns
 // a 500 Internal Server Error response while logging the panic.
 //
@@ -71,7 +76,7 @@ func Recovery(logger *slog.Logger) func(http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			defer func() {
 				if err := recover(); err != nil {
-					logger.ErrorContext(r.Context(), "HTTP handler panic",
+					logger.LogAttrs(r.Context(), slog.LevelError, "HTTP handler panic",
 						slog.Any("panic", err),
 						slog.String("method", r.Method),
 						slog.String("path", r.URL.Path),
@@ -121,7 +126,7 @@ func CORS(config CORSConfig) func(http.Handler) http.Handler {
 			// Check if origin is allowed
 			if origin != "" && isOriginAllowed(origin, config.AllowedOrigins) {
 				w.Header().Set("Access-Control-Allow-Origin", origin)
-			} else if contains(config.AllowedOrigins, "*") {
+			} else if slices.Contains(config.AllowedOrigins, "*") {
 				w.Header().Set("Access-Control-Allow-Origin", "*")
 			}
 
@@ -171,15 +176,6 @@ func DefaultCORSConfig() CORSConfig {
 func isOriginAllowed(origin string, allowedOrigins []string) bool {
 	for _, allowed := range allowedOrigins {
 		if allowed == "*" || allowed == origin {
-			return true
-		}
-	}
-	return false
-}
-
-func contains(slice []string, item string) bool {
-	for _, s := range slice {
-		if s == item {
 			return true
 		}
 	}
