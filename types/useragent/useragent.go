@@ -7,6 +7,7 @@ import (
 	"iter"
 	"net/http"
 	"slices"
+	"sync/atomic"
 
 	"golang.org/x/net/html"
 	"golang.org/x/net/html/atom"
@@ -14,7 +15,15 @@ import (
 
 var Browsers = []string{"Chrome", "Firefox", "Mozilla", "Safari", "Opera", "Opera Mini", "Edge", "Internet Explorer"}
 
+type loader interface {
+	io.ReaderFrom
+	io.WriterTo
+}
+
+var _ loader = (*Loader)(nil)
+
 type Loader struct {
+	val      atomic.Pointer[[]string]
 	browsers []string
 }
 
@@ -22,33 +31,45 @@ func NewLoader(browsers []string) *Loader {
 	return &Loader{browsers: browsers}
 }
 
-func (l *Loader) Read(r io.Reader) ([]string, error) {
+func (l *Loader) Load() []string {
+	p := l.val.Load()
+	return slices.Clone(*p)
+}
+
+func (l *Loader) ReadFrom(r io.Reader) (int64, error) {
+	var n int
 	var res []string
 	scanner := bufio.NewScanner(r)
 	for scanner.Scan() {
-		res = append(res, scanner.Text())
+		text := scanner.Text()
+		n += len(text)
+		res = append(res, text)
 	}
 	if err := scanner.Err(); err != nil {
-		return nil, err
+		return 0, err
 	}
-	return res, nil
+	l.val.Store(&res)
+
+	return int64(n), nil
 }
 
-func (l *Loader) Write(w io.Writer) error {
+func (l *Loader) WriteTo(w io.Writer) (int64, error) {
+	var total int
 	for _, b := range l.browsers {
 		seq, stop := Fetch(b)
 		for ua := range seq {
-			_, err := fmt.Fprintf(w, "%s\n", ua)
+			n, err := fmt.Fprintf(w, "%s\n", ua)
 			if err != nil {
-				return err
+				return 0, err
 			}
+			total += n
 		}
 		if err := stop(); err != nil {
-			return err
+			return 0, err
 		}
 	}
 
-	return nil
+	return int64(total), nil
 }
 
 func Fetch(browser string) (iter.Seq[string], func() error) {

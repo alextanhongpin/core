@@ -4,44 +4,57 @@ import (
 	"cmp"
 	"errors"
 	"io"
+	"log/slog"
 	"maps"
 	"os"
-	"sync/atomic"
+	"sync"
 	"time"
 )
 
-type loader[T any] interface {
-	Write(w io.Writer) error
-	Read(r io.Reader) (T, error)
+type rw interface {
+	io.WriterTo
+	io.ReaderFrom
 }
 
-func NewLoader[T any](path string, meta map[string]any, ttl time.Duration, l loader[T]) *Loader[T] {
-	return &Loader[T]{
-		loader: l,
-		meta:   meta,
-		path:   path,
-		ttl:    ttl,
+func NewLoader(path string, meta map[string]any, ttl time.Duration, rw rw) *Loader {
+	return &Loader{
+		rw:   rw,
+		meta: meta,
+		path: path,
+		ttl:  ttl,
 	}
 }
 
-type Loader[T any] struct {
-	loader loader[T]
-	meta   map[string]any
-	path   string
-	ttl    time.Duration
-	val    atomic.Pointer[T]
+type Loader struct {
+	rw   rw
+	meta map[string]any
+	path string
+	ttl  time.Duration
 }
 
-func (u *Loader[T]) Load() T {
-	return *u.val.Load()
+func (l *Loader) Sync() func() {
+	var wg sync.WaitGroup
+
+	wg.Go(func() {
+		t := time.NewTicker(l.ttl)
+		defer t.Stop()
+		for range t.C {
+			err := l.SyncOnce()
+			if err != nil {
+				slog.Default().Error("sync error", "err", err.Error())
+			}
+		}
+	})
+
+	return wg.Wait
 }
 
-func (u *Loader[T]) Sync() error {
-	f, err := os.Open(u.path)
+func (l *Loader) SyncOnce() error {
+	f, err := os.Open(l.path)
 	if errors.Is(err, os.ErrNotExist) {
 		return cmp.Or(
-			u.Download(),
-			u.Sync(),
+			l.Download(),
+			l.SyncOnce(),
 		)
 	}
 	if err != nil {
@@ -56,24 +69,23 @@ func (u *Loader[T]) Sync() error {
 		return err
 	}
 
-	if u.shouldUpdate(meta) {
+	if l.shouldUpdate(meta) {
 		return cmp.Or(
-			u.Download(),
-			u.Sync(),
+			l.Download(),
+			l.SyncOnce(),
 		)
 	}
 
-	t, err := u.loader.Read(reader)
+	_, err = l.rw.ReadFrom(reader)
 	if err != nil {
 		return err
 	}
-	u.val.Swap(&t)
 
 	return nil
 }
 
-func (u *Loader[T]) Download() error {
-	f, err := os.Create(u.path)
+func (l *Loader) Download() error {
+	f, err := os.Create(l.path)
 	if err != nil {
 		return err
 	}
@@ -81,17 +93,18 @@ func (u *Loader[T]) Download() error {
 		_ = f.Close()
 	}()
 
-	meta := maps.Clone(u.meta)
+	meta := maps.Clone(l.meta)
 	meta["created_at"] = time.Now().Format(time.RFC3339)
 	err = WriteFrontmatter(meta, f)
 	if err != nil {
 		return err
 	}
 
-	return u.loader.Write(f)
+	_, err = l.rw.WriteTo(f)
+	return err
 }
 
-func (u *Loader[T]) shouldUpdate(meta map[string]any) bool {
+func (l *Loader) shouldUpdate(meta map[string]any) bool {
 	s, ok := meta["created_at"].(string)
 	if !ok {
 		return false
@@ -102,5 +115,5 @@ func (u *Loader[T]) shouldUpdate(meta map[string]any) bool {
 		return false
 	}
 
-	return time.Since(t) > u.ttl
+	return time.Since(t) > l.ttl
 }
