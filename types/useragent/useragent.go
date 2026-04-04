@@ -38,7 +38,10 @@ func (l *Loader) Write(w io.Writer) error {
 	for _, b := range l.browsers {
 		seq, stop := Fetch(b)
 		for ua := range seq {
-			fmt.Fprintf(w, "%s\n", ua)
+			_, err := fmt.Fprintf(w, "%s\n", ua)
+			if err != nil {
+				return err
+			}
 		}
 		if err := stop(); err != nil {
 			return err
