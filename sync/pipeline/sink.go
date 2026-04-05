@@ -25,17 +25,14 @@ func Collect[T any](in <-chan T) []T {
 	return res
 }
 
-func Process[T any](in <-chan T, fn func(T)) func() {
+func Sink[T any](in <-chan T, fn func(T)) func() {
 	var wg sync.WaitGroup
-	wg.Add(1)
 
-	go func() {
-		defer wg.Done()
-
+	wg.Go(func() {
 		for v := range in {
 			fn(v)
 		}
-	}()
+	})
 
 	return wg.Wait
 }

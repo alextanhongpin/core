@@ -1,27 +1,13 @@
 // source must be cancellable. It takes the context as the first argument.
 package pipeline
 
-import "context"
+import (
+	"context"
+	"iter"
+)
 
-func Generator(ctx context.Context, n int) <-chan int {
-	out := make(chan int)
-
-	go func() {
-		defer close(out)
-
-		for i := range n {
-			select {
-			case <-ctx.Done():
-				return
-			case out <- i:
-			}
-		}
-	}()
-
-	return out
-}
-
-func GeneratorFunc[T any](ctx context.Context, fn func() T) <-chan T {
+// SourceChan creates a new source channel from a channel.
+func SourceChan[T any](ctx context.Context, in chan T) chan T {
 	out := make(chan T)
 
 	go func() {
@@ -31,7 +17,7 @@ func GeneratorFunc[T any](ctx context.Context, fn func() T) <-chan T {
 			select {
 			case <-ctx.Done():
 				return
-			case out <- fn():
+			case out <- <-in:
 			}
 		}
 	}()
@@ -39,54 +25,14 @@ func GeneratorFunc[T any](ctx context.Context, fn func() T) <-chan T {
 	return out
 }
 
-func Repeat[T any](ctx context.Context, vs ...T) <-chan T {
+// SourceIter creates a new source channel from an iterator.
+func SourceIter[T any](ctx context.Context, seq iter.Seq[T]) <-chan T {
 	out := make(chan T)
 
 	go func() {
 		defer close(out)
 
-		for {
-			for _, v := range vs {
-				select {
-				case <-ctx.Done():
-					return
-				case out <- v:
-				}
-			}
-		}
-	}()
-
-	return out
-}
-
-func RepeatFunc[T any](ctx context.Context, fn func() []T) <-chan T {
-	out := make(chan T)
-
-	go func() {
-		defer close(out)
-
-		for {
-			for _, v := range fn() {
-				select {
-				case <-ctx.Done():
-					return
-				case out <- v:
-				}
-			}
-		}
-	}()
-
-	return out
-}
-
-// From creates a channel from a slice of values
-func From[T any](ctx context.Context, values ...T) <-chan T {
-	out := make(chan T)
-
-	go func() {
-		defer close(out)
-
-		for _, v := range values {
+		for v := range seq {
 			select {
 			case <-ctx.Done():
 				return
@@ -98,8 +44,8 @@ func From[T any](ctx context.Context, values ...T) <-chan T {
 	return out
 }
 
-// FromSlice creates a channel from a slice
-func FromSlice[T any](ctx context.Context, values []T) <-chan T {
+// SourceSlice creates a source channel from a slice.
+func SourceSlice[T any](ctx context.Context, values []T) <-chan T {
 	out := make(chan T)
 
 	go func() {
@@ -110,44 +56,6 @@ func FromSlice[T any](ctx context.Context, values []T) <-chan T {
 			case <-ctx.Done():
 				return
 			case out <- v:
-			}
-		}
-	}()
-
-	return out
-}
-
-// Range creates a channel that emits values from start to end (exclusive)
-func Range(ctx context.Context, start, end int) <-chan int {
-	out := make(chan int)
-
-	go func() {
-		defer close(out)
-
-		for i := start; i < end; i++ {
-			select {
-			case <-ctx.Done():
-				return
-			case out <- i:
-			}
-		}
-	}()
-
-	return out
-}
-
-// RangeStep creates a channel that emits values from start to end with step
-func RangeStep(ctx context.Context, start, end, step int) <-chan int {
-	out := make(chan int)
-
-	go func() {
-		defer close(out)
-
-		for i := start; i < end; i += step {
-			select {
-			case <-ctx.Done():
-				return
-			case out <- i:
 			}
 		}
 	}()
