@@ -43,14 +43,14 @@ func TestLoader(t *testing.T) {
 		ml,
 	)
 
-	err := loader.SyncOnce()
+	err := loader.Load()
 	is := assert.New(t)
 	is.NoError(err)
 
 	is.Equal("foo", ml.val)
 	time.Sleep(time.Second)
 
-	err = loader.SyncOnce()
+	err = loader.Load()
 	is.NoError(err)
 	is.Equal("bar", ml.val)
 }

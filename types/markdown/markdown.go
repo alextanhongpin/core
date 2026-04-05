@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"maps"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 )
@@ -26,9 +27,9 @@ func NewLoader(path string, meta map[string]any, ttl time.Duration, rw rw) *Load
 }
 
 type Loader struct {
-	rw   rw
 	meta map[string]any
 	path string
+	rw   rw
 	ttl  time.Duration
 }
 
@@ -39,7 +40,7 @@ func (l *Loader) Sync() func() {
 		t := time.NewTicker(l.ttl)
 		defer t.Stop()
 		for range t.C {
-			err := l.SyncOnce()
+			err := l.Load()
 			if err != nil {
 				slog.Default().Error("sync error", "err", err.Error())
 			}
@@ -49,12 +50,12 @@ func (l *Loader) Sync() func() {
 	return wg.Wait
 }
 
-func (l *Loader) SyncOnce() error {
+func (l *Loader) Load() error {
 	f, err := os.Open(l.path)
 	if errors.Is(err, os.ErrNotExist) {
 		return cmp.Or(
-			l.Download(),
-			l.SyncOnce(),
+			l.Save(),
+			l.Load(),
 		)
 	}
 	if err != nil {
@@ -71,8 +72,8 @@ func (l *Loader) SyncOnce() error {
 
 	if l.shouldUpdate(meta) {
 		return cmp.Or(
-			l.Download(),
-			l.SyncOnce(),
+			l.Save(),
+			l.Load(),
 		)
 	}
 
@@ -84,7 +85,11 @@ func (l *Loader) SyncOnce() error {
 	return nil
 }
 
-func (l *Loader) Download() error {
+func (l *Loader) Save() error {
+	err := os.MkdirAll(filepath.Dir(l.path), 0o755)
+	if err != nil {
+		return err
+	}
 	f, err := os.Create(l.path)
 	if err != nil {
 		return err
