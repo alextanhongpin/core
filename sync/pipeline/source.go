@@ -17,7 +17,16 @@ func SourceChan[T any](ctx context.Context, in chan T) chan T {
 			select {
 			case <-ctx.Done():
 				return
-			case out <- <-in:
+			case v, ok := <-in:
+				if !ok {
+					break
+				}
+
+				select {
+				case <-ctx.Done():
+					return
+				case out <- v:
+				}
 			}
 		}
 	}()
