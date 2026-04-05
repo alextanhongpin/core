@@ -89,6 +89,13 @@ func New[T any]() *Result[T] {
 	return &Result[T]{}
 }
 
+func Make[T any](v T, err error) *Result[T] {
+	return &Result[T]{
+		Data: v,
+		Err:  err,
+	}
+}
+
 // OK creates a successful Result with the given value.
 func OK[T any](v T) *Result[T] {
 	return &Result[T]{

@@ -15,7 +15,7 @@ type Tracker struct {
 	start time.Time
 }
 
-func NewTracker(ctx context.Context, msg string, attrs ...slog.Attr) *Tracker {
+func New(ctx context.Context, msg string, attrs ...slog.Attr) *Tracker {
 	return &Tracker{
 		ctx:   ctx,
 		attrs: attrs,
