@@ -3,6 +3,7 @@ package markdown_test
 import (
 	"fmt"
 	"io"
+	"os"
 	"testing"
 	"time"
 
@@ -33,9 +34,12 @@ func (m *mockLoader) ReadFrom(r io.Reader) (int64, error) {
 }
 
 func TestLoader(t *testing.T) {
+	file := fmt.Sprintf("testdata/%s.md", t.Name())
+	_ = os.RemoveAll(file)
+
 	ml := &mockLoader{vals: []string{"foo", "bar"}}
 	loader := markdown.NewLoader(
-		fmt.Sprintf("testdata/%s.md", t.Name()),
+		file,
 		map[string]any{
 			"foo": "bar",
 		},

@@ -11,13 +11,13 @@ import (
 )
 
 func TestWriteFrontmatter(t *testing.T) {
-	fm := map[string]any{
+	meta := map[string]any{
 		"name":        t.Name(),
 		"description": t.Name(),
 	}
 	var bb bytes.Buffer
 	w := io.MultiWriter(&bb, t.Output())
-	err := markdown.WriteFrontmatter(fm, w)
+	err := markdown.WriteFrontmatter(w, meta)
 	is := assert.New(t)
 	is.NoError(err)
 
