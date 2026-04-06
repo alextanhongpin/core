@@ -1,16 +1,18 @@
 package must
 
-import "log"
+import (
+	"fmt"
+)
 
 func Value[T any](v T, err error) T {
 	if err != nil {
-		log.Fatalf("must: %v", err)
+		panic(fmt.Errorf("must: %w", err))
 	}
 	return v
 }
 
 func Nil(err error) {
 	if err != nil {
-		log.Fatalf("must: %v", err)
+		panic(fmt.Errorf("must: %w", err))
 	}
 }
