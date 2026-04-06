@@ -25,19 +25,17 @@ func New[T any](path string) *JSONL[T] {
 }
 
 func (s *JSONL[T]) All() (iter.Seq[T], func() error) {
-	f, err := os.Open(s.path)
-	if errors.Is(err, os.ErrNotExist) {
-		return func(yield func(T) bool) {}, nil
-	}
-
-	if err != nil {
-		return nil, func() error {
-			return err
-		}
-	}
-
 	var iterErr error
 	seq := func(yield func(T) bool) {
+		f, err := os.Open(s.path)
+		if errors.Is(err, os.ErrNotExist) {
+			return
+		}
+		if err != nil {
+			iterErr = err
+			return
+		}
+
 		defer func() {
 			_ = f.Close()
 		}()
