@@ -16,3 +16,12 @@ func Nil(err error) {
 		panic(fmt.Errorf("must: %w", err))
 	}
 }
+
+func Nilf(msg string, args ...any) {
+	for _, arg := range args {
+		_, ok := arg.(error)
+		if ok {
+			panic(fmt.Errorf(msg, args...))
+		}
+	}
+}
