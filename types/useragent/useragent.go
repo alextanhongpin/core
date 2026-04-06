@@ -13,7 +13,27 @@ import (
 	"golang.org/x/net/html/atom"
 )
 
-var Browsers = []string{"Chrome", "Firefox", "Mozilla", "Safari", "Opera", "Opera Mini", "Edge", "Internet Explorer"}
+const (
+	Chrome           = "Chrome"
+	Edge             = "Edge"
+	Firefox          = "Firefox"
+	InternetExplorer = "Internet Explorer"
+	Mozilla          = "Mozilla"
+	Opera            = "Opera"
+	OperaMini        = "Opera Mini"
+	Safari           = "Safari"
+)
+
+var Browsers = []string{
+	Chrome,
+	Edge,
+	Firefox,
+	InternetExplorer,
+	Mozilla,
+	Opera,
+	OperaMini,
+	Safari,
+}
 
 func For(browser string) (iter.Seq[string], error) {
 	baseURL := "http://www.useragentstring.com/pages/useragentstring.php?name="
