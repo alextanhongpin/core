@@ -58,6 +58,7 @@ func (g Graph[T]) TopologicalSort() ([]T, error) {
 			queue = append(queue, node)
 		}
 	}
+	slices.Sort(queue)
 
 	var result []T
 	for len(queue) > 0 {

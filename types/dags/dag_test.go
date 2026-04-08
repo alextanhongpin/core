@@ -1,6 +1,7 @@
 package dags_test
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/alextanhongpin/core/types/dags"
@@ -75,5 +76,16 @@ func TestDAG(t *testing.T) {
 			3: []int{1},
 			4: []int{1},
 		}, inv)
+	})
+
+	t.Run("disconnected", func(t *testing.T) {
+		var g dags.Graph[string]
+		b := []byte(`{"a": [], "b": [], "c": []}`)
+		is := assert.New(t)
+		is.NoError(json.Unmarshal(b, &g))
+
+		order, err := g.TopologicalSort()
+		is.NoError(err)
+		is.Equal([]string{"a", "b", "c"}, order)
 	})
 }
