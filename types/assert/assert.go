@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"reflect"
 	"regexp"
+	"slices"
 	"strings"
 )
 
@@ -108,11 +109,10 @@ func Email(s string) string {
 
 // OneOf validates that a value is one of the allowed values.
 func OneOf[T comparable](v T, allowed ...T) string {
-	for _, a := range allowed {
-		if v == a {
-			return ""
-		}
+	if slices.Contains(allowed, v) {
+		return ""
 	}
+
 	return fmt.Sprintf("must be one of: %v", allowed)
 }
 

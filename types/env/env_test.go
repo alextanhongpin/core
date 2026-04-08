@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/alextanhongpin/core/types/env"
-	"github.com/stretchr/testify/assert"
+	"github.com/go-openapi/testify/assert"
 )
 
 func TestMustLoad(t *testing.T) {

@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/alextanhongpin/core/types/handlers"
-	"github.com/stretchr/testify/assert"
+	"github.com/go-openapi/testify/assert"
 )
 
 type MessageRequest struct {

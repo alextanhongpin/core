@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/alextanhongpin/core/types/list"
-	"github.com/stretchr/testify/assert"
+	"github.com/go-openapi/testify/assert"
 )
 
 func TestMap(t *testing.T) {

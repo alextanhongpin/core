@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/alextanhongpin/core/types/structs"
-	"github.com/stretchr/testify/assert"
+	"github.com/go-openapi/testify/assert"
 )
 
 // Example types for testing

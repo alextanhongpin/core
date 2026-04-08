@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"time"
 )
 
@@ -78,15 +79,10 @@ func (r *Request) Decode(v any) error {
 
 // Clone creates a copy of the request with a new body.
 func (r *Request) Clone(newBody io.Reader) *Request {
-	meta := make(map[string]string)
-	for k, v := range r.Meta {
-		meta[k] = v
-	}
-
 	return &Request{
 		Pattern:   r.Pattern,
 		Body:      newBody,
-		Meta:      meta,
+		Meta:      maps.Clone(r.Meta),
 		Timestamp: r.Timestamp,
 		ctx:       r.ctx,
 	}
@@ -308,7 +304,7 @@ func RecoveryMiddleware() Middleware {
 			defer func() {
 				if rec := recover(); rec != nil {
 					w.WriteStatus(500)
-					w.Encode(map[string]interface{}{
+					w.Encode(map[string]any{
 						"error": "internal server error",
 						"panic": fmt.Sprintf("%v", rec),
 					})

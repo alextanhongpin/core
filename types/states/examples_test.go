@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/alextanhongpin/core/types/states"
-	"github.com/stretchr/testify/assert"
+	"github.com/go-openapi/testify/assert"
 )
 
 // Example: User Registration Workflow

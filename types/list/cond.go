@@ -60,13 +60,7 @@ func Some[T any](slice []T, predicate func(T) bool) bool {
 // None returns true if no elements satisfy the predicate.
 // Returns true for empty slices.
 func None[T any](slice []T, predicate func(T) bool) bool {
-	for _, item := range slice {
-		if predicate(item) {
-			return false
-		}
-	}
-
-	return true
+	return !slices.ContainsFunc(slice, predicate)
 }
 
 // NoneIndex returns true if no elements satisfy the index-based predicate.

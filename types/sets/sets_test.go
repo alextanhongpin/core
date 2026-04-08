@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/alextanhongpin/core/types/sets"
-	"github.com/stretchr/testify/assert"
+	"github.com/go-openapi/testify/assert"
 )
 
 func TestSet(t *testing.T) {

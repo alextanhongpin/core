@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/alextanhongpin/core/types/safe"
-	"github.com/stretchr/testify/assert"
+	"github.com/go-openapi/testify/assert"
 )
 
 func TestEncryptDecrypt(t *testing.T) {

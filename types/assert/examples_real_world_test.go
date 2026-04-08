@@ -64,7 +64,7 @@ func ExampleUserRegistrationRequest() {
 		if errors := req.Validate(); len(errors) > 0 {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusBadRequest)
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			json.NewEncoder(w).Encode(map[string]any{
 				"error":  "Validation failed",
 				"fields": errors,
 			})
