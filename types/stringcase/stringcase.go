@@ -1,68 +1,43 @@
 package stringcase
 
 import (
-	"regexp"
+	"iter"
 	"slices"
 	"strings"
 	"unicode"
+
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
 )
 
 var (
-	// The order matters as regexp will match the longest first.
-	// We want to avoid false match with UUID/UID/UI.
-	split       = regexp.MustCompile(`([A-Z][a-z0-9]+|ASCII|HTTPS|GUID|HTML|HTTP|JSON|SMTP|UTF8|UUID|XSRF|API|CPU|CSS|DNS|EOF|LHS|QPS|RAM|RHS|RPC|SLA|SQL|SSH|TCP|TLS|TTL|UDP|UID|URI|URL|XML|XSS|ID|IP|UI|VM)|(ASCII|HTTPS|GUID|HTML|HTTP|JSON|SMTP|UTF8|UUID|XSRF|API|CPU|CSS|DNS|EOF|LHS|QPS|RAM|RHS|RPC|SLA|SQL|SSH|TCP|TLS|TTL|UDP|UID|URI|URL|XML|XSS|ID|IP|UI|VM|-|_)`)
-	initialisms = map[string]struct{}{
-		"API": {}, "ASCII": {}, "CPU": {}, "CSS": {}, "DNS": {}, "EOF": {}, "GUID": {}, "HTML": {}, "HTTP": {}, "HTTPS": {}, "ID": {}, "IP": {}, "JSON": {}, "LHS": {}, "QPS": {}, "RAM": {}, "RHS": {}, "RPC": {}, "SLA": {}, "SMTP": {}, "SQL": {}, "SSH": {}, "TCP": {}, "TLS": {}, "TTL": {}, "UDP": {}, "UI": {}, "UID": {}, "UUID": {}, "URI": {}, "URL": {}, "UTF8": {}, "VM": {}, "XML": {}, "XSRF": {}, "XSS": {}}
+	DefaultInitialisms = strings.Fields("API APIs ASCII ASCIIs CPU CPUs CSS DNS EOF EOFs GUID GUIDs HTML HTMLs HTTP HTTPS HTTPs ID IDs IP IPs JSON JSONs LHS QPS RAM RAMs RHS RPC RPCs SLA SLAs SMTP SMTPs SQL SQLs SSH SSHs TCP TCPs TLS TTL TTLs UDP UDPs UI UID UIDs UIs URI URIs URL URLs UTF8 UTF8s UUID UUIDs VM VMs XML XMLs XSRF XSRFs XSS")
+	tokenizer          = NewTokenizer(DefaultInitialisms...)
 )
 
 // ToKebab converts a string to kebab-case.
 func ToKebab(s string) string {
-	return strings.Join(tokenize(s), "-")
+	return tokenizer.Kebab(s)
 }
 
 // ToSnake converts a string to snake_case.
 func ToSnake(s string) string {
-	return strings.Join(tokenize(s), "_")
+	return tokenizer.Snake(s)
 }
 
 // ToCamel converts a string to camelCase.
 func ToCamel(s string) string {
-	tokens := normalize(s)
-	if len(tokens) == 0 {
-		return ""
-	}
-
-	tokens[0] = strings.ToLower(tokens[0])
-	return strings.Join(tokens, "")
+	return tokenizer.Camel(s)
 }
 
 // ToPascal converts a string to PascalCase.
 func ToPascal(s string) string {
-	return strings.Join(normalize(s), "")
+	return tokenizer.Pascal(s)
 }
 
 // ToTitle converts a string to Title Case.
 func ToTitle(s string) string {
-	return strings.Join(normalize(s), " ")
-}
-
-func normalize(s string) []string {
-	words := preserveInitialism(tokenize(s))
-	for i := range words {
-		words[i] = upperFirst(words[i])
-	}
-	return words
-}
-
-// ToWords splits a string into space-separated words, collapsing multiple spaces.
-func tokenize(s string) []string {
-	var result []string
-	s = split.ReplaceAllString(s, " $1 ")
-	for w := range strings.FieldsSeq(s) {
-		result = append(result, strings.ToLower(w))
-	}
-
-	return result
+	return tokenizer.Title(s)
 }
 
 // FromKebab converts kebab-case to space-separated words.
@@ -75,24 +50,170 @@ func FromSnake(s string) string {
 	return strings.ReplaceAll(s, "_", " ")
 }
 
-// preserveInitialism preserves initialisms as uppercase.
-func preserveInitialism(s []string) []string {
-	words := slices.Clone(s)
-	for i, w := range s {
-		upper := strings.ToUpper(w)
-		if _, ok := initialisms[upper]; ok {
-			words[i] = upper
-		}
-	}
-	return words
+type Tokenizer struct {
+	initialisms  []string
+	lowerToUpper map[string]string
 }
 
-// upperFirst uppercases the first rune in a string.
-func upperFirst(s string) string {
-	if s == "" {
-		return ""
+func NewTokenizer(initialisms ...string) *Tokenizer {
+	m := make(map[string]string)
+	for _, i := range initialisms {
+		m[strings.ToLower(i)] = i
 	}
-	runes := []rune(s)
-	runes[0] = unicode.ToUpper(runes[0])
-	return string(runes)
+
+	return &Tokenizer{
+		initialisms:  initialisms,
+		lowerToUpper: m,
+	}
+}
+
+func (t *Tokenizer) Title(text string) string {
+	caser := cases.Title(language.English)
+	var result []string
+	for token := range t.Tokenize(text) {
+		upper, ok := t.lowerToUpper[token]
+		if ok {
+			result = append(result, upper)
+		} else {
+			result = append(result, caser.String(token))
+		}
+	}
+
+	return strings.Join(result, " ")
+}
+
+func (t *Tokenizer) Pascal(text string) string {
+	var result []string
+	for token := range t.Tokenize(text) {
+		upper, ok := t.lowerToUpper[token]
+		if ok {
+			result = append(result, upper)
+		} else {
+			result = append(result, uppercaseFirst(token))
+		}
+	}
+
+	return strings.Join(result, "")
+}
+
+func (t *Tokenizer) Camel(text string) string {
+	var result []string
+	for token := range t.Tokenize(text) {
+		if len(result) == 0 {
+			result = append(result, token)
+			continue
+		}
+
+		upper, ok := t.lowerToUpper[token]
+		if ok {
+			result = append(result, upper)
+		} else {
+			result = append(result, uppercaseFirst(token))
+		}
+	}
+
+	return strings.Join(result, "")
+}
+
+func (t *Tokenizer) Snake(text string) string {
+	return strings.Join(slices.Collect(t.Tokenize(text)), "_")
+}
+
+func (t *Tokenizer) Kebab(text string) string {
+	return strings.Join(slices.Collect(t.Tokenize(text)), "-")
+}
+
+func (t *Tokenizer) Tokenize(text string) iter.Seq[string] {
+	return func(yield func(string) bool) {
+		text = strings.Map(func(r rune) rune {
+			if unicode.IsDigit(r) || unicode.IsLetter(r) {
+				return r
+			}
+			return ' '
+		}, text)
+
+		for word := range strings.FieldsSeq(text) {
+			for token := range t.tokenize(word) {
+				if !yield(strings.ToLower(token)) {
+					break
+				}
+			}
+		}
+	}
+}
+
+func (t *Tokenizer) tokenize(text string) iter.Seq[string] {
+	return func(yield func(string) bool) {
+		next, stop := iter.Pull(segment(text))
+		defer stop()
+		for {
+			a, ok := next()
+			if !ok {
+				break
+			}
+			if strings.ToLower(a) == a {
+				if !yield(a) {
+					break
+				}
+				continue
+			}
+			b, ok := next()
+			if !ok {
+				yield(a)
+				break
+			}
+			if len(a) == 1 {
+				if !yield(a + b) {
+					return
+				}
+				continue
+			}
+
+			if slices.Contains(t.initialisms, a+b) {
+				if !yield(a + b) {
+					return
+				}
+				continue
+			}
+
+			upper, last := a[:len(a)-1], a[len(a)-1:]
+			if !yield(upper) {
+				return
+			}
+			if !yield(last + b) {
+				return
+			}
+		}
+	}
+}
+
+func segment(text string) iter.Seq[string] {
+	return func(yield func(string) bool) {
+		runes := []rune(text)
+		isUpper := unicode.IsUpper(runes[0])
+		var start int
+		for i, r := range runes {
+			toggle := (isUpper && unicode.IsLower(r)) || (!isUpper && unicode.IsUpper(r))
+			if !toggle {
+				continue
+			}
+			isUpper = unicode.IsUpper(r)
+			if !yield(string(runes[start:i])) {
+				return
+			}
+			start = i
+		}
+		if s := string(runes[start:]); s != "" {
+			yield(s)
+		}
+	}
+}
+
+func uppercaseFirst(s string) string {
+	if len(s) == 0 {
+		return s
+	}
+	r := []rune(s)
+	r[0] = unicode.ToUpper(r[0])
+	return string(r)
 }
