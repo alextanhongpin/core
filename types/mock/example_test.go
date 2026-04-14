@@ -15,11 +15,11 @@ func (s *ExampleService) WithOptions(options mock.Options) *ExampleService {
 	return s
 }
 
-func (s *ExampleService) Foo() string { return s.Option() }
-func (s *ExampleService) Bar() string { return s.Option() }
+func (s *ExampleService) Foo() string { return s.Call() }
+func (s *ExampleService) Bar() string { return s.Call() }
 
-func ExampleMock_Option() {
-	s := new(ExampleService).WithOptions(mock.Options{"Foo": "fast", "Bar": "slow"})
+func ExampleMock_Call() {
+	s := new(ExampleService).WithOptions(mock.Options{"Foo": []string{"fast"}, "Bar": []string{"slow"}})
 	fmt.Println(s.Foo())
 	fmt.Println(s.Bar())
 	// Output:
