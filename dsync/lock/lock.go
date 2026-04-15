@@ -36,9 +36,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/alextanhongpin/core/dsync/cache"
 	"github.com/google/uuid"
 	redis "github.com/redis/go-redis/v9"
+	"github.com/redis/go-redis/v9/helper"
 )
 
 var (
@@ -47,12 +47,6 @@ var (
 	ErrLockWaitTimeout = errors.New("lock: failed to acquire lock within the wait duration")
 	ErrLocked          = errors.New("lock: another process has acquired the lock")
 )
-
-type cacheable interface {
-	CompareAndDelete(ctx context.Context, key string, old []byte) error
-	CompareAndSwap(ctx context.Context, key string, old, value []byte, ttl time.Duration) error
-	StoreOnce(ctx context.Context, key string, value []byte, ttl time.Duration) error
-}
 
 type backoff interface {
 	Sleep() <-chan time.Time
@@ -83,16 +77,16 @@ func NewLockOption() *LockOption {
 // Locker represents a distributed lock implementation using Redis.
 // Works on with a single redis node.
 type Locker struct {
+	Client   *redis.Client
 	KeyMutex *KeyMutex
-	Cache    cacheable
 	Logger   *slog.Logger // Optional logger for debugging purposes.
 }
 
 // New returns a pointer to Locker.
 func New(client *redis.Client) *Locker {
 	return &Locker{
+		Client:   client,
 		KeyMutex: NewKeyMutex(),
-		Cache:    cache.New(client),
 		Logger:   slog.Default(), // Default logger, can be overridden.
 	}
 }
@@ -171,12 +165,15 @@ func (l *Locker) Do(ctx context.Context, key string, fn func(ctx context.Context
 }
 
 func (l *Locker) TryLock(ctx context.Context, key, token string, ttl time.Duration) error {
-	err := l.Cache.StoreOnce(ctx, key, []byte(token), ttl)
-	if errors.Is(err, cache.ErrExists) {
+	err := l.Client.SetArgs(ctx, key, token, redis.SetArgs{
+		Mode: string(redis.NX),
+		TTL:  ttl,
+	}).Err()
+	if errors.Is(err, redis.Nil) {
 		return ErrLocked
 	}
 
-	return nil
+	return err
 }
 
 // LockWait waits until the lock is acquired.
@@ -223,21 +220,29 @@ func (l *Locker) Lock(ctx context.Context, key, token string, ttl, wait time.Dur
 
 // Unlocks the key with the given token.
 func (l *Locker) Unlock(ctx context.Context, key, token string) error {
-	err := l.Cache.CompareAndDelete(ctx, key, []byte(token))
-	if err != nil {
-		return fmt.Errorf("unlock: %w", mapError(err))
+	n, err := l.Client.DelExArgs(ctx, key, redis.DelExArgs{
+		Mode:        "IFDEQ",
+		MatchDigest: helper.DigestString(token),
+	}).Result()
+	if errors.Is(err, redis.Nil) {
+		return ErrLocked
 	}
-
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return ErrExpired
+	}
 	return nil
 }
 
 func (l *Locker) Extend(ctx context.Context, key, token string, ttl time.Duration) error {
 	val := []byte(token)
-	if err := l.Cache.CompareAndSwap(ctx, key, val, val, ttl); err != nil {
-		return fmt.Errorf("extend: %w", mapError(err))
+	err := l.Client.SetIFDEQ(ctx, key, val, helper.DigestString(token), ttl).Err()
+	if errors.Is(err, redis.Nil) {
+		return ErrLocked
 	}
-
-	return nil
+	return err
 }
 
 func newToken() string {
@@ -285,46 +290,3 @@ func (b ExponentialBackoff) Sleep() <-chan time.Time {
 	sleep := rand.N(min(b.base*time.Duration(1<<b.attempts), b.limit))
 	return time.After(sleep)
 }
-
-func mapError(err error) error {
-	if errors.Is(err, cache.ErrNotExist) {
-		return ErrExpired
-	}
-
-	if errors.Is(err, cache.ErrValueMismatch) {
-		return ErrLocked
-	}
-
-	return err
-}
-
-// Example Prometheus integration
-//
-// import (
-//   "github.com/prometheus/client_golang/prometheus"
-//   "github.com/prometheus/client_golang/prometheus/promhttp"
-//   "github.com/redis/go-redis/v9"
-//   "github.com/alextanhongpin/core/dsync/lock"
-//   "net/http"
-// )
-//
-// func main() {
-//   lockAttempts := prometheus.NewCounter(prometheus.CounterOpts{Name: "lock_attempts", Help: "Lock attempts."})
-//   lockSuccess := prometheus.NewCounter(prometheus.CounterOpts{Name: "lock_success", Help: "Lock successes."})
-//   lockFailures := prometheus.NewCounter(prometheus.CounterOpts{Name: "lock_failures", Help: "Lock failures."})
-//   unlocks := prometheus.NewCounter(prometheus.CounterOpts{Name: "lock_unlocks", Help: "Unlocks."})
-//   extends := prometheus.NewCounter(prometheus.CounterOpts{Name: "lock_extends", Help: "Extends."})
-//   prometheus.MustRegister(lockAttempts, lockSuccess, lockFailures, unlocks, extends)
-//
-//   metrics := &lock.PrometheusLockMetrics{
-//     LockAttempts: lockAttempts,
-//     LockSuccess: lockSuccess,
-//     LockFailures: lockFailures,
-//     Unlocks: unlocks,
-//     Extends: extends,
-//   }
-//   rdb := redis.NewClient(&redis.Options{Addr: "localhost:6379"})
-//   locker := lock.New(rdb, metrics)
-//   http.Handle("/metrics", promhttp.Handler())
-//   http.ListenAndServe(":8080", nil)
-// }
