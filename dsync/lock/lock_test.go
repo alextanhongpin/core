@@ -240,7 +240,7 @@ func TestLock_Unlock_Deleted(t *testing.T) {
 		Wait:         waitTTL,
 		RefreshRatio: 0.5, // Enable extension so it can detect key deletion
 	})
-	is.ErrorIs(err, lock.ErrExpired)
+	is.ErrorIs(err, lock.ErrLocked)
 }
 
 func TestLock_Extend_Success(t *testing.T) {
