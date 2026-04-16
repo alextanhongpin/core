@@ -3,18 +3,16 @@ package idempotent
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"sync"
-	"sync/atomic"
+	"fmt"
 	"time"
 
-	"github.com/alextanhongpin/core/dsync/cache"
+	"github.com/alextanhongpin/core/sync/lock"
+	"github.com/google/go-cmp/cmp"
 	"github.com/google/uuid"
-	"github.com/prometheus/client_golang/prometheus"
 	redis "github.com/redis/go-redis/v9"
+	"github.com/redis/go-redis/v9/helper"
 )
 
 var (
@@ -39,109 +37,48 @@ var (
 	lockRefreshRatio = 0.7
 )
 
-type cacheable interface {
-	CompareAndDelete(ctx context.Context, key string, old []byte) error
-	CompareAndSwap(ctx context.Context, key string, old, value []byte, ttl time.Duration) error
-	LoadOrStore(ctx context.Context, key string, value []byte, ttl time.Duration) (curr []byte, loaded bool, err error)
-}
-
-// MetricsCollector defines the interface for collecting idempotent store metrics.
-type MetricsCollector interface {
-	IncTotalRequests()
-	IncHits()
-	IncMisses()
-	IncLocks()
-	IncConflicts()
-}
-
-type AtomicIdemMetrics struct {
-	totalRequests int64
-	hits          int64
-	misses        int64
-	locks         int64
-	conflicts     int64
-}
-
-func (m *AtomicIdemMetrics) IncTotalRequests() { atomic.AddInt64(&m.totalRequests, 1) }
-func (m *AtomicIdemMetrics) IncHits()          { atomic.AddInt64(&m.hits, 1) }
-func (m *AtomicIdemMetrics) IncMisses()        { atomic.AddInt64(&m.misses, 1) }
-func (m *AtomicIdemMetrics) IncLocks()         { atomic.AddInt64(&m.locks, 1) }
-func (m *AtomicIdemMetrics) IncConflicts()     { atomic.AddInt64(&m.conflicts, 1) }
-
-// PrometheusIdemMetrics implements MetricsCollector using prometheus metrics.
-type PrometheusIdemMetrics struct {
-	TotalRequests prometheus.Counter
-	Hits          prometheus.Counter
-	Misses        prometheus.Counter
-	Locks         prometheus.Counter
-	Conflicts     prometheus.Counter
-}
-
-func (m *PrometheusIdemMetrics) IncTotalRequests() { m.TotalRequests.Inc() }
-func (m *PrometheusIdemMetrics) IncHits()          { m.Hits.Inc() }
-func (m *PrometheusIdemMetrics) IncMisses()        { m.Misses.Inc() }
-func (m *PrometheusIdemMetrics) IncLocks()         { m.Locks.Inc() }
-func (m *PrometheusIdemMetrics) IncConflicts()     { m.Conflicts.Inc() }
-
 type RedisStore struct {
-	cache            cacheable
-	client           *redis.Client
-	mu               *muKey
-	metricsCollector MetricsCollector
+	client *redis.Client
+	locker *lock.KeyLock
 }
 
 // NewRedisStore creates a new RedisStore instance with the specified Redis
 // client, lock TTL, and keep TTL.
-func NewRedisStore(client *redis.Client, collectors ...MetricsCollector) *RedisStore {
-	var collector MetricsCollector
-	if len(collectors) > 0 && collectors[0] != nil {
-		collector = collectors[0]
-	} else {
-		collector = &AtomicIdemMetrics{}
-	}
+func NewRedisStore(client *redis.Client) *RedisStore {
 	return &RedisStore{
-		cache:            cache.New(client),
-		client:           client,
-		mu:               newMuKey(),
-		metricsCollector: collector,
+		client: client,
+		locker: lock.New(),
 	}
 }
 
 // Do executes the provided function idempotently, using the specified key and
 // request.
 func (s *RedisStore) Do(ctx context.Context, key string, fn func(context.Context, []byte) ([]byte, error), req []byte, lockTTL, keepTTL time.Duration) (res []byte, loaded bool, err error) {
-	mu := s.mu.Key(key)
-	mu.Lock()
-	defer mu.Unlock()
+	l := s.locker.Lock(key)
+	defer l.Unlock()
 
-	res, err = s.loadOrStore(ctx, key, req, lockTTL)
-	if !errors.Is(err, errors.ErrUnsupported) {
-		return res, err == nil, err
-	}
-
-	token := string(res)
-	res, err = s.runInLock(ctx, key, token, fn, req, lockTTL, keepTTL)
-	return res, false, err
-}
-
-// loadOrStore returns the response for the specified key, or stores the request
-func (s *RedisStore) loadOrStore(ctx context.Context, key string, req []byte, lockTTL time.Duration) ([]byte, error) {
-	b, loaded, err := s.cache.LoadOrStore(ctx, key, []byte(newToken()), lockTTL)
+	data, loaded, err := s.loadOrStore(ctx, key, newToken(), lockTTL)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 
 	// There are two possible scenarios:
 	// 1) The key/value pair exists. Process the value.
 	// 2) The key/value pair does not exist. Proceed with the request.
 
-	// 1)
 	if loaded {
-		return s.parse(req, b)
-	}
+		// 1)
+		res, err := s.parse(req, data)
+		if err != nil {
+			return nil, false, err
+		}
 
+		return res, true, nil
+	}
 	// 2)
-	return b, errors.ErrUnsupported
+
+	res, err = s.runInLock(ctx, key, data, fn, req, lockTTL, keepTTL)
+	return res, false, err
 }
 
 func (s *RedisStore) runInLock(ctx context.Context, key, token string, fn func(context.Context, []byte) ([]byte, error), req []byte, lockTTL, keepTTL time.Duration) ([]byte, error) {
@@ -149,7 +86,9 @@ func (s *RedisStore) runInLock(ctx context.Context, key, token string, fn func(c
 	// context.WithoutCancel ensures that the unlock is always called.
 	// If the operation is successful, the token will be replaced with the
 	// response, so the operation should fail.
-	defer s.cache.CompareAndDelete(context.WithoutCancel(ctx), key, []byte(token))
+	defer func() {
+		_ = s.compareAndDelete(context.WithoutCancel(ctx), key, token)
+	}()
 
 	// Create a new channel to handle the result.
 	ch := make(chan result[[]byte], 1)
@@ -190,7 +129,7 @@ func (s *RedisStore) runInLock(ctx context.Context, key, token string, fn func(c
 				return nil, err
 			}
 
-			b, err := json.Marshal(makeData(req, res))
+			b, err := json.Marshal(data{Request: req, Response: res})
 			if err != nil {
 				return nil, err
 			}
@@ -201,7 +140,7 @@ func (s *RedisStore) runInLock(ctx context.Context, key, token string, fn func(c
 			}
 
 			// Return the response.
-			return []byte(res), nil
+			return res, nil
 		case <-t.C:
 			// Extend the lock to prevent the token from expiring.
 			if err := s.compareAndSwap(ctx, key, []byte(token), []byte(token), lockTTL); err != nil {
@@ -211,8 +150,10 @@ func (s *RedisStore) runInLock(ctx context.Context, key, token string, fn func(c
 	}
 }
 
+// compareAndSwap swaps the old and new values for key if the value stored in
+// the map is equal to old. The old value must be of a comparable type.
 func (s *RedisStore) compareAndSwap(ctx context.Context, key string, old, value []byte, ttl time.Duration) error {
-	err := s.cache.CompareAndSwap(ctx, key, old, value, ttl)
+	_, err := s.client.SetIFDEQ(ctx, key, value, helper.DigestBytes(old), ttl).Result()
 	if errors.Is(err, redis.Nil) {
 		return ErrLockConflict
 	}
@@ -225,47 +166,85 @@ func (s *RedisStore) compareAndSwap(ctx context.Context, key string, old, value 
 //  2. The value is a JSON object, which means the request has been processed.
 //     2.1) The request does not match, return an error.
 //     2.2) The request matches, return the response.
-func (s *RedisStore) parse(req, value []byte) ([]byte, error) {
+func (s *RedisStore) parse(req []byte, val string) ([]byte, error) {
 	// 1)
-	if isPending(value) {
+	if isUUID(val) {
 		return nil, ErrRequestInFlight
 	}
 
 	// 2)
 	var d data
-	if err := json.Unmarshal(value, &d); err != nil {
+	if err := json.Unmarshal([]byte(val), &d); err != nil {
 		return nil, err
 	}
 
 	// 2.1)
-	if d.Request != string(hash(req)) {
-		return nil, ErrRequestMismatch
+	if hash(d.Request) != hash(req) {
+		return nil, fmt.Errorf("%w: \n%s", ErrRequestMismatch, cmp.Diff(d.Request, req))
 	}
 
 	// 2.2)
-	return d.getResponseBytes()
+	return d.Response, nil
 }
 
-// hash generates a SHA-256 hash of the provided data.
+// CompareAndDelete deletes the entry for key if its value is equal to old. The
+// old value must be of a comparable type.
+// If there is no current value for key in the map, CompareAndDelete returns
+// false (even if the old value is the nil interface value).
+func (r *RedisStore) compareAndDelete(ctx context.Context, key, old string) error {
+	n, err := r.client.DelExArgs(ctx, key, redis.DelExArgs{
+		Mode:        "IFDEQ",
+		MatchDigest: helper.DigestString(old),
+	}).Result()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return redis.Nil
+	}
+	return nil
+}
+
+// loadOrStore returns the existing value for the key if present. Otherwise, it
+// stores and returns the given value. The loaded result is true if the value
+// was loaded, false if stored.
+// Also see usecase here: https://github.com/golang/go/issues/33762#issuecomment-523757434
+func (r *RedisStore) loadOrStore(ctx context.Context, key string, value string, ttl time.Duration) (curr string, loaded bool, err error) {
+	s, err := r.client.SetArgs(ctx, key, value, redis.SetArgs{
+		Get:  true,
+		Mode: string(redis.NX),
+		TTL:  ttl,
+	}).Result()
+	// If the previous value does not exist when GET, then it will be nil.
+	// But since we successfully set the value, we skip the error.
+	if errors.Is(err, redis.Nil) {
+		return value, false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+
+	return s, true, nil
+}
+
+// hash generates a uint64 of the provided data.
 // We hash the request because
 // 1) The request may contain sensitive information.
 // 2) The request may be too long to store in Redis.
 // 3) We just need to compare the request, not the response.
-func hash(data []byte) string {
-	h := sha256.New()
-	h.Write(data)
-	b := h.Sum(nil)
-	return base64.StdEncoding.EncodeToString(b)
-}
-
-func isPending(b []byte) bool {
-	return isUUID(b)
+func hash(data []byte) uint64 {
+	return helper.DigestBytes(data)
 }
 
 // isUUID checks if the provided byte slice represents a valid UUID.
-func isUUID(b []byte) bool {
-	_, err := uuid.ParseBytes(b)
+func isUUID(s string) bool {
+	_, err := uuid.Parse(s)
 	return err == nil
+}
+
+type data struct {
+	Request  []byte `json:"request,omitempty"`
+	Response []byte `json:"response,omitempty"`
 }
 
 type result[T any] struct {
@@ -280,118 +259,3 @@ func (r result[T]) unwrap() (T, error) {
 func newToken() string {
 	return uuid.Must(uuid.NewV7()).String()
 }
-
-type muKey struct {
-	mu   sync.Mutex
-	keys map[string]*keyEntry
-}
-
-type keyEntry struct {
-	mu      *sync.Mutex
-	refs    int
-	lastUse time.Time
-}
-
-func newMuKey() *muKey {
-	mk := &muKey{
-		keys: make(map[string]*keyEntry),
-	}
-
-	// Start a cleanup goroutine to remove unused mutexes
-	go mk.cleanup()
-
-	return mk
-}
-
-func (m *muKey) Key(key string) sync.Locker {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	entry, ok := m.keys[key]
-	if !ok {
-		entry = &keyEntry{
-			mu:      new(sync.Mutex),
-			refs:    0,
-			lastUse: time.Now(),
-		}
-		m.keys[key] = entry
-	}
-
-	entry.refs++
-	entry.lastUse = time.Now()
-
-	return &keyLock{
-		mu:    entry.mu,
-		entry: entry,
-		mk:    m,
-		key:   key,
-	}
-}
-
-func (m *muKey) cleanup() {
-	ticker := time.NewTicker(5 * time.Minute)
-	defer ticker.Stop()
-
-	for range ticker.C {
-		m.mu.Lock()
-		now := time.Now()
-		for key, entry := range m.keys {
-			// Remove entries that haven't been used for 10 minutes and have no active references
-			if entry.refs == 0 && now.Sub(entry.lastUse) > 10*time.Minute {
-				delete(m.keys, key)
-			}
-		}
-		m.mu.Unlock()
-	}
-}
-
-type keyLock struct {
-	mu    *sync.Mutex
-	entry *keyEntry
-	mk    *muKey
-	key   string
-}
-
-func (k *keyLock) Lock() {
-	k.mu.Lock()
-}
-
-func (k *keyLock) Unlock() {
-	k.mu.Unlock()
-
-	// Decrement reference count
-	k.mk.mu.Lock()
-	k.entry.refs--
-	k.mk.mu.Unlock()
-}
-
-// Example Prometheus integration
-//
-// import (
-//   "github.com/prometheus/client_golang/prometheus"
-//   "github.com/prometheus/client_golang/prometheus/promhttp"
-//   "github.com/redis/go-redis/v9"
-//   "github.com/alextanhongpin/core/dsync/idempotent"
-//   "net/http"
-// )
-//
-// func main() {
-//   totalRequests := prometheus.NewCounter(prometheus.CounterOpts{Name: "idempotent_total_requests", Help: "Total idempotent requests."})
-//   hits := prometheus.NewCounter(prometheus.CounterOpts{Name: "idempotent_hits", Help: "Idempotent hits."})
-//   misses := prometheus.NewCounter(prometheus.CounterOpts{Name: "idempotent_misses", Help: "Idempotent misses."})
-//   locks := prometheus.NewCounter(prometheus.CounterOpts{Name: "idempotent_locks", Help: "Idempotent locks."})
-//   conflicts := prometheus.NewCounter(prometheus.CounterOpts{Name: "idempotent_conflicts", Help: "Idempotent lock conflicts."})
-//   prometheus.MustRegister(totalRequests, hits, misses, locks, conflicts)
-//
-//   metrics := &idempotent.PrometheusIdemMetrics{
-//     TotalRequests: totalRequests,
-//     Hits: hits,
-//     Misses: misses,
-//     Locks: locks,
-//     Conflicts: conflicts,
-//   }
-//   rdb := redis.NewClient(&redis.Options{Addr: "localhost:6379"})
-//   store := idempotent.NewRedisStore(rdb, metrics)
-//   http.Handle("/metrics", promhttp.Handler())
-//   http.ListenAndServe(":8080", nil)
-// }

@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/alextanhongpin/core/dsync/idempotent"
-	"github.com/alextanhongpin/core/storage/redis/redistest"
+	"github.com/alextanhongpin/dbtx/testing/redistest"
 	redis "github.com/redis/go-redis/v9"
 )
 
