@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/alextanhongpin/core/dsync/ratelimit"
-	"github.com/alextanhongpin/core/storage/redis/redistest"
+	"github.com/alextanhongpin/dbtx/testing/redistest"
 	redis "github.com/redis/go-redis/v9"
 )
 

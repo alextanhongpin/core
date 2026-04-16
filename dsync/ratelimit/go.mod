@@ -3,7 +3,7 @@ module github.com/alextanhongpin/core/dsync/ratelimit
 go 1.25.6
 
 require (
-	github.com/alextanhongpin/core/storage/redis v0.0.0-20250611042647-3a06a1c0ddd5
+	github.com/alextanhongpin/dbtx/testing/redistest v0.0.1
 	github.com/redis/go-redis/v9 v9.18.0
 	github.com/stretchr/testify v1.11.1
 )
@@ -36,7 +36,7 @@ require (
 	github.com/moby/term v0.5.2 // indirect
 	github.com/opencontainers/go-digest v1.0.0 // indirect
 	github.com/opencontainers/image-spec v1.1.1 // indirect
-	github.com/opencontainers/runc v1.2.3 // indirect
+	github.com/opencontainers/runc v1.3.0 // indirect
 	github.com/ory/dockertest/v3 v3.12.0 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/sirupsen/logrus v1.9.4 // indirect
