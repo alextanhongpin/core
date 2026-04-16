@@ -49,10 +49,6 @@ var (
 	ErrLocked          = errors.New("lock: another process has acquired the lock")
 )
 
-type backoff interface {
-	Sleep() <-chan time.Time
-}
-
 type LockOption struct {
 	//  The duration to wait for the lock to be available.
 	Wait time.Duration
@@ -62,8 +58,6 @@ type LockOption struct {
 	RefreshRatio float64
 	// Optional token to identify the lock owner.
 	Token string
-
-	Backoff backoff
 }
 
 func NewLockOption() *LockOption {
@@ -71,7 +65,6 @@ func NewLockOption() *LockOption {
 		Wait:         5 * time.Second,
 		Lock:         30 * time.Second,
 		RefreshRatio: 0.8,
-		Backoff:      NewRandomBackoff(5 * time.Second),
 	}
 }
 
@@ -248,46 +241,4 @@ func (l *Locker) Extend(ctx context.Context, key, token string, ttl time.Duratio
 
 func newToken() string {
 	return uuid.Must(uuid.NewV7()).String()
-}
-
-func NewRandomBackoff(base time.Duration) *RandomBackoff {
-	return &RandomBackoff{
-		base: base,
-	}
-}
-
-type RandomBackoff struct {
-	load bool
-	base time.Duration
-}
-
-func (r *RandomBackoff) Sleep() <-chan time.Time {
-	if !r.load {
-		r.load = true
-		return time.After(0)
-	}
-
-	return time.After(rand.N(r.base))
-}
-
-func NewExponentialBackoff(base, limit time.Duration) *ExponentialBackoff {
-	return &ExponentialBackoff{
-		base:  base,
-		limit: limit,
-	}
-}
-
-type ExponentialBackoff struct {
-	attempts int
-	base     time.Duration
-	limit    time.Duration
-}
-
-func (b ExponentialBackoff) Sleep() <-chan time.Time {
-	defer func() {
-		b.attempts++
-	}()
-
-	sleep := rand.N(min(b.base*time.Duration(1<<b.attempts), b.limit))
-	return time.After(sleep)
 }
