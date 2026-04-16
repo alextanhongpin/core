@@ -36,6 +36,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/alextanhongpin/core/sync/lock"
 	"github.com/google/uuid"
 	redis "github.com/redis/go-redis/v9"
 	"github.com/redis/go-redis/v9/helper"
@@ -77,23 +78,23 @@ func NewLockOption() *LockOption {
 // Locker represents a distributed lock implementation using Redis.
 // Works on with a single redis node.
 type Locker struct {
-	Client   *redis.Client
-	KeyMutex *KeyMutex
-	Logger   *slog.Logger // Optional logger for debugging purposes.
+	Client  *redis.Client
+	KeyLock *lock.KeyLock
+	Logger  *slog.Logger // Optional logger for debugging purposes.
 }
 
 // New returns a pointer to Locker.
 func New(client *redis.Client) *Locker {
 	return &Locker{
-		Client:   client,
-		KeyMutex: NewKeyMutex(),
-		Logger:   slog.Default(), // Default logger, can be overridden.
+		Client:  client,
+		KeyLock: lock.New(),
+		Logger:  slog.Default(), // Default logger, can be overridden.
 	}
 }
 
 func (l *Locker) Do(ctx context.Context, key string, fn func(ctx context.Context) error, opts *LockOption) error {
-	unlock := l.KeyMutex.Lock(key)
-	defer unlock()
+	locker := l.KeyLock.Lock(key)
+	defer locker.Unlock()
 
 	opts = cmp.Or(opts, NewLockOption())
 	token := cmp.Or(opts.Token, newToken())

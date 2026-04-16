@@ -8,6 +8,8 @@ github.com/Microsoft/go-winio v0.6.2 h1:F2VQgta7ecxGYO8k3ZZz3RS8fVIXVxONVUPlNERo
 github.com/Microsoft/go-winio v0.6.2/go.mod h1:yd8OoFMLzJbo9gZq8j5qaps8bJ9aShtEA8Ipt1oGCvU=
 github.com/Nvveen/Gotty v0.0.0-20120604004816-cd527374f1e5 h1:TngWCqHvy9oXAN6lEVMRuU21PR1EtLVZJmdB18Gu3Rw=
 github.com/Nvveen/Gotty v0.0.0-20120604004816-cd527374f1e5/go.mod h1:lmUJ/7eu/Q8D7ML55dXQrVaamCz2vxCfdQBasLZfHKk=
+github.com/alextanhongpin/core/sync/lock v0.0.2 h1:1sYW+hPJUSuygKMD/QB/EUc2nR1op4DJySa0vTUrJgw=
+github.com/alextanhongpin/core/sync/lock v0.0.2/go.mod h1:RvzBAyFuIzOhdZs/dVFOMzGJVWWPq6Tvg9vx53/dIx0=
 github.com/alextanhongpin/dbtx/testing/redistest v0.0.0-20250528161638-1d13dea36d24 h1:m99FBmRIDxmN/IAuEXyCmnL5JpO4BbUAbpr2e/8ohys=
 github.com/alextanhongpin/dbtx/testing/redistest v0.0.0-20250528161638-1d13dea36d24/go.mod h1:7WOB/agyCRuACS9YYNPIEYnWvgio+2BD54ixo+kdoek=
 github.com/bsm/ginkgo/v2 v2.12.0 h1:Ny8MWAHyOepLGlLKYmXG4IEkioBysk6GpaRTLC8zwWs=
