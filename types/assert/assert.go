@@ -5,25 +5,22 @@
 package assert
 
 import (
+	"cmp"
 	"fmt"
 	"reflect"
-	"regexp"
 	"slices"
 	"strings"
-)
 
-var (
-	// Common email validation regex
-	emailRegex = regexp.MustCompile(`^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`)
+	"github.com/alextanhongpin/core/types/email"
 )
 
 // Is returns an empty string if the condition is true, otherwise returns the message.
 // This is useful for conditional validation.
-func Is(is bool, msg string) string {
+func Is(is bool, msg string, args ...any) string {
 	if is {
 		return ""
 	}
-	return msg
+	return fmt.Sprintf(msg, args...)
 }
 
 // Required validates that a value is non-zero and applies additional assertions.
@@ -31,7 +28,7 @@ func Is(is bool, msg string) string {
 func Required(v any, assertions ...string) string {
 	var sb strings.Builder
 
-	if isZero(v) {
+	if IsZero(v) {
 		sb.WriteString("required")
 		sb.WriteString(", ")
 	}
@@ -50,7 +47,7 @@ func Required(v any, assertions ...string) string {
 // Optional applies assertions only if the value is non-zero.
 // If the value is zero, returns empty string (no validation errors).
 func Optional(v any, assertions ...string) string {
-	if isZero(v) {
+	if IsZero(v) {
 		return ""
 	}
 	return Required(v, assertions...)
@@ -69,54 +66,47 @@ func Map(kv map[string]string) map[string]string {
 	return res
 }
 
+// IsZero checks if a value is the zero value for its type.
+func IsZero(v any) bool {
+	if v == nil {
+		return true
+	}
+	val := reflect.ValueOf(v)
+	if slices.Contains([]reflect.Kind{reflect.Map, reflect.Slice, reflect.Array}, val.Kind()) {
+		return val.Len() == 0
+	}
+	if val.IsZero() {
+		return true
+	}
+
+	if val.Kind() == reflect.Pointer {
+		return val.Elem().IsZero()
+	}
+
+	return false
+}
+
 // MinLength validates that a string has at least the specified length.
 func MinLength(s string, min int) string {
-	return Is(len(s) >= min, fmt.Sprintf("must be at least %d characters", min))
+	return Is(len(s) >= min, "must be at least %d characters", min)
 }
 
 // MaxLength validates that a string has at most the specified length.
 func MaxLength(s string, max int) string {
-	return Is(len(s) <= max, fmt.Sprintf("must be at most %d characters", max))
+	return Is(len(s) <= max, "must be at most %d characters", max)
 }
 
 // Range validates that a value is between min and max (inclusive).
-func Range[T comparable](v, min, max T) string {
-	rv := reflect.ValueOf(v)
-	rmin := reflect.ValueOf(min)
-	rmax := reflect.ValueOf(max)
-
-	switch rv.Kind() {
-	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		vi, mini, maxi := rv.Int(), rmin.Int(), rmax.Int()
-		return Is(vi >= mini && vi <= maxi, fmt.Sprintf("must be between %d and %d", mini, maxi))
-	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-		vi, mini, maxi := rv.Uint(), rmin.Uint(), rmax.Uint()
-		return Is(vi >= mini && vi <= maxi, fmt.Sprintf("must be between %d and %d", mini, maxi))
-	case reflect.Float32, reflect.Float64:
-		vi, mini, maxi := rv.Float(), rmin.Float(), rmax.Float()
-		return Is(vi >= mini && vi <= maxi, fmt.Sprintf("must be between %g and %g", mini, maxi))
-	case reflect.String:
-		vi, mini, maxi := rv.String(), rmin.String(), rmax.String()
-		return Is(vi >= mini && vi <= maxi, fmt.Sprintf("must be between %s and %s", mini, maxi))
-	}
-	return ""
+func Range[T cmp.Ordered](v, lo, hi T) string {
+	return Is(v >= lo && v <= hi, "must be between %v and %v", lo, hi)
 }
 
 // Email validates that a string is a valid email address.
 func Email(s string) string {
-	return Is(emailRegex.MatchString(s), "must be a valid email address")
+	return Is(email.IsValid(s), "must be a valid email address")
 }
 
 // OneOf validates that a value is one of the allowed values.
 func OneOf[T comparable](v T, allowed ...T) string {
-	if slices.Contains(allowed, v) {
-		return ""
-	}
-
-	return fmt.Sprintf("must be one of: %v", allowed)
-}
-
-// isZero checks if a value is the zero value for its type.
-func isZero(v any) bool {
-	return v == nil || reflect.ValueOf(v).IsZero()
+	return Is(slices.Contains(allowed, v), "must be one of %v", allowed)
 }
