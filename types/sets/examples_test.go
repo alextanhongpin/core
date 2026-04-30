@@ -15,9 +15,9 @@ func ExampleSet_userPermissions() {
 	fmt.Println("User Permission Management:")
 
 	// Define permissions for different roles
-	adminPerms := sets.New("read", "write", "delete", "admin", "manage_users")
-	editorPerms := sets.New("read", "write", "edit", "publish")
-	_ = sets.New("read", "view") // viewerPerms for demonstration
+	adminPerms := sets.Of("read", "write", "delete", "admin", "manage_users")
+	editorPerms := sets.Of("read", "write", "edit", "publish")
+	_ = sets.Of("read", "view") // viewerPerms for demonstration
 
 	// User has multiple roles
 	userPerms := adminPerms.Union(editorPerms)
@@ -49,9 +49,9 @@ func ExampleSet_tagManagement() {
 	fmt.Println("Content Tag Management:")
 
 	// Article tags
-	article1Tags := sets.New("golang", "programming", "backend", "tutorial")
-	article2Tags := sets.New("golang", "web", "frontend", "tutorial")
-	article3Tags := sets.New("python", "machine-learning", "data-science")
+	article1Tags := sets.Of("golang", "programming", "backend", "tutorial")
+	article2Tags := sets.Of("golang", "web", "frontend", "tutorial")
+	article3Tags := sets.Of("python", "machine-learning", "data-science")
 
 	// Find articles with common tags
 	commonTags := article1Tags.Intersect(article2Tags)
@@ -62,7 +62,7 @@ func ExampleSet_tagManagement() {
 	fmt.Printf("All unique tags: %s\n", allTags)
 
 	// Programming-related tags
-	programmingTags := sets.New("golang", "python", "programming", "backend", "frontend")
+	programmingTags := sets.Of("golang", "python", "programming", "backend", "frontend")
 
 	// Check which articles are programming-related
 	fmt.Printf("Article 1 programming-related: %v\n", !article1Tags.IsDisjoint(programmingTags))
@@ -83,9 +83,9 @@ func ExampleSet_featureFlags() {
 	fmt.Println("Feature Flag Management:")
 
 	// Define feature flags for different environments
-	productionFlags := sets.New("feature_a", "feature_b", "feature_stable")
-	stagingFlags := sets.New("feature_a", "feature_b", "feature_c", "feature_experimental")
-	developmentFlags := sets.New("feature_a", "feature_b", "feature_c", "feature_d", "feature_debug")
+	productionFlags := sets.Of("feature_a", "feature_b", "feature_stable")
+	stagingFlags := sets.Of("feature_a", "feature_b", "feature_c", "feature_experimental")
+	developmentFlags := sets.Of("feature_a", "feature_b", "feature_c", "feature_d", "feature_debug")
 
 	// Features available in all environments
 	universalFeatures := productionFlags.Intersect(stagingFlags).Intersect(developmentFlags)
@@ -163,14 +163,14 @@ func ExampleSet_accessControl() {
 	fmt.Println("Access Control Management:")
 
 	// Define security groups
-	adminGroup := sets.New("alice", "bob")
-	developersGroup := sets.New("charlie", "diana", "eve")
-	qaGroup := sets.New("frank", "grace")
-	allEmployees := sets.New("alice", "bob", "charlie", "diana", "eve", "frank", "grace", "henry")
+	adminGroup := sets.Of("alice", "bob")
+	developersGroup := sets.Of("charlie", "diana", "eve")
+	qaGroup := sets.Of("frank", "grace")
+	allEmployees := sets.Of("alice", "bob", "charlie", "diana", "eve", "frank", "grace", "henry")
 
 	// Resource access permissions
-	sensitiveResourceUsers := adminGroup.Union(sets.New("diana")) // senior developer
-	_ = allEmployees                                              // publicResourceUsers for demonstration
+	sensitiveResourceUsers := adminGroup.Union(sets.Of("diana")) // senior developer
+	_ = allEmployees                                             // publicResourceUsers for demonstration
 
 	// Check access permissions
 	checkAccess := func(user string, resource string, allowedUsers *sets.Set[string]) {
@@ -206,9 +206,9 @@ func ExampleSet_abTesting() {
 	fmt.Println("A/B Testing Groups:")
 
 	// Define experiment groups
-	controlGroup := sets.New("user1", "user3", "user5", "user7", "user9")
-	treatmentGroupA := sets.New("user2", "user4", "user6", "user8")
-	treatmentGroupB := sets.New("user10", "user11", "user12", "user13")
+	controlGroup := sets.Of("user1", "user3", "user5", "user7", "user9")
+	treatmentGroupA := sets.Of("user2", "user4", "user6", "user8")
+	treatmentGroupB := sets.Of("user10", "user11", "user12", "user13")
 
 	// All experiment participants
 	allParticipants := controlGroup.Union(treatmentGroupA).Union(treatmentGroupB)
@@ -222,7 +222,7 @@ func ExampleSet_abTesting() {
 	fmt.Printf("Groups are properly isolated: %v\n", controlVsA && controlVsB && aVsB)
 
 	// Simulate user actions
-	purchasedUsers := sets.New("user2", "user4", "user7", "user9", "user11")
+	purchasedUsers := sets.Of("user2", "user4", "user7", "user9", "user11")
 
 	// Calculate conversion rates by group
 	controlPurchases := controlGroup.Intersect(purchasedUsers)
@@ -247,10 +247,10 @@ func ExampleSet_socialNetwork() {
 	fmt.Println("Social Network Analysis:")
 
 	// User connections (followers)
-	aliceFollowers := sets.New("bob", "charlie", "diana", "eve")
-	bobFollowers := sets.New("alice", "charlie", "frank")
-	charlieFollowers := sets.New("alice", "bob", "diana", "grace")
-	dianaFollowers := sets.New("alice", "charlie", "eve")
+	aliceFollowers := sets.Of("bob", "charlie", "diana", "eve")
+	bobFollowers := sets.Of("alice", "charlie", "frank")
+	charlieFollowers := sets.Of("alice", "bob", "diana", "grace")
+	dianaFollowers := sets.Of("alice", "charlie", "eve")
 
 	// Find mutual followers
 	aliceBobMutual := aliceFollowers.Intersect(bobFollowers)
@@ -286,9 +286,9 @@ func ExampleSet_inventoryManagement() {
 	fmt.Println("Inventory Management:")
 
 	// Available products in different warehouses
-	warehouse1 := sets.New("laptop", "mouse", "keyboard", "monitor")
-	warehouse2 := sets.New("laptop", "printer", "scanner", "keyboard")
-	warehouse3 := sets.New("mouse", "monitor", "printer", "webcam")
+	warehouse1 := sets.Of("laptop", "mouse", "keyboard", "monitor")
+	warehouse2 := sets.Of("laptop", "printer", "scanner", "keyboard")
+	warehouse3 := sets.Of("mouse", "monitor", "printer", "webcam")
 
 	// Products available in all warehouses
 	universalStock := warehouse1.Intersect(warehouse2).Intersect(warehouse3)
@@ -308,7 +308,7 @@ func ExampleSet_inventoryManagement() {
 	fmt.Printf("Exclusive to warehouse 3: %s\n", exclusive3)
 
 	// Customer order checking
-	customerOrder := sets.New("laptop", "mouse", "keyboard")
+	customerOrder := sets.Of("laptop", "mouse", "keyboard")
 
 	canFulfillFrom1 := customerOrder.IsSubset(warehouse1)
 	canFulfillFrom2 := customerOrder.IsSubset(warehouse2)
@@ -335,14 +335,14 @@ func ExampleSet_skillsMatching() {
 	fmt.Println("Skills-based Job Matching:")
 
 	// Job requirements
-	backendJobSkills := sets.New("golang", "sql", "docker", "kubernetes", "api-design")
-	frontendJobSkills := sets.New("javascript", "react", "css", "html", "typescript")
-	fullstackJobSkills := sets.New("golang", "javascript", "react", "sql", "docker")
+	backendJobSkills := sets.Of("golang", "sql", "docker", "kubernetes", "api-design")
+	frontendJobSkills := sets.Of("javascript", "react", "css", "html", "typescript")
+	fullstackJobSkills := sets.Of("golang", "javascript", "react", "sql", "docker")
 
 	// Candidate skills
-	candidate1Skills := sets.New("golang", "sql", "docker", "python")
-	candidate2Skills := sets.New("javascript", "react", "css", "html", "vue")
-	candidate3Skills := sets.New("golang", "javascript", "react", "sql", "docker", "kubernetes")
+	candidate1Skills := sets.Of("golang", "sql", "docker", "python")
+	candidate2Skills := sets.Of("javascript", "react", "css", "html", "vue")
+	candidate3Skills := sets.Of("golang", "javascript", "react", "sql", "docker", "kubernetes")
 
 	// Calculate skill match percentages
 	calculateMatch := func(candidateSkills, jobSkills *sets.Set[string]) float64 {
@@ -392,12 +392,12 @@ func ExampleSet_configManagement() {
 	fmt.Println("Configuration Management:")
 
 	// Required configurations for different environments
-	devConfig := sets.New("debug", "hot-reload", "mock-api", "test-db", "dev-cors")
-	stagingConfig := sets.New("logging", "staging-db", "ssl", "monitoring", "backup")
-	prodConfig := sets.New("logging", "prod-db", "ssl", "monitoring", "backup", "cdn", "cache")
+	devConfig := sets.Of("debug", "hot-reload", "mock-api", "test-db", "dev-cors")
+	stagingConfig := sets.Of("logging", "staging-db", "ssl", "monitoring", "backup")
+	prodConfig := sets.Of("logging", "prod-db", "ssl", "monitoring", "backup", "cdn", "cache")
 
 	// Current environment configuration
-	currentConfig := sets.New("debug", "logging", "ssl", "monitoring", "test-db")
+	currentConfig := sets.Of("debug", "logging", "ssl", "monitoring", "test-db")
 
 	// Check which environment this matches
 	fmt.Printf("Current config: %s\n", currentConfig)
@@ -431,7 +431,7 @@ func ExampleSet_configManagement() {
 // Test set operations comprehensively
 func TestSetOperations(t *testing.T) {
 	t.Run("Basic Operations", func(t *testing.T) {
-		s := sets.New(1, 2, 3, 4, 5)
+		s := sets.Of(1, 2, 3, 4, 5)
 
 		if s.Len() != 5 {
 			t.Errorf("Expected length 5, got %d", s.Len())
@@ -445,20 +445,20 @@ func TestSetOperations(t *testing.T) {
 			t.Error("Expected set not to contain 6")
 		}
 
-		s.Add(6, 7)
+		s.AddMany(6, 7)
 		if s.Len() != 7 {
 			t.Errorf("Expected length 7 after adding, got %d", s.Len())
 		}
 
-		s.Remove(1, 2)
+		s.RemoveMany(1, 2)
 		if s.Len() != 5 {
 			t.Errorf("Expected length 5 after deleting, got %d", s.Len())
 		}
 	})
 
 	t.Run("Set Operations", func(t *testing.T) {
-		a := sets.New(1, 2, 3, 4)
-		b := sets.New(3, 4, 5, 6)
+		a := sets.Of(1, 2, 3, 4)
+		b := sets.Of(3, 4, 5, 6)
 
 		// Union
 		union := a.Union(b)
@@ -490,9 +490,9 @@ func TestSetOperations(t *testing.T) {
 	})
 
 	t.Run("Subset/Superset Operations", func(t *testing.T) {
-		a := sets.New(1, 2)
-		b := sets.New(1, 2, 3, 4)
-		c := sets.New(1, 2)
+		a := sets.Of(1, 2)
+		b := sets.Of(1, 2, 3, 4)
+		c := sets.Of(1, 2)
 
 		if !a.IsSubset(b) {
 			t.Error("Expected a to be subset of b")
@@ -516,7 +516,7 @@ func TestSetOperations(t *testing.T) {
 	})
 
 	t.Run("Predicate Operations", func(t *testing.T) {
-		s := sets.New(2, 4, 6, 8, 10)
+		s := sets.Of(2, 4, 6, 8, 10)
 
 		// All even
 		allEven := s.Every(func(x int) bool { return x%2 == 0 })
@@ -542,19 +542,19 @@ func TestSetOperations(t *testing.T) {
 // Test string representation
 func TestSetString(t *testing.T) {
 	// Empty set
-	empty := sets.New[int]()
+	empty := sets.Of[int]()
 	if empty.String() != "{}" {
 		t.Errorf("Empty set string: got %s, want {}", empty.String())
 	}
 
 	// Single element
-	single := sets.New(42)
+	single := sets.Of(42)
 	if single.String() != "{42}" {
 		t.Errorf("Single element set string: got %s, want {42}", single.String())
 	}
 
 	// Multiple elements
-	multiple := sets.New(3, 1, 2)
+	multiple := sets.Of(3, 1, 2)
 	if multiple.String() != "{1, 2, 3}" {
 		t.Errorf("Multiple element set string: got %s, want {1, 2, 3}", multiple.String())
 	}
@@ -564,7 +564,7 @@ func TestSetString(t *testing.T) {
 func BenchmarkSetOperations(b *testing.B) {
 	// Create test sets
 	size := 1000
-	a := sets.New[int]()
+	a := sets.Of[int]()
 	bSlice := make([]int, size)
 	for i := range size {
 		a.Add(i)
@@ -574,7 +574,7 @@ func BenchmarkSetOperations(b *testing.B) {
 
 	b.Run("Add", func(b *testing.B) {
 		for i := range b.N {
-			s := sets.New[int]()
+			s := sets.Of[int]()
 			s.Add(i)
 		}
 	})
@@ -631,7 +631,7 @@ func ExampleSet_complexFiltering() {
 	fmt.Println("Complex filtering example:")
 
 	// Create a set of words
-	words := sets.New("apple", "banana", "cherry", "date", "elderberry", "fig", "grape")
+	words := sets.Of("apple", "banana", "cherry", "date", "elderberry", "fig", "grape")
 
 	// Filter words with more than 5 characters
 	longWords := words.Filter(func(word string) bool {
@@ -653,7 +653,7 @@ func ExampleSet_complexFiltering() {
 
 	// Count characters in all words
 	totalChars := 0
-	words.ForEach(func(word string) {
+	words.Range(func(word string) {
 		totalChars += len(word)
 	})
 	fmt.Printf("Total characters: %d\n", totalChars)

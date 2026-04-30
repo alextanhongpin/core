@@ -7,24 +7,18 @@
 package sets
 
 import (
+	"cmp"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
-
-	"golang.org/x/exp/constraints"
+	"unique"
 )
-
-// OrderedComparable represents types that are both ordered and comparable.
-// This constraint allows sets to be sorted and compared efficiently.
-type OrderedComparable interface {
-	constraints.Ordered
-	comparable
-}
 
 // Set represents a collection of unique elements of type T.
 // The zero value of Set is an empty set ready to use.
-type Set[T OrderedComparable] struct {
-	values map[T]struct{}
+type Set[T cmp.Ordered] struct {
+	vals map[unique.Handle[T]]struct{}
 }
 
 // New creates a new set containing the given elements.
@@ -33,14 +27,9 @@ type Set[T OrderedComparable] struct {
 // Example:
 //
 //	s := sets.New(1, 2, 3, 2, 1) // Set contains {1, 2, 3}
-func New[T OrderedComparable](ts ...T) *Set[T] {
-	values := make(map[T]struct{}, len(ts))
-	for _, t := range ts {
-		values[t] = struct{}{}
-	}
-
+func New[T cmp.Ordered]() *Set[T] {
 	return &Set[T]{
-		values: values,
+		vals: make(map[unique.Handle[T]]struct{}),
 	}
 }
 
@@ -50,8 +39,10 @@ func New[T OrderedComparable](ts ...T) *Set[T] {
 //
 //	slice := []int{1, 2, 3, 2, 1}
 //	s := sets.From(slice) // Set contains {1, 2, 3}
-func From[T OrderedComparable](slice []T) *Set[T] {
-	return New(slice...)
+func From[T cmp.Ordered](slice []T) *Set[T] {
+	set := New[T]()
+	set.AddMany(slice...)
+	return set
 }
 
 // Of is an alias for New, providing a more readable way to create sets.
@@ -59,9 +50,9 @@ func From[T OrderedComparable](slice []T) *Set[T] {
 // Example:
 //
 //	s := sets.Of(1, 2, 3) // Set contains {1, 2, 3}
-func Of[T OrderedComparable](ts ...T) *Set[T] {
+func Of[T cmp.Ordered](ts ...T) *Set[T] {
 	// Alias for New for better readability
-	return New(ts...)
+	return From(ts)
 }
 
 // Add adds one or more elements to the set.
@@ -70,13 +61,31 @@ func Of[T OrderedComparable](ts ...T) *Set[T] {
 // Example:
 //
 //	s.Add(4, 5, 6)
-func (s *Set[T]) Add(ts ...T) {
-	if s.values == nil {
-		s.values = make(map[T]struct{})
+func (s *Set[T]) Add(v T) bool {
+	return s.add(unique.Make(v))
+}
+
+func (s *Set[T]) AddMany(vs ...T) int {
+	var count int
+	for _, v := range vs {
+		if s.add(unique.Make(v)) {
+			count++
+		}
 	}
-	for _, t := range ts {
-		s.values[t] = struct{}{}
+	return count
+}
+
+func (s *Set[T]) add(k unique.Handle[T]) bool {
+	if s.vals == nil {
+		s.vals = make(map[unique.Handle[T]]struct{})
 	}
+
+	if _, ok := s.vals[k]; !ok {
+		s.vals[k] = struct{}{}
+		return true
+	}
+
+	return false
 }
 
 // Remove removes one or more elements from the set.
@@ -85,13 +94,27 @@ func (s *Set[T]) Add(ts ...T) {
 // Example:
 //
 //	s.Remove(1, 2)
-func (s *Set[T]) Remove(ts ...T) {
-	if s.values == nil {
-		return
+func (s *Set[T]) Remove(v T) bool {
+	return s.remove(unique.Make(v))
+}
+
+func (s *Set[T]) RemoveMany(vs ...T) int {
+	var count int
+	for _, v := range vs {
+		if s.Remove(v) {
+			count++
+		}
 	}
-	for _, t := range ts {
-		delete(s.values, t)
+	return count
+}
+
+func (s *Set[T]) remove(k unique.Handle[T]) bool {
+	if _, ok := s.vals[k]; ok {
+		delete(s.vals, k)
+		return true
 	}
+
+	return false
 }
 
 // Clear removes all elements from the set.
@@ -100,7 +123,7 @@ func (s *Set[T]) Remove(ts ...T) {
 //
 //	s.Clear() // Set becomes empty
 func (s *Set[T]) Clear() {
-	clear(s.values)
+	clear(s.vals)
 }
 
 // Len returns the number of elements in the set.
@@ -109,10 +132,10 @@ func (s *Set[T]) Clear() {
 //
 //	count := s.Len()
 func (s *Set[T]) Len() int {
-	if s.values == nil {
+	if s.vals == nil {
 		return 0
 	}
-	return len(s.values)
+	return len(s.vals)
 }
 
 // IsEmpty returns true if the set contains no elements.
@@ -129,50 +152,30 @@ func (s *Set[T]) IsEmpty() bool {
 // Example:
 //
 //	if s.Has(42) { /* element exists */ }
-func (s *Set[T]) Has(t T) bool {
-	if s.values == nil {
+func (s *Set[T]) Has(v T) bool {
+	return s.has(unique.Make(v))
+}
+
+func (s *Set[T]) has(k unique.Handle[T]) bool {
+	if s.vals == nil {
 		return false
 	}
-	_, ok := s.values[t]
+	_, ok := s.vals[k]
 	return ok
 }
 
-// Contains is an alias for Has for better readability.
+// All returns the sets in consistent order.
 //
 // Example:
 //
-//	if s.Contains(42) { /* element exists */ }
-func (s *Set[T]) Contains(t T) bool {
-	return s.Has(t)
-}
-
-// All returns all elements in the set as a sorted slice.
-// The order is guaranteed to be consistent across calls.
-//
-// Example:
-//
-//	elements := s.All() // []int{1, 2, 3, 4}
+//	slice := s.All()
 func (s *Set[T]) All() []T {
-	if s.values == nil {
-		return []T{}
+	var res []T
+	for k := range s.vals {
+		res = append(res, k.Value())
 	}
-
-	res := make([]T, 0, len(s.values))
-	for t := range s.values {
-		res = append(res, t)
-	}
-
 	slices.Sort(res)
 	return res
-}
-
-// Slice is an alias for All for better API consistency.
-//
-// Example:
-//
-//	slice := s.Slice()
-func (s *Set[T]) Slice() []T {
-	return s.All()
 }
 
 // String returns a string representation of the set.
@@ -200,14 +203,8 @@ func (s *Set[T]) String() string {
 //
 //	copy := s.Clone()
 func (s *Set[T]) Clone() *Set[T] {
-	if s.values == nil {
-		return New[T]()
-	}
-
 	newSet := New[T]()
-	for t := range s.values {
-		newSet.Add(t)
-	}
+	maps.Copy(newSet.vals, s.vals)
 	return newSet
 }
 
@@ -220,19 +217,16 @@ func (s *Set[T]) Clone() *Set[T] {
 //	b := sets.New(2, 3, 4)
 //	c := a.Intersect(b) // {2, 3}
 func (s *Set[T]) Intersect(other *Set[T]) *Set[T] {
-	if s.values == nil || other.values == nil {
-		return New[T]()
-	}
-
 	// Optimize by iterating over the smaller set
 	if s.Len() > other.Len() {
 		return other.Intersect(s)
 	}
 
 	result := New[T]()
-	for t := range s.values {
-		if other.Has(t) {
-			result.Add(t)
+	for k := range s.vals {
+		v := k.Value()
+		if other.Has(v) {
+			result.Add(v)
 		}
 	}
 
@@ -248,22 +242,10 @@ func (s *Set[T]) Intersect(other *Set[T]) *Set[T] {
 //	b := sets.New(2, 3, 4)
 //	c := a.Union(b) // {1, 2, 3, 4}
 func (s *Set[T]) Union(other *Set[T]) *Set[T] {
-	if s.values == nil {
-		if other.values == nil {
-			return New[T]()
-		}
-		return other.Clone()
-	}
-	if other.values == nil {
-		return s.Clone()
-	}
-
-	result := s.Clone()
-	for t := range other.values {
-		result.Add(t)
-	}
-
-	return result
+	res := New[T]()
+	maps.Copy(res.vals, s.vals)
+	maps.Copy(res.vals, other.vals)
+	return res
 }
 
 // Difference returns a new set containing elements in this set but not in the other.
@@ -275,21 +257,11 @@ func (s *Set[T]) Union(other *Set[T]) *Set[T] {
 //	b := sets.New(2, 3, 4)
 //	c := a.Difference(b) // {1}
 func (s *Set[T]) Difference(other *Set[T]) *Set[T] {
-	if s.values == nil {
-		return New[T]()
+	res := s.Clone()
+	for v := range other.vals {
+		res.remove(v)
 	}
-	if other.values == nil {
-		return s.Clone()
-	}
-
-	result := New[T]()
-	for t := range s.values {
-		if !other.Has(t) {
-			result.Add(t)
-		}
-	}
-
-	return result
+	return res
 }
 
 // SymmetricDifference returns a new set containing elements in either set but not in both.
@@ -316,15 +288,8 @@ func (s *Set[T]) Equal(other *Set[T]) bool {
 		return false
 	}
 
-	if s.values == nil && other.values == nil {
-		return true
-	}
-	if s.values == nil || other.values == nil {
-		return false
-	}
-
-	for t := range s.values {
-		if !other.Has(t) {
+	for v := range s.vals {
+		if !other.has(v) {
 			return false
 		}
 	}
@@ -340,15 +305,8 @@ func (s *Set[T]) Equal(other *Set[T]) bool {
 //	b := sets.New(1, 2, 3)
 //	isSubset := a.IsSubset(b) // true
 func (s *Set[T]) IsSubset(other *Set[T]) bool {
-	if s.values == nil {
-		return true // empty set is subset of any set
-	}
-	if other.values == nil {
-		return s.IsEmpty()
-	}
-
-	for t := range s.values {
-		if !other.Has(t) {
+	for v := range s.vals {
+		if !other.has(v) {
 			return false
 		}
 	}
@@ -396,38 +354,31 @@ func (s *Set[T]) IsProperSuperset(other *Set[T]) bool {
 //	b := sets.New(3, 4)
 //	isDisjoint := a.IsDisjoint(b) // true
 func (s *Set[T]) IsDisjoint(other *Set[T]) bool {
-	if s.values == nil || other.values == nil {
-		return true
-	}
-
 	// Check the smaller set for efficiency
 	if s.Len() > other.Len() {
 		return other.IsDisjoint(s)
 	}
 
-	for t := range s.values {
-		if other.Has(t) {
+	for v := range s.vals {
+		if other.has(v) {
 			return false
 		}
 	}
 	return true
 }
 
-// ForEach iterates over all elements in the set, calling the provided function for each.
+// Range iterates over all elements in the set, calling the provided function for each.
 // The iteration order is not guaranteed to be consistent.
-//
-// Example:
-//
-//	s.ForEach(func(element int) {
-//	    fmt.Println(element)
-//	})
-func (s *Set[T]) ForEach(fn func(T)) {
-	if s.values == nil {
-		return
+func (s *Set[T]) Range(predicate func(T)) *Set[T] {
+	result := New[T]()
+	if s.vals == nil {
+		return result
 	}
-	for t := range s.values {
-		fn(t)
+
+	for v := range s.vals {
+		predicate(v.Value())
 	}
+	return result
 }
 
 // Filter returns a new set containing only elements that satisfy the predicate.
@@ -438,13 +389,13 @@ func (s *Set[T]) ForEach(fn func(T)) {
 //	evens := s.Filter(func(x int) bool { return x%2 == 0 }) // {2, 4}
 func (s *Set[T]) Filter(predicate func(T) bool) *Set[T] {
 	result := New[T]()
-	if s.values == nil {
+	if s.vals == nil {
 		return result
 	}
 
-	for t := range s.values {
-		if predicate(t) {
-			result.Add(t)
+	for v := range s.vals {
+		if predicate(v.Value()) {
+			result.add(v)
 		}
 	}
 	return result
@@ -457,12 +408,12 @@ func (s *Set[T]) Filter(predicate func(T) bool) *Set[T] {
 //	s := sets.New(1, 2, 3)
 //	hasEven := s.Any(func(x int) bool { return x%2 == 0 }) // true
 func (s *Set[T]) Any(predicate func(T) bool) bool {
-	if s.values == nil {
+	if s.vals == nil {
 		return false
 	}
 
-	for t := range s.values {
-		if predicate(t) {
+	for v := range s.vals {
+		if predicate(v.Value()) {
 			return true
 		}
 	}
@@ -476,12 +427,12 @@ func (s *Set[T]) Any(predicate func(T) bool) bool {
 //	s := sets.New(2, 4, 6)
 //	allEven := s.Every(func(x int) bool { return x%2 == 0 }) // true
 func (s *Set[T]) Every(predicate func(T) bool) bool {
-	if s.values == nil {
+	if s.vals == nil {
 		return true // vacuously true for empty set
 	}
 
-	for t := range s.values {
-		if !predicate(t) {
+	for v := range s.vals {
+		if !predicate(v.Value()) {
 			return false
 		}
 	}
