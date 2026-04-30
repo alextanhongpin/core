@@ -19,9 +19,8 @@ func TestRoundTripper(t *testing.T) {
 		defer ts.Close()
 
 		// Arrange.
-		re := retry.New(retry.N(5), retry.NoWait)
 		client := ts.Client()
-		client.Transport = retry.NewRoundTripper(client.Transport, re)
+		client.Transport = retry.NewRoundTripper(client.Transport, retry.N(5), retry.NoWait)
 
 		// Act.
 		resp, err := ts.Client().Get(ts.URL)
@@ -43,9 +42,8 @@ func TestRoundTripper(t *testing.T) {
 		defer ts.Close()
 
 		// Arrange.
-		re := retry.New(retry.N(5), retry.NoWait)
 		client := ts.Client()
-		client.Transport = retry.NewRoundTripper(client.Transport, re)
+		client.Transport = retry.NewRoundTripper(client.Transport, retry.N(5), retry.NoWait)
 
 		// Act.
 		resp, err := ts.Client().Get(ts.URL)
