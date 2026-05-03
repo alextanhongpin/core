@@ -29,18 +29,18 @@ func WriteFrontmatter(w io.Writer, meta any) error {
 
 // ParseFrontmatter reads YAML frontmatter from an io.Reader.
 // It returns the parsed data, the *remaining* io.Reader containing the main content, and an error.
-func ParseFrontmatter(r io.Reader) (map[string]any, io.Reader, error) {
+func ParseFrontmatter(r io.Reader) (io.Reader, map[string]any, error) {
 	reader := bufio.NewReader(r)
 
 	delimiter := delimiter + "\n"
 	// Step 1: Look for the starting delimiter.
 	b, err := reader.Peek(len(delimiter))
 	if err != nil {
-		// No frontmatter found at the beginning, return nil data and the original reader
 		return nil, nil, err
 	}
+	// No frontmatter found at the beginning, return nil data and the original reader
 	if string(b) != delimiter {
-		return nil, reader, nil
+		return reader, nil, nil
 	}
 
 	// Consume the starting delimiter.
@@ -66,8 +66,8 @@ func ParseFrontmatter(r io.Reader) (map[string]any, io.Reader, error) {
 	}
 
 	// Step 3: Parse YAML
-	var data map[string]any
-	if err := yaml.Unmarshal(yamlData.Bytes(), &data); err != nil {
+	var meta map[string]any
+	if err := yaml.Unmarshal(yamlData.Bytes(), &meta); err != nil {
 		return nil, nil, fmt.Errorf("failed to unmarshal frontmatter YAML: %w", err)
 	}
 
@@ -92,5 +92,5 @@ func ParseFrontmatter(r io.Reader) (map[string]any, io.Reader, error) {
 
 	// Reverting to a simplified assumption based on the original tool's pattern:
 	// If we reached EOF gracefully after parsing, we return the original reader.
-	return data, reader, nil
+	return reader, meta, nil
 }
