@@ -45,6 +45,8 @@ func (t *Tracker) Errorf(ctx context.Context, format string, args ...any) error 
 	return t.Error(ctx, fmt.Errorf(format, args...))
 }
 
+// With returns a Logger that includes the given attributes in each output
+// operation. Arguments are converted to attributes as if by [Logger.Log].
 func (t *Tracker) With(args ...any) *Tracker {
 	t.Logger = t.Logger.With(args...)
 	return t
@@ -62,6 +64,7 @@ func (t *Tracker) Attrs(attrs ...slog.Attr) *Tracker {
 	return t.With(a...)
 }
 
+// Done logs the message with duration.
 func (t *Tracker) Done(ctx context.Context, msg string) {
 	t.done(ctx, msg, nil)
 }
@@ -69,7 +72,7 @@ func (t *Tracker) Done(ctx context.Context, msg string) {
 // Done finalizes the tracking process.
 // It logs the final result (success or failure), including the total duration,
 // and returns the tracker pointer for chaining.
-// If t.err is non-nil, the log level will be ERROR.
+// If err is non-nil, the log level will be ERROR.
 // Otherwise, it logs at INFO level.
 func (t *Tracker) done(ctx context.Context, msg string, err error) {
 	t.once.Do(func() {
@@ -78,10 +81,10 @@ func (t *Tracker) done(ctx context.Context, msg string, err error) {
 
 		if err != nil {
 			// Log an error summary
-			t.Logger.LogAttrs(ctx, slog.LevelError, msg, tookAttr, slog.String("cause", err.Error()))
+			t.LogAttrs(ctx, slog.LevelError, msg, tookAttr, slog.String("cause", err.Error()))
 		} else {
 			// Log a success summary
-			t.Logger.LogAttrs(ctx, slog.LevelInfo, msg, tookAttr)
+			t.LogAttrs(ctx, slog.LevelInfo, msg, tookAttr)
 		}
 	})
 }
