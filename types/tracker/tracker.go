@@ -35,7 +35,9 @@ func New(logger *slog.Logger) *Tracker {
 // Error sets the tracker's internal error state.
 // If this method is called, the final log recorded by Done() will treat the operation as failed.
 func (t *Tracker) Error(ctx context.Context, err error) error {
-	t.done(ctx, "", err)
+	t.once.Do(func() {
+		t.LogAttrs(ctx, slog.LevelError, err.Error(), slog.Duration("took", time.Since(t.start)))
+	})
 	return err
 }
 
@@ -45,46 +47,26 @@ func (t *Tracker) Errorf(ctx context.Context, format string, args ...any) error 
 	return t.Error(ctx, fmt.Errorf(format, args...))
 }
 
-// With returns a Logger that includes the given attributes in each output
-// operation. Arguments are converted to attributes as if by [Logger.Log].
 func (t *Tracker) With(args ...any) *Tracker {
 	t.Logger = t.Logger.With(args...)
 	return t
 }
 
-// Attrs appends a variable list of attributes to the tracker's context.
+// WithAttrs appends a variable list of attributes to the tracker's context.
 // Use this to attach metadata that should be part of the final log record.
 // It returns the tracker pointer for chaining.
-func (t *Tracker) Attrs(attrs ...slog.Attr) *Tracker {
-	a := make([]any, len(attrs))
+func (t *Tracker) WithAttrs(attrs ...slog.Attr) *Tracker {
+	args := make([]any, len(attrs))
 	for i, attr := range attrs {
-		a[i] = attr
+		args[i] = attr
 	}
-
-	return t.With(a...)
+	t.Logger = t.Logger.With(args...)
+	return t
 }
 
 // Done logs the message with duration.
 func (t *Tracker) Done(ctx context.Context, msg string) {
-	t.done(ctx, msg, nil)
-}
-
-// Done finalizes the tracking process.
-// It logs the final result (success or failure), including the total duration,
-// and returns the tracker pointer for chaining.
-// If err is non-nil, the log level will be ERROR.
-// Otherwise, it logs at INFO level.
-func (t *Tracker) done(ctx context.Context, msg string, err error) {
 	t.once.Do(func() {
-		// Calculate and append the total duration as the final attribute.
-		tookAttr := slog.Duration("took", time.Since(t.start))
-
-		if err != nil {
-			// Log an error summary
-			t.LogAttrs(ctx, slog.LevelError, msg, tookAttr, slog.String("cause", err.Error()))
-		} else {
-			// Log a success summary
-			t.LogAttrs(ctx, slog.LevelInfo, msg, tookAttr)
-		}
+		t.LogAttrs(ctx, slog.LevelInfo, msg, slog.Duration("took", time.Since(t.start)))
 	})
 }

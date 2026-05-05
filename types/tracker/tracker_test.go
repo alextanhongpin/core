@@ -46,7 +46,7 @@ func ExampleNew_error() {
 	// time=0001-01-01T00:00:00.000Z level=INFO msg=retrying... op=retry api=bar attempts=1
 	// time=0001-01-01T00:00:00.000Z level=INFO msg=retrying... op=retry api=bar attempts=2
 	// time=0001-01-01T00:00:00.000Z level=INFO msg=done op=retry api=bar took=0s
-	// time=0001-01-01T00:00:00.000Z level=ERROR msg="" op=foo key=value took=0s cause="unsupported operation"
+	// time=0001-01-01T00:00:00.000Z level=ERROR msg="unsupported operation" op=foo key=value took=0s
 }
 
 func ExampleNew_success() {
@@ -106,13 +106,34 @@ func ExampleNew_group() {
 	// time=0001-01-01T00:00:00.000Z level=INFO msg=done group.op=foo group.key=value group.took=0s
 }
 
+func ExampleNew_idempotent() {
+	bb.Reset()
+
+	ctx := context.Background()
+	t := tracker.New(nil).With("op", "foo", slog.String("key", "value"))
+	t.Done(ctx, "done 1")
+	t.Done(ctx, "done 2")
+	t.Done(ctx, "done 3")
+	_ = t.Errorf(ctx, "bad request")
+
+	tt := tracker.New(nil).WithAttrs(Op("foo"), slog.String("key", "value"))
+	_ = tt.Errorf(ctx, "error 1")
+	_ = tt.Errorf(ctx, "error 2")
+	_ = tt.Errorf(ctx, "error 3")
+	tt.Done(ctx, "done")
+	fmt.Println(bb.String())
+	// Output:
+	// time=0001-01-01T00:00:00.000Z level=INFO msg="done 1" op=foo key=value took=0s
+	// time=0001-01-01T00:00:00.000Z level=ERROR msg="error 1" op=foo key=value took=0s
+}
+
 func foo(ctx context.Context, err error, logger *slog.Logger) error {
 	logger = cmp.Or(logger, slog.Default())
 	t := tracker.New(logger).With("op", "foo", slog.String("key", "value"))
 	t.DebugContext(ctx, "init")
 	defer t.Done(ctx, "done")
 
-	tt := tracker.New(logger).Attrs(slog.String("op", "retry"), slog.String("api", "bar"))
+	tt := tracker.New(logger).WithAttrs(slog.String("op", "retry"), slog.String("api", "bar"))
 	tt.DebugContext(ctx, "init")
 	for i := range 3 {
 		tt.InfoContext(ctx, "retrying...", slog.Int("attempts", i))
@@ -173,4 +194,8 @@ func (h *ReqIDHandler) clone() *ReqIDHandler {
 		group: h.group,
 		attrs: slices.Clone(h.attrs),
 	}
+}
+
+func Op(v string) slog.Attr {
+	return slog.String("op", v)
 }
