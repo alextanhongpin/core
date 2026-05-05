@@ -2,7 +2,6 @@ package tracker_test
 
 import (
 	"bytes"
-	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -40,13 +39,13 @@ func ExampleNew_error() {
 	fmt.Println(bb.String())
 
 	// Output:
-	// time=0001-01-01T00:00:00.000Z level=DEBUG msg=init op=foo key=value
-	// time=0001-01-01T00:00:00.000Z level=DEBUG msg=init op=retry api=bar
-	// time=0001-01-01T00:00:00.000Z level=INFO msg=retrying... op=retry api=bar attempts=0
-	// time=0001-01-01T00:00:00.000Z level=INFO msg=retrying... op=retry api=bar attempts=1
-	// time=0001-01-01T00:00:00.000Z level=INFO msg=retrying... op=retry api=bar attempts=2
-	// time=0001-01-01T00:00:00.000Z level=INFO msg=done op=retry api=bar took=0s
-	// time=0001-01-01T00:00:00.000Z level=ERROR msg="unsupported operation" op=foo key=value took=0s
+	// time=0001-01-01T00:00:00.000Z level=DEBUG msg=init op=foo
+	// time=0001-01-01T00:00:00.000Z level=DEBUG msg=init op=retry
+	// time=0001-01-01T00:00:00.000Z level=INFO msg=retrying... attempts=0 op=retry api=bar
+	// time=0001-01-01T00:00:00.000Z level=INFO msg=retrying... attempts=1 op=retry api=bar
+	// time=0001-01-01T00:00:00.000Z level=INFO msg=retrying... attempts=2 op=retry api=bar
+	// time=0001-01-01T00:00:00.000Z level=INFO msg=done took=0s op=retry api=bar
+	// time=0001-01-01T00:00:00.000Z level=ERROR msg=fail took=0s detail="unsupported operation" op=foo key=value
 }
 
 func ExampleNew_success() {
@@ -55,13 +54,13 @@ func ExampleNew_success() {
 	_ = foo(context.Background(), nil, nil)
 	fmt.Println(bb.String())
 	// Output:
-	// time=0001-01-01T00:00:00.000Z level=DEBUG msg=init op=foo key=value
-	// time=0001-01-01T00:00:00.000Z level=DEBUG msg=init op=retry api=bar
-	// time=0001-01-01T00:00:00.000Z level=INFO msg=retrying... op=retry api=bar attempts=0
-	// time=0001-01-01T00:00:00.000Z level=INFO msg=retrying... op=retry api=bar attempts=1
-	// time=0001-01-01T00:00:00.000Z level=INFO msg=retrying... op=retry api=bar attempts=2
-	// time=0001-01-01T00:00:00.000Z level=INFO msg=done op=retry api=bar took=0s
-	// time=0001-01-01T00:00:00.000Z level=INFO msg=done op=foo key=value took=0s
+	// time=0001-01-01T00:00:00.000Z level=DEBUG msg=init op=foo
+	// time=0001-01-01T00:00:00.000Z level=DEBUG msg=init op=retry
+	// time=0001-01-01T00:00:00.000Z level=INFO msg=retrying... attempts=0 op=retry api=bar
+	// time=0001-01-01T00:00:00.000Z level=INFO msg=retrying... attempts=1 op=retry api=bar
+	// time=0001-01-01T00:00:00.000Z level=INFO msg=retrying... attempts=2 op=retry api=bar
+	// time=0001-01-01T00:00:00.000Z level=INFO msg=done took=0s op=retry api=bar
+	// time=0001-01-01T00:00:00.000Z level=INFO msg=done took=0s op=foo key=value
 }
 
 func ExampleNew_requestID() {
@@ -72,14 +71,15 @@ func ExampleNew_requestID() {
 
 	_ = foo(ctx, nil, nil)
 	fmt.Println(bb.String())
+
 	// Output:
-	// time=0001-01-01T00:00:00.000Z level=DEBUG msg=init op=foo key=value request_id=req-123abc
-	// time=0001-01-01T00:00:00.000Z level=DEBUG msg=init op=retry api=bar request_id=req-123abc
-	// time=0001-01-01T00:00:00.000Z level=INFO msg=retrying... op=retry api=bar attempts=0 request_id=req-123abc
-	// time=0001-01-01T00:00:00.000Z level=INFO msg=retrying... op=retry api=bar attempts=1 request_id=req-123abc
-	// time=0001-01-01T00:00:00.000Z level=INFO msg=retrying... op=retry api=bar attempts=2 request_id=req-123abc
-	// time=0001-01-01T00:00:00.000Z level=INFO msg=done op=retry api=bar took=0s request_id=req-123abc
-	// time=0001-01-01T00:00:00.000Z level=INFO msg=done op=foo key=value took=0s request_id=req-123abc
+	// time=0001-01-01T00:00:00.000Z level=DEBUG msg=init request_id=req-123abc op=foo
+	// time=0001-01-01T00:00:00.000Z level=DEBUG msg=init request_id=req-123abc op=retry
+	// time=0001-01-01T00:00:00.000Z level=INFO msg=retrying... attempts=0 request_id=req-123abc op=retry api=bar
+	// time=0001-01-01T00:00:00.000Z level=INFO msg=retrying... attempts=1 request_id=req-123abc op=retry api=bar
+	// time=0001-01-01T00:00:00.000Z level=INFO msg=retrying... attempts=2 request_id=req-123abc op=retry api=bar
+	// time=0001-01-01T00:00:00.000Z level=INFO msg=done took=0s request_id=req-123abc op=retry api=bar
+	// time=0001-01-01T00:00:00.000Z level=INFO msg=done took=0s request_id=req-123abc op=foo key=value
 }
 
 func ExampleNew_discard() {
@@ -94,54 +94,55 @@ func ExampleNew_discard() {
 func ExampleNew_group() {
 	bb.Reset()
 
-	_ = foo(context.Background(), nil, slog.Default().WithGroup("group"))
+	_ = foo(context.Background(), nil, slog.Default().WithGroup("my_group"))
 	fmt.Println(bb.String())
+
 	// Output:
-	// time=0001-01-01T00:00:00.000Z level=DEBUG msg=init group.op=foo group.key=value
-	// time=0001-01-01T00:00:00.000Z level=DEBUG msg=init group.op=retry group.api=bar
-	// time=0001-01-01T00:00:00.000Z level=INFO msg=retrying... group.op=retry group.api=bar group.attempts=0
-	// time=0001-01-01T00:00:00.000Z level=INFO msg=retrying... group.op=retry group.api=bar group.attempts=1
-	// time=0001-01-01T00:00:00.000Z level=INFO msg=retrying... group.op=retry group.api=bar group.attempts=2
-	// time=0001-01-01T00:00:00.000Z level=INFO msg=done group.op=retry group.api=bar group.took=0s
-	// time=0001-01-01T00:00:00.000Z level=INFO msg=done group.op=foo group.key=value group.took=0s
+	// time=0001-01-01T00:00:00.000Z level=DEBUG msg=init my_group.op=foo
+	// time=0001-01-01T00:00:00.000Z level=DEBUG msg=init my_group.op=retry
+	// time=0001-01-01T00:00:00.000Z level=INFO msg=retrying... my_group.attempts=0 my_group.op=retry my_group.api=bar
+	// time=0001-01-01T00:00:00.000Z level=INFO msg=retrying... my_group.attempts=1 my_group.op=retry my_group.api=bar
+	// time=0001-01-01T00:00:00.000Z level=INFO msg=retrying... my_group.attempts=2 my_group.op=retry my_group.api=bar
+	// time=0001-01-01T00:00:00.000Z level=INFO msg=done my_group.took=0s my_group.op=retry my_group.api=bar
+	// time=0001-01-01T00:00:00.000Z level=INFO msg=done my_group.took=0s my_group.op=foo my_group.key=value
 }
 
 func ExampleNew_idempotent() {
 	bb.Reset()
 
 	ctx := context.Background()
-	t := tracker.New(nil).With("op", "foo", slog.String("key", "value"))
-	t.Done(ctx, "done 1")
-	t.Done(ctx, "done 2")
-	t.Done(ctx, "done 3")
-	_ = t.Errorf(ctx, "bad request")
+	t := tracker.New(ctx, nil, "foo").WithAttrs(slog.String("key", "value"))
+	t.Done()
+	t.Done()
+	t.Done()
+	_ = t.Errorf("bad request")
 
-	tt := tracker.New(nil).WithAttrs(Op("foo"), slog.String("key", "value"))
-	_ = tt.Errorf(ctx, "error 1")
-	_ = tt.Errorf(ctx, "error 2")
-	_ = tt.Errorf(ctx, "error 3")
-	tt.Done(ctx, "done")
+	tt := tracker.New(ctx, nil, "foo").WithAttrs(slog.String("key", "value"))
+	_ = tt.Errorf("error 1")
+	_ = tt.Errorf("error 2")
+	_ = tt.Errorf("error 3")
+	tt.Done()
 	fmt.Println(bb.String())
+
 	// Output:
-	// time=0001-01-01T00:00:00.000Z level=INFO msg="done 1" op=foo key=value took=0s
-	// time=0001-01-01T00:00:00.000Z level=ERROR msg="error 1" op=foo key=value took=0s
+	// time=0001-01-01T00:00:00.000Z level=DEBUG msg=init op=foo
+	// time=0001-01-01T00:00:00.000Z level=INFO msg=done took=0s op=foo key=value
+	// time=0001-01-01T00:00:00.000Z level=DEBUG msg=init op=foo
+	// time=0001-01-01T00:00:00.000Z level=ERROR msg=fail took=0s detail="error 1" op=foo key=value
 }
 
 func foo(ctx context.Context, err error, logger *slog.Logger) error {
-	logger = cmp.Or(logger, slog.Default())
-	t := tracker.New(logger).With("op", "foo", slog.String("key", "value"))
-	t.DebugContext(ctx, "init")
-	defer t.Done(ctx, "done")
+	t := tracker.New(ctx, logger, "foo").WithAttrs(slog.String("key", "value"))
+	defer t.Done()
 
-	tt := tracker.New(logger).WithAttrs(slog.String("op", "retry"), slog.String("api", "bar"))
-	tt.DebugContext(ctx, "init")
+	tt := tracker.New(ctx, logger, "retry").WithAttrs(slog.String("api", "bar"))
 	for i := range 3 {
-		tt.InfoContext(ctx, "retrying...", slog.Int("attempts", i))
+		tt.Info("retrying...", slog.Int("attempts", i))
 	}
-	tt.Done(ctx, "done")
+	tt.Done()
 
 	if err != nil {
-		return t.Error(ctx, err)
+		return t.Error(err)
 	}
 
 	return nil
@@ -159,15 +160,18 @@ type ReqIDHandler struct {
 }
 
 func (h *ReqIDHandler) Handle(ctx context.Context, r slog.Record) error {
+	rc := r.Clone()
 	// Extract ID from context
 	if id, ok := ctx.Value(requestIDKey).(string); ok {
-		r.AddAttrs(slog.String("request_id", id))
+		rc.AddAttrs(slog.String("request_id", id))
 	}
+	rc.AddAttrs(h.attrs...)
+
 	next := h.Next
 	if h.group != "" {
 		next = next.WithGroup(h.group)
 	}
-	return next.WithAttrs(h.attrs).Handle(ctx, r)
+	return next.Handle(ctx, rc)
 }
 
 func (h *ReqIDHandler) WithAttrs(attrs []slog.Attr) slog.Handler {

@@ -14,9 +14,10 @@ import (
 // a final summary message upon calling Done().
 type Tracker struct {
 	// start records the time the tracking process began.
-	*slog.Logger
-	once  sync.Once
-	start time.Time
+	logger *slog.Logger
+	ctx    context.Context
+	once   sync.Once
+	start  time.Time
 }
 
 // New creates and returns a new Tracker instance.
@@ -25,31 +26,39 @@ type Tracker struct {
 // ctx: The context to be used for all logging operations within this tracker.
 // msg: The primary message to be logged when the operation completes successfully.
 // attrs: Any initial attributes to be associated with this operation.
-func New(logger *slog.Logger) *Tracker {
-	return &Tracker{
-		Logger: cmp.Or(logger, slog.Default()),
+func New(ctx context.Context, logger *slog.Logger, op string) *Tracker {
+	t := &Tracker{
+		logger: cmp.Or(logger, slog.Default()).With(slog.String("op", op)),
+		ctx:    ctx,
 		start:  time.Now(),
 	}
+	t.Debug("init")
+	return t
 }
 
-// Error sets the tracker's internal error state.
-// If this method is called, the final log recorded by Done() will treat the operation as failed.
-func (t *Tracker) Error(ctx context.Context, err error) error {
+// Error logs and returns the error.
+func (t *Tracker) Error(err error) error {
 	t.once.Do(func() {
-		t.LogAttrs(ctx, slog.LevelError, err.Error(), slog.Duration("took", time.Since(t.start)))
+		t.logger.LogAttrs(t.ctx, slog.LevelError, "fail", slog.Duration("took", time.Since(t.start)), slog.String("detail", err.Error()))
 	})
 	return err
 }
 
-// Errorf sets the tracker's internal error state using formatted error messages.
-// If this method is called, the final log recorded by Done() will treat the operation as failed.
-func (t *Tracker) Errorf(ctx context.Context, format string, args ...any) error {
-	return t.Error(ctx, fmt.Errorf(format, args...))
+// Errorf logs the formatted error and returns it.
+func (t *Tracker) Errorf(format string, args ...any) error {
+	return t.Error(fmt.Errorf(format, args...))
 }
 
-func (t *Tracker) With(args ...any) *Tracker {
-	t.Logger = t.Logger.With(args...)
-	return t
+func (t *Tracker) Info(msg string, args ...slog.Attr) {
+	t.logger.LogAttrs(t.ctx, slog.LevelInfo, msg, args...)
+}
+
+func (t *Tracker) Debug(msg string, args ...slog.Attr) {
+	t.logger.LogAttrs(t.ctx, slog.LevelDebug, msg, args...)
+}
+
+func (t *Tracker) Warn(msg string, args ...slog.Attr) {
+	t.logger.LogAttrs(t.ctx, slog.LevelWarn, msg, args...)
 }
 
 // WithAttrs appends a variable list of attributes to the tracker's context.
@@ -60,13 +69,13 @@ func (t *Tracker) WithAttrs(attrs ...slog.Attr) *Tracker {
 	for i, attr := range attrs {
 		args[i] = attr
 	}
-	t.Logger = t.Logger.With(args...)
+	t.logger = t.logger.With(args...)
 	return t
 }
 
 // Done logs the message with duration.
-func (t *Tracker) Done(ctx context.Context, msg string) {
+func (t *Tracker) Done() {
 	t.once.Do(func() {
-		t.LogAttrs(ctx, slog.LevelInfo, msg, slog.Duration("took", time.Since(t.start)))
+		t.logger.LogAttrs(t.ctx, slog.LevelInfo, "done", slog.Duration("took", time.Since(t.start)))
 	})
 }
