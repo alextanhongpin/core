@@ -40,13 +40,12 @@ func ExampleNew_error() {
 	fmt.Println(bb.String())
 
 	// Output:
-	// time=0001-01-01T00:00:00.000Z level=DEBUG msg=init op=foo key=value
-	// time=0001-01-01T00:00:00.000Z level=DEBUG msg=init op=retry api=bar
-	// time=0001-01-01T00:00:00.000Z level=INFO msg=retrying... op=retry api=bar attempts=0
-	// time=0001-01-01T00:00:00.000Z level=INFO msg=retrying... op=retry api=bar attempts=1
-	// time=0001-01-01T00:00:00.000Z level=INFO msg=retrying... op=retry api=bar attempts=2
-	// time=0001-01-01T00:00:00.000Z level=INFO msg=done op=retry api=bar took=0s
-	// time=0001-01-01T00:00:00.000Z level=ERROR msg="unsupported operation" op=foo key=value took=0s
+	// time=0001-01-01T00:00:00.000Z level=INFO msg=foo key=value
+	// time=0001-01-01T00:00:00.000Z level=INFO msg=retrying... api=bar attempts=0
+	// time=0001-01-01T00:00:00.000Z level=INFO msg=retrying... api=bar attempts=1
+	// time=0001-01-01T00:00:00.000Z level=INFO msg=retrying... api=bar attempts=2
+	// time=0001-01-01T00:00:00.000Z level=INFO msg=done api=bar took=0s
+	// time=0001-01-01T00:00:00.000Z level=ERROR msg="unsupported operation" key=value took=0s
 }
 
 func ExampleNew_success() {
@@ -55,13 +54,12 @@ func ExampleNew_success() {
 	_ = foo(context.Background(), nil, nil)
 	fmt.Println(bb.String())
 	// Output:
-	// time=0001-01-01T00:00:00.000Z level=DEBUG msg=init op=foo key=value
-	// time=0001-01-01T00:00:00.000Z level=DEBUG msg=init op=retry api=bar
-	// time=0001-01-01T00:00:00.000Z level=INFO msg=retrying... op=retry api=bar attempts=0
-	// time=0001-01-01T00:00:00.000Z level=INFO msg=retrying... op=retry api=bar attempts=1
-	// time=0001-01-01T00:00:00.000Z level=INFO msg=retrying... op=retry api=bar attempts=2
-	// time=0001-01-01T00:00:00.000Z level=INFO msg=done op=retry api=bar took=0s
-	// time=0001-01-01T00:00:00.000Z level=INFO msg=done op=foo key=value took=0s
+	// time=0001-01-01T00:00:00.000Z level=INFO msg=foo key=value
+	// time=0001-01-01T00:00:00.000Z level=INFO msg=retrying... api=bar attempts=0
+	// time=0001-01-01T00:00:00.000Z level=INFO msg=retrying... api=bar attempts=1
+	// time=0001-01-01T00:00:00.000Z level=INFO msg=retrying... api=bar attempts=2
+	// time=0001-01-01T00:00:00.000Z level=INFO msg=done api=bar took=0s
+	// time=0001-01-01T00:00:00.000Z level=INFO msg=done key=value took=0s
 }
 
 func ExampleNew_requestID() {
@@ -73,13 +71,12 @@ func ExampleNew_requestID() {
 	_ = foo(ctx, nil, nil)
 	fmt.Println(bb.String())
 	// Output:
-	// time=0001-01-01T00:00:00.000Z level=DEBUG msg=init op=foo key=value request_id=req-123abc
-	// time=0001-01-01T00:00:00.000Z level=DEBUG msg=init op=retry api=bar request_id=req-123abc
-	// time=0001-01-01T00:00:00.000Z level=INFO msg=retrying... op=retry api=bar attempts=0 request_id=req-123abc
-	// time=0001-01-01T00:00:00.000Z level=INFO msg=retrying... op=retry api=bar attempts=1 request_id=req-123abc
-	// time=0001-01-01T00:00:00.000Z level=INFO msg=retrying... op=retry api=bar attempts=2 request_id=req-123abc
-	// time=0001-01-01T00:00:00.000Z level=INFO msg=done op=retry api=bar took=0s request_id=req-123abc
-	// time=0001-01-01T00:00:00.000Z level=INFO msg=done op=foo key=value took=0s request_id=req-123abc
+	// time=0001-01-01T00:00:00.000Z level=INFO msg=foo key=value request_id=req-123abc
+	// time=0001-01-01T00:00:00.000Z level=INFO msg=retrying... api=bar attempts=0 request_id=req-123abc
+	// time=0001-01-01T00:00:00.000Z level=INFO msg=retrying... api=bar attempts=1 request_id=req-123abc
+	// time=0001-01-01T00:00:00.000Z level=INFO msg=retrying... api=bar attempts=2 request_id=req-123abc
+	// time=0001-01-01T00:00:00.000Z level=INFO msg=done api=bar took=0s request_id=req-123abc
+	// time=0001-01-01T00:00:00.000Z level=INFO msg=done key=value took=0s request_id=req-123abc
 }
 
 func ExampleNew_discard() {
@@ -97,51 +94,53 @@ func ExampleNew_group() {
 	_ = foo(context.Background(), nil, slog.Default().WithGroup("group"))
 	fmt.Println(bb.String())
 	// Output:
-	// time=0001-01-01T00:00:00.000Z level=DEBUG msg=init group.op=foo group.key=value
-	// time=0001-01-01T00:00:00.000Z level=DEBUG msg=init group.op=retry group.api=bar
-	// time=0001-01-01T00:00:00.000Z level=INFO msg=retrying... group.op=retry group.api=bar group.attempts=0
-	// time=0001-01-01T00:00:00.000Z level=INFO msg=retrying... group.op=retry group.api=bar group.attempts=1
-	// time=0001-01-01T00:00:00.000Z level=INFO msg=retrying... group.op=retry group.api=bar group.attempts=2
-	// time=0001-01-01T00:00:00.000Z level=INFO msg=done group.op=retry group.api=bar group.took=0s
-	// time=0001-01-01T00:00:00.000Z level=INFO msg=done group.op=foo group.key=value group.took=0s
+	// time=0001-01-01T00:00:00.000Z level=INFO msg=foo group.key=value
+	// time=0001-01-01T00:00:00.000Z level=INFO msg=retrying... group.api=bar group.attempts=0
+	// time=0001-01-01T00:00:00.000Z level=INFO msg=retrying... group.api=bar group.attempts=1
+	// time=0001-01-01T00:00:00.000Z level=INFO msg=retrying... group.api=bar group.attempts=2
+	// time=0001-01-01T00:00:00.000Z level=INFO msg=done group.api=bar group.took=0s
+	// time=0001-01-01T00:00:00.000Z level=INFO msg=done group.key=value group.took=0s
 }
 
 func ExampleNew_idempotent() {
 	bb.Reset()
 
 	ctx := context.Background()
-	t := tracker.New(nil).With("op", "foo", slog.String("key", "value"))
-	t.Done(ctx, "done 1")
-	t.Done(ctx, "done 2")
-	t.Done(ctx, "done 3")
-	_ = t.Errorf(ctx, "bad request")
+	t := tracker.New(ctx, nil, slog.String("key", "value")).Debug("init")
+	for range 3 {
+		t.Done("done")
+	}
+	_ = t.Errorf("bad request")
 
-	tt := tracker.New(nil).WithAttrs(Op("foo"), slog.String("key", "value"))
-	_ = tt.Errorf(ctx, "error 1")
-	_ = tt.Errorf(ctx, "error 2")
-	_ = tt.Errorf(ctx, "error 3")
-	tt.Done(ctx, "done")
+	tt := tracker.New(ctx, nil, slog.String("key", "value")).Debug("retrying")
+	for i := range 3 {
+		_ = tt.Error(errors.New("retry error"), slog.Int("attempt", i+1))
+	}
+	tt.Done("retry ok")
 	fmt.Println(bb.String())
 	// Output:
-	// time=0001-01-01T00:00:00.000Z level=INFO msg="done 1" op=foo key=value took=0s
-	// time=0001-01-01T00:00:00.000Z level=ERROR msg="error 1" op=foo key=value took=0s
+	// time=0001-01-01T00:00:00.000Z level=DEBUG msg=init key=value
+	// time=0001-01-01T00:00:00.000Z level=INFO msg=done key=value took=0s
+	// time=0001-01-01T00:00:00.000Z level=ERROR msg="bad request" key=value took=0s
+	// time=0001-01-01T00:00:00.000Z level=DEBUG msg=retrying key=value
+	// time=0001-01-01T00:00:00.000Z level=ERROR msg="retry error" key=value attempt=1 took=0s
+	// time=0001-01-01T00:00:00.000Z level=ERROR msg="retry error" key=value attempt=2 took=0s
+	// time=0001-01-01T00:00:00.000Z level=ERROR msg="retry error" key=value attempt=3 took=0s
 }
 
 func foo(ctx context.Context, err error, logger *slog.Logger) error {
 	logger = cmp.Or(logger, slog.Default())
-	t := tracker.New(logger).With("op", "foo", slog.String("key", "value"))
-	t.DebugContext(ctx, "init")
-	defer t.Done(ctx, "done")
+	t := tracker.New(ctx, logger, slog.String("key", "value")).Info("foo")
+	defer t.Done("done")
 
-	tt := tracker.New(logger).WithAttrs(slog.String("op", "retry"), slog.String("api", "bar"))
-	tt.DebugContext(ctx, "init")
+	tt := tracker.New(ctx, logger, slog.String("api", "bar"))
 	for i := range 3 {
-		tt.InfoContext(ctx, "retrying...", slog.Int("attempts", i))
+		tt.Info("retrying...", slog.Int("attempts", i))
 	}
-	tt.Done(ctx, "done")
+	tt.Done("done")
 
 	if err != nil {
-		return t.Error(ctx, err)
+		return t.Error(err)
 	}
 
 	return nil
@@ -194,8 +193,4 @@ func (h *ReqIDHandler) clone() *ReqIDHandler {
 		group: h.group,
 		attrs: slices.Clone(h.attrs),
 	}
-}
-
-func Op(v string) slog.Attr {
-	return slog.String("op", v)
 }
