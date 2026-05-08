@@ -36,7 +36,7 @@ name: a name
 description: a description
 ---
 hello world`
-		r, meta, err := markdown.ParseFrontmatter(strings.NewReader(s))
+		r, meta, err := markdown.ParseFrontmatter[map[string]any](strings.NewReader(s))
 		is := assert.New(t)
 		is.NoError(err)
 
@@ -47,7 +47,7 @@ hello world`
 	})
 
 	t.Run("no frontmatter", func(t *testing.T) {
-		r, meta, err := markdown.ParseFrontmatter(strings.NewReader(t.Name()))
+		r, meta, err := markdown.ParseFrontmatter[map[string]any](strings.NewReader(t.Name()))
 		is := assert.New(t)
 		is.NoError(err)
 
@@ -58,7 +58,7 @@ hello world`
 	})
 
 	t.Run("empty", func(t *testing.T) {
-		meta, r, err := markdown.ParseFrontmatter(strings.NewReader(""))
+		meta, r, err := markdown.ParseFrontmatter[map[string]any](strings.NewReader(""))
 		is := assert.New(t)
 		is.ErrorIs(err, io.EOF)
 		is.Nil(r)

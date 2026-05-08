@@ -29,18 +29,20 @@ func WriteFrontmatter(w io.Writer, meta any) error {
 
 // ParseFrontmatter reads YAML frontmatter from an io.Reader.
 // It returns the parsed data, the *remaining* io.Reader containing the main content, and an error.
-func ParseFrontmatter(r io.Reader) (io.Reader, map[string]any, error) {
+func ParseFrontmatter[T any](r io.Reader) (io.Reader, T, error) {
+	var zero T
+
 	reader := bufio.NewReader(r)
 
 	delimiter := delimiter + "\n"
 	// Step 1: Look for the starting delimiter.
 	b, err := reader.Peek(len(delimiter))
 	if err != nil {
-		return nil, nil, err
+		return nil, zero, err
 	}
 	// No frontmatter found at the beginning, return nil data and the original reader
 	if string(b) != delimiter {
-		return reader, nil, nil
+		return reader, zero, nil
 	}
 
 	// Consume the starting delimiter.
@@ -52,7 +54,7 @@ func ParseFrontmatter(r io.Reader) (io.Reader, map[string]any, error) {
 	for {
 		line, err := reader.ReadString('\n')
 		if err != nil {
-			return nil, nil, fmt.Errorf("error reading content line: %w", err)
+			return nil, zero, fmt.Errorf("error reading content line: %w", err)
 		}
 		if line == delimiter {
 			break
@@ -62,13 +64,13 @@ func ParseFrontmatter(r io.Reader) (io.Reader, map[string]any, error) {
 
 	if yamlData.Len() == 0 {
 		// Should not happen if delimiters are properly structured, but safe guard
-		return nil, nil, errors.New("found start delimiter but no content found before end delimiter")
+		return nil, zero, errors.New("found start delimiter but no content found before end delimiter")
 	}
 
 	// Step 3: Parse YAML
-	var meta map[string]any
+	var meta T
 	if err := yaml.Unmarshal(yamlData.Bytes(), &meta); err != nil {
-		return nil, nil, fmt.Errorf("failed to unmarshal frontmatter YAML: %w", err)
+		return nil, zero, fmt.Errorf("failed to unmarshal frontmatter YAML: %w", err)
 	}
 
 	// Step 4: Return parsed data and the remaining reader (which should start right after the closing ---)
