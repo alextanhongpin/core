@@ -57,7 +57,7 @@ func NewTracer(ctx context.Context, cfg TracerConfig) (func(context.Context) err
 			semconv.SchemaURL,
 			semconv.ServiceName(cfg.ServiceName),
 			semconv.ServiceVersion(cfg.ServiceVersion),
-			semconv.DeploymentEnvironmentName(cfg.Environment),
+			semconv.DeploymentEnvironmentNameKey.String(cfg.Environment),
 		),
 	)
 	if err != nil {
