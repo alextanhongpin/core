@@ -12,7 +12,7 @@ import (
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/sdk/resource"
 	"go.opentelemetry.io/otel/sdk/trace"
-	semconv "go.opentelemetry.io/otel/semconv/v1.37.0"
+	semconv "go.opentelemetry.io/otel/semconv/v1.41.0"
 )
 
 type TracerConfig struct {
@@ -61,7 +61,7 @@ func NewTracer(ctx context.Context, cfg TracerConfig) (func(context.Context) err
 		),
 	)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("merging resource: %w", err)
 	}
 
 	// TODO: Setup OTEL_EXPORTER_OTLP_TRACES_ENDPOINT where appropriate.
