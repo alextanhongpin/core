@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/http/httptrace"
 	"time"
 
+	"go.opentelemetry.io/contrib/instrumentation/net/http/httptrace/otelhttptrace"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
@@ -31,6 +33,9 @@ func NewHTTPClient() *http.Client {
 				MaxIdleConns:        100,
 				MaxIdleConnsPerHost: 10,
 			},
+			otelhttp.WithClientTrace(func(ctx context.Context) *httptrace.ClientTrace {
+				return otelhttptrace.NewClientTrace(ctx)
+			}),
 		),
 	}
 }
@@ -64,7 +69,11 @@ func NewTracer(ctx context.Context, cfg TracerConfig) (func(context.Context) err
 		return nil, fmt.Errorf("merging resource: %w", err)
 	}
 
-	// TODO: Setup OTEL_EXPORTER_OTLP_TRACES_ENDPOINT where appropriate.
+	// https://opentelemetry.io/docs/languages/sdk-configuration/otlp-exporter/
+	// TODO: Setup OTEL_EXPORTER_OTLP_ENDPOINT where appropriate.
+	// e.g.
+	// grpc: "http://localhost:4317"
+	// http: "http://localhost:4318"
 	shutdown, err := initHTTPTracerProvider(ctx, res, cfg)
 	if err != nil {
 		return nil, err
@@ -74,7 +83,9 @@ func NewTracer(ctx context.Context, cfg TracerConfig) (func(context.Context) err
 }
 
 func initHTTPTracerProvider(ctx context.Context, res *resource.Resource, cfg TracerConfig) (func(context.Context) error, error) {
-	exporter, err := otlptracehttp.New(ctx, otlptracehttp.WithInsecure())
+	exporter, err := otlptracehttp.New(ctx,
+		otlptracehttp.WithInsecure(),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("creating otlptracehttp: %w", err)
 	}
