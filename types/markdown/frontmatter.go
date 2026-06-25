@@ -27,72 +27,70 @@ func WriteFrontmatter(w io.Writer, meta any) error {
 	return err
 }
 
+// Write writes both frontmatter and bytes content to the writer.
+func Write(w io.Writer, meta any, content []byte) error {
+	err := WriteFrontmatter(w, meta)
+	if err != nil {
+		return err
+	}
+	_, err = w.Write(content)
+	return err
+}
+
+// WriteString writes both frontmatter and string content to the writer.
+func WriteString(w io.Writer, meta any, content string) error {
+	err := WriteFrontmatter(w, meta)
+	if err != nil {
+		return err
+	}
+	_, err = io.WriteString(w, content)
+	return err
+}
+
 // ParseFrontmatter reads YAML frontmatter from an io.Reader.
 // It returns the parsed data, the *remaining* io.Reader containing the main content, and an error.
-func ParseFrontmatter[T any](r io.Reader) (io.Reader, T, error) {
+func ParseFrontmatter[T any](r io.Reader) (T, io.Reader, error) {
 	var zero T
 
 	reader := bufio.NewReader(r)
 
-	delimiter := delimiter + "\n"
+	delimiter := []byte(delimiter + "\n")
 	// Step 1: Look for the starting delimiter.
 	b, err := reader.Peek(len(delimiter))
 	if err != nil {
-		return nil, zero, err
+		return zero, nil, err
 	}
 	// No frontmatter found at the beginning, return nil data and the original reader
-	if string(b) != delimiter {
-		return reader, zero, nil
+	if !bytes.Equal(b, delimiter) {
+		return zero, reader, nil
 	}
 
 	// Consume the starting delimiter.
 	_, _ = reader.Discard(len(delimiter))
 
-	var yamlData bytes.Buffer
-
+	var data []byte
 	// Step 2: Read content until the closing delimiter.
 	for {
-		line, err := reader.ReadString('\n')
+		b, err := reader.ReadBytes('\n')
 		if err != nil {
-			return nil, zero, fmt.Errorf("error reading content line: %w", err)
+			return zero, nil, fmt.Errorf("error reading content line: %w", err)
 		}
-		if line == delimiter {
+		if bytes.Equal(b, delimiter) {
 			break
 		}
-		yamlData.WriteString(line)
+		data = append(data, b...)
 	}
 
-	if yamlData.Len() == 0 {
+	if len(data) == 0 {
 		// Should not happen if delimiters are properly structured, but safe guard
-		return nil, zero, errors.New("found start delimiter but no content found before end delimiter")
+		return zero, nil, errors.New("found start delimiter but no content found before end delimiter")
 	}
 
 	// Step 3: Parse YAML
 	var meta T
-	if err := yaml.Unmarshal(yamlData.Bytes(), &meta); err != nil {
-		return nil, zero, fmt.Errorf("failed to unmarshal frontmatter YAML: %w", err)
+	if err := yaml.Unmarshal(data, &meta); err != nil {
+		return zero, nil, fmt.Errorf("failed to unmarshal frontmatter YAML: %w", err)
 	}
 
-	// Step 4: Return parsed data and the remaining reader (which should start right after the closing ---)
-
-	// Note: Directly manipulating the reader state to return the *remainder* precisely after consuming the trailing ---
-	// is complex with bufio.Reader. For simplicity and correctness in this context,
-	// we will assume that after successfully parsing the frontmatter, the rest of the original reader
-	// (which we effectively consumed up to the end delimiter) is the main content,
-	// and we return a reader that represents the original reader state minus the consumed bytes.
-	// Since perfect state transfer is hard without deeper integration, we'll rely on the fact that
-	// the function signature suggests we return the rest of the input stream.
-
-	// Given the original implementation's goal, which was to return 'reader',
-	// we need to simulate what 'reader' was pointing to *after* reading the entire block.
-	// A safer pattern in real code would involve reading all bytes into a buffer,
-	// separating frontmatter bytes, and returning the rest.
-
-	// For this exercise, we'll keep the return signature but acknowledge the complexity.
-	// We'll return the *original* reader, assuming the caller will handle the consumption contextually,
-	// or, more robustly, we would need to read all input to a buffer and slice it.
-
-	// Reverting to a simplified assumption based on the original tool's pattern:
-	// If we reached EOF gracefully after parsing, we return the original reader.
-	return reader, meta, nil
+	return meta, reader, nil
 }

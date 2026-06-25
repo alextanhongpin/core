@@ -10,6 +10,28 @@ import (
 	"github.com/go-openapi/testify/assert"
 )
 
+func TestWriteString(t *testing.T) {
+	meta := map[string]any{
+		"name":        t.Name(),
+		"description": t.Name(),
+	}
+	content := t.Name()
+	err := markdown.WriteString(t.Output(), meta, content)
+	is := assert.New(t)
+	is.NoError(err)
+}
+
+func TestWrite(t *testing.T) {
+	meta := map[string]any{
+		"name":        t.Name(),
+		"description": t.Name(),
+	}
+	content := t.Name()
+	err := markdown.Write(t.Output(), meta, []byte(content))
+	is := assert.New(t)
+	is.NoError(err)
+}
+
 func TestWriteFrontmatter(t *testing.T) {
 	meta := map[string]any{
 		"name":        t.Name(),
@@ -36,7 +58,7 @@ name: a name
 description: a description
 ---
 hello world`
-		r, meta, err := markdown.ParseFrontmatter[map[string]any](strings.NewReader(s))
+		meta, r, err := markdown.ParseFrontmatter[map[string]any](strings.NewReader(s))
 		is := assert.New(t)
 		is.NoError(err)
 
@@ -47,7 +69,7 @@ hello world`
 	})
 
 	t.Run("no frontmatter", func(t *testing.T) {
-		r, meta, err := markdown.ParseFrontmatter[map[string]any](strings.NewReader(t.Name()))
+		meta, r, err := markdown.ParseFrontmatter[map[string]any](strings.NewReader(t.Name()))
 		is := assert.New(t)
 		is.NoError(err)
 

@@ -85,7 +85,7 @@ func (l *Loader) Load() error {
 	}()
 
 	// 1. Parse Frontmatter
-	reader, meta, err := ParseFrontmatter[map[string]any](f)
+	meta, reader, err := ParseFrontmatter[map[string]any](f)
 	if err != nil {
 		return err
 	}
