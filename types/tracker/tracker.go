@@ -9,6 +9,19 @@ import (
 	"time"
 )
 
+type tracker interface {
+	Debug(msg string, attrs ...slog.Attr)
+	Done(msg string, attrs ...slog.Attr)
+	Error(err error, attrs ...slog.Attr) error
+	Errorf(format string, args ...any) error
+	Info(msg string, attrs ...slog.Attr)
+	Log(ctx context.Context, depth int, level slog.Level, msg string, attrs ...slog.Attr)
+	SetAttrs(attrs ...slog.Attr)
+	Warn(msg string, attrs ...slog.Attr)
+}
+
+var _ tracker = (*Tracker)(nil)
+
 // Tracker is a utility struct designed to wrap the execution of a timed operation.
 // It collects contextual attributes, tracks an error if one occurs, and logs
 // a final summary message upon calling Done().
@@ -49,6 +62,13 @@ func (t *Tracker) Debug(msg string, attrs ...slog.Attr) {
 	t.Log(t.ctx, 3, slog.LevelDebug, msg, attrs...)
 }
 
+// Done logs the message with duration.
+func (t *Tracker) Done(msg string, attrs ...slog.Attr) {
+	t.once.Do(func() {
+		t.Log(t.ctx, 6, slog.LevelInfo, msg, append(attrs, slog.Duration("took", time.Since(t.start)))...)
+	})
+}
+
 func (t *Tracker) Error(err error, attrs ...slog.Attr) error {
 	t.once.Do(func() {
 	})
@@ -67,10 +87,6 @@ func (t *Tracker) Errorf(format string, args ...any) error {
 
 func (t *Tracker) Info(msg string, attrs ...slog.Attr) {
 	t.Log(t.ctx, 3, slog.LevelInfo, msg, attrs...)
-}
-
-func (t *Tracker) Warn(msg string, attrs ...slog.Attr) {
-	t.Log(t.ctx, 3, slog.LevelWarn, msg, attrs...)
 }
 
 func (t *Tracker) Log(ctx context.Context, depth int, level slog.Level, msg string, attrs ...slog.Attr) {
@@ -97,9 +113,6 @@ func (t *Tracker) SetAttrs(attrs ...slog.Attr) {
 	t.logger = t.logger.With(args...)
 }
 
-// Done logs the message with duration.
-func (t *Tracker) Done(msg string, attrs ...slog.Attr) {
-	t.once.Do(func() {
-		t.Log(t.ctx, 6, slog.LevelInfo, msg, append(attrs, slog.Duration("took", time.Since(t.start)))...)
-	})
+func (t *Tracker) Warn(msg string, attrs ...slog.Attr) {
+	t.Log(t.ctx, 3, slog.LevelWarn, msg, attrs...)
 }
