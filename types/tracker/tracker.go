@@ -90,6 +90,10 @@ func (t *Tracker) Info(msg string, attrs ...slog.Attr) {
 }
 
 func (t *Tracker) Log(ctx context.Context, depth int, level slog.Level, msg string, attrs ...slog.Attr) {
+	if !t.logger.Enabled(ctx, level) {
+		return
+	}
+
 	var pc uintptr
 	var pcs [1]uintptr
 	runtime.Callers(depth, pcs[:])
