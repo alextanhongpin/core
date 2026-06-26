@@ -11,17 +11,8 @@ func Value[T any](v T, err error) T {
 	return v
 }
 
-func Nil(err error) {
+func NoError(err error) {
 	if err != nil {
 		panic(fmt.Errorf("must: %w", err))
-	}
-}
-
-func Nilf(msg string, args ...any) {
-	for _, arg := range args {
-		_, ok := arg.(error)
-		if ok {
-			panic(fmt.Errorf(msg, args...))
-		}
 	}
 }
