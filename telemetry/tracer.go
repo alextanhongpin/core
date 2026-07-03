@@ -2,11 +2,13 @@ package telemetry
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"net/http"
 	"net/http/httptrace"
 	"time"
 
+	"github.com/uptrace/opentelemetry-go-extra/otelsql"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/httptrace/otelhttptrace"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel"
@@ -111,4 +113,10 @@ func initHTTPTracerProvider(ctx context.Context, res *resource.Resource, cfg Tra
 	))
 
 	return tp.Shutdown, nil
+}
+
+func NewDB(dsn string) (*sql.DB, error) {
+	return otelsql.Open("postgres", dsn,
+		otelsql.WithAttributes(semconv.DBSystemNamePostgreSQL),
+	)
 }
