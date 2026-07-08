@@ -110,7 +110,7 @@ func ErrorJSON(w http.ResponseWriter, err error) {
 		}
 	}
 
-	JSON(w, Body{Error: e}, code)
+	JSON(w, Body[any]{Error: e}, code)
 }
 
 // SetCacheHeaders sets appropriate cache headers

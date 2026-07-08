@@ -62,9 +62,9 @@ type PageInfo struct {
 // Only one of Data or Error should be populated in a given response:
 // - For successful operations, populate Data and optionally PageInfo
 // - For failed operations, populate Error with detailed error information
-type Body struct {
+type Body[T any] struct {
 	// Data contains the successful response payload (any valid JSON value)
-	Data any `json:"data,omitempty"`
+	Data T `json:"data,omitempty"`
 	// Error contains detailed error information when the operation fails
 	Error *Error `json:"error,omitempty"`
 	// PageInfo contains pagination metadata for list responses
