@@ -34,15 +34,15 @@ var (
 
 func TestRedisJSON(t *testing.T) {
 	c := cache.New[*User]()
-	c.Storage = cache.NewRedis(newClient(t))
+	c.Cache = cache.NewRedis(newClient(t))
 
 	testUnmarshaler(t, c)
 }
 
 func TestRedisGob(t *testing.T) {
 	c := cache.New[*User]()
-	c.Storage = cache.NewRedis(newClient(t))
-	c.Encoder = cache.NewGobEncoder()
+	c.Cache = cache.NewRedis(newClient(t))
+	c.Codec = cache.NewGobCodec()
 
 	testUnmarshaler(t, c)
 }
@@ -55,7 +55,7 @@ func TestFileJSON(t *testing.T) {
 	storage, err := cache.NewFile(path)
 	assert.NoError(t, err)
 	c := cache.New[*User]()
-	c.Storage = storage
+	c.Cache = storage
 	assert.NoError(t, err)
 
 	testUnmarshaler(t, c)
@@ -70,13 +70,13 @@ func TestFileGob(t *testing.T) {
 	assert.NoError(t, err)
 
 	c := cache.New[*User]()
-	c.Storage = storage
-	c.Encoder = cache.NewGobEncoder()
+	c.Cache = storage
+	c.Codec = cache.NewGobCodec()
 
 	testUnmarshaler(t, c)
 }
 
-func testUnmarshaler(t *testing.T, c cache.Storage[*User]) {
+func testUnmarshaler(t *testing.T, c cache.C[*User]) {
 	t.Helper()
 	t.Cleanup(func() {
 		_ = c.Close()

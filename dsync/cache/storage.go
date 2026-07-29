@@ -2,13 +2,16 @@ package cache
 
 import (
 	"context"
+	"io"
 	"time"
 )
 
-// Storage defines the interface for cache operations with atomic guarantees.
+type C[T any] = cache[T]
+
+// cache defines the interface for cache operations with atomic guarantees.
 // All operations are thread-safe and provide strong consistency through cache.
-type Storage[T any] interface {
-	Close() error
+type cache[T any] interface {
+	io.Closer
 
 	// CompareAndDelete atomically deletes a key only if its current value matches the expected old value.
 	CompareAndDelete(ctx context.Context, key string, old T) error

@@ -44,7 +44,7 @@ type File struct {
 	data map[string]*Event
 }
 
-var _ Storage[[]byte] = (*File)(nil)
+var _ cache[[]byte] = (*File)(nil)
 
 // NewFile creates a new File instance with the provided File client.
 func NewFile(path string) (*File, error) {

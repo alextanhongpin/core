@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func testStorage(t *testing.T, c cache.Storage[[]byte]) {
+func testStorage(t *testing.T, c cache.C[[]byte]) {
 	t.Helper()
 
 	t.Run("empty", func(t *testing.T) {
