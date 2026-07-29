@@ -15,6 +15,10 @@ import (
 	"unique"
 )
 
+func Unique[T cmp.Ordered](vals []T) []T {
+	return From(vals).All()
+}
+
 // Set represents a collection of unique elements of type T.
 // The zero value of Set is an empty set ready to use.
 type Set[T cmp.Ordered] struct {
@@ -208,24 +212,31 @@ func (s *Set[T]) Clone() *Set[T] {
 	return newSet
 }
 
-// Intersect returns a new set containing elements that exist in both sets.
+// Intersection returns a new set containing elements that exist in both sets.
 // The operation is commutative: A.Intersect(B) == B.Intersect(A).
 //
 // Example:
 //
 //	a := sets.New(1, 2, 3)
 //	b := sets.New(2, 3, 4)
-//	c := a.Intersect(b) // {2, 3}
-func (s *Set[T]) Intersect(other *Set[T]) *Set[T] {
+//	c := sets.Intersection(a, b) // {2, 3}
+func Intersection[T cmp.Ordered](a *Set[T], bs ...*Set[T]) *Set[T] {
+	for _, b := range bs {
+		a = intersection(a, b)
+	}
+	return a
+}
+
+func intersection[T cmp.Ordered](a, b *Set[T]) *Set[T] {
 	// Optimize by iterating over the smaller set
-	if s.Len() > other.Len() {
-		return other.Intersect(s)
+	if a.Len() > b.Len() {
+		return intersection(b, a)
 	}
 
 	result := New[T]()
-	for k := range s.vals {
+	for k := range a.vals {
 		v := k.Value()
-		if other.Has(v) {
+		if b.Has(v) {
 			result.Add(v)
 		}
 	}
@@ -240,11 +251,13 @@ func (s *Set[T]) Intersect(other *Set[T]) *Set[T] {
 //
 //	a := sets.New(1, 2, 3)
 //	b := sets.New(2, 3, 4)
-//	c := a.Union(b) // {1, 2, 3, 4}
-func (s *Set[T]) Union(other *Set[T]) *Set[T] {
+//	c := sets.Union(a, b) // {1, 2, 3, 4}
+func Union[T cmp.Ordered](a *Set[T], bs ...*Set[T]) *Set[T] {
 	res := New[T]()
-	maps.Copy(res.vals, s.vals)
-	maps.Copy(res.vals, other.vals)
+	maps.Copy(res.vals, a.vals)
+	for _, b := range bs {
+		maps.Copy(res.vals, b.vals)
+	}
 	return res
 }
 
@@ -255,11 +268,13 @@ func (s *Set[T]) Union(other *Set[T]) *Set[T] {
 //
 //	a := sets.New(1, 2, 3)
 //	b := sets.New(2, 3, 4)
-//	c := a.Difference(b) // {1}
-func (s *Set[T]) Difference(other *Set[T]) *Set[T] {
-	res := s.Clone()
-	for v := range other.vals {
-		res.remove(v)
+//	c := sets.Difference(a, b) // {1}
+func Difference[T cmp.Ordered](a *Set[T], bs ...*Set[T]) *Set[T] {
+	res := a.Clone()
+	for _, b := range bs {
+		for v := range b.vals {
+			res.remove(v)
+		}
 	}
 	return res
 }
@@ -271,9 +286,9 @@ func (s *Set[T]) Difference(other *Set[T]) *Set[T] {
 //
 //	a := sets.New(1, 2, 3)
 //	b := sets.New(2, 3, 4)
-//	c := a.SymmetricDifference(b) // {1, 4}
-func (s *Set[T]) SymmetricDifference(other *Set[T]) *Set[T] {
-	return s.Difference(other).Union(other.Difference(s))
+//	c := sets.SymmetricDifference(a, b) // {1, 4}
+func SymmetricDifference[T cmp.Ordered](a, b *Set[T]) *Set[T] {
+	return Union(Difference(a, b), Difference(b, a))
 }
 
 // Equal returns true if both sets contain exactly the same elements.
@@ -282,14 +297,14 @@ func (s *Set[T]) SymmetricDifference(other *Set[T]) *Set[T] {
 //
 //	a := sets.New(1, 2, 3)
 //	b := sets.New(3, 2, 1)
-//	equal := a.Equal(b) // true
-func (s *Set[T]) Equal(other *Set[T]) bool {
-	if s.Len() != other.Len() {
+//	equal := sets.Equal(a, b) // true
+func Equal[T cmp.Ordered](a, b *Set[T]) bool {
+	if a.Len() != b.Len() {
 		return false
 	}
 
-	for v := range s.vals {
-		if !other.has(v) {
+	for v := range a.vals {
+		if !b.has(v) {
 			return false
 		}
 	}
@@ -303,10 +318,10 @@ func (s *Set[T]) Equal(other *Set[T]) bool {
 //
 //	a := sets.New(1, 2)
 //	b := sets.New(1, 2, 3)
-//	isSubset := a.IsSubset(b) // true
-func (s *Set[T]) IsSubset(other *Set[T]) bool {
-	for v := range s.vals {
-		if !other.has(v) {
+//	isSubset := sets.IsSubset(a, b) // true
+func IsSubset[T cmp.Ordered](a, b *Set[T]) bool {
+	for v := range a.vals {
+		if !b.has(v) {
 			return false
 		}
 	}
@@ -319,9 +334,9 @@ func (s *Set[T]) IsSubset(other *Set[T]) bool {
 //
 //	a := sets.New(1, 2, 3)
 //	b := sets.New(1, 2)
-//	isSuperset := a.IsSuperset(b) // true
-func (s *Set[T]) IsSuperset(other *Set[T]) bool {
-	return other.IsSubset(s)
+//	isSuperset := sets.IsSuperset(a, b) // true
+func IsSuperset[T cmp.Ordered](a, b *Set[T]) bool {
+	return IsSubset(b, a)
 }
 
 // IsProperSubset returns true if this set is a subset of the other but not equal to it.
@@ -330,9 +345,9 @@ func (s *Set[T]) IsSuperset(other *Set[T]) bool {
 //
 //	a := sets.New(1, 2)
 //	b := sets.New(1, 2, 3)
-//	isProperSubset := a.IsProperSubset(b) // true
-func (s *Set[T]) IsProperSubset(other *Set[T]) bool {
-	return s.IsSubset(other) && !s.Equal(other)
+//	isProperSubset := sets.IsProperSubset(a, b) // true
+func IsProperSubset[T cmp.Ordered](a, b *Set[T]) bool {
+	return IsSubset(a, b) && !Equal(a, b)
 }
 
 // IsProperSuperset returns true if this set is a superset of the other but not equal to it.
@@ -341,9 +356,9 @@ func (s *Set[T]) IsProperSubset(other *Set[T]) bool {
 //
 //	a := sets.New(1, 2, 3)
 //	b := sets.New(1, 2)
-//	isProperSuperset := a.IsProperSuperset(b) // true
-func (s *Set[T]) IsProperSuperset(other *Set[T]) bool {
-	return s.IsSuperset(other) && !s.Equal(other)
+//	isProperSuperset := sets.IsProperSuperset(a, b) // true
+func IsProperSuperset[T cmp.Ordered](a, b *Set[T]) bool {
+	return IsSuperset(a, b) && !Equal(a, b)
 }
 
 // IsDisjoint returns true if the sets have no elements in common.
@@ -352,19 +367,14 @@ func (s *Set[T]) IsProperSuperset(other *Set[T]) bool {
 //
 //	a := sets.New(1, 2)
 //	b := sets.New(3, 4)
-//	isDisjoint := a.IsDisjoint(b) // true
-func (s *Set[T]) IsDisjoint(other *Set[T]) bool {
+//	isDisjoint := sets.IsDisjoint(a, b) // true
+func IsDisjoint[T cmp.Ordered](a, b *Set[T]) bool {
 	// Check the smaller set for efficiency
-	if s.Len() > other.Len() {
-		return other.IsDisjoint(s)
+	if a.Len() > b.Len() {
+		return IsDisjoint(b, a)
 	}
 
-	for v := range s.vals {
-		if other.has(v) {
-			return false
-		}
-	}
-	return true
+	return Intersection(a, b).Len() == 0
 }
 
 // Range iterates over all elements in the set, calling the provided function for each.
