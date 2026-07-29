@@ -15,15 +15,15 @@ func TestSet(t *testing.T) {
 		s1 := sets.Of(1, 2, 3)
 		s2 := sets.Of(1, 2, 3)
 
-		assert.Equal([]int{1, 2, 3}, s1.Union(s2).All())
-		assert.Equal([]int{1, 2, 3}, s1.Intersect(s2).All())
-		assert.Equal([]int(nil), s1.Difference(s2).All())
-		assert.True(s1.Union(s2).Equal(s1))
-		assert.True(s1.Equal(s2))
-		assert.True(s1.Intersect(s2).Equal(s1))
-		assert.True(s1.Difference(s2).Equal(sets.Of[int]()))
+		assert.Equal([]int{1, 2, 3}, sets.Sorted(sets.Union(s1, s2)).All())
+		assert.Equal([]int{1, 2, 3}, sets.Sorted(sets.Intersection(s1, s2)).All())
+		assert.Equal([]int(nil), sets.Difference(s1, s2).All())
+		assert.True(sets.Equal(sets.Union(s1, s2), s1))
+		assert.True(sets.Equal(s1, s2))
+		assert.True(sets.Equal(sets.Intersection(s1, s2), s1))
+		assert.True(sets.Equal(sets.Difference(s1, s2), sets.Of[int]()))
 		assert.Equal(3, s1.Len())
-		assert.Equal([]int{1, 2, 3}, s1.All())
+		assert.Equal([]int{1, 2, 3}, sets.Sorted(s1).All())
 		assert.True(s1.Has(1))
 		assert.True(s1.Has(2))
 		assert.True(s1.Has(3))
@@ -36,9 +36,9 @@ func TestSet(t *testing.T) {
 		s1 := sets.Of(1, 2, 3)
 		s2 := sets.Of(2, 3, 4)
 
-		assert.Equal([]int{1, 2, 3, 4}, s1.Union(s2).All())
-		assert.Equal([]int{2, 3}, s1.Intersect(s2).All())
-		assert.Equal([]int{1}, s1.Difference(s2).All())
+		assert.Equal([]int{1, 2, 3, 4}, sets.Sorted(sets.Union(s1, s2)).All())
+		assert.Equal([]int{2, 3}, sets.Sorted(sets.Intersection(s1, s2)).All())
+		assert.Equal([]int{1}, sets.Difference(s1, s2).All())
 	})
 
 	t.Run("two non-overlapping sets", func(t *testing.T) {
@@ -47,9 +47,9 @@ func TestSet(t *testing.T) {
 		s1 := sets.Of(1, 2, 3)
 		s2 := sets.Of(4, 5, 6)
 
-		assert.Equal([]int{1, 2, 3, 4, 5, 6}, s1.Union(s2).All())
-		assert.Equal([]int(nil), s1.Intersect(s2).All())
-		assert.Equal([]int{1, 2, 3}, s1.Difference(s2).All())
+		assert.Equal([]int{1, 2, 3, 4, 5, 6}, sets.Sorted(sets.Union(s1, s2)).All())
+		assert.Equal([]int(nil), sets.Intersection(s1, s2).All())
+		assert.Equal([]int{1, 2, 3}, sets.Sorted(sets.Difference(s1, s2)).All())
 	})
 
 	t.Run("empty set", func(t *testing.T) {

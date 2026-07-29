@@ -20,8 +20,8 @@ func ExampleSet_userPermissions() {
 	_ = sets.Of("read", "view") // viewerPerms for demonstration
 
 	// User has multiple roles
-	userPerms := adminPerms.Union(editorPerms)
-	fmt.Printf("User permissions: %s\n", userPerms)
+	userPerms := sets.Union(adminPerms, editorPerms)
+	fmt.Printf("User permissions: %s\n", sets.Sorted(userPerms))
 
 	// Check specific permissions
 	canDelete := userPerms.Has("delete")
@@ -29,12 +29,12 @@ func ExampleSet_userPermissions() {
 	fmt.Printf("Can delete: %v, Can manage users: %v\n", canDelete, canManage)
 
 	// Find common permissions between roles
-	commonPerms := adminPerms.Intersect(editorPerms)
-	fmt.Printf("Common permissions: %s\n", commonPerms)
+	commonPerms := sets.Intersection(adminPerms, editorPerms)
+	fmt.Printf("Common permissions: %s\n", sets.Sorted(commonPerms))
 
 	// Admin-only permissions
-	adminOnlyPerms := adminPerms.Difference(editorPerms)
-	fmt.Printf("Admin-only permissions: %s\n", adminOnlyPerms)
+	adminOnlyPerms := sets.Difference(adminPerms, editorPerms)
+	fmt.Printf("Admin-only permissions: %s\n", sets.Sorted(adminOnlyPerms))
 
 	// Output:
 	// User Permission Management:
@@ -54,20 +54,20 @@ func ExampleSet_tagManagement() {
 	article3Tags := sets.Of("python", "machine-learning", "data-science")
 
 	// Find articles with common tags
-	commonTags := article1Tags.Intersect(article2Tags)
-	fmt.Printf("Common tags between article 1 & 2: %s\n", commonTags)
+	commonTags := sets.Intersection(article1Tags, article2Tags)
+	fmt.Printf("Common tags between article 1 & 2: %s\n", sets.Sorted(commonTags))
 
 	// All unique tags across articles
-	allTags := article1Tags.Union(article2Tags).Union(article3Tags)
-	fmt.Printf("All unique tags: %s\n", allTags)
+	allTags := sets.Union(sets.Union(article1Tags, article2Tags), article3Tags)
+	fmt.Printf("All unique tags: %s\n", sets.Sorted(allTags))
 
 	// Programming-related tags
 	programmingTags := sets.Of("golang", "python", "programming", "backend", "frontend")
 
 	// Check which articles are programming-related
-	fmt.Printf("Article 1 programming-related: %v\n", !article1Tags.IsDisjoint(programmingTags))
-	fmt.Printf("Article 2 programming-related: %v\n", !article2Tags.IsDisjoint(programmingTags))
-	fmt.Printf("Article 3 programming-related: %v\n", !article3Tags.IsDisjoint(programmingTags))
+	fmt.Printf("Article 1 programming-related: %v\n", !sets.IsDisjoint(article1Tags, programmingTags))
+	fmt.Printf("Article 2 programming-related: %v\n", !sets.IsDisjoint(article2Tags, programmingTags))
+	fmt.Printf("Article 3 programming-related: %v\n", !sets.IsDisjoint(article3Tags, programmingTags))
 
 	// Output:
 	// Content Tag Management:
@@ -88,19 +88,19 @@ func ExampleSet_featureFlags() {
 	developmentFlags := sets.Of("feature_a", "feature_b", "feature_c", "feature_d", "feature_debug")
 
 	// Features available in all environments
-	universalFeatures := productionFlags.Intersect(stagingFlags).Intersect(developmentFlags)
-	fmt.Printf("Universal features: %s\n", universalFeatures)
+	universalFeatures := sets.Intersection(productionFlags, stagingFlags, developmentFlags)
+	fmt.Printf("Universal features: %s\n", sets.Sorted(universalFeatures))
 
 	// Development-only features
-	devOnlyFeatures := developmentFlags.Difference(productionFlags)
-	fmt.Printf("Development-only features: %s\n", devOnlyFeatures)
+	devOnlyFeatures := sets.Difference(developmentFlags, productionFlags)
+	fmt.Printf("Development-only features: %s\n", sets.Sorted(devOnlyFeatures))
 
 	// Features that need production testing
-	needsProdTesting := stagingFlags.Difference(productionFlags)
-	fmt.Printf("Features needing production testing: %s\n", needsProdTesting)
+	needsProdTesting := sets.Difference(stagingFlags, productionFlags)
+	fmt.Printf("Features needing production testing: %s\n", sets.Sorted(needsProdTesting))
 
 	// Check if staging is ready for production
-	readyForProd := stagingFlags.IsSubset(productionFlags)
+	readyForProd := sets.IsSubset(stagingFlags, productionFlags)
 	fmt.Printf("Staging ready for production: %v\n", readyForProd)
 
 	// Output:
@@ -125,26 +125,26 @@ func ExampleSet_dataDeduplication() {
 	set2 := sets.From(source2IDs)
 	set3 := sets.From(source3IDs)
 
-	fmt.Printf("Source 1 (deduplicated): %s\n", set1)
-	fmt.Printf("Source 2: %s\n", set2)
-	fmt.Printf("Source 3: %s\n", set3)
+	fmt.Printf("Source 1 (deduplicated): %s\n", sets.Sorted(set1))
+	fmt.Printf("Source 2: %s\n", sets.Sorted(set2))
+	fmt.Printf("Source 3: %s\n", sets.Sorted(set3))
 
 	// All unique IDs across sources
-	allUniqueIDs := set1.Union(set2).Union(set3)
-	fmt.Printf("All unique IDs: %s\n", allUniqueIDs)
+	allUniqueIDs := sets.Union(sets.Union(set1, set2), set3)
+	fmt.Printf("All unique IDs: %s\n", sets.Sorted(allUniqueIDs))
 
 	// IDs present in all sources
-	commonIDs := set1.Intersect(set2).Intersect(set3)
+	commonIDs := sets.Intersection(sets.Intersection(set1, set2), set3)
 	fmt.Printf("IDs in all sources: %s\n", commonIDs)
 
 	// IDs unique to each source
-	unique1 := set1.Difference(set2.Union(set3))
-	unique2 := set2.Difference(set1.Union(set3))
-	unique3 := set3.Difference(set1.Union(set2))
+	unique1 := sets.Difference(set1, sets.Union(set2, set3))
+	unique2 := sets.Difference(set2, sets.Union(set1, set3))
+	unique3 := sets.Difference(set3, sets.Union(set1, set2))
 
-	fmt.Printf("Unique to source 1: %s\n", unique1)
-	fmt.Printf("Unique to source 2: %s\n", unique2)
-	fmt.Printf("Unique to source 3: %s\n", unique3)
+	fmt.Printf("Unique to source 1: %s\n", sets.Sorted(unique1))
+	fmt.Printf("Unique to source 2: %s\n", sets.Sorted(unique2))
+	fmt.Printf("Unique to source 3: %s\n", sets.Sorted(unique3))
 
 	// Output:
 	// Data Deduplication:
@@ -169,8 +169,8 @@ func ExampleSet_accessControl() {
 	allEmployees := sets.Of("alice", "bob", "charlie", "diana", "eve", "frank", "grace", "henry")
 
 	// Resource access permissions
-	sensitiveResourceUsers := adminGroup.Union(sets.Of("diana")) // senior developer
-	_ = allEmployees                                             // publicResourceUsers for demonstration
+	sensitiveResourceUsers := sets.Union(adminGroup, sets.Of("diana")) // senior developer
+	_ = allEmployees                                                   // publicResourceUsers for demonstration
 
 	// Check access permissions
 	checkAccess := func(user string, resource string, allowedUsers *sets.Set[string]) {
@@ -183,13 +183,13 @@ func ExampleSet_accessControl() {
 	checkAccess("charlie", "sensitive resource", sensitiveResourceUsers)
 
 	// Find users without any group membership
-	usersInGroups := adminGroup.Union(developersGroup).Union(qaGroup)
-	ungroupedUsers := allEmployees.Difference(usersInGroups)
+	usersInGroups := sets.Union(adminGroup, developersGroup, qaGroup)
+	ungroupedUsers := sets.Difference(allEmployees, usersInGroups)
 	fmt.Printf("Users without group membership: %s\n", ungroupedUsers)
 
 	// Check if all developers have access to development resources
-	devResourceUsers := developersGroup.Union(adminGroup) // admins have dev access too
-	allDevsHaveAccess := developersGroup.IsSubset(devResourceUsers)
+	devResourceUsers := sets.Union(developersGroup, adminGroup) // admins have dev access too
+	allDevsHaveAccess := sets.IsSubset(developersGroup, devResourceUsers)
 	fmt.Printf("All developers have dev resource access: %v\n", allDevsHaveAccess)
 
 	// Output:
@@ -211,13 +211,13 @@ func ExampleSet_abTesting() {
 	treatmentGroupB := sets.Of("user10", "user11", "user12", "user13")
 
 	// All experiment participants
-	allParticipants := controlGroup.Union(treatmentGroupA).Union(treatmentGroupB)
+	allParticipants := sets.Union(controlGroup, treatmentGroupA, treatmentGroupB)
 	fmt.Printf("Total participants: %d\n", allParticipants.Len())
 
 	// Ensure no overlap between groups (proper A/B test design)
-	controlVsA := controlGroup.IsDisjoint(treatmentGroupA)
-	controlVsB := controlGroup.IsDisjoint(treatmentGroupB)
-	aVsB := treatmentGroupA.IsDisjoint(treatmentGroupB)
+	controlVsA := sets.IsDisjoint(controlGroup, treatmentGroupA)
+	controlVsB := sets.IsDisjoint(controlGroup, treatmentGroupB)
+	aVsB := sets.IsDisjoint(treatmentGroupA, treatmentGroupB)
 
 	fmt.Printf("Groups are properly isolated: %v\n", controlVsA && controlVsB && aVsB)
 
@@ -225,9 +225,9 @@ func ExampleSet_abTesting() {
 	purchasedUsers := sets.Of("user2", "user4", "user7", "user9", "user11")
 
 	// Calculate conversion rates by group
-	controlPurchases := controlGroup.Intersect(purchasedUsers)
-	treatmentAPurchases := treatmentGroupA.Intersect(purchasedUsers)
-	treatmentBPurchases := treatmentGroupB.Intersect(purchasedUsers)
+	controlPurchases := sets.Intersection(controlGroup, purchasedUsers)
+	treatmentAPurchases := sets.Intersection(treatmentGroupA, purchasedUsers)
+	treatmentBPurchases := sets.Intersection(treatmentGroupB, purchasedUsers)
 
 	fmt.Printf("Control group conversions: %d/%d\n", controlPurchases.Len(), controlGroup.Len())
 	fmt.Printf("Treatment A conversions: %d/%d\n", treatmentAPurchases.Len(), treatmentGroupA.Len())
@@ -253,23 +253,23 @@ func ExampleSet_socialNetwork() {
 	dianaFollowers := sets.Of("alice", "charlie", "eve")
 
 	// Find mutual followers
-	aliceBobMutual := aliceFollowers.Intersect(bobFollowers)
+	aliceBobMutual := sets.Intersection(aliceFollowers, bobFollowers)
 	fmt.Printf("Alice & Bob mutual followers: %s\n", aliceBobMutual)
 
 	// Find influencers (users who follow each other)
-	aliceCharlieMutual := aliceFollowers.Intersect(charlieFollowers)
-	fmt.Printf("Alice & Charlie mutual followers: %s\n", aliceCharlieMutual)
+	aliceCharlieMutual := sets.Intersection(aliceFollowers, charlieFollowers)
+	fmt.Printf("Alice & Charlie mutual followers: %s\n", sets.Sorted(aliceCharlieMutual))
 
 	// Users who follow Alice but not Bob
-	aliceExclusive := aliceFollowers.Difference(bobFollowers)
-	fmt.Printf("Follow Alice but not Bob: %s\n", aliceExclusive)
+	aliceExclusive := sets.Difference(aliceFollowers, bobFollowers)
+	fmt.Printf("Follow Alice but not Bob: %s\n", sets.Sorted(aliceExclusive))
 
 	// Total unique users in the network
-	allUsers := aliceFollowers.Union(bobFollowers).Union(charlieFollowers).Union(dianaFollowers)
-	fmt.Printf("Total unique users: %d - %s\n", allUsers.Len(), allUsers)
+	allUsers := sets.Union(aliceFollowers, bobFollowers, charlieFollowers, dianaFollowers)
+	fmt.Printf("Total unique users: %d - %s\n", allUsers.Len(), sets.Sorted(allUsers))
 
 	// Find users who are followed by everyone
-	followedByAll := aliceFollowers.Intersect(bobFollowers).Intersect(charlieFollowers).Intersect(dianaFollowers)
+	followedByAll := sets.Intersection(aliceFollowers, bobFollowers, charlieFollowers, dianaFollowers)
 	fmt.Printf("Followed by everyone: %s\n", followedByAll)
 
 	// Output:
@@ -291,17 +291,17 @@ func ExampleSet_inventoryManagement() {
 	warehouse3 := sets.Of("mouse", "monitor", "printer", "webcam")
 
 	// Products available in all warehouses
-	universalStock := warehouse1.Intersect(warehouse2).Intersect(warehouse3)
-	fmt.Printf("Available in all warehouses: %s\n", universalStock)
+	universalStock := sets.Intersection(warehouse1, warehouse2, warehouse3)
+	fmt.Printf("Available in all warehouses: %s\n", sets.Sorted(universalStock))
 
 	// All unique products across warehouses
-	allProducts := warehouse1.Union(warehouse2).Union(warehouse3)
-	fmt.Printf("All products: %s\n", allProducts)
+	allProducts := sets.Union(warehouse1, warehouse2, warehouse3)
+	fmt.Printf("All products: %s\n", sets.Sorted(allProducts))
 
 	// Products exclusive to each warehouse
-	exclusive1 := warehouse1.Difference(warehouse2.Union(warehouse3))
-	exclusive2 := warehouse2.Difference(warehouse1.Union(warehouse3))
-	exclusive3 := warehouse3.Difference(warehouse1.Union(warehouse2))
+	exclusive1 := sets.Difference(warehouse1, sets.Union(warehouse2, warehouse3))
+	exclusive2 := sets.Difference(warehouse2, sets.Union(warehouse1, warehouse3))
+	exclusive3 := sets.Difference(warehouse3, sets.Union(warehouse1, warehouse2))
 
 	fmt.Printf("Exclusive to warehouse 1: %s\n", exclusive1)
 	fmt.Printf("Exclusive to warehouse 2: %s\n", exclusive2)
@@ -310,9 +310,9 @@ func ExampleSet_inventoryManagement() {
 	// Customer order checking
 	customerOrder := sets.Of("laptop", "mouse", "keyboard")
 
-	canFulfillFrom1 := customerOrder.IsSubset(warehouse1)
-	canFulfillFrom2 := customerOrder.IsSubset(warehouse2)
-	canFulfillFrom3 := customerOrder.IsSubset(warehouse3)
+	canFulfillFrom1 := sets.IsSubset(customerOrder, warehouse1)
+	canFulfillFrom2 := sets.IsSubset(customerOrder, warehouse2)
+	canFulfillFrom3 := sets.IsSubset(customerOrder, warehouse3)
 
 	fmt.Printf("Can fulfill order from warehouse 1: %v\n", canFulfillFrom1)
 	fmt.Printf("Can fulfill order from warehouse 2: %v\n", canFulfillFrom2)
@@ -347,7 +347,7 @@ func ExampleSet_skillsMatching() {
 	// Calculate skill match percentages
 	calculateMatch := func(candidateSkills, jobSkills *sets.Set[string]) float64 {
 		requiredSkills := jobSkills.Len()
-		matchedSkills := candidateSkills.Intersect(jobSkills).Len()
+		matchedSkills := sets.Intersection(candidateSkills, jobSkills).Len()
 		return float64(matchedSkills) / float64(requiredSkills) * 100
 	}
 
@@ -367,8 +367,8 @@ func ExampleSet_skillsMatching() {
 	fmt.Printf("  Fullstack: %.1f%%\n", calculateMatch(candidate3Skills, fullstackJobSkills))
 
 	// Missing skills analysis
-	candidate1Missing := backendJobSkills.Difference(candidate1Skills)
-	fmt.Printf("Candidate 1 missing skills for backend: %s\n", candidate1Missing)
+	candidate1Missing := sets.Difference(backendJobSkills, candidate1Skills)
+	fmt.Printf("Candidate 1 missing skills for backend: %s\n", sets.Sorted(candidate1Missing))
 
 	// Output:
 	// Skills-based Job Matching:
@@ -400,23 +400,23 @@ func ExampleSet_configManagement() {
 	currentConfig := sets.Of("debug", "logging", "ssl", "monitoring", "test-db")
 
 	// Check which environment this matches
-	fmt.Printf("Current config: %s\n", currentConfig)
+	fmt.Printf("Current config: %s\n", sets.Sorted(currentConfig))
 
-	devMatch := currentConfig.Intersect(devConfig).Len()
-	stagingMatch := currentConfig.Intersect(stagingConfig).Len()
-	prodMatch := currentConfig.Intersect(prodConfig).Len()
+	devMatch := sets.Intersection(currentConfig, devConfig).Len()
+	stagingMatch := sets.Intersection(currentConfig, stagingConfig).Len()
+	prodMatch := sets.Intersection(currentConfig, prodConfig).Len()
 
 	fmt.Printf("Dev environment match: %d/%d configs\n", devMatch, devConfig.Len())
 	fmt.Printf("Staging environment match: %d/%d configs\n", stagingMatch, stagingConfig.Len())
 	fmt.Printf("Production environment match: %d/%d configs\n", prodMatch, prodConfig.Len())
 
 	// Missing configurations for production
-	missingForProd := prodConfig.Difference(currentConfig)
-	fmt.Printf("Missing for production: %s\n", missingForProd)
+	missingForProd := sets.Difference(prodConfig, currentConfig)
+	fmt.Printf("Missing for production: %s\n", sets.Sorted(missingForProd))
 
 	// Configurations that shouldn't be in production
-	invalidForProd := currentConfig.Difference(prodConfig)
-	fmt.Printf("Invalid for production: %s\n", invalidForProd)
+	invalidForProd := sets.Difference(currentConfig, prodConfig)
+	fmt.Printf("Invalid for production: %s\n", sets.Sorted(invalidForProd))
 
 	// Output:
 	// Configuration Management:
@@ -461,28 +461,28 @@ func TestSetOperations(t *testing.T) {
 		b := sets.Of(3, 4, 5, 6)
 
 		// Union
-		union := a.Union(b)
+		union := sets.Union(a, b)
 		expected := []int{1, 2, 3, 4, 5, 6}
 		if !sliceEqual(union.All(), expected) {
 			t.Errorf("Union failed: got %v, want %v", union.All(), expected)
 		}
 
 		// Intersection
-		intersect := a.Intersect(b)
+		intersect := sets.Intersection(a, b)
 		expected = []int{3, 4}
 		if !sliceEqual(intersect.All(), expected) {
 			t.Errorf("Intersection failed: got %v, want %v", intersect.All(), expected)
 		}
 
 		// Difference
-		diff := a.Difference(b)
+		diff := sets.Difference(a, b)
 		expected = []int{1, 2}
 		if !sliceEqual(diff.All(), expected) {
 			t.Errorf("Difference failed: got %v, want %v", diff.All(), expected)
 		}
 
 		// Symmetric Difference
-		symDiff := a.SymmetricDifference(b)
+		symDiff := sets.SymmetricDifference(a, b)
 		expected = []int{1, 2, 5, 6}
 		if !sliceEqual(symDiff.All(), expected) {
 			t.Errorf("Symmetric difference failed: got %v, want %v", symDiff.All(), expected)
@@ -494,23 +494,23 @@ func TestSetOperations(t *testing.T) {
 		b := sets.Of(1, 2, 3, 4)
 		c := sets.Of(1, 2)
 
-		if !a.IsSubset(b) {
+		if !sets.IsSubset(a, b) {
 			t.Error("Expected a to be subset of b")
 		}
 
-		if !b.IsSuperset(a) {
+		if !sets.IsSuperset(b, a) {
 			t.Error("Expected b to be superset of a")
 		}
 
-		if !a.Equal(c) {
+		if !sets.Equal(a, c) {
 			t.Error("Expected a to equal c")
 		}
 
-		if !a.IsProperSubset(b) {
+		if !sets.IsProperSubset(a, b) {
 			t.Error("Expected a to be proper subset of b")
 		}
 
-		if a.IsProperSubset(c) {
+		if sets.IsProperSubset(a, c) {
 			t.Error("Expected a not to be proper subset of c")
 		}
 	})
@@ -554,7 +554,7 @@ func TestSetString(t *testing.T) {
 	}
 
 	// Multiple elements
-	multiple := sets.Of(3, 1, 2)
+	multiple := sets.Sorted(sets.Of(3, 1, 2))
 	if multiple.String() != "{1, 2, 3}" {
 		t.Errorf("Multiple element set string: got %s, want {1, 2, 3}", multiple.String())
 	}
@@ -587,19 +587,19 @@ func BenchmarkSetOperations(b *testing.B) {
 
 	b.Run("Union", func(b *testing.B) {
 		for b.Loop() {
-			_ = a.Union(setB)
+			_ = sets.Union(a, setB)
 		}
 	})
 
 	b.Run("Intersect", func(b *testing.B) {
 		for b.Loop() {
-			_ = a.Intersect(setB)
+			_ = sets.Intersection(a, setB)
 		}
 	})
 
 	b.Run("Difference", func(b *testing.B) {
 		for b.Loop() {
-			_ = a.Difference(setB)
+			_ = sets.Difference(a, setB)
 		}
 	})
 }
@@ -637,7 +637,7 @@ func ExampleSet_complexFiltering() {
 	longWords := words.Filter(func(word string) bool {
 		return len(word) > 5
 	})
-	fmt.Printf("Long words: %s\n", longWords)
+	fmt.Printf("Long words: %s\n", sets.Sorted(longWords))
 
 	// Check if any word starts with 'a'
 	startsWithA := words.Any(func(word string) bool {
