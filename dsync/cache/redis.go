@@ -19,7 +19,7 @@ type Redis struct {
 	group  singleflight.Group
 }
 
-var _ Storage[[]byte] = (*Redis)(nil)
+var _ cache[[]byte] = (*Redis)(nil)
 
 // NewRedis creates a new Redis instance with the provided Redis client.
 func NewRedis(client *redis.Client) *Redis {
@@ -35,6 +35,9 @@ func (r *Redis) Close() error {
 
 func (r *Redis) Load(ctx context.Context, key string) ([]byte, error) {
 	s, err := r.client.Get(ctx, key).Result()
+	if errors.Is(err, redis.Nil) {
+		return nil, ErrNotExist
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -83,11 +86,11 @@ func (r *Redis) LoadOrStore(ctx context.Context, key string, value []byte, ttl t
 	return []byte(s), true, nil
 }
 
-// LoadOrStoreFunc returns the existing value for the key if present. Otherwise, it
+// LoadOrCreate returns the existing value for the key if present. Otherwise, it
 // stores and returns the given value. The loaded result is true if the value
 // was loaded, false if stored.
 // Also see usecase here: https://github.com/golang/go/issues/33762#issuecomment-523757434
-func (r *Redis) LoadOrStoreFunc(ctx context.Context, key string, getter func(context.Context, string) ([]byte, time.Duration, error)) (curr []byte, loaded bool, err error) {
+func (r *Redis) LoadOrCreate(ctx context.Context, key string, create func(context.Context, string) ([]byte, time.Duration, error)) (curr []byte, loaded bool, err error) {
 	val, err := r.Load(ctx, key)
 	if err == nil {
 		return val, true, nil
@@ -95,16 +98,11 @@ func (r *Redis) LoadOrStoreFunc(ctx context.Context, key string, getter func(con
 	if !errors.Is(err, ErrNotExist) {
 		return nil, false, err
 	}
-	type cache struct {
-		hit bool
-		val []byte
-	}
 
-	var called atomic.Bool
+	var created atomic.Bool
 	// The "shared" value will be true if all the values are shared.
-	c, err, shared := r.group.Do(key, func() (any, error) {
-		called.Store(true)
-		val, ttl, err := getter(ctx, key)
+	res, err, _ := r.group.Do(key, func() (any, error) {
+		val, ttl, err := create(ctx, key)
 		if err != nil {
 			return nil, err
 		}
@@ -113,18 +111,17 @@ func (r *Redis) LoadOrStoreFunc(ctx context.Context, key string, getter func(con
 		if err != nil {
 			return nil, err
 		}
+		if !loaded {
+			created.Store(true)
+		}
 
-		return &cache{
-			val: curr,
-			hit: loaded,
-		}, nil
+		return curr, nil
 	})
 	if err != nil {
 		return nil, false, err
 	}
-	res := c.(*cache)
 
-	return res.val, res.hit || (!called.Load() && shared), nil
+	return res.([]byte), !created.Load(), nil
 }
 
 // LoadAndDelete deletes the value for a key, returning the previous value if
@@ -132,6 +129,9 @@ func (r *Redis) LoadOrStoreFunc(ctx context.Context, key string, getter func(con
 // Also see usecase here: https://github.com/golang/go/issues/33762#issuecomment-523757434
 func (r *Redis) LoadAndDelete(ctx context.Context, key string) (value []byte, err error) {
 	s, err := r.client.GetDel(ctx, key).Result()
+	if errors.Is(err, redis.Nil) {
+		return value, ErrNotExist
+	}
 	if err != nil {
 		return value, err
 	}
@@ -161,6 +161,9 @@ func (r *Redis) CompareAndDelete(ctx context.Context, key string, old []byte) er
 // the map is equal to old. The old value must be of a comparable type.
 func (r *Redis) CompareAndSwap(ctx context.Context, key string, old, value []byte, ttl time.Duration) error {
 	_, err := r.client.SetIFDEQ(ctx, key, value, helper.DigestBytes(old), ttl).Result()
+	if errors.Is(err, redis.Nil) {
+		return ErrNotExist
+	}
 	return err
 }
 
@@ -182,10 +185,18 @@ func (r *Redis) TTL(ctx context.Context, key string) (time.Duration, error) {
 
 // Expire sets a timeout on a key. After the timeout has expired, the key will automatically be deleted.
 func (r *Redis) Expire(ctx context.Context, key string, ttl time.Duration) error {
-	return r.client.Expire(ctx, key, ttl).Err()
+	err := r.client.Expire(ctx, key, ttl).Err()
+	if errors.Is(err, redis.Nil) {
+		return ErrNotExist
+	}
+	return err
 }
 
 // Delete removes one or more keys from the cache.
 func (r *Redis) Delete(ctx context.Context, keys ...string) (int64, error) {
-	return r.client.Del(ctx, keys...).Result()
+	n, err := r.client.Del(ctx, keys...).Result()
+	if errors.Is(err, redis.Nil) {
+		return 0, ErrNotExist
+	}
+	return n, err
 }

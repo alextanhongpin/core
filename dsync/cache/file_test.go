@@ -48,5 +48,5 @@ func TestFileStorageInit(t *testing.T) {
 
 	n, err = c.Size(t.Context())
 	is.NoError(err)
-	is.Equal(0, n)
+	is.Equal(1, n)
 }

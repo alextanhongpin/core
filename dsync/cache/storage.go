@@ -2,13 +2,16 @@ package cache
 
 import (
 	"context"
+	"io"
 	"time"
 )
 
-// Storage defines the interface for cache operations with atomic guarantees.
+type C[T any] = cache[T]
+
+// cache defines the interface for cache operations with atomic guarantees.
 // All operations are thread-safe and provide strong consistency through cache.
-type Storage[T any] interface {
-	Close() error
+type cache[T any] interface {
+	io.Closer
 
 	// CompareAndDelete atomically deletes a key only if its current value matches the expected old value.
 	CompareAndDelete(ctx context.Context, key string, old T) error
@@ -26,7 +29,7 @@ type Storage[T any] interface {
 	// Returns the current value and whether it was loaded (true) or stored (false).
 	LoadOrStore(ctx context.Context, key string, value T, ttl time.Duration) (curr T, loaded bool, err error)
 
-	LoadOrStoreFunc(ctx context.Context, key string, fn func(ctx context.Context, key string) (T, time.Duration, error)) (curr T, loaded bool, err error)
+	LoadOrCreate(ctx context.Context, key string, fn func(ctx context.Context, key string) (T, time.Duration, error)) (curr T, loaded bool, err error)
 
 	// Store sets a key's value with the specified TTL.
 	Store(ctx context.Context, key string, value T, ttl time.Duration) error
