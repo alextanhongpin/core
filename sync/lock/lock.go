@@ -16,14 +16,21 @@ type unlocker interface {
 	Unlock()
 }
 
+// A raw mutex cannot be weakly referenced.
+// The standard pattern is to wrap the lock inside an allocated object.
+// This object must be allocated on the heap to be tracked by the GC.
+type entry struct {
+	mu sync.Mutex
+}
+
 type KeyLock struct {
-	mu   sync.Mutex
-	data map[string]weak.Pointer[sync.Mutex]
+	mu    sync.Mutex
+	locks map[string]weak.Pointer[entry]
 }
 
 func New() *KeyLock {
 	return &KeyLock{
-		data: make(map[string]weak.Pointer[sync.Mutex]),
+		locks: make(map[string]weak.Pointer[entry]),
 	}
 }
 
@@ -31,18 +38,18 @@ func (l *KeyLock) Size() int {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	return len(l.data)
+	return len(l.locks)
 }
 
 func (l *KeyLock) Has(key string) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	if lock := l.data[key].Value(); lock != nil {
+	if lock := l.locks[key].Value(); lock != nil {
 		return true
 	}
 
-	delete(l.data, key)
+	delete(l.locks, key)
 	return false
 }
 
@@ -50,20 +57,25 @@ func (l *KeyLock) Lock(key string) unlocker {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	if lock := l.data[key].Value(); lock != nil {
-		lock.Lock()
-		return lock
+	if wp, exists := l.locks[key]; exists {
+		if e := wp.Value(); e != nil {
+			e.mu.Lock()
+			return &e.mu
+		}
 	}
 
-	lock := new(sync.Mutex)
-	lock.Lock()
-
-	l.data[key] = weak.Make(lock)
-	runtime.AddCleanup(lock, func(key string) {
+	e := &entry{}
+	l.locks[key] = weak.Make(e)
+	runtime.AddCleanup(e, func(key string) {
 		l.mu.Lock()
-		delete(l.data, key)
-		l.mu.Unlock()
+		defer l.mu.Unlock()
+
+		// Double check that another thread hasn't already overwritten this key.
+		if wp, exists := l.locks[key]; exists && wp.Value() == nil {
+			delete(l.locks, key)
+		}
 	}, key)
 
-	return lock
+	e.mu.Lock()
+	return &e.mu
 }

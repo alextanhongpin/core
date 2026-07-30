@@ -61,9 +61,3 @@ func isFalse(t *testing.T, got bool) {
 
 	isEqual(t, false, got)
 }
-
-func noError(t *testing.T, err error) {
-	t.Helper()
-
-	isEqual(t, nil, err)
-}
