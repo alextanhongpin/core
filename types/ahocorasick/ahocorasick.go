@@ -1,112 +1,161 @@
 package ahocorasick
 
-import "context"
-
-type TrieNode struct {
-	output   []string
-	children map[rune]*TrieNode
-	fail     *TrieNode
+// Match represents a pattern match found in the input text.
+type Match struct {
+	Start        int
+	End          int
+	PatternIndex int
 }
 
-func (n *TrieNode) hasChild(char rune) bool {
-	_, ok := n.children[char]
-	return ok
-}
-func NewTrieNode() *TrieNode {
-	return &TrieNode{
-		children: make(map[rune]*TrieNode),
-	}
-}
+// Matcher represents the compiled Aho-Corasick automaton.
+type Matcher struct {
+	// Flat transition table: transitions[state * 256 + byte] -> nextState
+	transitions []uint32
+	// Fail links for BFS construction
+	fail []uint32
 
-type Automaton struct {
-	root     *TrieNode
-	keywords []string
-}
+	// Compressed output list representation
+	outputHead []int32 // state -> index into outputPatterns (-1 if no match)
+	outputList []int32 // pattern indices stored in linked list form
+	outputNext []int32 // pointer to next pattern index for the state (-1 if end)
 
-func NewAutomaton(keywords ...string) *Automaton {
-	return &Automaton{
-		root: buildAutomaton(keywords...),
-	}
+	patternLens []int // length of each pattern by index
 }
 
-func buildAutomaton(keywords ...string) *TrieNode {
-	// Initialize root node of the trie
-	root := NewTrieNode()
-
-	// Build trie
-	for _, keyword := range keywords {
-		node := root
-		// Traverse the trie and create nodes for each character
-		for _, char := range keyword {
-			if _, ok := node.children[char]; !ok {
-				node.children[char] = NewTrieNode()
-			}
-			node = node.children[char]
-		}
-
-		// Add keyword to the output list of the final node
-		node.output = append(node.output, keyword)
+// NewMatcher constructs and compiles an Aho-Corasick automaton from a slice of patterns.
+func NewMatcher(patterns [][]byte) *Matcher {
+	m := &Matcher{
+		patternLens: make([]int, len(patterns)),
 	}
 
-	// Build failure links using BFS
-	var queue []*TrieNode
+	// 1. Initial allocation for root state (State 0)
+	m.addState()
 
-	// Start from root's children
-	for _, node := range root.children {
-		queue = append(queue, node)
-		node.fail = root
-	}
-
-	// Breadth-first traversal of the trie
-	for len(queue) > 0 {
-		current_node := queue[0]
-		queue = queue[1:]
-		// Traverse each child node
-		for key, next_node := range current_node.children {
-			queue = append(queue, next_node)
-			fail_node := current_node.fail
-			// Find the longest proper suffix that is also a prefix
-			for fail_node != nil && !fail_node.hasChild(key) {
-				fail_node = fail_node.fail
-			}
-			// Set failure link of the current node
-			if fail_node != nil {
-				next_node.fail = fail_node.children[key]
-			} else {
-				next_node.fail = root
-			}
-			// Add output patterns of failure node to current node's output
-			next_node.output = append(next_node.output, next_node.fail.output...)
-
-		}
-	}
-	return root
-}
-
-func (a *Automaton) Search(ctx context.Context, text string) map[string][]int {
-	root := a.root
-	// Initialize result dictionary
-	result := make(map[string][]int)
-
-	current_node := root
-	// Traverse the text
-	for i, char := range text {
-		// Follow failure links until a match is found
-		for current_node != nil && !current_node.hasChild(char) {
-			current_node = current_node.fail
-		}
-
-		if current_node == nil {
-			current_node = root
+	// 2. Build Trie
+	for patIdx, pat := range patterns {
+		m.patternLens[patIdx] = len(pat)
+		if len(pat) == 0 {
 			continue
 		}
 
-		// Move to the next node based on current character
-		current_node = current_node.children[char]
-		// Record matches found at this position
-		for _, keyword := range current_node.output {
-			result[keyword] = append(result[keyword], i-len(keyword)+1)
+		var curr uint32 = 0
+		for _, b := range pat {
+			next := m.transitions[curr*256+uint32(b)]
+			if next == 0 {
+				next = m.addState()
+				m.transitions[curr*256+uint32(b)] = next
+			}
+			curr = next
+		}
+		m.addOutput(curr, int32(patIdx))
+	}
+
+	// 3. Build Failure Links & Compile Full DFA Transitions
+	m.buildDFA()
+
+	return m
+}
+
+func (m *Matcher) addState() uint32 {
+	state := uint32(len(m.fail))
+	m.fail = append(m.fail, 0)
+	m.outputHead = append(m.outputHead, -1)
+
+	// Allocate 256 byte transitions for the new state
+	m.transitions = append(m.transitions, make([]uint32, 256)...)
+	return state
+}
+
+func (m *Matcher) addOutput(state uint32, patternIdx int32) {
+	head := m.outputHead[state]
+	newHead := int32(len(m.outputList))
+
+	m.outputList = append(m.outputList, patternIdx)
+	m.outputNext = append(m.outputNext, head)
+	m.outputHead[state] = newHead
+}
+
+func (m *Matcher) buildDFA() {
+	queue := make([]uint32, 0, len(m.fail))
+
+	// Queue depth-1 states
+	for b := range 256 {
+		child := m.transitions[b]
+		if child != 0 {
+			queue = append(queue, child)
 		}
 	}
-	return result
+
+	// BFS for failure link computation & transition compilation
+	for len(queue) > 0 {
+		curr := queue[0]
+		queue = queue[1:]
+
+		failState := m.fail[curr]
+
+		for b := range 256 {
+			idx := curr*256 + uint32(b)
+			child := m.transitions[idx]
+
+			if child != 0 {
+				// Set fail link of child to transition of failState
+				m.fail[child] = m.transitions[failState*256+uint32(b)]
+
+				// Merge outputs from fail state into child state
+				m.mergeOutputs(child, m.fail[child])
+
+				queue = append(queue, child)
+			} else {
+				// Optimization: Flatten transition graph into direct DFA
+				m.transitions[idx] = m.transitions[failState*256+uint32(b)]
+			}
+		}
+	}
+}
+
+func (m *Matcher) mergeOutputs(toState, fromState uint32) {
+	outIdx := m.outputHead[fromState]
+	for outIdx != -1 {
+		patIdx := m.outputList[outIdx]
+		m.addOutput(toState, patIdx)
+		outIdx = m.outputNext[outIdx]
+	}
+}
+
+// FindAll scans text and returns all matches.
+func (m *Matcher) FindAll(text []byte) []Match {
+	var matches []Match
+	m.MatchFunc(text, func(match Match) bool {
+		matches = append(matches, match)
+		return true // continue search
+	})
+	return matches
+}
+
+// MatchFunc streams matches through a callback to eliminate slice allocations.
+// Returning false from the callback stops scanning immediately.
+func (m *Matcher) MatchFunc(text []byte, fn func(Match) bool) {
+	var state uint32 = 0
+
+	for i, b := range text {
+		state = m.transitions[state*256+uint32(b)]
+
+		outIdx := m.outputHead[state]
+		for outIdx != -1 {
+			patIdx := m.outputList[outIdx]
+			patLen := m.patternLens[patIdx]
+
+			match := Match{
+				Start:        i - patLen + 1,
+				End:          i + 1,
+				PatternIndex: int(patIdx),
+			}
+
+			if !fn(match) {
+				return
+			}
+
+			outIdx = m.outputNext[outIdx]
+		}
+	}
 }
