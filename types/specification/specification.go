@@ -16,6 +16,12 @@ func Or[T any](a, b specification[T]) specification[T] {
 	})
 }
 
+func Not[T any](a specification[T]) specification[T] {
+	return Func[T](func(v T) bool {
+		return !a.IsSatisfiedBy(v)
+	})
+}
+
 func Xor[T any](a, b specification[T]) specification[T] {
 	return Func[T](func(v T) bool {
 		return a.IsSatisfiedBy(v) != b.IsSatisfiedBy(v)
