@@ -14,13 +14,13 @@ import (
 	"strings"
 )
 
-func Unique[T cmp.Ordered](vals []T) []T {
+func Unique[T comparable](vals []T) []T {
 	return From(vals).All()
 }
 
 // Set represents a collection of unique elements of type T.
 // The zero value of Set is an empty set ready to use.
-type Set[T cmp.Ordered] struct {
+type Set[T comparable] struct {
 	vals map[T]struct{}
 }
 
@@ -30,7 +30,7 @@ type Set[T cmp.Ordered] struct {
 // Example:
 //
 //	s := sets.New(1, 2, 3, 2, 1) // Set contains {1, 2, 3}
-func New[T cmp.Ordered]() *Set[T] {
+func New[T comparable]() *Set[T] {
 	return &Set[T]{
 		vals: make(map[T]struct{}),
 	}
@@ -42,7 +42,7 @@ func New[T cmp.Ordered]() *Set[T] {
 //
 //	slice := []int{1, 2, 3, 2, 1}
 //	s := sets.From(slice) // Set contains {1, 2, 3}
-func From[T cmp.Ordered](slice []T) *Set[T] {
+func From[T comparable](slice []T) *Set[T] {
 	set := New[T]()
 	set.AddMany(slice...)
 	return set
@@ -53,7 +53,7 @@ func From[T cmp.Ordered](slice []T) *Set[T] {
 // Example:
 //
 //	s := sets.Of(1, 2, 3) // Set contains {1, 2, 3}
-func Of[T cmp.Ordered](ts ...T) *Set[T] {
+func Of[T comparable](ts ...T) *Set[T] {
 	// Alias for New for better readability
 	return From(ts)
 }
@@ -206,14 +206,14 @@ func (s *Set[T]) Clone() *Set[T] {
 //	a := sets.New(1, 2, 3)
 //	b := sets.New(2, 3, 4)
 //	c := sets.Intersection(a, b) // {2, 3}
-func Intersection[T cmp.Ordered](a *Set[T], bs ...*Set[T]) *Set[T] {
+func Intersection[T comparable](a *Set[T], bs ...*Set[T]) *Set[T] {
 	for _, b := range bs {
 		a = intersection(a, b)
 	}
 	return a
 }
 
-func intersection[T cmp.Ordered](a, b *Set[T]) *Set[T] {
+func intersection[T comparable](a, b *Set[T]) *Set[T] {
 	// Optimize by iterating over the smaller set
 	if a.Len() > b.Len() {
 		return intersection(b, a)
@@ -237,7 +237,7 @@ func intersection[T cmp.Ordered](a, b *Set[T]) *Set[T] {
 //	a := sets.New(1, 2, 3)
 //	b := sets.New(2, 3, 4)
 //	c := sets.Union(a, b) // {1, 2, 3, 4}
-func Union[T cmp.Ordered](a *Set[T], bs ...*Set[T]) *Set[T] {
+func Union[T comparable](a *Set[T], bs ...*Set[T]) *Set[T] {
 	res := New[T]()
 	maps.Copy(res.vals, a.vals)
 	for _, b := range bs {
@@ -254,7 +254,7 @@ func Union[T cmp.Ordered](a *Set[T], bs ...*Set[T]) *Set[T] {
 //	a := sets.New(1, 2, 3)
 //	b := sets.New(2, 3, 4)
 //	c := sets.Difference(a, b) // {1}
-func Difference[T cmp.Ordered](a *Set[T], bs ...*Set[T]) *Set[T] {
+func Difference[T comparable](a *Set[T], bs ...*Set[T]) *Set[T] {
 	res := a.Clone()
 	for _, b := range bs {
 		for v := range b.vals {
@@ -272,7 +272,7 @@ func Difference[T cmp.Ordered](a *Set[T], bs ...*Set[T]) *Set[T] {
 //	a := sets.New(1, 2, 3)
 //	b := sets.New(2, 3, 4)
 //	c := sets.SymmetricDifference(a, b) // {1, 4}
-func SymmetricDifference[T cmp.Ordered](a, b *Set[T]) *Set[T] {
+func SymmetricDifference[T comparable](a, b *Set[T]) *Set[T] {
 	return Union(Difference(a, b), Difference(b, a))
 }
 
@@ -283,7 +283,7 @@ func SymmetricDifference[T cmp.Ordered](a, b *Set[T]) *Set[T] {
 //	a := sets.New(1, 2, 3)
 //	b := sets.New(3, 2, 1)
 //	equal := sets.Equal(a, b) // true
-func Equal[T cmp.Ordered](a, b *Set[T]) bool {
+func Equal[T comparable](a, b *Set[T]) bool {
 	if a.Len() != b.Len() {
 		return false
 	}
@@ -304,7 +304,7 @@ func Equal[T cmp.Ordered](a, b *Set[T]) bool {
 //	a := sets.New(1, 2)
 //	b := sets.New(1, 2, 3)
 //	isSubset := sets.IsSubset(a, b) // true
-func IsSubset[T cmp.Ordered](a, b *Set[T]) bool {
+func IsSubset[T comparable](a, b *Set[T]) bool {
 	for v := range a.vals {
 		if !b.Has(v) {
 			return false
@@ -320,7 +320,7 @@ func IsSubset[T cmp.Ordered](a, b *Set[T]) bool {
 //	a := sets.New(1, 2, 3)
 //	b := sets.New(1, 2)
 //	isSuperset := sets.IsSuperset(a, b) // true
-func IsSuperset[T cmp.Ordered](a, b *Set[T]) bool {
+func IsSuperset[T comparable](a, b *Set[T]) bool {
 	return IsSubset(b, a)
 }
 
@@ -331,7 +331,7 @@ func IsSuperset[T cmp.Ordered](a, b *Set[T]) bool {
 //	a := sets.New(1, 2)
 //	b := sets.New(1, 2, 3)
 //	isProperSubset := sets.IsProperSubset(a, b) // true
-func IsProperSubset[T cmp.Ordered](a, b *Set[T]) bool {
+func IsProperSubset[T comparable](a, b *Set[T]) bool {
 	return IsSubset(a, b) && !Equal(a, b)
 }
 
@@ -342,7 +342,7 @@ func IsProperSubset[T cmp.Ordered](a, b *Set[T]) bool {
 //	a := sets.New(1, 2, 3)
 //	b := sets.New(1, 2)
 //	isProperSuperset := sets.IsProperSuperset(a, b) // true
-func IsProperSuperset[T cmp.Ordered](a, b *Set[T]) bool {
+func IsProperSuperset[T comparable](a, b *Set[T]) bool {
 	return IsSuperset(a, b) && !Equal(a, b)
 }
 
@@ -353,7 +353,7 @@ func IsProperSuperset[T cmp.Ordered](a, b *Set[T]) bool {
 //	a := sets.New(1, 2)
 //	b := sets.New(3, 4)
 //	isDisjoint := sets.IsDisjoint(a, b) // true
-func IsDisjoint[T cmp.Ordered](a, b *Set[T]) bool {
+func IsDisjoint[T comparable](a, b *Set[T]) bool {
 	// Check the smaller set for efficiency
 	if a.Len() > b.Len() {
 		return IsDisjoint(b, a)
