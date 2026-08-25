@@ -12,7 +12,6 @@ import (
 	"maps"
 	"slices"
 	"strings"
-	"unique"
 )
 
 func Unique[T cmp.Ordered](vals []T) []T {
@@ -22,7 +21,7 @@ func Unique[T cmp.Ordered](vals []T) []T {
 // Set represents a collection of unique elements of type T.
 // The zero value of Set is an empty set ready to use.
 type Set[T cmp.Ordered] struct {
-	vals map[unique.Handle[T]]struct{}
+	vals map[T]struct{}
 }
 
 // New creates a new set containing the given elements.
@@ -33,7 +32,7 @@ type Set[T cmp.Ordered] struct {
 //	s := sets.New(1, 2, 3, 2, 1) // Set contains {1, 2, 3}
 func New[T cmp.Ordered]() *Set[T] {
 	return &Set[T]{
-		vals: make(map[unique.Handle[T]]struct{}),
+		vals: make(map[T]struct{}),
 	}
 }
 
@@ -66,30 +65,26 @@ func Of[T cmp.Ordered](ts ...T) *Set[T] {
 //
 //	s.Add(4, 5, 6)
 func (s *Set[T]) Add(v T) bool {
-	return s.add(unique.Make(v))
+	if s.vals == nil {
+		s.vals = make(map[T]struct{})
+	}
+
+	if _, ok := s.vals[v]; !ok {
+		s.vals[v] = struct{}{}
+		return true
+	}
+
+	return false
 }
 
 func (s *Set[T]) AddMany(vs ...T) int {
 	var count int
 	for _, v := range vs {
-		if s.add(unique.Make(v)) {
+		if s.Add(v) {
 			count++
 		}
 	}
 	return count
-}
-
-func (s *Set[T]) add(k unique.Handle[T]) bool {
-	if s.vals == nil {
-		s.vals = make(map[unique.Handle[T]]struct{})
-	}
-
-	if _, ok := s.vals[k]; !ok {
-		s.vals[k] = struct{}{}
-		return true
-	}
-
-	return false
 }
 
 // Remove removes one or more elements from the set.
@@ -99,7 +94,12 @@ func (s *Set[T]) add(k unique.Handle[T]) bool {
 //
 //	s.Remove(1, 2)
 func (s *Set[T]) Remove(v T) bool {
-	return s.remove(unique.Make(v))
+	if _, ok := s.vals[v]; ok {
+		delete(s.vals, v)
+		return true
+	}
+
+	return false
 }
 
 func (s *Set[T]) RemoveMany(vs ...T) int {
@@ -110,15 +110,6 @@ func (s *Set[T]) RemoveMany(vs ...T) int {
 		}
 	}
 	return count
-}
-
-func (s *Set[T]) remove(k unique.Handle[T]) bool {
-	if _, ok := s.vals[k]; ok {
-		delete(s.vals, k)
-		return true
-	}
-
-	return false
 }
 
 // Clear removes all elements from the set.
@@ -157,14 +148,10 @@ func (s *Set[T]) IsEmpty() bool {
 //
 //	if s.Has(42) { /* element exists */ }
 func (s *Set[T]) Has(v T) bool {
-	return s.has(unique.Make(v))
-}
-
-func (s *Set[T]) has(k unique.Handle[T]) bool {
 	if s.vals == nil {
 		return false
 	}
-	_, ok := s.vals[k]
+	_, ok := s.vals[v]
 	return ok
 }
 
@@ -176,9 +163,8 @@ func (s *Set[T]) has(k unique.Handle[T]) bool {
 func (s *Set[T]) All() []T {
 	var res []T
 	for k := range s.vals {
-		res = append(res, k.Value())
+		res = append(res, k)
 	}
-	slices.Sort(res)
 	return res
 }
 
@@ -235,9 +221,8 @@ func intersection[T cmp.Ordered](a, b *Set[T]) *Set[T] {
 
 	result := New[T]()
 	for k := range a.vals {
-		v := k.Value()
-		if b.Has(v) {
-			result.Add(v)
+		if b.Has(k) {
+			result.Add(k)
 		}
 	}
 
@@ -273,7 +258,7 @@ func Difference[T cmp.Ordered](a *Set[T], bs ...*Set[T]) *Set[T] {
 	res := a.Clone()
 	for _, b := range bs {
 		for v := range b.vals {
-			res.remove(v)
+			res.Remove(v)
 		}
 	}
 	return res
@@ -304,7 +289,7 @@ func Equal[T cmp.Ordered](a, b *Set[T]) bool {
 	}
 
 	for v := range a.vals {
-		if !b.has(v) {
+		if !b.Has(v) {
 			return false
 		}
 	}
@@ -321,7 +306,7 @@ func Equal[T cmp.Ordered](a, b *Set[T]) bool {
 //	isSubset := sets.IsSubset(a, b) // true
 func IsSubset[T cmp.Ordered](a, b *Set[T]) bool {
 	for v := range a.vals {
-		if !b.has(v) {
+		if !b.Has(v) {
 			return false
 		}
 	}
@@ -386,7 +371,7 @@ func (s *Set[T]) Range(predicate func(T)) *Set[T] {
 	}
 
 	for v := range s.vals {
-		predicate(v.Value())
+		predicate(v)
 	}
 	return result
 }
@@ -404,8 +389,8 @@ func (s *Set[T]) Filter(predicate func(T) bool) *Set[T] {
 	}
 
 	for v := range s.vals {
-		if predicate(v.Value()) {
-			result.add(v)
+		if predicate(v) {
+			result.Add(v)
 		}
 	}
 	return result
@@ -423,7 +408,7 @@ func (s *Set[T]) Any(predicate func(T) bool) bool {
 	}
 
 	for v := range s.vals {
-		if predicate(v.Value()) {
+		if predicate(v) {
 			return true
 		}
 	}
@@ -442,9 +427,47 @@ func (s *Set[T]) Every(predicate func(T) bool) bool {
 	}
 
 	for v := range s.vals {
-		if !predicate(v.Value()) {
+		if !predicate(v) {
 			return false
 		}
 	}
 	return true
+}
+
+func Sorted[T cmp.Ordered](s *Set[T]) *SortedSet[T] {
+	return &SortedSet[T]{
+		Set: s,
+	}
+}
+
+type SortedSet[T cmp.Ordered] struct {
+	*Set[T]
+}
+
+func (s *SortedSet[T]) All() []T {
+	var res []T
+	for k := range s.vals {
+		res = append(res, k)
+	}
+	slices.Sort(res)
+	return res
+}
+
+// String returns a string representation of the set.
+//
+// Example:
+//
+//	fmt.Printf("Set: %s\n", s) // Set: {1, 2, 3}
+func (s *SortedSet[T]) String() string {
+	if s.IsEmpty() {
+		return "{}"
+	}
+
+	elements := s.All()
+	strElements := make([]string, len(elements))
+	for i, elem := range elements {
+		strElements[i] = fmt.Sprintf("%v", elem)
+	}
+
+	return "{" + strings.Join(strElements, ", ") + "}"
 }
