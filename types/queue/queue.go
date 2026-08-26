@@ -1,35 +1,80 @@
 package queue
 
-// An Item is something we manage in a priority queue.
-type Item[T any] struct {
-	Value    T       // The Value of the item; arbitrary.
-	Priority float64 // The priority of the item in the queue.
+import (
+	"container/heap"
+	"slices"
+	"sort"
+)
+
+type Orderable[T any] interface {
+	Less(other T) bool
 }
 
-// A PriorityQueue implements heap.Interface and holds Items.
-type PriorityQueue[T any] []*Item[T]
+// A priorityQueue implements heap.Interface and holds Items.
+type priorityQueue[T Orderable[T]] []T
 
-func (pq PriorityQueue[T]) Len() int { return len(pq) }
+func (pq priorityQueue[T]) Len() int { return len(pq) }
 
-func (pq PriorityQueue[T]) Less(i, j int) bool {
-	// If we want Pop to give us the highest, not lowest, priority we can use greater than here.
-	return pq[i].Priority < pq[j].Priority
+func (pq priorityQueue[T]) Less(i, j int) bool {
+	// If we want Pop to give us the highest, not lowest, priorityQueue we can use greater than here.
+	return pq[i].Less(pq[j])
 }
 
-func (pq PriorityQueue[T]) Swap(i, j int) {
+func (pq priorityQueue[T]) Swap(i, j int) {
 	pq[i], pq[j] = pq[j], pq[i]
 }
 
-func (pq *PriorityQueue[T]) Push(x any) {
-	item := x.(*Item[T])
+func (pq *priorityQueue[T]) Push(x any) {
+	item := x.(T)
 	*pq = append(*pq, item)
 }
 
-func (pq *PriorityQueue[T]) Pop() any {
+func (pq *priorityQueue[T]) Pop() any {
 	old := *pq
 	n := len(old)
 	item := old[n-1]
-	old[n-1] = nil // don't stop the GC from reclaiming the item eventually
-	*pq = old[0 : n-1]
+	*pq = slices.Delete(old, n-1, n)
 	return item
+}
+
+type PriorityQueue[T Orderable[T]] struct {
+	q    priorityQueue[T]
+	TopK int
+}
+
+func NewPriorityQueue[T Orderable[T]]() *PriorityQueue[T] {
+	q := make(priorityQueue[T], 0)
+	heap.Init(&q)
+	return &PriorityQueue[T]{
+		q: q,
+	}
+}
+
+func (pq *PriorityQueue[T]) Push(vals ...T) {
+	for _, val := range vals {
+		heap.Push(&pq.q, val)
+		for pq.TopK > 0 && pq.q.Len() > pq.TopK {
+			_ = heap.Pop(&pq.q)
+		}
+	}
+}
+
+func (pq *PriorityQueue[T]) Pop() (val T, ok bool) {
+	if pq.q.Len() == 0 {
+		return
+	}
+	item, ok := heap.Pop(&pq.q).(T)
+	return item, true
+}
+
+func (pq *PriorityQueue[T]) Len() int {
+	return pq.q.Len()
+}
+
+func (pq *PriorityQueue[T]) Slice() []T {
+	res := slices.Clone(pq.q)
+	sort.Slice(res, func(i, j int) bool {
+		return res[i].Less(res[j])
+	})
+	return res
 }
