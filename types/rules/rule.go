@@ -1,6 +1,8 @@
 package rules
 
-type spec[T any] interface {
+import "strings"
+
+type specification[T any] interface {
 	IsSatisfiedBy(T) bool
 }
 
@@ -31,7 +33,9 @@ type Result struct {
 }
 
 func (e *Engine[T]) Evaluate(v T) *Result {
+	var rules []string
 	for _, rule := range e.rules {
+		rules = append(rules, rule.name)
 		if !rule.IsSatisfiedBy(v) {
 			return &Result{
 				Rule:  rule.name,
@@ -41,18 +45,19 @@ func (e *Engine[T]) Evaluate(v T) *Result {
 	}
 
 	return &Result{
+		Rule:  strings.Join(rules, " AND "),
 		Valid: true,
 	}
 }
 
 type Rule[T any] struct {
 	name string
-	spec[T]
+	specification[T]
 }
 
-func NewRule[T any](name string, spec spec[T]) *Rule[T] {
+func NewRule[T any](name string, spec specification[T]) *Rule[T] {
 	return &Rule[T]{
-		name: name,
-		spec: spec,
+		name:          name,
+		specification: spec,
 	}
 }
