@@ -1,29 +1,42 @@
 package queue_test
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/alextanhongpin/core/types/queue"
 )
 
-func TestPriorityQueue(t *testing.T) {
-	type Leaderboard struct {
-		Name  string
-		Score int
+type Leaderboard struct {
+	Name  string
+	Score int
+}
+
+func (l *Leaderboard) Less(o *Leaderboard) bool {
+	if l.Score != o.Score {
+		return l.Score < o.Score
 	}
+	return l.Name < o.Name
+	/*
+		This does not work
+		return cmp.Or(
+			cmp.Less(l.Score, o.Score),
+			cmp.Less(l.Name, o.Name),
+		)
+	*/
+}
 
-	a := Leaderboard{Name: "alice", Score: 10}
-	b := Leaderboard{Name: "bob", Score: 1}
-	c := Leaderboard{Name: "charles", Score: 100}
-	pq := queue.NewPriorityQueue[Leaderboard, int]()
-	pq.Push(a, a.Score)
-	pq.Push(b, b.Score)
-	pq.Push(c, c.Score)
-
+func TestPriorityQueue(t *testing.T) {
+	a := &Leaderboard{Name: "alice", Score: 10}
+	b := &Leaderboard{Name: "bob", Score: 1}
+	c := &Leaderboard{Name: "charles", Score: 100}
+	pq := queue.NewPriorityQueue[*Leaderboard]()
+	pq.Push(a, b, c)
 	// Sequence will be bob, alice, charles
-	d, _, _ := pq.Pop()
-	e, _, _ := pq.Pop()
-	f, _, _ := pq.Pop()
+	d, _ := pq.Pop()
+	e, _ := pq.Pop()
+	f, _ := pq.Pop()
+	t.Log(d, e, f)
 	if b != d {
 		t.Fatalf("want %s, got %s", b.Name, d.Name)
 	}
@@ -36,33 +49,45 @@ func TestPriorityQueue(t *testing.T) {
 }
 
 func TestPriorityQueue_TopK(t *testing.T) {
-	type Leaderboard struct {
-		Name  string
-		Score int
-	}
-
-	a := Leaderboard{Name: "alice", Score: 10}
-	b := Leaderboard{Name: "bob", Score: 1}
-	c := Leaderboard{Name: "charles", Score: 100}
-	pq := queue.NewPriorityQueue[Leaderboard, int]()
+	a := &Leaderboard{Name: "alice", Score: 10}
+	b := &Leaderboard{Name: "bob", Score: 1}
+	c := &Leaderboard{Name: "charles", Score: 100}
+	pq := queue.NewPriorityQueue[*Leaderboard]()
 	pq.TopK = 2
-	pq.Push(a, a.Score)
-	pq.Push(b, b.Score)
-	pq.Push(c, c.Score)
+	pq.Push(a, b, c)
 
 	if want, got := 2, pq.Len(); want != got {
 		t.Fatalf("want %d, got %d", want, got)
 	}
-	d, _, ok := pq.Pop()
+	d, ok := pq.Pop()
 	if a != d || !ok {
 		t.Fatalf("want %s, got %s", a.Name, d.Name)
 	}
-	e, _, ok := pq.Pop()
+	e, ok := pq.Pop()
 	if c != e || !ok {
 		t.Fatalf("want %s, got %s", c.Name, e.Name)
 	}
-	_, _, ok = pq.Pop()
+	_, ok = pq.Pop()
 	if ok {
 		t.Fatal("want false")
+	}
+}
+
+func TestPriorityQueue_Duplicate(t *testing.T) {
+	pq := queue.NewPriorityQueue[*Leaderboard]()
+	pq.TopK = 3
+	pq.Push(&Leaderboard{Name: "alice", Score: 10})
+	pq.Push(&Leaderboard{Name: "alice", Score: 1})
+	pq.Push(&Leaderboard{Name: "alice", Score: 100})
+	pq.Push(&Leaderboard{Name: "alice", Score: 1000})
+	pq.Push(&Leaderboard{Name: "bob", Score: 1})
+	pq.Push(&Leaderboard{Name: "charlie", Score: 1})
+	pq.Push(&Leaderboard{Name: "charlie", Score: 10})
+	pq.Push(&Leaderboard{Name: "charlie", Score: 100})
+	pq.Push(&Leaderboard{Name: "zeta", Score: 1000})
+	list := pq.Slice()
+	slices.Reverse(list)
+	for _, item := range list {
+		t.Log(item)
 	}
 }
