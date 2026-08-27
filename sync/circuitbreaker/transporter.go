@@ -10,38 +10,29 @@ type transporter interface {
 	RoundTrip(*http.Request) (*http.Response, error)
 }
 
-type circuitbreaker interface {
-	Do(ctx context.Context, fn func(ctx context.Context) error) error
-}
+type transporterFunc = handler[*http.Request, *http.Response]
 
 type Transporter struct {
-	Transport      transporter
-	CircuitBreaker circuitbreaker
+	fn transporterFunc
 }
 
-func NewTransporter(t transporter, cb circuitbreaker) *Transporter {
+func NewTransporter(t transporter, cb func(transporterFunc) transporterFunc) *Transporter {
 	return &Transporter{
-		Transport:      t,
-		CircuitBreaker: cb,
+		fn: cb(func(ctx context.Context, r *http.Request) (*http.Response, error) {
+			resp, err := t.RoundTrip(r)
+			if err != nil {
+				return nil, err
+			}
+
+			if resp != nil && resp.StatusCode >= http.StatusInternalServerError {
+				return nil, errors.New(resp.Status)
+			}
+
+			return resp, nil
+		}),
 	}
 }
 
-func (t *Transporter) RoundTrip(r *http.Request) (resp *http.Response, err error) {
-	err = t.CircuitBreaker.Do(r.Context(), func(ctx context.Context) error {
-		resp, err = t.Transport.RoundTrip(r)
-		if err != nil {
-			return err
-		}
-
-		if resp != nil && resp.StatusCode >= http.StatusInternalServerError {
-			return errors.New(resp.Status)
-		}
-
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	return resp, nil
+func (t *Transporter) RoundTrip(r *http.Request) (*http.Response, error) {
+	return t.fn(r.Context(), r)
 }

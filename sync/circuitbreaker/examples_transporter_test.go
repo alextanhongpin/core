@@ -25,7 +25,7 @@ func ExampleTransporter() {
 	defer ts.Close()
 
 	client := ts.Client()
-	client.Transport = circuitbreaker.NewTransporter(client.Transport, cb)
+	client.Transport = circuitbreaker.NewTransporter(client.Transport, cb.Handler)
 
 	re := regexp.MustCompile(`\d{5}`)
 

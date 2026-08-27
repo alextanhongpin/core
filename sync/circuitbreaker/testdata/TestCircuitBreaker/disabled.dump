@@ -1,0 +1,56 @@
+evaltest.T[github.com/alextanhongpin/core/sync/circuitbreaker_test.Input,string]{
+  Name: "disabled",
+  Input: circuitbreaker_test.Input{
+    Status: "disabled",
+    N: 4,
+  },
+  Output: "disabled",
+  Error: nil,
+  ErrorString: "",
+  Logs: []interface {}{
+    &evaltest.T[interface {},interface {}]{
+      Name: "do",
+      Input: nil,
+      Output: &circuitbreaker_test.Output{
+        Result: "TestCircuitBreaker/disabled",
+        Status: "disabled",
+      },
+      Error: nil,
+      ErrorString: "",
+      Logs: []interface {}{},
+    },
+    &evaltest.T[interface {},interface {}]{
+      Name: "do",
+      Input: nil,
+      Output: &circuitbreaker_test.Output{
+        Result: "TestCircuitBreaker/disabled",
+        Status: "disabled",
+      },
+      Error: nil,
+      ErrorString: "",
+      Logs: []interface {}{},
+    },
+    &evaltest.T[interface {},interface {}]{
+      Name: "do",
+      Input: nil,
+      Output: &circuitbreaker_test.Output{
+        Result: "TestCircuitBreaker/disabled",
+        Status: "disabled",
+      },
+      Error: nil,
+      ErrorString: "",
+      Logs: []interface {}{},
+    },
+    &evaltest.T[interface {},interface {}]{
+      Name: "do",
+      Input: nil,
+      Output: &circuitbreaker_test.Output{
+        Result: "TestCircuitBreaker/disabled",
+        Status: "disabled",
+      },
+      Error: nil,
+      ErrorString: "",
+      Logs: []interface {}{},
+    },
+  },
+}

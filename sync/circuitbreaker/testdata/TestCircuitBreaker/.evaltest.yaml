@@ -1,0 +1,84 @@
+name: closed error
+description: |
+  circuit will be opened due to error threshold exceeded
+input:
+  status: closed
+  n: 4
+evals:
+  - name: status opened
+    expr: output == "opened"
+---
+name: opened error sleep
+description: |
+  circuit will be opened first, then it will be half-open, and
+  eventually closed
+input:
+  status: opened
+  n: 4
+evals:
+  - name: status opened
+    expr: output == "closed"
+---
+name: opened error
+input:
+  status: opened
+  n: 4
+evals:
+  - name: status opened
+    expr: output == "opened"
+---
+name: opened
+input:
+  status: opened
+  n: 4
+evals:
+  - name: status closed
+    expr: output == "closed"
+---
+name: half-opened error
+input:
+  status: half-open
+  n: 4
+evals:
+  - name: status opened
+    expr: output == "opened"
+---
+name: half-opened
+input:
+  status: half-open
+  n: 4
+evals:
+  - name: status opened
+    expr: output == "closed"
+---
+name: disabled
+input:
+  status: disabled
+  n: 4
+evals:
+  - name: status opened
+    expr: output == "disabled"
+---
+name: disabled error
+input:
+  status: disabled
+  n: 4
+evals:
+  - name: status opened
+    expr: output == "disabled"
+---
+name: forced-open error
+input:
+  status: forced-open
+  n: 4
+evals:
+  - name: status opened
+    expr: output == "forced-open"
+---
+name: forced-open
+input:
+  status: forced-open
+  n: 4
+evals:
+  - name: status opened
+    expr: output == "forced-open"

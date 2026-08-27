@@ -1,0 +1,56 @@
+evaltest.T[github.com/alextanhongpin/core/sync/circuitbreaker_test.Input,string]{
+  Name: "closed error",
+  Input: circuitbreaker_test.Input{
+    Status: "closed",
+    N: 4,
+  },
+  Output: "opened",
+  Error: nil,
+  ErrorString: "",
+  Logs: []interface {}{
+    &evaltest.T[interface {},interface {}]{
+      Name: "do",
+      Input: nil,
+      Output: &circuitbreaker_test.Output{
+        Result: "",
+        Status: "closed",
+      },
+      Error: &errors.errorString{},
+      ErrorString: "unsupported operation",
+      Logs: []interface {}{},
+    },
+    &evaltest.T[interface {},interface {}]{
+      Name: "do",
+      Input: nil,
+      Output: &circuitbreaker_test.Output{
+        Result: "",
+        Status: "closed",
+      },
+      Error: &errors.errorString{},
+      ErrorString: "unsupported operation",
+      Logs: []interface {}{},
+    },
+    &evaltest.T[interface {},interface {}]{
+      Name: "do",
+      Input: nil,
+      Output: &circuitbreaker_test.Output{
+        Result: "",
+        Status: "opened",
+      },
+      Error: &errors.errorString{},
+      ErrorString: "unsupported operation",
+      Logs: []interface {}{},
+    },
+    &evaltest.T[interface {},interface {}]{
+      Name: "do",
+      Input: nil,
+      Output: &circuitbreaker_test.Output{
+        Result: "",
+        Status: "opened",
+      },
+      Error: &errors.errorString{},
+      ErrorString: "circuitbreaker: opened",
+      Logs: []interface {}{},
+    },
+  },
+}

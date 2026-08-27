@@ -1,0 +1,8 @@
+evaltest.T[int,interface {}]{
+  Name: "ok",
+  Input: 100,
+  Output: 100,
+  Error: nil,
+  ErrorString: "",
+  Logs: []interface {}{},
+}

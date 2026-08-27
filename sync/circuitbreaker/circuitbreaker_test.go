@@ -2,111 +2,57 @@ package circuitbreaker_test
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/alextanhongpin/core/sync/circuitbreaker"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/suite"
+	"github.com/alextanhongpin/evaltest"
 )
 
-func TestCircuitBreakerSuite(t *testing.T) {
-	suite.Run(t, new(CircuitBreakerSuite))
-}
+func TestCircuitBreaker(t *testing.T) {
+	type Input struct {
+		Status string
+		N      int
+	}
+	type Output struct {
+		Result string
+		Status string
+	}
+	evaltest.Run(t, func(t *testing.T, ctx context.Context, input Input) (string, error) {
+		var cb *circuitbreaker.CircuitBreaker
+		name := evaltest.Name(ctx)
+		synctest.Test(t, func(t *testing.T) {
+			opts := circuitbreaker.NewOptions()
+			opts.FailureThreshold = 3
+			opts.SuccessThreshold = 3
+			opts.OpenTimeout = 100 * time.Millisecond
 
-type CircuitBreakerSuite struct {
-	suite.Suite
+			cb = circuitbreaker.New(opts)
+			cb.SetStatus(circuitbreaker.ParseStatus(input.Status))
+			h := cb.Handler(func(ctx context.Context, name string) (string, error) {
+				if strings.Contains(name, "error") {
+					return "", errors.ErrUnsupported
+				}
+				return name, nil
+			})
+			for range input.N {
+				res, err := h(ctx, t.Name())
+				evaltest.Log(ctx, evaltest.NewT[any, any]("do", nil, &Output{Result: res, Status: cb.Status().String()}, err))
+			}
+			if strings.Contains(name, "sleep") {
+				time.Sleep(opts.OpenTimeout)
 
-	options *circuitbreaker.Options
-	cb      *circuitbreaker.CircuitBreaker
-}
-
-func (s *CircuitBreakerSuite) SetupTest() {
-	options := circuitbreaker.NewOptions()
-	options.FailureThreshold = 10
-	options.SuccessThreshold = 10
-	options.OpenTimeout = 100 * time.Millisecond
-
-	s.options = options
-	s.cb = circuitbreaker.New(options)
-}
-
-func (s *CircuitBreakerSuite) statusIs(status circuitbreaker.Status) {
-	got := s.cb.Status()
-	s.Equal(status, got)
-}
-
-func (s *CircuitBreakerSuite) setStatus(status circuitbreaker.Status) {
-	s.cb.SetStatus(status)
-}
-
-func (s *CircuitBreakerSuite) runErr(want error) {
-	got := s.cb.Do(s.T().Context(), func(context.Context) error {
-		return assert.AnError
+				for range input.N {
+					res, err := cb.Do(ctx, func(ctx context.Context, name string) (string, error) {
+						return name, nil
+					}, t.Name())
+					evaltest.Log(ctx, evaltest.NewT[any, any]("sleep", nil, &Output{Result: res, Status: cb.Status().String()}, err))
+				}
+			}
+		})
+		return cb.Status().String(), nil
 	})
-	s.ErrorIs(got, want)
-}
-
-func (s *CircuitBreakerSuite) run(want error) {
-	t := s.T()
-
-	ctx := t.Context()
-	got := s.cb.Do(ctx, func(context.Context) error {
-		return nil
-	})
-	s.ErrorIs(got, want)
-}
-
-func (s *CircuitBreakerSuite) triggerOpen() {
-	for range s.options.FailureThreshold {
-		s.runErr(assert.AnError)
-	}
-}
-
-func (s *CircuitBreakerSuite) TestClosed() {
-	s.run(nil)
-	s.statusIs(circuitbreaker.Closed)
-}
-
-func (s *CircuitBreakerSuite) TestOpened() {
-	s.triggerOpen()
-	s.statusIs(circuitbreaker.Opened)
-}
-
-func (s *CircuitBreakerSuite) TestHalfOpenError() {
-	s.triggerOpen()
-	s.statusIs(circuitbreaker.Opened)
-	time.Sleep(s.options.OpenTimeout)
-
-	s.runErr(assert.AnError)
-	s.statusIs(circuitbreaker.Opened)
-	s.run(circuitbreaker.ErrOpened)
-}
-
-func (s *CircuitBreakerSuite) TestHalfOpenSuccess() {
-	s.triggerOpen()
-	s.statusIs(circuitbreaker.Opened)
-	time.Sleep(s.options.OpenTimeout)
-
-	s.run(nil)
-	s.statusIs(circuitbreaker.HalfOpen)
-
-	for range s.options.SuccessThreshold {
-		s.run(nil)
-	}
-	s.statusIs(circuitbreaker.Closed)
-}
-
-func (s *CircuitBreakerSuite) TestForcedOpen() {
-	s.setStatus(circuitbreaker.ForcedOpen)
-	s.run(circuitbreaker.ErrOpened)
-	s.statusIs(circuitbreaker.ForcedOpen)
-}
-
-func (s *CircuitBreakerSuite) TestDisabled() {
-	s.setStatus(circuitbreaker.Disabled)
-	for range s.options.FailureThreshold + 1 {
-		s.runErr(assert.AnError)
-	}
-	s.statusIs(circuitbreaker.Disabled)
 }
