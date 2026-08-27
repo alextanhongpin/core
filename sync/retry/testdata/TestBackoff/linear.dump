@@ -1,0 +1,8 @@
+evaltest.T[int,int64]{
+  Name: "linear",
+  Input: 3,
+  Output: 30000000,
+  Error: nil,
+  ErrorString: "",
+  Logs: []interface {}{},
+}

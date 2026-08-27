@@ -1,0 +1,25 @@
+evaltest.T[string,string]{
+  Name: "ok",
+  Input: "payload data",
+  Output: "payload data",
+  Error: nil,
+  ErrorString: "",
+  Logs: []interface {}{
+    &evaltest.T[interface {},string]{
+      Name: "request",
+      Input: nil,
+      Output: "payload data",
+      Error: nil,
+      ErrorString: "",
+      Logs: []interface {}{},
+    },
+    &evaltest.T[interface {},string]{
+      Name: "request",
+      Input: nil,
+      Output: "payload data",
+      Error: nil,
+      ErrorString: "",
+      Logs: []interface {}{},
+    },
+  },
+}

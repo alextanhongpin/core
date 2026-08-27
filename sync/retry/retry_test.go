@@ -3,112 +3,107 @@ package retry_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/alextanhongpin/core/sync/retry"
-	"github.com/go-openapi/testify/assert"
+	"github.com/alextanhongpin/evaltest"
 )
 
-func TestExec(t *testing.T) {
-	t.Run("success", func(t *testing.T) {
-		err := retry.Exec(t.Context(), func(context.Context) error {
-			return nil
-		})
-		assert.NoError(t, err)
-	})
+type Output struct {
+	Attempts int
+	Result   string
+}
 
-	t.Run("error", func(t *testing.T) {
+type DoOutput struct {
+	Attempts int
+}
+
+func TestHandler(t *testing.T) {
+	evaltest.Run(t, func(t *testing.T, ctx context.Context, input int) (*Output, error) {
+		name := evaltest.Name(ctx)
+
 		var count int
-		err := retry.Exec(t.Context(), func(context.Context) error {
+		fn := func(ctx context.Context, input string) (string, error) {
 			count++
-			return assert.AnError
-		}, retry.NoWait, retry.N(5))
+			if ctx.Err() != nil {
+				return "", context.Cause(ctx)
+			}
+			if strings.Contains(name, "error") {
+				return "", errors.ErrUnsupported
+			}
+			return t.Name(), nil
+		}
 
-		is := assert.New(t)
-		is.ErrorIs(err, assert.AnError)
-		is.ErrorIs(err, retry.ErrLimitExceeded, "did not complete within 5 attempts")
-		is.Equal(6, count, "initial plus 5 retries")
-	})
-
-	t.Run("context timeout", func(t *testing.T) {
-		var timeoutErr = errors.New("timeout")
-		ctx, cancel := context.WithTimeoutCause(t.Context(), time.Millisecond, timeoutErr)
+		rt := newRetry()
+		rt.Attempts = input
+		rt.Backoff = retry.NewConstantBackoff(1 * time.Millisecond)
+		if strings.Contains(name, "noretry") {
+			rt.Retryable = retry.NonRetryableErrors(errors.ErrUnsupported)
+		}
+		h := retry.Func(fn, rt)
+		ctx, cancel := context.WithCancel(ctx)
 		defer cancel()
 
-		err := retry.Exec(ctx, func(context.Context) error {
-			return assert.AnError
-		}, retry.Constant(time.Millisecond))
+		if strings.Contains(name, "cancel") {
+			cancel()
+		}
 
-		is := assert.New(t)
-		is.ErrorIs(err, assert.AnError)
-		is.ErrorIs(err, timeoutErr, "context timeout")
-	})
-
-	t.Run("zero times", func(t *testing.T) {
-		var count int
-		err := retry.Exec(t.Context(), func(context.Context) error {
-			count++
-			return assert.AnError
-		}, retry.N(0))
-		is := assert.New(t)
-		is.ErrorIs(err, assert.AnError)
-		is.ErrorIs(err, retry.ErrLimitExceeded)
-		is.Equal(count, 1)
+		res, err := h(ctx, t.Name())
+		return &Output{
+			Attempts: count,
+			Result:   res,
+		}, err
 	})
 }
 
-func TestDo(t *testing.T) {
-	t.Run("success", func(t *testing.T) {
-		v, err := retry.Do(t.Context(), func(context.Context) (string, error) {
-			return t.Name(), nil
+func TestThrottle(t *testing.T) {
+	evaltest.Run(t, func(t *testing.T, ctx context.Context, input int) (*DoOutput, error) {
+		throttler := retry.NewThrottler(&retry.ThrottlerConfig{
+			MaxTokens:  2,
+			TokenRatio: 0.1,
 		})
-		is := assert.New(t)
-		is.NoError(err)
-		is.Equal(t.Name(), v)
-	})
 
-	t.Run("error", func(t *testing.T) {
+		rt := newRetry()
+		rt.Throttler = throttler
+		rt.Attempts = input
 
 		var count int
-		v, err := retry.Do(t.Context(), func(ctx context.Context) (string, error) {
+
+		h := retry.Func(func(ctx context.Context, input any) (any, error) {
 			count++
-			return "", assert.AnError
-		}, retry.NoWait, retry.N(5))
+			return nil, errors.ErrUnsupported
+		}, rt)
+		_, err := h(ctx, nil)
 
-		is := assert.New(t)
-		is.ErrorIs(err, assert.AnError)
-		is.ErrorIs(err, retry.ErrLimitExceeded, "did not complete within 5 attempts")
-		is.Equal(6, count, "initial plus 5 retries")
-		is.Empty(v)
+		return &DoOutput{
+			Attempts: count,
+		}, err
 	})
+}
 
-	t.Run("context timeout", func(t *testing.T) {
-		var timeoutErr = errors.New("timeout")
-		ctx, cancel := context.WithTimeoutCause(t.Context(), time.Millisecond, timeoutErr)
-		defer cancel()
-
-		v, err := retry.Do(ctx, func(context.Context) (string, error) {
-			return "", assert.AnError
-		}, retry.Constant(time.Millisecond))
-
-		is := assert.New(t)
-		is.ErrorIs(err, assert.AnError)
-		is.ErrorIs(err, timeoutErr, "context timeout")
-		is.Empty(v)
+func TestBackoff(t *testing.T) {
+	evaltest.Run(t, func(t *testing.T, ctx context.Context, input int) (int64, error) {
+		name := evaltest.Name(ctx)
+		switch {
+		case strings.Contains(name, "constant"):
+			b := retry.NewConstantBackoff(10 * time.Millisecond)
+			return int64(b.At(input)), nil
+		case strings.Contains(name, "linear"):
+			b := retry.NewLinearBackoff(10 * time.Millisecond)
+			return int64(b.At(input)), nil
+		default:
+			return 0, nil
+		}
 	})
+}
 
-	t.Run("zero times", func(t *testing.T) {
-		var count int
-		v, err := retry.Do(t.Context(), func(context.Context) (string, error) {
-			count++
-			return "", assert.AnError
-		}, retry.N(0))
-
-		is := assert.New(t)
-		is.ErrorIs(err, assert.AnError)
-		is.ErrorIs(err, retry.ErrLimitExceeded)
-		is.Equal(count, 1)
-		is.Empty(v)
-	})
+func newRetry() *retry.Retry {
+	cfg := retry.DefaultConfig()
+	cfg.Attempts = 10
+	cfg.Backoff = retry.NewConstantBackoff(0)
+	cfg.Throttler = retry.NewNoopThrottler()
+	rt := retry.New(cfg)
+	return rt
 }

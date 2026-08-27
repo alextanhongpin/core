@@ -1,0 +1,16 @@
+name: ok
+evals:
+  - name: no error
+    expr: err == nil
+---
+name: retry
+input: 2
+evals:
+  - name: no error
+    expr: err == nil
+---
+name: error
+input: 2
+evals:
+  - name: retry error
+    expr: err != nil

@@ -1,0 +1,10 @@
+evaltest.T[int,*github.com/alextanhongpin/core/sync/retry_test.DoOutput]{
+  Name: "retry",
+  Input: 2,
+  Output: &retry_test.DoOutput{
+    Attempts: 2,
+  },
+  Error: nil,
+  ErrorString: "",
+  Logs: []interface {}{},
+}

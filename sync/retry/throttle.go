@@ -5,23 +5,24 @@ import (
 	"sync"
 )
 
-func NewNoOpThrottler() *NoOpThrottler {
-	return &NoOpThrottler{}
+func NewNoopThrottler() *NoopThrottler {
+	return &NoopThrottler{}
 }
 
-type NoOpThrottler struct{}
+type NoopThrottler struct{}
 
-func (n *NoOpThrottler) Allow() bool {
+func (n *NoopThrottler) Allow() bool {
 	return true
 }
-func (n *NoOpThrottler) Success() {}
+func (n *NoopThrottler) Success() {}
 
-type throttler interface {
+type Limiter interface {
 	Allow() bool
 	Success()
 }
 
-var _ throttler = (*Throttler)(nil)
+var _ Limiter = (*Throttler)(nil)
+var _ Limiter = (*NoopThrottler)(nil)
 
 type Throttler struct {
 	ratio  float64
@@ -32,23 +33,23 @@ type Throttler struct {
 	tokens float64
 }
 
-type ThrottlerOptions struct {
+type ThrottlerConfig struct {
 	MaxTokens  float64
 	TokenRatio float64
 }
 
-func NewThrottlerOptions() *ThrottlerOptions {
-	return &ThrottlerOptions{
+func DefaultThrottlerConfig() *ThrottlerConfig {
+	return &ThrottlerConfig{
 		MaxTokens:  10,
 		TokenRatio: 0.1,
 	}
 }
 
-func NewThrottler(opts *ThrottlerOptions) *Throttler {
-	opts = cmp.Or(opts, NewThrottlerOptions())
+func NewThrottler(cfg *ThrottlerConfig) *Throttler {
+	cfg = cmp.Or(cfg, DefaultThrottlerConfig())
 
-	ratio := opts.TokenRatio
-	maxTokens := opts.MaxTokens
+	ratio := cfg.TokenRatio
+	maxTokens := cfg.MaxTokens
 
 	return &Throttler{
 		ratio:  ratio,
@@ -64,11 +65,14 @@ func (t *Throttler) Allow() bool {
 	}
 
 	t.mu.Lock()
-	t.tokens = max(t.tokens-1, 0)
-	ok := t.tokens > t.thresh
-	t.mu.Unlock()
+	defer t.mu.Unlock()
 
-	return ok
+	if t.tokens <= t.thresh {
+		return false
+	}
+
+	t.tokens = max(t.tokens-1, 0)
+	return true
 }
 
 func (t *Throttler) Success() {

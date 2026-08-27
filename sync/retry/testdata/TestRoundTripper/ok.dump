@@ -1,0 +1,17 @@
+evaltest.T[int,interface {}]{
+  Name: "ok",
+  Input: 200,
+  Output: 200,
+  Error: nil,
+  ErrorString: "",
+  Logs: []interface {}{
+    &evaltest.T[interface {},int]{
+      Name: "request",
+      Input: nil,
+      Output: 200,
+      Error: nil,
+      ErrorString: "",
+      Logs: []interface {}{},
+    },
+  },
+}
