@@ -104,6 +104,25 @@ func Dedup[T comparable](in <-chan T) <-chan T {
 	return out
 }
 
+func DedupFunc[T any, V comparable](in <-chan T, fn func(T) V) <-chan T {
+	out := make(chan T)
+
+	go func() {
+		defer close(out)
+
+		seen := make(map[V]struct{})
+		for v := range in {
+			k := fn(v)
+			if _, exists := seen[k]; !exists {
+				seen[k] = struct{}{}
+				out <- v
+			}
+		}
+	}()
+
+	return out
+}
+
 // FanIn merges multiple input channels into one output channel
 func FanIn[T any](channels ...<-chan T) <-chan T {
 	out := make(chan T)
@@ -231,12 +250,12 @@ func Merge[T any](mergeFn func(T, T) T, channels ...<-chan T) <-chan T {
 
 // Pipe transform the value received by the input channel before passing to the
 // output channel.
-func Pipe[T, V any](in chan T, fn func(T) (V, bool)) chan V {
+func Pipe[T, V any](in <-chan T, fn func(T) (V, bool)) <-chan V {
 	return PipeN(in, fn, 1)
 }
 
 // PipeN is like Pipe, but runs multiple workers.
-func PipeN[T, V any](in chan T, fn func(T) (V, bool), n int) chan V {
+func PipeN[T, V any](in <-chan T, fn func(T) (V, bool), n int) <-chan V {
 	if n == 0 {
 		panic("min 1 running goroutine")
 	}
