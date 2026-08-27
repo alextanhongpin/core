@@ -1,0 +1,11 @@
+evaltest.T[int,*github.com/alextanhongpin/core/sync/retry_test.Output]{
+  Name: "error",
+  Input: 1,
+  Output: &retry_test.Output{
+    Attempts: 2,
+    Result: "",
+  },
+  Error: &errors.joinError{},
+  ErrorString: "unsupported operation\nretry: limit exceeded: retried 1 times",
+  Logs: []interface {}{},
+}

@@ -1,0 +1,7 @@
+name: ok
+input: "payload data"
+evals:
+  - name: no error
+    expr: err == nil
+  - name: output matches
+    expr: output == "payload data"

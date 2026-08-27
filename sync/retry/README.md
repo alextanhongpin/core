@@ -1,30 +1,30 @@
-# Retry
+# retry
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/alextanhongpin/core/sync/retry.svg)](https://pkg.go.dev/github.com/alextanhongpin/core/sync/retry)
 [![Go Report Card](https://goreportcard.com/badge/github.com/alextanhongpin/core/sync/retry)](https://goreportcard.com/report/github.com/alextanhongpin/core/sync/retry)
 
-A robust, production-ready Go retry package that provides intelligent retry mechanisms with configurable backoff strategies and throttling capabilities. Designed for real-world applications where reliability and performance are critical.
+A robust, production-ready Go retry package providing configurable backoff strategies, adaptive client-side throttling (token bucket), context cancellation awareness, and HTTP `RoundTripper` integration.
 
 ## Features
 
-- **Multiple Backoff Strategies**: Constant, linear, and exponential backoff with jitter
-- **Context-Aware**: Full support for context cancellation and timeouts
-- **Throttling Support**: Built-in adaptive throttling to prevent resource exhaustion
-- **Context-Aware Cancellation**: Full context support for timeouts and cancellation
-- **Adaptive Throttling**: Token bucket algorithm to prevent resource exhaustion
-- **Iterator API**: Clean Go 1.23+ iterators (Try, Do, DoValue) for structured retry logic
-- **HTTP Integration**: Automatic HTTP retries via RoundTripper for transient errors
-- **Metrics & Observability**: Prometheus integration and atomic metrics collection
+- **Functional Decorator & Convenience APIs**: Generic middleware-style `Handler[K, V]`, as well as `Do` and `DoValue[T]` helpers.
+- **Multiple Backoff Strategies**: Exponential backoff with full jitter, Linear backoff, Constant backoff, and immediate `NoWait`.
+- **Adaptive Client-Side Throttling**: Token bucket limiter to prevent retry storms and cascading downstream failures.
+- **Context-Aware Cancellation**: Immediate termination on context cancellation/timeout with leak-free timer management.
+- **Granular Error Classification**: Define non-retryable errors (`WithNonRetryableErrors`) or dynamic predicates (`WithRetryable`).
+- **HTTP Client Integration**: Drop-in `http.RoundTripper` with status code evaluation, automatic response body closing on retry, and request body rewinding (`GetBody`).
 
 ## Installation
 
-```
+```bash
 go get github.com/alextanhongpin/core/sync/retry
 ```
 
 ## Quick Start
 
-### Basic Retry with Default Settings
+### 1. Basic Retry (`Do`)
+
+Retry operations that return an `error`:
 
 ```go
 package main
@@ -41,582 +41,338 @@ import (
 func main() {
 	ctx := context.Background()
 
-	// Simple retry with default exponential backoff (base: 1s, cap: 1m)
 	err := retry.Do(ctx, func(ctx context.Context) error {
-		return callService()
-	}, retry.N(5)) // Max 5 attempts
-
+		return performOperation(ctx)
+	},
+		retry.N(3),                                                // Up to 3 retries (4 attempts total)
+		retry.Exponential(100*time.Millisecond, 2*time.Second),   // Jittered exponential backoff
+	)
 	if err != nil {
-		log.Printf("Call failed after retries: %v", err)
+		log.Printf("Operation failed: %v", err)
 	}
 }
 
-func callService() error {
-	// Your potentially failing operation
-	return errors.ErrUnsupported
+func performOperation(ctx context.Context) error {
+	// Your network or database call
+	return nil
 }
 ```
 
-### Retry with Value Return
+### 2. Retry with Return Value (`DoValue`)
 
-```go
-func main() {
-	ctx := context.Background()
-
-	// DoValue returns the value when successful, or the final error
-	user, err := retry.DoValue(ctx, func(ctx context.Context) (string, error) {
-		return callService()
-	}, retry.N(3))
-
-	if err != nil {
-		log.Printf("Call failed after retries: %v", err)
-		return
-	}
-
-	log.Printf("Got response: %s", user)
-}
-
-func callService() (string, error) {
-	return fmt.Sprintf("response"), nil
-}
-```
-
-## Configuration Options
-
-### Attempt Count
-
-Control how many times an operation will be attempted:
-
-```go
-// Using the N helper (shorthand for WithAttempts)
-r := retry.New(retry.N(3)) // Max 3 retries after the initial attempt (up to 4 total)
-
-// Or using constant shorthand
-r := retry.New(retry.NoWait, retry.Throttle(), retry.N(3)) // No backoff + throttle
-```
-
-### Backoff Strategies
-
-Choose from built-in backoff strategies or implement custom ones:
-
-#### Exponential Backoff with Jitter (Recommended for Production)
-
-// Exponential backoff with jitter: base * 2^attempts (randomized)
-
-```go
-// Configure exponential backoff with 100ms base and 30s cap
-r := retry.New(retry.Exponential(100*time.Millisecond, 30*time.Second))
-
-err := r.Do(ctx, func(ctx context.Context) error {
-	return callExternalService()
-}, 5) // Or use N(5) for attempt count
-```
-
-#### Constant Backoff for Predictable Timing
-
-```go
-// No delay: attempts are made immediately if they fail
-r := retry.New(retry.NoWait, retry.N(3))
-
-err := r.Do(ctx, func(ctx context.Context) error {
-	return processMessage()
-}, 5)
-```
-
-#### Linear Backoff for Gradual Increase
-
-```go
-// Linearly increasing delays: 0s, 1s, 2s, 3s...
-// Formula: Period * attempt_number (where attempt_number starts at 0)
-
-err := r.Do(ctx, func(ctx context.Context) error {
-	return uploadFile()
-}, 5)
-```
-
-### Throttling for Rate-Limited APIs
-
-Use adaptive throttling to prevent overwhelming downstream services:
-
-```go
-// Configure throttling to prevent resource exhaustion
-r := retry.New(retry.Throttle()) // Uses default settings: MaxTokens=10, TokenRatio=0.1
-
-err := r.Do(ctx, func(ctx context.Context) error {
-	return callRateLimitedAPI()
-}, 20)
-```
-
-Handle throttle errors explicitly when needed:
-
-```go
-if err != nil {
-    if errors.Is(err, retry.ErrThrottled) {
-        log.Println("Operation was throttled, try again later")
-    } else if errors.Is(err, retry.ErrLimitExceeded) {
-        log.Println("Maximum retry attempts exceeded")
-    } else {
-        log.Printf("Operation failed: %v", err)
-    }
-}
-```
-
-### Custom Throttler Configuration
-
-Fine-tune the token bucket algorithm:
-
-```go
-throttlerOpts := &retry.ThrottlerOptions{
-	MaxTokens:  10,   // Token bucket size
-	TokenRatio: 0.2,  // Token replenishment rate per success
-}
-
-r := retry.New().WithThrottler(retry.NewThrottler(throttlerOpts))
-```
-
-## Iterator API
-
-The iterator-based approach gives you fine-grained control over retry logic:
-
-```go
-func main() {
-	ctx := context.Background()
-	r := retry.New(retry.NoWait, retry.Throttle(), retry.N(3))
-
-	var lastError error
-	for attempt, retryErr := range r.Try(ctx, 5) {
-		if retryErr != nil {
-			log.Printf("Retry stopped: %v (after %d attempts)", retryErr, attempt)
-			break
-		}
-
-		log.Printf("Attempt %d starting...", attempt+1)
-
-		err := performComplexOperation()
-		if err == nil {
-			log.Println("Operation succeeded!")
-			break
-		}
-
-		lastError = err
-	}
-
-	if lastError != nil {
-		log.Printf("Final error: %v", lastError)
-	}
-}
-
-func performComplexOperation() error {
-	return errors.ErrUnsupported
-}
-```
-
-## HTTP Client Integration
-
-### Automatic HTTP Retry with Custom Status Codes
-
-Configure which HTTP status codes should trigger automatic retries:
+Retry operations that return both a value and an `error`:
 
 ```go
 package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"net/http"
+	"log"
 	"time"
 
 	"github.com/alextanhongpin/core/sync/retry"
 )
-
-func main() {
-	retryableStatusCodes := []int{
-		http.StatusRequestTimeout,
-		http.StatusInternalServerError,
-		http.StatusBadGateway,
-		http.StatusServiceUnavailable,
-		http.StatusGatewayTimeout,
-	}
-
-	statusCodeFunc := func(code int) error {
-		if errors.Is(retryErr := fmt.Errorf("retryable status: %d", code), nil) {
-			return fmt.Errorf("%d: %s", code, http.StatusText(code))
-		}
-		return nil
-	}
-
-	retryTransport := retry.NewRoundTripper(
-		http.DefaultTransport,
-		retry.New(), // Your retry handler
-	).With(&retry.RoundTripper{
-		StatusCode: statusCodeFunc,
-		MaxRetries: 10,
-	})
-
-	client := &http.Client{
-		Transport: retryTransport,
-		Timeout:   30 * time.Second,
-	}
-
-	resp, err := client.Get("https://api.example.com/data")
-	if err != nil {
-		fmt.Printf("Request failed: %v\n", err)
-		return
-	}
-	defer resp.Body.Close()
-
-	fmt.Printf("Success! Status: %d\n", resp.StatusCode)
-}
-```
-
-## Metrics and Observability
-
-### Atomic Metrics Collection
-
-The package includes built-in atomic metrics collectors for tracking retry behavior:
-
-```go
-type RetryMetrics struct {
-	Attempts      int64
-	Successes     int64
-	Failures      int64
-	Throttles     int64
-	LimitExceeded int64
-}
-```
-
-### Prometheus Integration
-
-Monitor retries via Prometheus metrics endpoint:
-
-```go
-package main
-
-import (
-	"context"
-	"log"
-	"net/http"
-
-	"github.com/alextanhongpin/core/sync/retry"
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
-)
-
-func newPrometheusRetryMetrics() *retry.PrometheusRetryMetricsCollector {
-	attempts := prometheus.NewCounter(prometheus.CounterOpts{
-		Name: "retry_attempts_total",
-		Help: "Total retry attempts.",
-	})
-	successes := prometheus.NewCounter(prometheus.CounterOpts{
-		Name: "retry_successes_total",
-		Help: "Total retry successes.",
-	})
-	failures := prometheus.NewCounter(prometheus.CounterOpts{
-		Name: "retry_failures_total",
-		Help: "Total retry failures.",
-	})
-	throttles := prometheus.NewCounter(prometheus.CounterOpts{
-		Name: "retry_throttles_total",
-		Help: "Total retry throttles.",
-	})
-	limitExceeded := prometheus.NewCounter(prometheus.CounterOpts{
-		Name: "retry_limit_exceeded_total",
-		Help: "Total retry limit exceeded events.",
-	})
-
-	prometheus.MustRegister(attempts, successes, failures, throttles, limitExceeded)
-
-	return &retry.PrometheusRetryMetricsCollector{
-		Attempts:      attempts,
-		Successes:     successes,
-		Failures:      failures,
-		Throttles:     throttles,
-		LimitExceeded: limitExceeded,
-	}
-}
-
-func main() {
-	metrics := newPrometheusRetryMetrics()
-	r := retry.New(retry.WithMetricsCollector(metrics), retry.N(3))
-
-	ctx := context.Background()
-	_ = r.Do(ctx, func(ctx context.Context) error {
-		return errors.ErrUnsupported // Simulate failure for demo
-	})
-
-	http.Handle("/metrics", promhttp.Handler())
-	log.Println("Prometheus retry metrics available at http://localhost:2116/metrics")
-	log.Fatal(http.ListenAndServe(":2116", nil))
-}
-```
-
-## Error Handling
-
-The package provides specific error types for different failure scenarios:
-
-```go
-func handleRetryErrors(err error) {
-	switch {
-	case errors.Is(err, retry.ErrLimitExceeded):
-		// Maximum retry attempts reached
-		log.Error("Retry limit exceeded, operation failed permanently")
-
-	case errors.Is(err, retry.ErrThrottled):
-		// Operation was throttled due to rate limiting
-		log.Warn("Operation throttled, try again later")
-
-	case errors.Is(err, context.DeadlineExceeded):
-		// Context timeout reached
-		log.Error("Operation timed out")
-
-	case errors.Is(err, context.Canceled):
-		// Context was cancelled
-		log.Info("Operation cancelled")
-
-	default:
-		// Other application-specific errors
-		log.Error("Operation failed: %v", err)
-	}
-}
-```
-
-## Real-World Examples
-
-### Database Operations with Circuit Breaker Pattern
-
-```go
-func main() {
-	ctx := context.Background()
-
-	// Configure exponential backoff with short intervals for DB operations
-	r := retry.New(retry.Exponential(50*time.Millisecond, 2*time.Second))
-
-	// Add throttling to prevent database overload
-	r = retry.WithThrottler(r).With(&retry.ThrottlerOptions{
-		MaxTokens:   5,
-		TokenRatio:  0.1,
-	})
-
-	user, err := retry.DoValue(ctx, func(ctx context.Context) (*User, error) {
-		return getUserFromDatabase(ctx, "user123")
-	}, retry.N(3))
-
-	if err != nil {
-		log.Printf("Database query failed: %v", err)
-		return
-	}
-
-	log.Printf("Retrieved user: %+v", user)
-}
 
 type User struct {
 	ID   string
 	Name string
 }
 
-func getUserFromDatabase(ctx context.Context, userID string) (*User, error) {
-	// Simulate database query that might fail
-	return &User{ID: userID, Name: "John Doe"}, nil
-}
-```
-
-### Microservice Communication
-
-```go
-func main() {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	r := retry.New(retry.Exponential(100*time.Millisecond, 10*time.Second))
-
-	response, err := retry.DoValue(ctx, func(ctx context.Context) (*ServiceResponse, error) {
-		return callMicroservice(ctx, "process-order", map[string]interface{}{
-			"order_id": "12345",
-			"amount":   99.99,
-		})
-	}, retry.N(5))
-
-	if err != nil {
-		if errors.Is(err, context.DeadlineExceeded) {
-			log.Println("Service call timed out")
-		} else if errors.Is(err, retry.ErrLimitExceeded) {
-			log.Println("Exceeded maximum retry attempts")
-		} else {
-			log.Printf("Service call failed: %v", err)
-		}
-		return
-	}
-
-	log.Printf("Service response: %+v", response)
-}
-
-type ServiceResponse struct {
-	Status string
-	Data   map[string]interface{}
-}
-
-func callMicroservice(ctx context.Context, endpoint string, payload map[string]interface{}) (*ServiceResponse, error) {
-	// Simulate microservice call
-	return &ServiceResponse{
-		Status: "success",
-		Data:   payload,
-	}, nil
-}
-```
-
-### Batch Processing with Error Handling
-
-```go
 func main() {
 	ctx := context.Background()
-	items := []string{"item1", "item2", "item3", "item4", "item5"}
 
-	r := retry.New(retry.NoWait, retry.N(3))
-
-	var successCount, failureCount int
-
-	for _, item := range items {
-		err := r.Do(ctx, func(ctx context.Context) error {
-			return processItem(item)
-		}, retry.N(3))
-
-		if err != nil {
-			log.Printf("Failed to process %s: %v", item, err)
-			failureCount++
-		} else {
-			log.Printf("Successfully processed %s", item)
-			successCount++
-		}
+	user, err := retry.DoValue(ctx, func(ctx context.Context) (*User, error) {
+		return fetchUser(ctx, "user-123")
+	},
+		retry.N(3),
+		retry.Linear(50*time.Millisecond),
+	)
+	if err != nil {
+		log.Fatalf("Failed to fetch user: %v", err)
 	}
 
-	log.Printf("Batch complete: %d/%d succeeded", successCount, len(items))
+	fmt.Printf("User: %+v\n", user)
 }
 
-func processItem(item string) error {
-	// Simulate item processing with occasional failures
-	if rand.Float64() < 0.3 {
-		return errors.ErrUnsupported
-	}
-	return nil
+func fetchUser(ctx context.Context, id string) (*User, error) {
+	return &User{ID: id, Name: "Alice"}, nil
 }
 ```
 
-### Concurrent Retry Operations
+### 3. Generic Function Decorator (`Handler`)
+
+Wrap generic functions `func(ctx context.Context, req K) (V, error)` with retry middleware:
 
 ```go
 package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"math/rand/v2"
-	"sync"
+	"time"
+
+	"github.com/alextanhongpin/core/sync/retry"
+)
+
+type GetItemRequest struct {
+	ItemID string
+}
+
+type GetItemResponse struct {
+	ItemName string
+	Price    int
+}
+
+func getItem(ctx context.Context, req GetItemRequest) (GetItemResponse, error) {
+	return GetItemResponse{ItemName: "Widget", Price: 100}, nil
+}
+
+func main() {
+	// Wrap once and reuse across multiple invocations
+	getItemWithRetry := retry.Handler(
+		getItem,
+		retry.N(3),
+		retry.Exponential(50*time.Millisecond, 1*time.Second),
+	)
+
+	resp, err := getItemWithRetry(context.Background(), GetItemRequest{ItemID: "item-42"})
+	if err != nil {
+		panic(err)
+	}
+
+	fmt.Printf("Item: %s, Price: $%d\n", resp.ItemName, resp.Price)
+}
+```
+
+## Backoff Strategies
+
+The package provides several backoff implementations conforming to the `Backoff` interface:
+
+```go
+type Backoff interface {
+	At(attempts int) time.Duration
+}
+```
+
+### 1. Exponential Backoff with Jitter (Recommended)
+
+Applies full jitter between `0` and `min(Base * 2^attempts, Cap)` to prevent thundering herd problems:
+
+```go
+// Base duration 100ms, max duration 30s
+retry.Exponential(100*time.Millisecond, 30*time.Second)
+```
+
+### 2. Linear Backoff
+
+Linearly increasing delay calculated as `Period * attempts`:
+
+```go
+// 100ms * attempt (0ms, 100ms, 200ms, ...)
+retry.Linear(100*time.Millisecond)
+```
+
+### 3. Constant Backoff & Immediate Retry
+
+Fixed delay between attempts or zero delay:
+
+```go
+// Fixed 500ms delay
+retry.Constant(500*time.Millisecond)
+
+// No delay (immediate retry)
+retry.NoWait
+```
+
+### 4. Custom Backoff
+
+Implement the `retry.Backoff` interface:
+
+```go
+type FixedStepBackoff struct{}
+
+func (b *FixedStepBackoff) At(attempts int) time.Duration {
+	return time.Duration(attempts+1) * 200 * time.Millisecond
+}
+
+// Usage:
+retry.WithBackoff(&FixedStepBackoff{})
+```
+
+## Adaptive Client-Side Throttling
+
+When downstream services are under heavy load or failing, retries can exacerbate outages (retry storm). Adaptive throttling uses a **token bucket algorithm** to dynamically restrict retries when failures exceed a healthy ratio.
+
+```go
+// Enable default adaptive throttling (MaxTokens: 10, TokenRatio: 0.1)
+retry.Throttle()
+
+// Or configure custom throttler settings:
+throttler := retry.NewThrottler(&retry.ThrottlerOptions{
+	MaxTokens:  20,  // Maximum token capacity
+	TokenRatio: 0.2, // Tokens replenished per successful request
+})
+
+err := retry.Do(ctx, fn,
+	retry.N(5),
+	retry.WithThrottler(throttler),
+)
+```
+
+- Each retry consumes tokens from the bucket.
+- Successful requests (including initial attempts and retries) replenish tokens via `TokenRatio`.
+- If available tokens drop below threshold, retries are immediately aborted with `retry.ErrThrottled`, sparing downstream services.
+
+## Error Handling & Classification
+
+### Package Sentinel Errors
+
+| Error | Description |
+|---|---|
+| `retry.ErrLimitExceeded` | Maximum retry attempts reached without success |
+| `retry.ErrThrottled` | Retries aborted because token bucket is exhausted |
+| `retry.ErrCanceled` | Operation encountered a non-retryable error or cancellation |
+
+When multiple retries fail, `retry.Do` and `retry.Handler` return a joined error containing all attempted errors plus `ErrLimitExceeded`. Use standard `errors.Is` to check for specific conditions:
+
+```go
+if err != nil {
+	switch {
+	case errors.Is(err, retry.ErrLimitExceeded):
+		log.Printf("All retry attempts exhausted: %v", err)
+	case errors.Is(err, retry.ErrThrottled):
+		log.Printf("Operation throttled to protect downstream service")
+	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+		log.Printf("Context canceled or timed out: %v", err)
+	default:
+		log.Printf("Non-retryable error: %v", err)
+	}
+}
+```
+
+### Specifying Non-Retryable Errors
+
+Prevent retrying fatal errors (e.g. `sql.ErrNoRows`, validation errors, 4xx client errors):
+
+```go
+var (
+	ErrNotFound = errors.New("not found")
+	ErrInvalid  = errors.New("invalid input")
+)
+
+err := retry.Do(ctx, fn,
+	retry.N(3),
+	retry.WithNonRetryableErrors(ErrNotFound, ErrInvalid),
+)
+```
+
+### Dynamic Error Classification (`WithRetryable`)
+
+Use a custom function to decide whether an error is retryable:
+
+```go
+err := retry.Do(ctx, fn,
+	retry.N(3),
+	retry.WithRetryable(func(err error) (error, bool) {
+		// Do not retry context cancellation
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return fmt.Errorf("%w: %w", retry.ErrCanceled, err), false
+		}
+
+		var apiErr *APIError
+		if errors.As(err, &apiErr) && apiErr.StatusCode == 429 {
+			return err, true // Retry rate-limited requests
+		}
+
+		return err, false // Don't retry other errors
+	}),
+)
+```
+
+## HTTP Client Integration (`RoundTripper`)
+
+The package includes a drop-in `http.RoundTripper` decorator that transparently retries failed HTTP requests:
+
+- Automatically handles transient status codes (408, 425, 500, 502, 503, 504) by default.
+- Properly closes response bodies from failed attempts to avoid connection/memory leaks.
+- Supports replayable request payloads via `http.Request.GetBody`.
+
+```go
+package main
+
+import (
+	"context"
+	"fmt"
+	"io"
+	"net/http"
+	"time"
 
 	"github.com/alextanhongpin/core/sync/retry"
 )
 
 func main() {
-	r := retry.New(retry.NoWait, retry.Throttle(), retry.N(3))
-
-	var mu sync.Mutex
-	counter := make(map[int]int)
-
-	ctx := context.Background()
-
-	var failed, success int64
-	var skipped int64
-	n := 100
-
-	var wg sync.WaitGroup
-
-	for range n {
-		wg.Go(func() {
-			var i int
-			err := r.Do(ctx, func(context.Context) error {
-				i++
-
-				mu.Lock()
-				counter[i]++
-				mu.Unlock()
-
-				if rand.Float64() < 0.2 {
-					return errors.ErrUnsupported
-				}
-
-				return nil
-			})
-
-			if errors.Is(err, retry.ErrThrottled) {
-				skipped++
-			}
-			if errors.Is(err, retry.ErrLimitExceeded) {
-				failed++
-			}
-			if err == nil {
-				success++
-			}
-		})
+	// Create an HTTP client with retry capabilities
+	client := &http.Client{
+		Transport: retry.NewRoundTripper(
+			http.DefaultTransport,
+			nil, // Defaults to standard transient status code handler
+			retry.N(3),
+			retry.Exponential(50*time.Millisecond, 500*time.Millisecond),
+		),
+		Timeout: 10 * time.Second,
 	}
 
-	wg.Wait()
-	fmt.Println("success:", success)
-	fmt.Println("skipped:", skipped)
-	fmt.Println("failed:", failed)
-	fmt.Println("counter:", counter)
-	var retries int
-	for k, v := range counter {
-		if k > 0 {
-			retries += v
-		}
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, "https://api.example.com/data", nil)
+	if err != nil {
+		panic(err)
 	}
-	fmt.Println("retries:", retries)
+
+	resp, err := client.Do(req)
+	if err != nil {
+		panic(err)
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	fmt.Printf("Response (%d): %s\n", resp.StatusCode, string(body))
 }
 ```
 
-## Error Types
+### Custom HTTP Status Code Handler
 
-| Error | Description |
-|-------|-------------|
-| retry.ErrLimitExceeded | Maximum retry attempts reached |
-| retry.ErrThrottled | Operation was throttled due to rate limiting |
-| context.DeadlineExceeded | Context timeout reached |
-| context.Canceled | Context was cancelled |
+Customize which HTTP status codes trigger retries:
 
-## Performance Considerations
+```go
+customStatusCodeHandler := func(statusCode int) error {
+	if statusCode == http.StatusTooManyRequests || statusCode >= 500 {
+		return fmt.Errorf("retryable status code: %d", statusCode)
+	}
+	return nil
+}
 
-### Memory Usage
+transport := retry.NewRoundTripper(
+	http.DefaultTransport,
+	customStatusCodeHandler,
+	retry.N(5),
+)
+```
 
-- The iterator-based API minimizes memory allocations
-- Throttler uses efficient token bucket algorithm
-- No goroutine leaks in concurrent scenarios
+## Summary of Options
 
-### CPU Usage
-
-- Exponential backoff uses efficient random jitter calculation
-- Context cancellation is checked before each retry attempt
-- Minimal overhead for successful operations
-
-### Network Efficiency
-
-- Jittered exponential backoff reduces thundering herd problems
-- Adaptive throttling prevents overwhelming downstream services
-- Configurable timeout support for different operation types
-
-## Best Practices
-
-1. Use Context Timeouts: Always use context with appropriate timeouts
-2. Choose Appropriate Backoff: Exponential for external services, constant for internal operations
-3. Configure Throttling: Enable throttling for rate-limited APIs
-4. Monitor Metrics: Track retry attempts and success rates using Prometheus or custom collectors
-5. Set Reasonable Limits: Balance between reliability and performance
-6. Handle Specific Errors: Differentiate between temporary and permanent failures
+| Option | Description |
+|---|---|
+| `retry.WithAttempts(n)` / `retry.N(n)` | Number of retry attempts after initial attempt (default: `10`) |
+| `retry.Exponential(base, cap)` | Jittered exponential backoff with base and max cap |
+| `retry.Linear(period)` | Linear backoff scaling with attempt count |
+| `retry.Constant(period)` | Constant delay between attempts |
+| `retry.NoWait` | Zero-delay immediate retry |
+| `retry.WithBackoff(b)` | Custom backoff strategy implementing `Backoff` |
+| `retry.Throttle()` | Enable default token-bucket adaptive throttling |
+| `retry.WithThrottler(t)` | Configure a custom `Limiter` throttler |
+| `retry.WithNonRetryableErrors(errs...)` | Mark specific errors as permanent (non-retryable) |
+| `retry.WithRetryable(fn)` | Custom predicate for error classification |
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
+MIT

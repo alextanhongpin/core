@@ -16,12 +16,15 @@ func (n *NoOpThrottler) Allow() bool {
 }
 func (n *NoOpThrottler) Success() {}
 
-type throttler interface {
+type Limiter interface {
 	Allow() bool
 	Success()
 }
 
-var _ throttler = (*Throttler)(nil)
+type throttler = Limiter
+
+var _ Limiter = (*Throttler)(nil)
+var _ Limiter = (*NoOpThrottler)(nil)
 
 type Throttler struct {
 	ratio  float64
@@ -64,11 +67,13 @@ func (t *Throttler) Allow() bool {
 	}
 
 	t.mu.Lock()
-	t.tokens = max(t.tokens-1, 0)
-	ok := t.tokens > t.thresh
-	t.mu.Unlock()
+	defer t.mu.Unlock()
 
-	return ok
+	if t.tokens <= t.thresh {
+		return false
+	}
+	t.tokens = max(t.tokens-1, 0)
+	return true
 }
 
 func (t *Throttler) Success() {

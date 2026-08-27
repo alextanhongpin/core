@@ -16,8 +16,8 @@ var (
 
 type Options struct {
 	Attempts  int
-	Backoff   backoff
-	Throttler throttler
+	Backoff   Backoff
+	Throttler Limiter
 	Retryable func(err error) (error, bool)
 }
 
@@ -61,31 +61,41 @@ func Throttle() Option {
 
 func WithAttempts(n int) Option {
 	if n < 0 {
-		panic("attempts must be greater than 0")
+		panic("attempts must be non-negative")
 	}
 	return func(o *Options) {
 		o.Attempts = n
 	}
 }
 
-func WithBackoff(bf backoff) Option {
+func WithBackoff(bf Backoff) Option {
 	return func(o *Options) {
 		o.Backoff = bf
 	}
 }
 
-func WithThrottler(t throttler) Option {
+func WithThrottler(t Limiter) Option {
 	return func(o *Options) {
 		o.Throttler = t
+	}
+}
+
+func WithRetryable(fn func(err error) (error, bool)) Option {
+	return func(o *Options) {
+		o.Retryable = fn
 	}
 }
 
 func WithNonRetryableErrors(errs ...error) Option {
 	joinErr := errors.Join(errs...)
 	return func(o *Options) {
+		prev := o.Retryable
 		o.Retryable = func(err error) (error, bool) {
 			if errors.Is(joinErr, err) {
 				return fmt.Errorf("%w: %w", ErrCanceled, err), false
+			}
+			if prev != nil {
+				return prev(err)
 			}
 			return err, true
 		}
