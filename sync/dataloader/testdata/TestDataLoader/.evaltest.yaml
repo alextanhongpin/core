@@ -1,0 +1,35 @@
+name: ok
+input: [1, 2, 3, 4, 5, 4, 3, 2, "a"]
+evals:
+  - name: no error
+    expr: err == nil
+---
+name: error
+input: [1, 2, 3, 4, 5, 4, 3, 2, 1]
+evals:
+  - name: no error
+    expr: err == nil
+---
+name: invalid
+input: [1, 2, 3, 4, 5, 4, 3, 2, "a"]
+evals:
+  - name: no error
+    expr: err == nil
+---
+name: many
+input: [1, 2, 3, 4, 5, 4, 3, 2, 1]
+evals:
+  - name: no error
+    expr: err == nil
+---
+name: many error
+input: [1, 2, 3, 4, 5, 4, 3, 2, 1]
+evals:
+  - name: no error
+    expr: err == nil
+---
+name: many invalid
+input: [1, 2, 3, 4, 5, 4, 3, 2, "a"]
+evals:
+  - name: no error
+    expr: err == nil

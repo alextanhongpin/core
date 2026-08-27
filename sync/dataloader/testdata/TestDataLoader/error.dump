@@ -1,0 +1,73 @@
+evaltest.T[[]string,interface {}]{
+  Name: "error",
+  Input: []string{
+    "1",
+    "2",
+    "3",
+    "4",
+    "5",
+    "4",
+    "3",
+    "2",
+    "1",
+  },
+  Output: []*dataloader.Result[string,int]{
+    &dataloader.Result[string,int]{
+      Key: "1",
+      Value: 0,
+      Error: &errors.errorString{},
+    },
+    &dataloader.Result[string,int]{
+      Key: "2",
+      Value: 0,
+      Error: &errors.errorString{},
+    },
+    &dataloader.Result[string,int]{
+      Key: "3",
+      Value: 0,
+      Error: &errors.errorString{},
+    },
+    &dataloader.Result[string,int]{
+      Key: "4",
+      Value: 0,
+      Error: &errors.errorString{},
+    },
+    &dataloader.Result[string,int]{
+      Key: "5",
+      Value: 0,
+      Error: &errors.errorString{},
+    },
+    &dataloader.Result[string,int]{
+      Key: "4",
+      Value: 0,
+      Error: &errors.errorString{},
+    },
+    &dataloader.Result[string,int]{
+      Key: "3",
+      Value: 0,
+      Error: &errors.errorString{},
+    },
+    &dataloader.Result[string,int]{
+      Key: "2",
+      Value: 0,
+      Error: &errors.errorString{},
+    },
+    &dataloader.Result[string,int]{
+      Key: "1",
+      Value: 0,
+      Error: &errors.errorString{},
+    },
+  },
+  Error: nil,
+  ErrorString: "",
+  Logs: []interface {}{
+    &evaltest.T[[]string,[]interface {}]{
+      Name: "batchFn",
+      Input: []string{},
+      Output: []interface {}{},
+      Error: &errors.errorString{},
+      ErrorString: "unsupported operation",
+      Logs: []interface {}{},
+    },
+  },
+}
