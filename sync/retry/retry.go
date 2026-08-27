@@ -11,6 +11,7 @@ import (
 var (
 	ErrLimitExceeded = errors.New("retry: limit exceeded")
 	ErrThrottled     = errors.New("retry: throttled")
+	ErrCanceled      = errors.New("retry: canceled")
 )
 
 type handler[K, V any] = func(ctx context.Context, req K) (V, error)
@@ -23,15 +24,23 @@ func Handler[K, V any](fn handler[K, V], opts ...Option) handler[K, V] {
 			return res, nil
 		}
 
-		opt := OptionsFrom(opts...)
+		opt := NewOptions()
+		for _, o := range opts {
+			o(opt)
+		}
+		retryable := opt.Retryable
 		attempts := opt.Attempts
 		backoff := opt.Backoff
 		throttler := opt.Throttler
 
+		if cause, ok := retryable(err); !ok {
+			return zero, cause
+		}
+
 		var errs []error
 		for i := range attempts {
 			if !throttler.Allow() {
-				return zero, errors.Join(ErrThrottled, err)
+				return zero, errors.Join(append(errs, ErrThrottled)...)
 			}
 
 			select {
@@ -43,6 +52,9 @@ func Handler[K, V any](fn handler[K, V], opts ...Option) handler[K, V] {
 				if err == nil {
 					throttler.Success()
 					return res, nil
+				}
+				if cause, ok := retryable(err); !ok {
+					return zero, cause
 				}
 				errs = append(errs, err)
 			}

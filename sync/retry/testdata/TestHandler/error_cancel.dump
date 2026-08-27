@@ -5,7 +5,7 @@ evaltest.T[int,*github.com/alextanhongpin/core/sync/retry_test.Output]{
     Attempts: 1,
     Result: "",
   },
-  Error: &errors.errorString{},
-  ErrorString: "context canceled",
+  Error: &fmt.wrapErrors{},
+  ErrorString: "retry: canceled: context canceled",
   Logs: []interface {}{},
 }

@@ -1,6 +1,11 @@
 package retry
 
-import "time"
+import (
+	"context"
+	"errors"
+	"fmt"
+	"time"
+)
 
 const defaultAttempts = 10
 
@@ -13,6 +18,7 @@ type Options struct {
 	Attempts  int
 	Backoff   backoff
 	Throttler throttler
+	Retryable func(err error) (error, bool)
 }
 
 func NewOptions() *Options {
@@ -20,15 +26,13 @@ func NewOptions() *Options {
 		Attempts:  defaultAttempts,
 		Backoff:   NewExponentialBackoff(time.Second, time.Minute),
 		Throttler: NewNoOpThrottler(),
+		Retryable: func(err error) (error, bool) {
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				return fmt.Errorf("%w: %w", ErrCanceled, err), false
+			}
+			return err, true
+		},
 	}
-}
-
-func OptionsFrom(opts ...Option) *Options {
-	o := NewOptions()
-	for _, opt := range opts {
-		opt(o)
-	}
-	return o
 }
 
 type Option func(*Options)
@@ -73,5 +77,17 @@ func WithBackoff(bf backoff) Option {
 func WithThrottler(t throttler) Option {
 	return func(o *Options) {
 		o.Throttler = t
+	}
+}
+
+func WithNonRetryableErrors(errs ...error) Option {
+	joinErr := errors.Join(errs...)
+	return func(o *Options) {
+		o.Retryable = func(err error) (error, bool) {
+			if errors.Is(joinErr, err) {
+				return fmt.Errorf("%w: %w", ErrCanceled, err), false
+			}
+			return err, true
+		}
 	}
 }

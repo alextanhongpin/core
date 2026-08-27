@@ -1,11 +1,11 @@
 evaltest.T[int,*github.com/alextanhongpin/core/sync/retry_test.Output]{
   Name: "error noretry",
-  Input: 0,
+  Input: 10,
   Output: &retry_test.Output{
     Attempts: 1,
     Result: "",
   },
-  Error: &errors.joinError{},
-  ErrorString: "retry: limit exceeded: retried 0 times",
+  Error: &fmt.wrapErrors{},
+  ErrorString: "retry: canceled: unsupported operation",
   Logs: []interface {}{},
 }
