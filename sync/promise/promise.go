@@ -221,6 +221,36 @@ func NewMap[K comparable, V any]() *Map[K, V] {
 	return &Map[K, V]{}
 }
 
+func (m *Map[K, V]) Resolve(ctx context.Context, key K, val V) {
+	v, loaded := m.Map.LoadOrStore(key, Resolve(ctx, val))
+	if loaded {
+		p := v.(*Promise[V])
+		p.resolve(val)
+	}
+}
+
+func (m *Map[K, V]) Reject(ctx context.Context, key K, err error) {
+	v, loaded := m.Map.LoadOrStore(key, Reject[V](ctx, err))
+	if loaded {
+		p := v.(*Promise[V])
+		p.reject(err)
+	}
+}
+
+func (m *Map[K, V]) Delete(ctx context.Context, key K, err error) {
+	v, ok := m.Map.LoadAndDelete(key)
+	if ok {
+		p := v.(*Promise[V])
+		p.reject(err)
+	}
+}
+
+func (m *Map[K, V]) Defer(ctx context.Context, key K) *Promise[V] {
+	d, _ := Deferred[V](ctx)
+	v, _ := m.Map.LoadOrStore(key, d)
+	return v.(*Promise[V])
+}
+
 func (m *Map[K, V]) Do(ctx context.Context, key K, fn handler[V]) (V, error) {
 	d, ctx := Deferred[V](ctx)
 	v, loaded := m.Map.LoadOrStore(key, d)
