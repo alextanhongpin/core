@@ -5,386 +5,219 @@ import (
 	"errors"
 	"sync"
 	"sync/atomic"
-	"time"
 )
 
-var (
-	ErrTimeout       = errors.New("promise: timeout")
-	ErrCanceled      = errors.New("promise: canceled")
-	ErrNilFunction   = errors.New("promise: nil function")
-	ErrEmptyPromises = errors.New("promise: empty promises")
+type Status int
+
+const (
+	StatusPending Status = iota
+	StatusFulfilled
+	StatusRejected
 )
 
 type Promise[T any] struct {
-	wg       sync.WaitGroup
-	once     sync.Once
-	data     T
-	err      error
-	ctx      context.Context
-	cancel   context.CancelFunc
-	resolved atomic.Bool
+	cancel func(error)
+	done   *atomic.Bool
+	once   sync.Once
+	fn     func() (T, error)
+	ch     chan result[T]
 }
 
-func Deferred[T any]() *Promise[T] {
-	ctx, cancel := context.WithCancel(context.Background())
+type result[T any] struct {
+	Data  T
+	Error error
+}
+
+type handler[T any] = func(ctx context.Context) (T, error)
+
+func New[T any](ctx context.Context, fn handler[T]) *Promise[T] {
+	p, ctx := Deferred[T](ctx)
+	go p.run(ctx, fn)
+	return p
+}
+
+func Deferred[T any](ctx context.Context) (*Promise[T], context.Context) {
+	ctx, cancel := context.WithCancelCause(ctx)
 	p := &Promise[T]{
-		ctx:    ctx,
+		ch:     make(chan result[T], 1),
+		done:   new(atomic.Bool),
 		cancel: cancel,
 	}
-	p.wg.Add(1)
-	return p
-}
-
-func DeferredWithContext[T any](ctx context.Context) *Promise[T] {
-	ctx, cancel := context.WithCancel(ctx)
-	p := &Promise[T]{
-		ctx:    ctx,
-		cancel: cancel,
-	}
-	p.wg.Add(1)
-	return p
-}
-
-func Resolve[T any](v T) *Promise[T] {
-	return Deferred[T]().Resolve(v)
-}
-
-func Reject[T any](err error) *Promise[T] {
-	return Deferred[T]().Reject(err)
-}
-
-func New[T any](fn func() (T, error)) *Promise[T] {
-	if fn == nil {
-		return Reject[T](ErrNilFunction)
-	}
-
-	p := Deferred[T]()
-
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				if err, ok := r.(error); ok {
-					p.Reject(err)
-				} else {
-					p.Reject(errors.New("promise: panic occurred"))
-				}
-			}
-		}()
-
+	p.fn = sync.OnceValues(func() (T, error) {
+		defer p.done.Store(true)
 		select {
-		case <-p.ctx.Done():
-			p.Reject(ErrCanceled)
-			return
-		default:
+		case <-ctx.Done():
+			var zero T
+			return zero, context.Cause(ctx)
+		case res := <-p.ch:
+			return res.Data, res.Error
 		}
-
-		data, err := fn()
-		p.once.Do(func() {
-			if err != nil {
-				p.err = err
-			} else {
-				p.data = data
-			}
-			p.resolved.Store(true)
-			p.wg.Done()
-		})
-	}()
-
-	return p
-}
-
-func NewWithContext[T any](ctx context.Context, fn func(context.Context) (T, error)) *Promise[T] {
-	if fn == nil {
-		return Reject[T](ErrNilFunction)
-	}
-
-	p := DeferredWithContext[T](ctx)
-
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				if err, ok := r.(error); ok {
-					p.Reject(err)
-				} else {
-					p.Reject(errors.New("promise: panic occurred"))
-				}
-			}
-		}()
-
-		select {
-		case <-p.ctx.Done():
-			p.Reject(ErrCanceled)
-			return
-		default:
-		}
-
-		data, err := fn(p.ctx)
-		p.once.Do(func() {
-			if err != nil {
-				p.err = err
-			} else {
-				p.data = data
-			}
-			p.resolved.Store(true)
-			p.wg.Done()
-		})
-	}()
-
-	return p
-}
-
-func (p *Promise[T]) Resolve(v T) *Promise[T] {
-	p.once.Do(func() {
-		p.data = v
-		p.resolved.Store(true)
-		p.wg.Done()
 	})
-
-	return p
+	return p, ctx
 }
 
-func (p *Promise[T]) Reject(err error) *Promise[T] {
+func (p *Promise[T]) run(ctx context.Context, fn handler[T]) {
 	p.once.Do(func() {
-		p.err = err
-		p.resolved.Store(true)
-		p.wg.Done()
+		res, err := fn(ctx)
+		p.ch <- result[T]{Data: res, Error: err}
 	})
+}
 
+func Resolve[T any](ctx context.Context, v T) *Promise[T] {
+	p, _ := Deferred[T](ctx)
+	p.Resolve(v)
 	return p
 }
 
-func (p *Promise[T]) Cancel() {
-	p.cancel()
-	p.Reject(ErrCanceled)
+func Reject[T any](ctx context.Context, err error) *Promise[T] {
+	p, _ := Deferred[T](ctx)
+	p.Reject(err)
+	return p
+}
+
+func WithResolvers[T any](ctx context.Context) (p *Promise[T], resolve func(T), reject func(error)) {
+	p, _ = Deferred[T](ctx)
+	return p, p.Resolve, p.Reject
+}
+
+func (p *Promise[T]) Resolve(v T) {
+	p.once.Do(func() {
+		p.ch <- result[T]{Data: v}
+	})
+}
+
+func (p *Promise[T]) Reject(err error) {
+	p.once.Do(func() {
+		p.ch <- result[T]{Error: err}
+	})
+}
+
+func (p *Promise[T]) Abort(cause error) {
+	p.cancel(cause)
 }
 
 func (p *Promise[T]) Await() (T, error) {
-	p.wg.Wait()
-	return p.data, p.err
+	return p.fn()
 }
 
-func (p *Promise[T]) AwaitWithTimeout(timeout time.Duration) (T, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-	return p.AwaitWithContext(ctx)
-}
-
-func (p *Promise[T]) AwaitWithContext(ctx context.Context) (T, error) {
-	done := make(chan struct{})
-	go func() {
-		p.wg.Wait()
-		close(done)
-	}()
-
-	select {
-	case <-done:
-		return p.data, p.err
-	case <-ctx.Done():
-		var zero T
-		return zero, ErrTimeout
+func (p *Promise[T]) Status() Status {
+	if !p.done.Load() {
+		return StatusPending
 	}
-}
-
-func (p *Promise[T]) IsPending() bool {
-	return !p.resolved.Load()
-}
-
-func (p *Promise[T]) IsResolved() bool {
-	return p.resolved.Load() && p.err == nil
-}
-
-func (p *Promise[T]) IsRejected() bool {
-	return p.resolved.Load() && p.err != nil
-}
-
-type Promises[T any] []*Promise[T]
-
-func (promises Promises[T]) All() ([]T, error) {
-	if len(promises) == 0 {
-		return []T{}, nil
+	_, err := p.Await()
+	if err != nil {
+		return StatusRejected
 	}
-
-	res := make([]T, len(promises))
-
-	for i, p := range promises {
-		v, err := p.Await()
-		if err != nil {
-			return nil, err
-		}
-		res[i] = v
-	}
-
-	return res, nil
-}
-
-func (promises Promises[T]) AllWithTimeout(timeout time.Duration) ([]T, error) {
-	if len(promises) == 0 {
-		return []T{}, nil
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-
-	return promises.AllWithContext(ctx)
-}
-
-func (promises Promises[T]) AllWithContext(ctx context.Context) ([]T, error) {
-	if len(promises) == 0 {
-		return []T{}, nil
-	}
-
-	res := make([]T, len(promises))
-
-	for i, p := range promises {
-		v, err := p.AwaitWithContext(ctx)
-		if err != nil {
-			return nil, err
-		}
-		res[i] = v
-	}
-
-	return res, nil
-}
-
-func (promises Promises[T]) AllSettled() []Result[T] {
-	if len(promises) == 0 {
-		return []Result[T]{}
-	}
-
-	res := make([]Result[T], len(promises))
-
-	for i, p := range promises {
-		data, err := p.Await()
-		res[i] = Result[T]{
-			Data: data,
-			Err:  err,
-		}
-	}
-
-	return res
-}
-
-func (promises Promises[T]) AllSettledWithTimeout(timeout time.Duration) []Result[T] {
-	if len(promises) == 0 {
-		return []Result[T]{}
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-
-	return promises.AllSettledWithContext(ctx)
-}
-
-func (promises Promises[T]) AllSettledWithContext(ctx context.Context) []Result[T] {
-	if len(promises) == 0 {
-		return []Result[T]{}
-	}
-
-	res := make([]Result[T], len(promises))
-
-	for i, p := range promises {
-		data, err := p.AwaitWithContext(ctx)
-		res[i] = Result[T]{
-			Data: data,
-			Err:  err,
-		}
-	}
-
-	return res
-}
-
-func (promises Promises[T]) Race() (T, error) {
-	if len(promises) == 0 {
-		var zero T
-		return zero, ErrEmptyPromises
-	}
-
-	done := make(chan Result[T], len(promises))
-
-	for _, p := range promises {
-		go func(p *Promise[T]) {
-			data, err := p.Await()
-			done <- Result[T]{Data: data, Err: err}
-		}(p)
-	}
-
-	result := <-done
-	return result.Data, result.Err
-}
-
-func (promises Promises[T]) RaceWithTimeout(timeout time.Duration) (T, error) {
-	if len(promises) == 0 {
-		var zero T
-		return zero, ErrEmptyPromises
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-
-	return promises.RaceWithContext(ctx)
-}
-
-func (promises Promises[T]) RaceWithContext(ctx context.Context) (T, error) {
-	if len(promises) == 0 {
-		var zero T
-		return zero, ErrEmptyPromises
-	}
-
-	done := make(chan Result[T], len(promises))
-
-	for _, p := range promises {
-		go func(p *Promise[T]) {
-			data, err := p.AwaitWithContext(ctx)
-			done <- Result[T]{Data: data, Err: err}
-		}(p)
-	}
-
-	select {
-	case result := <-done:
-		return result.Data, result.Err
-	case <-ctx.Done():
-		var zero T
-		return zero, ErrTimeout
-	}
-}
-
-func (promises Promises[T]) Any() (T, error) {
-	if len(promises) == 0 {
-		var zero T
-		return zero, ErrEmptyPromises
-	}
-
-	done := make(chan Result[T], len(promises))
-	var errCount int
-
-	for _, p := range promises {
-		go func(p *Promise[T]) {
-			data, err := p.Await()
-			done <- Result[T]{Data: data, Err: err}
-		}(p)
-	}
-
-	for range promises {
-		result := <-done
-		if result.Err == nil {
-			return result.Data, nil
-		}
-		errCount++
-	}
-
-	var zero T
-	return zero, errors.New("promise: all promises rejected")
+	return StatusFulfilled
 }
 
 type Result[T any] struct {
-	Data T
-	Err  error
+	Status Status
+	Data   T
+	Error  error
 }
 
-func (r Result[T]) IsResolved() bool {
-	return r.Err == nil
+// Promise.race() settles as soon as the first promise finishes
+// (whether it succeeds or fails)
+func Race[T any](promises ...*Promise[T]) (T, error) {
+	if len(promises) == 0 {
+		panic("no promises")
+	}
+	ch := make(chan result[T], len(promises))
+	go func() {
+		var wg sync.WaitGroup
+		for _, p := range promises {
+			wg.Go(func() {
+				res, err := p.Await()
+				ch <- result[T]{Data: res, Error: err}
+			})
+		}
+		wg.Wait()
+		close(ch)
+	}()
+	defer func() {
+		// Flush all
+		for range ch {
+		}
+	}()
+	res := <-ch
+	return res.Data, res.Error
 }
 
-func (r Result[T]) IsRejected() bool {
-	return r.Err != nil
+// Promise.any() settles as soon as the first promise succeeds
+// (ignoring failures unless they all fail)
+func Any[T any](promises ...*Promise[T]) (T, error) {
+	if len(promises) == 0 {
+		panic("no promises")
+	}
+	ch := make(chan result[T], len(promises))
+	go func() {
+		var wg sync.WaitGroup
+		for _, p := range promises {
+			wg.Go(func() {
+				res, err := p.Await()
+				ch <- result[T]{Data: res, Error: err}
+			})
+		}
+		wg.Wait()
+		close(ch)
+	}()
+	defer func() {
+		// Flush all
+		for range ch {
+		}
+	}()
+
+	var errs []error
+	for v := range ch {
+		if v.Error != nil {
+			errs = append(errs, v.Error)
+			continue
+		}
+		return v.Data, nil
+	}
+
+	var zero T
+	return zero, errors.Join(errs...)
+}
+
+func All[T any](promises ...*Promise[T]) ([]T, error) {
+	if len(promises) == 0 {
+		panic("no promises")
+	}
+	ps := AllSettled(promises...)
+	res := make([]T, len(ps))
+	for i, v := range ps {
+		if v.Error != nil {
+			return nil, v.Error
+		}
+		res[i] = v.Data
+	}
+
+	return res, nil
+}
+
+func AllSettled[T any](promises ...*Promise[T]) []*Result[T] {
+	if len(promises) == 0 {
+		panic("no promises")
+	}
+	res := make([]*Result[T], len(promises))
+	for i, p := range promises {
+		v, err := p.Await()
+		if err != nil {
+			res[i] = &Result[T]{Error: err, Status: StatusRejected}
+		} else {
+			res[i] = &Result[T]{Data: v, Status: StatusFulfilled}
+		}
+	}
+	return res
+}
+
+type Map[K comparable, V any] = Cache[K, Promise[V]]
+
+func NewMap[K comparable, V any](ctx context.Context) *Map[K, V] {
+	return NewCache(func(K) (*Promise[V], error) {
+		d, _ := Deferred[V](ctx)
+		return d, nil
+	})
 }

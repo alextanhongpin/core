@@ -3,6 +3,7 @@ package promise_test
 import (
 	"context"
 	"errors"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -12,490 +13,332 @@ import (
 )
 
 func TestPromiseWithContext(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	counter := atomic.Int32{}
-	p := promise.NewWithContext(ctx, func(ctx context.Context) (int, error) {
+	p := promise.New(ctx, func(ctx context.Context) (int, error) {
 		counter.Add(1)
 		select {
 		case <-ctx.Done():
-			return 0, ctx.Err()
+			return 0, context.Cause(ctx)
 		case <-time.After(10 * time.Millisecond):
 			return 42, nil
 		}
 	})
 
-	result, err := p.Await()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	var wg sync.WaitGroup
+	for range 3 {
+		wg.Go(func() {
+			res, err := p.Await()
+			if err != nil {
+				t.Fatalf("got error: %v", err)
+			}
+			if res != 42 {
+				t.Fatalf("want 42, got %d", res)
+			}
+			if counter.Load() != 1 {
+				t.Fatalf("want function to be called once, was called %d times", counter.Load())
+			}
+		})
 	}
-	if result != 42 {
-		t.Fatalf("expected 42, got %d", result)
-	}
-	if counter.Load() != 1 {
-		t.Fatalf("expected function to be called once, was called %d times", counter.Load())
-	}
+	wg.Wait()
 }
 
 func TestPromiseContextCancellation(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-
-	p := promise.NewWithContext(ctx, func(ctx context.Context) (int, error) {
+	ctx := t.Context()
+	p := promise.New(ctx, func(ctx context.Context) (int, error) {
 		select {
 		case <-ctx.Done():
-			return 0, ctx.Err()
+			return 0, context.Cause(ctx)
 		case <-time.After(100 * time.Millisecond):
 			return 42, nil
 		}
 	})
 
 	// Cancel context before promise completes
-	cancel()
+	p.Abort(errors.ErrUnsupported)
 
-	result, err := p.Await()
-	if err == nil {
-		t.Fatal("expected error due to context cancellation")
+	res, err := p.Await()
+	if !errors.Is(err, errors.ErrUnsupported) {
+		t.Fatal("want error due to context cancellation")
 	}
-	if result != 0 {
-		t.Fatalf("expected 0 result on error, got %d", result)
+	if res != 0 {
+		t.Fatalf("want 0 res on error, got %d", res)
 	}
 }
 
-func TestPromiseTimeout(t *testing.T) {
-	p := promise.New(func() (int, error) {
+func TestPromiseAbort(t *testing.T) {
+	ctx := t.Context()
+	p := promise.New(ctx, func(context.Context) (int, error) {
 		time.Sleep(100 * time.Millisecond)
 		return 42, nil
 	})
+	p.Abort(errors.ErrUnsupported)
 
-	result, err := p.AwaitWithTimeout(10 * time.Millisecond)
-	if err != promise.ErrTimeout {
-		t.Fatalf("expected timeout error, got %v", err)
+	res, err := p.Await()
+	if !errors.Is(err, errors.ErrUnsupported) {
+		t.Fatalf("want unsupported error, got %v", err)
 	}
-	if result != 0 {
-		t.Fatalf("expected 0 result on timeout, got %d", result)
-	}
-}
-
-func TestPromiseCancel(t *testing.T) {
-	p := promise.New(func() (int, error) {
-		time.Sleep(100 * time.Millisecond)
-		return 42, nil
-	})
-
-	p.Cancel()
-
-	result, err := p.Await()
-	if err != promise.ErrCanceled {
-		t.Fatalf("expected canceled error, got %v", err)
-	}
-	if result != 0 {
-		t.Fatalf("expected 0 result on cancellation, got %d", result)
+	if res != 0 {
+		t.Fatalf("want 0 res on timeout, got %d", res)
 	}
 }
 
-func TestPromiseState(t *testing.T) {
+func TestPromiseStatus(t *testing.T) {
 	// Test pending promise
-	p := promise.New(func() (int, error) {
+	ctx := t.Context()
+	p := promise.New(ctx, func(context.Context) (int, error) {
 		time.Sleep(50 * time.Millisecond)
 		return 42, nil
 	})
 
-	if !p.IsPending() {
-		t.Fatal("expected promise to be pending")
-	}
-	if p.IsResolved() {
-		t.Fatal("expected promise not to be resolved")
-	}
-	if p.IsRejected() {
-		t.Fatal("expected promise not to be rejected")
+	if p.Status() != promise.StatusPending {
+		t.Fatal("want promise to be pending")
 	}
 
 	// Wait for completion
-	result, err := p.Await()
+	res, err := p.Await()
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatalf("got error: %v", err)
 	}
-	if result != 42 {
-		t.Fatalf("expected 42, got %d", result)
+	if res != 42 {
+		t.Fatalf("want 42, got %d", res)
 	}
 
-	if p.IsPending() {
-		t.Fatal("expected promise not to be pending")
-	}
-	if !p.IsResolved() {
-		t.Fatal("expected promise to be resolved")
-	}
-	if p.IsRejected() {
-		t.Fatal("expected promise not to be rejected")
+	if want, got := promise.StatusFulfilled, p.Status(); want != got {
+		t.Fatalf("want %v, got %v", want, got)
 	}
 }
 
 func TestPromiseRejectedState(t *testing.T) {
-	expectedErr := errors.New("test error")
-	p := promise.New(func() (int, error) {
-		return 0, expectedErr
+	ctx := t.Context()
+	p := promise.New(ctx, func(context.Context) (int, error) {
+		return 0, errors.ErrUnsupported
 	})
 
-	result, err := p.Await()
-	if err != expectedErr {
-		t.Fatalf("expected test error, got %v", err)
+	res, err := p.Await()
+	if !errors.Is(err, errors.ErrUnsupported) {
+		t.Fatalf("want test error, got %v", err)
 	}
-	if result != 0 {
-		t.Fatalf("expected 0 result on error, got %d", result)
+	if res != 0 {
+		t.Fatalf("want 0 res on error, got %d", res)
 	}
 
-	if p.IsPending() {
-		t.Fatal("expected promise not to be pending")
-	}
-	if p.IsResolved() {
-		t.Fatal("expected promise not to be resolved")
-	}
-	if !p.IsRejected() {
-		t.Fatal("expected promise to be rejected")
+	if p.Status() != promise.StatusRejected {
+		t.Fatal("want promise not to be rejected")
 	}
 }
 
-func TestPromisesAll(t *testing.T) {
-	promises := promise.Promises[int]{
-		promise.Resolve(1),
-		promise.Resolve(2),
-		promise.Resolve(3),
-	}
-
-	results, err := promises.All()
+func TestPromiseAll(t *testing.T) {
+	ctx := t.Context()
+	res, err := promise.All(
+		promise.Resolve(ctx, 1),
+		promise.Resolve(ctx, 2),
+		promise.Resolve(ctx, 3),
+	)
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatal(err)
 	}
-	if len(results) != 3 {
-		t.Fatalf("expected 3 results, got %d", len(results))
+	if len(res) != 3 {
+		t.Fatalf("want 3 res, got %d", len(res))
 	}
-	for i, expected := range []int{1, 2, 3} {
-		if results[i] != expected {
-			t.Fatalf("expected results[%d] = %d, got %d", i, expected, results[i])
+	for i, want := range []int{1, 2, 3} {
+		if res[i] != want {
+			t.Fatalf("want res[%d] = %d, got %d", i, want, res[i])
 		}
 	}
 }
 
-func TestPromisesAllWithError(t *testing.T) {
-	expectedErr := errors.New("test error")
-	promises := promise.Promises[int]{
-		promise.Resolve(1),
-		promise.Reject[int](expectedErr),
-		promise.Resolve(3),
-	}
+func TestPromiseAllWithError(t *testing.T) {
+	ctx := t.Context()
+	res, err := promise.All(
+		promise.Resolve(ctx, 1),
+		promise.Reject[int](ctx, errors.ErrUnsupported),
+		promise.Resolve(ctx, 3),
+	)
 
-	results, err := promises.All()
-	if err != expectedErr {
-		t.Fatalf("expected test error, got %v", err)
+	if !errors.Is(err, errors.ErrUnsupported) {
+		t.Fatalf("want %v, got %v", errors.ErrUnsupported, err)
 	}
-	if results != nil {
-		t.Fatal("expected nil results on error")
+	if res != nil {
+		t.Fatal("want nil res on error")
 	}
 }
 
 func TestPromisesAllSettled(t *testing.T) {
-	expectedErr := errors.New("test error")
-	promises := promise.Promises[int]{
-		promise.Resolve(1),
-		promise.Reject[int](expectedErr),
-		promise.Resolve(3),
-	}
+	ctx := t.Context()
+	res := promise.AllSettled(
+		promise.Resolve(ctx, 1),
+		promise.Reject[int](ctx, errors.ErrUnsupported),
+		promise.Resolve(ctx, 3),
+	)
 
-	results := promises.AllSettled()
-	if len(results) != 3 {
-		t.Fatalf("expected 3 results, got %d", len(results))
+	if len(res) != 3 {
+		t.Fatalf("want 3 res, got %d", len(res))
 	}
 
 	// First promise should be resolved
-	if !results[0].IsResolved() {
-		t.Fatal("expected first result to be resolved")
+	if res[0].Status != promise.StatusFulfilled {
+		t.Fatal("want first res to be resolved")
 	}
-	if results[0].Data != 1 {
-		t.Fatalf("expected first result data to be 1, got %d", results[0].Data)
+	if res[0].Data != 1 {
+		t.Fatalf("want first res data to be 1, got %d", res[0].Data)
 	}
 
 	// Second promise should be rejected
-	if !results[1].IsRejected() {
-		t.Fatal("expected second result to be rejected")
+	if res[1].Status != promise.StatusRejected {
+		t.Fatal("want second res to be rejected")
 	}
-	if results[1].Err != expectedErr {
-		t.Fatalf("expected second result error to be test error, got %v", results[1].Err)
+	if !errors.Is(res[1].Error, errors.ErrUnsupported) {
+		t.Fatalf("want second res error to be test error, got %v", res[1].Error)
 	}
 
 	// Third promise should be resolved
-	if !results[2].IsResolved() {
-		t.Fatal("expected third result to be resolved")
+	if res[2].Status != promise.StatusFulfilled {
+		t.Fatal("want third res to be resolved")
 	}
-	if results[2].Data != 3 {
-		t.Fatalf("expected third result data to be 3, got %d", results[2].Data)
+	if res[2].Data != 3 {
+		t.Fatalf("want third res data to be 3, got %d", res[2].Data)
 	}
 }
 
 func TestPromisesRace(t *testing.T) {
-	promises := promise.Promises[int]{
-		promise.New(func() (int, error) {
+	ctx := t.Context()
+	res, err := promise.Race(
+		promise.New(ctx, func(context.Context) (int, error) {
 			time.Sleep(20 * time.Millisecond)
 			return 1, nil
 		}),
-		promise.New(func() (int, error) {
+		promise.New(ctx, func(context.Context) (int, error) {
 			time.Sleep(10 * time.Millisecond)
 			return 2, nil
 		}),
-		promise.New(func() (int, error) {
+		promise.New(ctx, func(context.Context) (int, error) {
 			time.Sleep(30 * time.Millisecond)
 			return 3, nil
 		}),
-	}
-
-	result, err := promises.Race()
+	)
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatalf("got error: %v", err)
 	}
-	if result != 2 {
-		t.Fatalf("expected fastest promise (2), got %d", result)
+	if res != 2 {
+		t.Fatalf("want fastest promise (2), got %d", res)
 	}
 }
 
 func TestPromisesAny(t *testing.T) {
-	testErr := errors.New("test error")
-	promises := promise.Promises[int]{
-		promise.Reject[int](testErr),
-		promise.New(func() (int, error) {
+	ctx := t.Context()
+	res, err := promise.Any(
+		promise.Reject[int](ctx, errors.ErrUnsupported),
+		promise.New(ctx, func(context.Context) (int, error) {
 			time.Sleep(10 * time.Millisecond)
 			return 2, nil
 		}),
-		promise.Reject[int](testErr),
-	}
+		promise.Reject[int](ctx, errors.ErrUnsupported),
+	)
 
-	result, err := promises.Any()
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatalf("got error: %v", err)
 	}
-	if result != 2 {
-		t.Fatalf("expected successful promise (2), got %d", result)
+	if res != 2 {
+		t.Fatalf("want successful promise (2), got %d", res)
 	}
 }
 
 func TestPromisesAnyAllRejected(t *testing.T) {
-	testErr := errors.New("test error")
-	promises := promise.Promises[int]{
-		promise.Reject[int](testErr),
-		promise.Reject[int](testErr),
-		promise.Reject[int](testErr),
+	ctx := t.Context()
+	res, err := promise.Any(
+		promise.Reject[int](ctx, errors.ErrUnsupported),
+		promise.Reject[int](ctx, errors.ErrUnsupported),
+		promise.Reject[int](ctx, errors.ErrUnsupported),
+	)
+	if err == nil {
+		t.Fatal("want error when all promises are rejected")
+	}
+	if res != 0 {
+		t.Fatalf("want 0 res when all rejected, got %d", res)
 	}
 
-	result, err := promises.Any()
-	if err == nil {
-		t.Fatal("expected error when all promises are rejected")
+	uw, ok := err.(interface{ Unwrap() []error })
+	if !ok {
+		t.Fatal("want joined errors")
 	}
-	if result != 0 {
-		t.Fatalf("expected 0 result when all rejected, got %d", result)
+	errSlice := uw.Unwrap()
+	for _, err := range errSlice {
+		if !errors.Is(err, errors.ErrUnsupported) {
+			t.Fatalf("want error, got %v", err)
+		}
 	}
 }
 
-func TestMapDoWithContext(t *testing.T) {
-	m := promise.NewMap[int]()
-	counter := atomic.Int32{}
+func TestMap(t *testing.T) {
+	m := promise.NewMap[string, int](t.Context())
 
+	var counter atomic.Int32
 	var wg sync.WaitGroup
 	n := 10
-	wg.Add(n)
+	ch := make(chan struct{})
 
-	for i := 0; i < n; i++ {
-		go func() {
-			defer wg.Done()
-			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-			defer cancel()
-
-			result, err := m.DoWithContext("test", ctx, func(ctx context.Context) (int, error) {
-				counter.Add(1)
-				return 42, nil
-			})
+	for range n {
+		wg.Go(func() {
+			p, loaded, err := m.LoadOrCreate(t.Name())
 			if err != nil {
-				t.Errorf("unexpected error: %v", err)
+				t.Errorf("got error: %v", err)
 			}
-			if result != 42 {
-				t.Errorf("expected 42, got %d", result)
+			if !loaded {
+				counter.Add(1)
+				p.Resolve(42)
 			}
-		}()
+			res, err := p.Await()
+			if err != nil {
+				t.Errorf("got error: %v", err)
+			}
+			if res != 42 {
+				t.Errorf("want 42, got %d", res)
+			}
+		})
 	}
 
+	close(ch)
 	wg.Wait()
-
 	if counter.Load() != 1 {
-		t.Fatalf("expected function to be called once, was called %d times", counter.Load())
-	}
-}
-
-func TestMapLockWithContext(t *testing.T) {
-	m := promise.NewMap[int]()
-	counter := atomic.Int32{}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-	defer cancel()
-
-	result, err := m.LockWithContext("test", ctx, func(ctx context.Context) (int, error) {
-		counter.Add(1)
-		return 42, nil
-	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if result != 42 {
-		t.Fatalf("expected 42, got %d", result)
-	}
-
-	// Promise should be removed after Lock
-	if m.Len() != 0 {
-		t.Fatalf("expected map to be empty after Lock, but length is %d", m.Len())
+		t.Fatalf("want function to be called once, was called %d times", counter.Load())
 	}
 }
 
 func TestMapClear(t *testing.T) {
-	m := promise.NewMap[int]()
-
-	// Add some promises
-	_, _ = m.LoadOrStore("key1")
-	_, _ = m.LoadOrStore("key2")
-	_, _ = m.LoadOrStore("key3")
-
-	if m.Len() != 3 {
-		t.Fatalf("expected 3 promises, got %d", m.Len())
-	}
-
-	m.Clear()
-
-	if m.Len() != 0 {
-		t.Fatalf("expected 0 promises after clear, got %d", m.Len())
-	}
-}
-
-func TestPoolWithContext(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	pool := promise.NewPoolWithContext[int](ctx, 2)
-	counter := atomic.Int32{}
-
-	// Add multiple tasks
-	for i := 0; i < 5; i++ {
-		err := pool.DoWithContext(ctx, func(ctx context.Context) (int, error) {
-			counter.Add(1)
-			time.Sleep(10 * time.Millisecond)
-			return int(counter.Load()), nil
-		})
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-	}
-
-	results, err := pool.All()
+	m := promise.NewMap[string, int](t.Context())
+	p, loaded, err := m.LoadOrCreate(t.Name())
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatalf("got error: %v", err)
 	}
-
-	if len(results) != 5 {
-		t.Fatalf("expected 5 results, got %d", len(results))
+	if loaded {
+		t.Fatal("loaded: want false, got true")
 	}
-
-	if counter.Load() != 5 {
-		t.Fatalf("expected 5 function calls, got %d", counter.Load())
-	}
-}
-
-func TestPoolCancel(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	pool := promise.NewPoolWithContext[int](ctx, 1) // Use limit of 1 to ensure blocking
-
-	// Start a long-running task that will block the pool
-	err := pool.DoWithContext(context.Background(), func(ctx context.Context) (int, error) {
-		time.Sleep(200 * time.Millisecond) // Long enough to block
-		return 42, nil
-	})
+	p.Resolve(42)
+	res, err := p.Await()
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatalf("got error: %v", err)
+	}
+	if res != 42 {
+		t.Fatalf("want 42, got %d", res)
 	}
 
-	// Cancel the pool's context
-	cancel()
-
-	// Wait for cancellation to propagate
-	time.Sleep(100 * time.Millisecond)
-
-	// Try to add another task - should fail because pool context is canceled
-	// This should return immediately with ErrCanceled
-	err = pool.DoWithContext(context.Background(), func(ctx context.Context) (int, error) {
-		return 1, nil
-	})
-	if err != promise.ErrCanceled {
-		t.Fatalf("expected canceled error, got %v", err)
-	}
-}
-
-func TestNilFunctionHandling(t *testing.T) {
-	// Test New with nil function
-	p := promise.New[int](nil)
-	result, err := p.Await()
-	if err != promise.ErrNilFunction {
-		t.Fatalf("expected nil function error, got %v", err)
-	}
-	if result != 0 {
-		t.Fatalf("expected 0 result, got %d", result)
-	}
-
-	// Test NewWithContext with nil function
-	p2 := promise.NewWithContext[int](context.Background(), nil)
-	result2, err2 := p2.Await()
-	if err2 != promise.ErrNilFunction {
-		t.Fatalf("expected nil function error, got %v", err2)
-	}
-	if result2 != 0 {
-		t.Fatalf("expected 0 result, got %d", result2)
-	}
-}
-
-func TestPromisePanicRecovery(t *testing.T) {
-	p := promise.New(func() (int, error) {
-		panic("test panic")
-	})
-
-	result, err := p.Await()
-	if err == nil {
-		t.Fatal("expected error from panic")
-	}
-	if result != 0 {
-		t.Fatalf("expected 0 result on panic, got %d", result)
-	}
-}
-
-func TestEmptyPromisesEdgeCases(t *testing.T) {
-	var promises promise.Promises[int]
-
-	// Test All with empty slice
-	results, err := promises.All()
+	_, loaded, err = m.LoadOrCreate(t.Name())
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatal(err)
 	}
-	if len(results) != 0 {
-		t.Fatalf("expected empty results, got %d", len(results))
-	}
-
-	// Test AllSettled with empty slice
-	settled := promises.AllSettled()
-	if len(settled) != 0 {
-		t.Fatalf("expected empty settled results, got %d", len(settled))
+	if !loaded {
+		t.Fatalf("loaded: want true, got %v", loaded)
 	}
 
-	// Test Race with empty slice
-	_, err = promises.Race()
-	if err != promise.ErrEmptyPromises {
-		t.Fatalf("expected empty promises error, got %v", err)
-	}
+	runtime.GC()
 
-	// Test Any with empty slice
-	_, err = promises.Any()
-	if err != promise.ErrEmptyPromises {
-		t.Fatalf("expected empty promises error, got %v", err)
+	_, loaded, err = m.LoadOrCreate(t.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded {
+		t.Fatalf("loaded: want false, got %v", loaded)
 	}
 }
