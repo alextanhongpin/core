@@ -70,7 +70,7 @@ local function close(keys, args)
 end
 
 
-local function halfOpen(keys, args)
+local function half_open(keys, args)
 	local key = keys[1]
 
 	local failure_count = tonumber(args[1])
@@ -120,7 +120,7 @@ local function commit(keys, args)
 	if status == CLOSED then
 		return close(keys, args)
 	elseif status == HALF_OPEN then
-		return halfOpen(keys, args)
+		return half_open(keys, args)
 	else
 		-- Not possible
 		return UNKNOWN
