@@ -1,6 +1,7 @@
 package retry
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"net/http"
@@ -30,19 +31,27 @@ func StatusCodeHandler(code int) error {
 }
 
 func NewRoundTripper(rt http.RoundTripper, statusCodeHandler func(statusCode int) error, opts ...Option) *RoundTripper {
+	rt = cmp.Or(rt, http.DefaultTransport)
 	if statusCodeHandler == nil {
 		statusCodeHandler = StatusCodeHandler
 	}
 	return &RoundTripper{
 		fn: Handler(func(ctx context.Context, r *http.Request) (*http.Response, error) {
+			if r.GetBody != nil {
+				body, err := r.GetBody()
+				if err != nil {
+					return nil, err
+				}
+				r.Body = body
+			}
+
 			resp, err := rt.RoundTrip(r)
 			if err != nil {
-				// This is transport error, don't retry.
 				return nil, err
 			}
 
-			err = statusCodeHandler(resp.StatusCode)
-			if err != nil {
+			if err = statusCodeHandler(resp.StatusCode); err != nil {
+				_ = resp.Body.Close()
 				return nil, err
 			}
 

@@ -1,0 +1,11 @@
+name: constant
+input: 5
+evals:
+  - name: duration matches
+    expr: output == 10000000
+---
+name: linear
+input: 3
+evals:
+  - name: duration matches
+    expr: output == 30000000

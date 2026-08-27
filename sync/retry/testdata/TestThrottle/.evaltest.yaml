@@ -1,0 +1,5 @@
+name: throttled
+input: 5
+evals:
+  - name: throttled error
+    expr: err != nil
