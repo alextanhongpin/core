@@ -1,6 +1,7 @@
 package circuitbreaker
 
 import (
+	"context"
 	"errors"
 	"net/http"
 )
@@ -10,7 +11,7 @@ type transporter interface {
 }
 
 type circuitbreaker interface {
-	Do(fn func() error) error
+	Do(ctx context.Context, fn func(ctx context.Context) error) error
 }
 
 type Transporter struct {
@@ -26,7 +27,7 @@ func NewTransporter(t transporter, cb circuitbreaker) *Transporter {
 }
 
 func (t *Transporter) RoundTrip(r *http.Request) (resp *http.Response, err error) {
-	err = t.CircuitBreaker.Do(func() error {
+	err = t.CircuitBreaker.Do(r.Context(), func(ctx context.Context) error {
 		resp, err = t.Transport.RoundTrip(r)
 		if err != nil {
 			return err

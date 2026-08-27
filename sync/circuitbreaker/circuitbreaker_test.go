@@ -2,103 +2,111 @@ package circuitbreaker_test
 
 import (
 	"context"
-	"errors"
 	"testing"
 	"time"
 
 	"github.com/alextanhongpin/core/sync/circuitbreaker"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/suite"
 )
 
-var (
-	ctx     = context.Background()
-	wantErr = errors.New("want error")
-)
-
-func TestCircuit(t *testing.T) {
-	cb := circuitbreaker.New()
-	cb.BreakDuration = 50 * time.Millisecond
-
-	t.Run("initial", func(t *testing.T) {
-		is := assert.New(t)
-		is.Equal(circuitbreaker.Closed, cb.Status())
-	})
-
-	t.Run("opened", func(t *testing.T) {
-		is := assert.New(t)
-
-		for range cb.FailureThreshold {
-			err := cb.Do(func() error {
-				return wantErr
-			})
-			is.ErrorIs(err, wantErr)
-		}
-		err := cb.Do(func() error {
-			return wantErr
-		})
-		is.ErrorIs(err, circuitbreaker.ErrBrokenCircuit)
-		is.Equal(circuitbreaker.Open, cb.Status())
-	})
-
-	t.Run("half-opened", func(t *testing.T) {
-		time.Sleep(cb.BreakDuration + 5*time.Millisecond)
-		is := assert.New(t)
-		is.Equal(circuitbreaker.HalfOpen, cb.Status())
-	})
-
-	t.Run("closed", func(t *testing.T) {
-		is := assert.New(t)
-
-		for range cb.SuccessThreshold {
-			err := cb.Do(func() error {
-				return nil
-			})
-			is.Nil(err)
-		}
-
-		is.Equal(circuitbreaker.Closed, cb.Status())
-	})
+func TestCircuitBreakerSuite(t *testing.T) {
+	suite.Run(t, new(CircuitBreakerSuite))
 }
 
-func TestHalfOpenFail(t *testing.T) {
-	cb := circuitbreaker.New()
-	cb.BreakDuration = 50 * time.Millisecond
+type CircuitBreakerSuite struct {
+	suite.Suite
 
-	is := assert.New(t)
-	is.Equal(circuitbreaker.Closed, cb.Status())
-
-	// Shift to closed state.
-	for range cb.FailureThreshold {
-		err := cb.Do(func() error {
-			return wantErr
-		})
-		is.NotNil(err)
-	}
-	is.Equal(circuitbreaker.Open, cb.Status())
-
-	time.Sleep(cb.BreakDuration + 5*time.Millisecond)
-	is.Equal(circuitbreaker.HalfOpen, cb.Status())
-
-	// Trigger failure in half-opened state.
-	err := cb.Do(func() error {
-		return wantErr
-	})
-	is.ErrorIs(err, wantErr)
-	is.Equal(circuitbreaker.Open, cb.Status())
+	options *circuitbreaker.Options
+	cb      *circuitbreaker.CircuitBreaker
 }
 
-func TestSlowCount(t *testing.T) {
-	cb := circuitbreaker.New()
-	cb.SlowCallCount = func(time.Duration) int {
-		// A single slow call will trigger the circuitbreaker to
-		// open.
-		return cb.FailureThreshold
-	}
-	err := cb.Do(func() error {
-		// No error, but the slow call count is incremented.
+func (s *CircuitBreakerSuite) SetupTest() {
+	options := circuitbreaker.NewOptions()
+	options.FailureThreshold = 10
+	options.SuccessThreshold = 10
+	options.OpenTimeout = 100 * time.Millisecond
+
+	s.options = options
+	s.cb = circuitbreaker.New(options)
+}
+
+func (s *CircuitBreakerSuite) statusIs(status circuitbreaker.Status) {
+	got := s.cb.Status()
+	s.Equal(status, got)
+}
+
+func (s *CircuitBreakerSuite) setStatus(status circuitbreaker.Status) {
+	s.cb.SetStatus(status)
+}
+
+func (s *CircuitBreakerSuite) runErr(want error) {
+	got := s.cb.Do(s.T().Context(), func(context.Context) error {
+		return assert.AnError
+	})
+	s.ErrorIs(got, want)
+}
+
+func (s *CircuitBreakerSuite) run(want error) {
+	t := s.T()
+
+	ctx := t.Context()
+	got := s.cb.Do(ctx, func(context.Context) error {
 		return nil
 	})
-	is := assert.New(t)
-	is.Nil(err)
-	is.Equal(circuitbreaker.Open, cb.Status())
+	s.ErrorIs(got, want)
+}
+
+func (s *CircuitBreakerSuite) triggerOpen() {
+	for range s.options.FailureThreshold {
+		s.runErr(assert.AnError)
+	}
+}
+
+func (s *CircuitBreakerSuite) TestClosed() {
+	s.run(nil)
+	s.statusIs(circuitbreaker.Closed)
+}
+
+func (s *CircuitBreakerSuite) TestOpened() {
+	s.triggerOpen()
+	s.statusIs(circuitbreaker.Opened)
+}
+
+func (s *CircuitBreakerSuite) TestHalfOpenError() {
+	s.triggerOpen()
+	s.statusIs(circuitbreaker.Opened)
+	time.Sleep(s.options.OpenTimeout)
+
+	s.runErr(assert.AnError)
+	s.statusIs(circuitbreaker.Opened)
+	s.run(circuitbreaker.ErrOpened)
+}
+
+func (s *CircuitBreakerSuite) TestHalfOpenSuccess() {
+	s.triggerOpen()
+	s.statusIs(circuitbreaker.Opened)
+	time.Sleep(s.options.OpenTimeout)
+
+	s.run(nil)
+	s.statusIs(circuitbreaker.HalfOpen)
+
+	for range s.options.SuccessThreshold {
+		s.run(nil)
+	}
+	s.statusIs(circuitbreaker.Closed)
+}
+
+func (s *CircuitBreakerSuite) TestForcedOpen() {
+	s.setStatus(circuitbreaker.ForcedOpen)
+	s.run(circuitbreaker.ErrOpened)
+	s.statusIs(circuitbreaker.ForcedOpen)
+}
+
+func (s *CircuitBreakerSuite) TestDisabled() {
+	s.setStatus(circuitbreaker.Disabled)
+	for range s.options.FailureThreshold + 1 {
+		s.runErr(assert.AnError)
+	}
+	s.statusIs(circuitbreaker.Disabled)
 }

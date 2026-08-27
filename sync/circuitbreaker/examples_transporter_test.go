@@ -11,9 +11,10 @@ import (
 )
 
 func ExampleTransporter() {
-	cb := circuitbreaker.New()
-	cb.BreakDuration = 100 * time.Millisecond
-	cb.SamplingDuration = 1 * time.Second
+	cb := circuitbreaker.New(nil)
+	cb.OpenTimeout = 100 * time.Millisecond
+	cb.FailureThreshold = 10
+	cb.FailurePeriod = 1 * time.Second
 
 	fmt.Println("initial status:")
 	fmt.Println(cb.Status())
@@ -48,5 +49,5 @@ func ExampleTransporter() {
 	// Get "http://127.0.0.1:8080": 500 Internal Server Error
 	// Get "http://127.0.0.1:8080": 500 Internal Server Error
 	// Get "http://127.0.0.1:8080": 500 Internal Server Error
-	// Get "http://127.0.0.1:8080": circuit-breaker: broken
+	// Get "http://127.0.0.1:8080": circuitbreaker: opened
 }

@@ -1,6 +1,6 @@
 module github.com/alextanhongpin/core/sync/circuitbreaker
 
-go 1.23.1
+go 1.27.0
 
 require (
 	github.com/alextanhongpin/core/sync/rate v0.0.0-20241129045434-84469bdbd179
