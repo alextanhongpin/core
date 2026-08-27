@@ -7,7 +7,7 @@ import (
 )
 
 // SourceChan creates a new source channel from a channel.
-func SourceChan[T any](ctx context.Context, in chan T) chan T {
+func SourceChan[T any](ctx context.Context, in <-chan T) <-chan T {
 	out := make(chan T)
 
 	go func() {

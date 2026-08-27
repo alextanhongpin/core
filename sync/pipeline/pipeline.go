@@ -21,9 +21,6 @@ func Batch[T any](in <-chan T, size int, timeout time.Duration) <-chan []T {
 		defer close(out)
 
 		var batch []T
-		timer := time.NewTimer(timeout)
-		timer.Stop()
-
 		flush := func() {
 			if len(batch) > 0 {
 				out <- batch
@@ -40,16 +37,11 @@ func Batch[T any](in <-chan T, size int, timeout time.Duration) <-chan []T {
 				}
 
 				batch = append(batch, v)
-				if len(batch) == 1 {
-					timer.Reset(timeout)
-				}
-
 				if len(batch) >= size {
-					timer.Stop()
 					flush()
 				}
 
-			case <-timer.C:
+			case <-time.After(timeout):
 				flush()
 			}
 		}
@@ -104,6 +96,25 @@ func Dedup[T comparable](in <-chan T) <-chan T {
 		for v := range in {
 			if _, exists := seen[v]; !exists {
 				seen[v] = struct{}{}
+				out <- v
+			}
+		}
+	}()
+
+	return out
+}
+
+func DedupFunc[T any, V comparable](in <-chan T, fn func(T) V) <-chan T {
+	out := make(chan T)
+
+	go func() {
+		defer close(out)
+
+		seen := make(map[V]struct{})
+		for v := range in {
+			k := fn(v)
+			if _, exists := seen[k]; !exists {
+				seen[k] = struct{}{}
 				out <- v
 			}
 		}
@@ -239,12 +250,12 @@ func Merge[T any](mergeFn func(T, T) T, channels ...<-chan T) <-chan T {
 
 // Pipe transform the value received by the input channel before passing to the
 // output channel.
-func Pipe[T, V any](in chan T, fn func(T) (V, bool)) chan V {
+func Pipe[T, V any](in <-chan T, fn func(T) (V, bool)) <-chan V {
 	return PipeN(in, fn, 1)
 }
 
 // PipeN is like Pipe, but runs multiple workers.
-func PipeN[T, V any](in chan T, fn func(T) (V, bool), n int) chan V {
+func PipeN[T, V any](in <-chan T, fn func(T) (V, bool), n int) <-chan V {
 	if n == 0 {
 		panic("min 1 running goroutine")
 	}
