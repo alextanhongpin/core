@@ -5,6 +5,8 @@ import (
 	"time"
 )
 
+var _ ratelimiter = (*FixedWindow)(nil)
+
 type fixedWindowState struct {
 	count int64
 	last  int64
@@ -17,22 +19,20 @@ type FixedWindow struct {
 	state map[string]fixedWindowState
 
 	// Options.
-	Now    func() time.Time
 	limit  int64
 	period int64
 }
 
-func NewFixedWindow(limit int, period time.Duration) (*FixedWindow, error) {
-	if err := validate(limit, period, 0); err != nil {
-		return nil, err
+func NewFixedWindow(cfg Config) *FixedWindow {
+	if err := cfg.Validate(); err != nil {
+		panic(err)
 	}
 
 	return &FixedWindow{
-		Now:    time.Now,
-		limit:  int64(limit),
-		period: period.Nanoseconds(),
+		limit:  int64(cfg.Limit),
+		period: cfg.Period.Nanoseconds(),
 		state:  make(map[string]fixedWindowState),
-	}, nil
+	}
 }
 
 // Allow checks if a request is allowed. Special case of AllowN that consumes
@@ -60,7 +60,7 @@ func (r *FixedWindow) LimitN(key string, n int) *Result {
 	defer r.mu.Unlock()
 
 	curr := r.state[key]
-	now := r.Now().UnixNano()
+	now := time.Now().UnixNano()
 	quantity := int64(n)
 
 	if curr.last+r.period <= now {
@@ -80,6 +80,7 @@ func (r *FixedWindow) LimitN(key string, n int) *Result {
 		Remaining:  max(0, int(remaining)),
 		ResetAfter: time.Duration(curr.last+r.period-now) * time.Nanosecond,
 		RetryAfter: 0,
+		Limit:      int(r.limit),
 	}
 	if res.Remaining == 0 {
 		res.RetryAfter = res.ResetAfter
@@ -89,7 +90,7 @@ func (r *FixedWindow) LimitN(key string, n int) *Result {
 
 func (r *FixedWindow) Clear() {
 	r.mu.Lock()
-	now := r.Now().UnixNano()
+	now := time.Now().UnixNano()
 	for k, v := range r.state {
 		if v.last+r.period <= now {
 			delete(r.state, k)

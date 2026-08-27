@@ -5,30 +5,30 @@ import (
 	"time"
 )
 
+var _ ratelimiter = (*GCRA)(nil)
+
 type GCRA struct {
 	// State.
 	mu    sync.RWMutex
 	state map[string]int64
 
 	// Option.
-	Now    func() time.Time
 	burst  int64
 	limit  int64
 	period int64
 }
 
-func NewGCRA(limit int, period time.Duration, burst int) (*GCRA, error) {
-	if err := validate(limit, period, burst); err != nil {
-		return nil, err
+func NewGCRA(cfg Config) *GCRA {
+	if err := cfg.Validate(); err != nil {
+		panic(err)
 	}
 
 	return &GCRA{
-		Now:    time.Now,
-		burst:  int64(burst),
-		limit:  int64(limit),
-		period: period.Nanoseconds(),
+		burst:  int64(cfg.Burst),
+		limit:  int64(cfg.Limit),
+		period: cfg.Period.Nanoseconds(),
 		state:  make(map[string]int64),
-	}, nil
+	}
 }
 
 func (r *GCRA) Allow(key string) bool {
@@ -56,7 +56,7 @@ func (r *GCRA) LimitN(key string, n int) *Result {
 	quantity := int64(n)
 	remaining := int64(-1)
 	delta := r.period / r.limit
-	now := r.Now().UnixNano()
+	now := time.Now().UnixNano()
 
 	last := r.state[key]
 	last = max(last, now)
@@ -74,12 +74,13 @@ func (r *GCRA) LimitN(key string, n int) *Result {
 		Remaining:  int(max(0, remaining)),
 		RetryAfter: time.Duration(retryAfter),
 		ResetAfter: time.Duration(retryAfter),
+		Limit:      int(r.limit),
 	}
 }
 
 func (r *GCRA) Clear() {
 	r.mu.Lock()
-	now := r.Now().UnixNano()
+	now := time.Now().UnixNano()
 	for k, v := range r.state {
 		if v+r.period <= now {
 			delete(r.state, k)
