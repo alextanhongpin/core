@@ -3,61 +3,51 @@ package retry_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/alextanhongpin/core/sync/retry"
-	"github.com/go-openapi/testify/assert"
+	"github.com/alextanhongpin/evaltest"
 )
 
-func TestExec(t *testing.T) {
-	t.Run("success", func(t *testing.T) {
-		err := retry.Exec(t.Context(), func(context.Context) error {
-			return nil
-		})
-		assert.NoError(t, err)
-	})
+func TestHandler(t *testing.T) {
+	type Output struct {
+		Attempts int
+		Result   string
+	}
+	evaltest.Run(t, func(t *testing.T, ctx context.Context, input int) (*Output, error) {
+		name := evaltest.Name(ctx)
 
-	t.Run("error", func(t *testing.T) {
 		var count int
-		err := retry.Exec(t.Context(), func(context.Context) error {
+		fn := func(ctx context.Context, input string) (string, error) {
 			count++
-			return assert.AnError
-		}, retry.NoWait, retry.N(5))
+			if ctx.Err() != nil {
+				return "", context.Cause(ctx)
+			}
+			if strings.Contains(name, "error") {
+				return "", errors.ErrUnsupported
+			}
+			return t.Name(), nil
+		}
 
-		is := assert.New(t)
-		is.ErrorIs(err, assert.AnError)
-		is.ErrorIs(err, retry.ErrLimitExceeded, "did not complete within 5 attempts")
-		is.Equal(6, count, "initial plus 5 retries")
-	})
-
-	t.Run("context timeout", func(t *testing.T) {
-		var timeoutErr = errors.New("timeout")
-		ctx, cancel := context.WithTimeoutCause(t.Context(), time.Millisecond, timeoutErr)
+		h := retry.Handler(fn, retry.N(input), retry.Constant(1*time.Millisecond))
+		ctx, cancel := context.WithCancel(ctx)
 		defer cancel()
 
-		err := retry.Exec(ctx, func(context.Context) error {
-			return assert.AnError
-		}, retry.Constant(time.Millisecond))
+		if strings.Contains(name, "cancel") {
+			cancel()
+		}
 
-		is := assert.New(t)
-		is.ErrorIs(err, assert.AnError)
-		is.ErrorIs(err, timeoutErr, "context timeout")
-	})
-
-	t.Run("zero times", func(t *testing.T) {
-		var count int
-		err := retry.Exec(t.Context(), func(context.Context) error {
-			count++
-			return assert.AnError
-		}, retry.N(0))
-		is := assert.New(t)
-		is.ErrorIs(err, assert.AnError)
-		is.ErrorIs(err, retry.ErrLimitExceeded)
-		is.Equal(count, 1)
+		res, err := h(ctx, t.Name())
+		return &Output{
+			Attempts: count,
+			Result:   res,
+		}, err
 	})
 }
 
+/*
 func TestDo(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		v, err := retry.Do(t.Context(), func(context.Context) (string, error) {
@@ -112,3 +102,4 @@ func TestDo(t *testing.T) {
 		is.Empty(v)
 	})
 }
+*/

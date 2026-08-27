@@ -1,0 +1,17 @@
+evaltest.T[int,interface {}]{
+  Name: "non-retryable",
+  Input: 401,
+  Output: 401,
+  Error: nil,
+  ErrorString: "",
+  Logs: []interface {}{
+    &evaltest.T[interface {},int]{
+      Name: "request",
+      Input: nil,
+      Output: 401,
+      Error: nil,
+      ErrorString: "",
+      Logs: []interface {}{},
+    },
+  },
+}

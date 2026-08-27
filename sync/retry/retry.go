@@ -13,42 +13,41 @@ var (
 	ErrThrottled     = errors.New("retry: throttled")
 )
 
-func Do[T any](ctx context.Context, fn func(ctx context.Context) (T, error), opts ...Option) (T, error) {
-	var zero T
-	v, err := fn(ctx)
-	if err == nil {
-		return v, nil
-	}
+type handler[K, V any] = func(ctx context.Context, req K) (V, error)
 
-	opt := OptionsFrom(opts...)
-	attempts := opt.Attempts
-	backoff := opt.Backoff
-	throttler := opt.Throttler
-
-	for i := range attempts {
-		if !throttler.Allow() {
-			return zero, errors.Join(ErrThrottled, err)
+func Handler[K, V any](fn handler[K, V], opts ...Option) handler[K, V] {
+	return func(ctx context.Context, req K) (V, error) {
+		var zero V
+		res, err := fn(ctx, req)
+		if err == nil {
+			return res, nil
 		}
-		duration := backoff.At(i)
-		select {
-		case <-time.After(duration):
-			v, err = fn(ctx)
-			if err == nil {
-				throttler.Success()
-				return v, nil
+
+		opt := OptionsFrom(opts...)
+		attempts := opt.Attempts
+		backoff := opt.Backoff
+		throttler := opt.Throttler
+
+		var errs []error
+		for i := range attempts {
+			if !throttler.Allow() {
+				return zero, errors.Join(ErrThrottled, err)
 			}
-			err = fmt.Errorf("retried %d times: %w", i+1, err)
-		case <-ctx.Done():
-			return zero, errors.Join(context.Cause(ctx), err)
+
+			select {
+			case <-ctx.Done():
+				return zero, context.Cause(ctx)
+
+			case <-time.After(backoff.At(i)):
+				res, err = fn(ctx, req)
+				if err == nil {
+					throttler.Success()
+					return res, nil
+				}
+				errs = append(errs, err)
+			}
 		}
+
+		return zero, errors.Join(append(errs, fmt.Errorf("%w: retried %d times", ErrLimitExceeded, attempts))...)
 	}
-
-	return zero, errors.Join(ErrLimitExceeded, err)
-}
-
-func Exec(ctx context.Context, fn func(ctx context.Context) error, opts ...Option) error {
-	_, err := Do(ctx, func(ctx context.Context) (any, error) {
-		return nil, fn(ctx)
-	}, opts...)
-	return err
 }

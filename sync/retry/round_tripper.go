@@ -2,7 +2,7 @@ package retry
 
 import (
 	"context"
-	"errors"
+	"fmt"
 	"net/http"
 	"slices"
 )
@@ -16,40 +16,41 @@ var retryableStatusCodes = []int{
 	http.StatusGatewayTimeout,
 }
 
+var _ http.RoundTripper = (*RoundTripper)(nil)
+
 type RoundTripper struct {
-	http.RoundTripper
-	StatusCodeHandler func(code int) error
-	Options           []Option
+	fn func(ctx context.Context, r *http.Request) (*http.Response, error)
 }
 
-func NewRoundTripper(rt http.RoundTripper, opts ...Option) *RoundTripper {
+func StatusCodeHandler(code int) error {
+	if slices.Contains(retryableStatusCodes, code) {
+		return fmt.Errorf("status code: %d", code)
+	}
+	return nil
+}
+
+func NewRoundTripper(rt http.RoundTripper, statusCodeHandler func(statusCode int) error, opts ...Option) *RoundTripper {
+	if statusCodeHandler == nil {
+		statusCodeHandler = StatusCodeHandler
+	}
 	return &RoundTripper{
-		RoundTripper: rt,
-		StatusCodeHandler: func(code int) error {
-			// NOTE: We need to convert the status code into errors in order to retry it.
-			if slices.Contains(retryableStatusCodes, code) {
-				return errors.New(http.StatusText(code))
+		fn: Handler(func(ctx context.Context, r *http.Request) (*http.Response, error) {
+			resp, err := rt.RoundTrip(r)
+			if err != nil {
+				// This is transport error, don't retry.
+				return nil, err
 			}
 
-			return nil
-		},
-		Options: opts,
+			err = statusCodeHandler(resp.StatusCode)
+			if err != nil {
+				return nil, err
+			}
+
+			return resp, nil
+		}, opts...),
 	}
 }
 
-func (t *RoundTripper) RoundTrip(r *http.Request) (*http.Response, error) {
-	return Do(r.Context(), func(context.Context) (*http.Response, error) {
-		resp, err := t.RoundTripper.RoundTrip(r)
-		if err != nil {
-			// This is transport error, don't retry.
-			return nil, err
-		}
-
-		err = t.StatusCodeHandler(resp.StatusCode)
-		if err != nil {
-			return nil, err
-		}
-
-		return resp, nil
-	}, t.Options...)
+func (rt *RoundTripper) RoundTrip(r *http.Request) (*http.Response, error) {
+	return rt.fn(r.Context(), r)
 }
