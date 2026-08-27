@@ -21,9 +21,6 @@ func Batch[T any](in <-chan T, size int, timeout time.Duration) <-chan []T {
 		defer close(out)
 
 		var batch []T
-		timer := time.NewTimer(timeout)
-		timer.Stop()
-
 		flush := func() {
 			if len(batch) > 0 {
 				out <- batch
@@ -40,16 +37,11 @@ func Batch[T any](in <-chan T, size int, timeout time.Duration) <-chan []T {
 				}
 
 				batch = append(batch, v)
-				if len(batch) == 1 {
-					timer.Reset(timeout)
-				}
-
 				if len(batch) >= size {
-					timer.Stop()
 					flush()
 				}
 
-			case <-timer.C:
+			case <-time.After(timeout):
 				flush()
 			}
 		}
