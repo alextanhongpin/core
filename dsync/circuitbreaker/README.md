@@ -66,7 +66,7 @@ cb := circuitbreaker.New(client, nil) // use default options
 Optionally, you can override the defaults:
 
 ```go
-opts := circuitbreaker.NewOptions()
+opts := circuitbreaker.DefaultConfig()
 opts.FailureThreshold = 10
 opts.OpenTimeout = 30 * time.Second
 cb := circuitbreaker.New(client, opts)

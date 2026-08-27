@@ -3,102 +3,61 @@ package circuitbreaker_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/alextanhongpin/core/sync/circuitbreaker"
-	"github.com/stretchr/testify/assert"
+	"github.com/alextanhongpin/evaltest"
 )
 
-var (
-	ctx     = context.Background()
-	wantErr = errors.New("want error")
-)
+func TestCircuitBreaker(t *testing.T) {
+	type Input struct {
+		Status string
+		N      int
+	}
+	type Output struct {
+		Result string
+		Status string
+	}
+	evaltest.Run(t, func(t *testing.T, ctx context.Context, input Input) (string, error) {
+		var cb *circuitbreaker.CircuitBreaker
+		name := evaltest.Name(ctx)
+		synctest.Test(t, func(t *testing.T) {
+			cb = newCircuitbreaker()
+			cb.SetStatus(circuitbreaker.ParseStatus(input.Status))
+			fn := func(ctx context.Context, name string) (string, error) {
+				if strings.Contains(name, "error") {
+					return "", errors.ErrUnsupported
+				}
+				return name, nil
+			}
+			h := circuitbreaker.Func(fn, cb)
+			for range input.N {
+				res, err := h(ctx, t.Name())
+				evaltest.Log(ctx, evaltest.NewT[any, any]("do", nil, &Output{Result: res, Status: cb.Status().String()}, err))
+			}
+			if strings.Contains(name, "sleep") {
+				time.Sleep(cb.OpenTimeout)
 
-func TestCircuit(t *testing.T) {
-	cb := circuitbreaker.New()
-	cb.BreakDuration = 50 * time.Millisecond
-
-	t.Run("initial", func(t *testing.T) {
-		is := assert.New(t)
-		is.Equal(circuitbreaker.Closed, cb.Status())
-	})
-
-	t.Run("opened", func(t *testing.T) {
-		is := assert.New(t)
-
-		for range cb.FailureThreshold {
-			err := cb.Do(func() error {
-				return wantErr
-			})
-			is.ErrorIs(err, wantErr)
-		}
-		err := cb.Do(func() error {
-			return wantErr
+				for range input.N {
+					err := cb.Do(func() error {
+						return nil
+					})
+					evaltest.Log(ctx, evaltest.NewT[any, any]("sleep", nil, &Output{Result: "", Status: cb.Status().String()}, err))
+				}
+			}
 		})
-		is.ErrorIs(err, circuitbreaker.ErrBrokenCircuit)
-		is.Equal(circuitbreaker.Open, cb.Status())
-	})
-
-	t.Run("half-opened", func(t *testing.T) {
-		time.Sleep(cb.BreakDuration + 5*time.Millisecond)
-		is := assert.New(t)
-		is.Equal(circuitbreaker.HalfOpen, cb.Status())
-	})
-
-	t.Run("closed", func(t *testing.T) {
-		is := assert.New(t)
-
-		for range cb.SuccessThreshold {
-			err := cb.Do(func() error {
-				return nil
-			})
-			is.Nil(err)
-		}
-
-		is.Equal(circuitbreaker.Closed, cb.Status())
+		return cb.Status().String(), nil
 	})
 }
 
-func TestHalfOpenFail(t *testing.T) {
-	cb := circuitbreaker.New()
-	cb.BreakDuration = 50 * time.Millisecond
+func newCircuitbreaker() *circuitbreaker.CircuitBreaker {
+	cfg := circuitbreaker.DefaultConfig()
+	cfg.FailureThreshold = 3
+	cfg.SuccessThreshold = 3
+	cfg.OpenTimeout = 100 * time.Millisecond
 
-	is := assert.New(t)
-	is.Equal(circuitbreaker.Closed, cb.Status())
-
-	// Shift to closed state.
-	for range cb.FailureThreshold {
-		err := cb.Do(func() error {
-			return wantErr
-		})
-		is.NotNil(err)
-	}
-	is.Equal(circuitbreaker.Open, cb.Status())
-
-	time.Sleep(cb.BreakDuration + 5*time.Millisecond)
-	is.Equal(circuitbreaker.HalfOpen, cb.Status())
-
-	// Trigger failure in half-opened state.
-	err := cb.Do(func() error {
-		return wantErr
-	})
-	is.ErrorIs(err, wantErr)
-	is.Equal(circuitbreaker.Open, cb.Status())
-}
-
-func TestSlowCount(t *testing.T) {
-	cb := circuitbreaker.New()
-	cb.SlowCallCount = func(time.Duration) int {
-		// A single slow call will trigger the circuitbreaker to
-		// open.
-		return cb.FailureThreshold
-	}
-	err := cb.Do(func() error {
-		// No error, but the slow call count is incremented.
-		return nil
-	})
-	is := assert.New(t)
-	is.Nil(err)
-	is.Equal(circuitbreaker.Open, cb.Status())
+	return circuitbreaker.New(cfg)
 }

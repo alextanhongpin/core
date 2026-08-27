@@ -1,0 +1,56 @@
+evaltest.T[github.com/alextanhongpin/core/sync/circuitbreaker_test.Input,string]{
+  Name: "forced-open error",
+  Input: circuitbreaker_test.Input{
+    Status: "forced-open",
+    N: 4,
+  },
+  Output: "forced-open",
+  Error: nil,
+  ErrorString: "",
+  Logs: []interface {}{
+    &evaltest.T[interface {},interface {}]{
+      Name: "do",
+      Input: nil,
+      Output: &circuitbreaker_test.Output{
+        Result: "",
+        Status: "forced-open",
+      },
+      Error: &errors.errorString{},
+      ErrorString: "circuitbreaker: opened",
+      Logs: []interface {}{},
+    },
+    &evaltest.T[interface {},interface {}]{
+      Name: "do",
+      Input: nil,
+      Output: &circuitbreaker_test.Output{
+        Result: "",
+        Status: "forced-open",
+      },
+      Error: &errors.errorString{},
+      ErrorString: "circuitbreaker: opened",
+      Logs: []interface {}{},
+    },
+    &evaltest.T[interface {},interface {}]{
+      Name: "do",
+      Input: nil,
+      Output: &circuitbreaker_test.Output{
+        Result: "",
+        Status: "forced-open",
+      },
+      Error: &errors.errorString{},
+      ErrorString: "circuitbreaker: opened",
+      Logs: []interface {}{},
+    },
+    &evaltest.T[interface {},interface {}]{
+      Name: "do",
+      Input: nil,
+      Output: &circuitbreaker_test.Output{
+        Result: "",
+        Status: "forced-open",
+      },
+      Error: &errors.errorString{},
+      ErrorString: "circuitbreaker: opened",
+      Logs: []interface {}{},
+    },
+  },
+}

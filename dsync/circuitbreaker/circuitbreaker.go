@@ -17,18 +17,31 @@ func (s Status) Int() int {
 	return int(s)
 }
 
+func (s Status) String() string {
+	return statusText[s]
+}
+
+var statusText = map[Status]string{
+	Unknown:    "unknown",
+	Closed:     "closed",
+	HalfOpen:   "half-open",
+	Opened:     "opened",
+	Disabled:   "disabled",
+	ForcedOpen: "forced-open",
+}
+
 const (
-	Unknown    Status = 0
-	Closed     Status = 1
-	HalfOpen   Status = 2
-	Opened     Status = 3
-	Disabled   Status = 4
-	ForcedOpen Status = 5
+	Unknown Status = iota
+	Closed
+	HalfOpen
+	Opened
+	Disabled
+	ForcedOpen
 )
 
 var ErrOpened = errors.New("cb: opened")
 
-func NewOptions() *Options {
+func DefaultConfig() *Options {
 	return &Options{
 		FailureThreshold: 100,
 		FailurePeriod:    time.Second,
@@ -76,7 +89,7 @@ type CircuitBreaker struct {
 func New(client *redis.Client, opts *Options) *CircuitBreaker {
 	return &CircuitBreaker{
 		client:  client,
-		options: cmp.Or(opts, NewOptions()),
+		options: cmp.Or(opts, DefaultConfig()),
 	}
 }
 

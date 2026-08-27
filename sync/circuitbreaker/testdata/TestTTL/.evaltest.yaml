@@ -1,0 +1,11 @@
+name: expires
+input: 100
+evals:
+  - name: no error
+    expr: output == 0
+---
+name: ok
+input: 100
+evals:
+  - name: reset
+    expr: output == input

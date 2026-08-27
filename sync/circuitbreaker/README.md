@@ -1,19 +1,19 @@
 # Circuit Breaker
 
-A simple, idiomatic Go circuit breaker implementation with pluggable timing and hooks for observability.
+A simple, idiomatic Go circuit breaker implementation with configurable thresholds and a minimal state machine.
 
 ## Features
 
 - **Closed / Open / Half-Open** states with automatic transitions
-- Configurable error and slow-call thresholds:
-  - `FailureThreshold` (minimum failures)
-  - `FailureRatio` (percentage of failures)
-  - `SlowCallCount` penalty based on call duration
-  - `SuccessThreshold` (minimum successes in half-open)
-- Pluggable clock (`Now`) and timer (`AfterFunc`) for deterministic testing
-- `OnStateChange` hook for logging, metrics, or custom reactions
-- Returns `ErrBrokenCircuit` when calls are rejected
-- Ignores context cancellations and applies heavier penalties on deadlines
+- Configurable thresholds with sliding windows:
+  - `FailureThreshold` and `FailurePeriod` (failures to open within period)
+  - `SuccessThreshold` and `SuccessPeriod` (successes to close within period)
+  - `OpenTimeout` (duration to wait before moving from Open to Half-Open)
+- `FailureCount` and `SlowCallCount` hooks to penalize errors and slow calls
+- Returns `ErrOpened` when calls are rejected
+- Supports `Disabled` and `ForcedOpen` statuses for testing / manual control
+- `Func` generic helper to wrap typed `func(ctx, req) (res, error)` functions
+- HTTP `Transporter` integration that treats 5xx responses as failures
 
 ## Installation
 
@@ -25,23 +25,20 @@ go get github.com/alextanhongpin/core/sync/circuitbreaker
 
 ```go
 import (
-    "context"
     "fmt"
-    "time"
 
     "github.com/alextanhongpin/core/sync/circuitbreaker"
 )
 
 func main() {
-    cb := circuitbreaker.New()
+    cb := circuitbreaker.New(circuitbreaker.DefaultConfig())
 
-    // sample operation
     err := cb.Do(func() error {
         // simulate work or call to remote service
         return nil
     })
 
-    if err == circuitbreaker.ErrBrokenCircuit {
+    if err == circuitbreaker.ErrOpened {
         fmt.Println("circuit is open, request short-circuited")
         return
     }
@@ -55,117 +52,175 @@ func main() {
 }
 ```
 
-## 🚀 Examples
+## Func Helper
 
-### Simple Example
-
-A basic example showing circuit breaker functionality:
-
-```bash
-go run examples/simple/main.go
-```
-
-### Advanced Example
-
-A comprehensive example with metrics, callbacks, and multiple failure scenarios:
-
-```bash
-go run examples/main.go
-```
-
-### HTTP Client Example
-
-Real-world HTTP client integration with circuit breaker:
-
-```bash
-go run examples/http/main.go
-```
-
-### HTTP Transport Integration
-
-Use the provided `Transporter` to wrap any HTTP client:
-
-```go
-client := &http.Client{}
-cb := circuitbreaker.New()
-client.Transport = circuitbreaker.NewTransporter(client.Transport, cb)
-
-// Now all HTTP requests will go through the circuit breaker
-resp, err := client.Get("https://api.example.com/users")
-```
-
-## Advanced Configuration
-
-You can customize defaults by modifying struct fields directly:
-
-```go
-cb := &circuitbreaker.Breaker{
-    BreakDuration:    10 * time.Second,
-    FailureThreshold: 20,
-    FailureRatio:     0.25,
-    SamplingDuration: 30 * time.Second,
-    SuccessThreshold: 3,
-    // penalize 1 error, +5 penalty for context deadlines
-    FailureCount: func(err error) int { /* ... */ },
-    // 1 penalty per full 2s of latency
-    SlowCallCount: func(d time.Duration) int { return int(d/2*time.Second) },
-    // hook called on every state change
-    OnStateChange: func(from, to circuitbreaker.Status) {
-        fmt.Printf("state: %s -> %s\n", from, to)
-    },
-}
-```
-
-## State Machine
-
-1. **Closed**: all calls pass; failures and slow calls are counted.
-2. **Open**: calls immediately reject with `ErrBrokenCircuit`; after `BreakDuration`, transitions to half-open.
-3. **Half-Open**: allows exactly one probe call; if it succeeds and thresholds pass, closes; otherwise reopens.
-
-## Metrics & Observability
-
-The circuit breaker supports pluggable metrics collectors for tracking state transitions, failures, and recoveries. You can use the built-in atomic collector for in-memory stats, or integrate with Prometheus for production monitoring.
-
-### Using the Atomic Metrics Collector (default)
-
-By default, if you do not provide a metrics collector, an atomic in-memory collector is used:
-
-```go
-cb := circuitbreaker.New() // uses AtomicMetricsCollector by default
-```
-
-### Using Prometheus for Metrics
-
-To collect metrics with Prometheus, inject a `PrometheusMetricsCollector`:
+`Func` wraps a typed `func(ctx context.Context, req K) (V, error)` with circuit breaker protection, preserving the original signature:
 
 ```go
 import (
-    "github.com/prometheus/client_golang/prometheus"
+    "context"
+    "fmt"
+
     "github.com/alextanhongpin/core/sync/circuitbreaker"
 )
 
-stateChanges := prometheus.NewCounter(prometheus.CounterOpts{Name: "cb_state_changes", Help: "Circuit breaker state changes."})
-opened := prometheus.NewCounter(prometheus.CounterOpts{Name: "cb_opened", Help: "Circuit opened events."})
-closed := prometheus.NewCounter(prometheus.CounterOpts{Name: "cb_closed", Help: "Circuit closed events."})
-prometheus.MustRegister(stateChanges, opened, closed)
+func main() {
+    cb := circuitbreaker.New(circuitbreaker.DefaultConfig())
 
-metrics := &circuitbreaker.PrometheusMetricsCollector{
-    StateChanges: stateChanges,
-    Opened:       opened,
-    Closed:       closed,
+    // Wrap a typed function with circuit breaker protection.
+    protected := circuitbreaker.Func(func(ctx context.Context, name string) (string, error) {
+        // simulate work or call to remote service
+        return "hello " + name, nil
+    }, cb)
+
+    result, err := protected(context.Background(), "world")
+    if err != nil {
+        fmt.Println("operation failed:", err)
+        return
+    }
+
+    fmt.Println("result:", result)
 }
-cb := circuitbreaker.New(circuitbreaker.WithMetrics(metrics))
 ```
+
+`Func` is useful for wrapping existing APIs or adapting third-party functions with resilience patterns without changing their call sites.
+
+## Configuration
+
+Defaults are provided by `DefaultConfig()`:
+
+```go
+opts := circuitbreaker.DefaultConfig()
+opts.FailureThreshold = 100
+opts.FailurePeriod    = time.Second
+opts.SuccessThreshold = 20
+opts.SuccessPeriod    = time.Second
+opts.OpenTimeout      = time.Minute
+opts.FailureCount = func(cause error) int {
+    // Extra failure weight for deadline-exceeded errors.
+    if errors.Is(cause, context.DeadlineExceeded) {
+        return 2
+    }
+    return 0
+}
+opts.SlowCallCount = func(d time.Duration) int {
+    if d >= time.Minute {
+        return 4
+    }
+    if d >= 30*time.Second {
+        return 2
+    }
+    if d > time.Second {
+        return 1
+    }
+    return 0
+}
+
+cb := circuitbreaker.New(opts)
+```
+
+`New` accepts a nil options pointer and falls back to defaults:
+
+```go
+cb := circuitbreaker.New(nil)
+```
+
+Config fields are public and can be mutated directly after construction:
+
+```go
+cb := circuitbreaker.New(nil)
+cb.OpenTimeout = 100 * time.Millisecond
+cb.FailureThreshold = 10
+```
+
+### How counters work
+
+Each failure increments the failure counter by `1 + FailureCount(err) + SlowCallCount(duration)`, allowing high-severity errors (e.g. timeouts, slow calls) to count for more than one failure. Counters use a sliding TTL window that resets after `FailurePeriod` (or `SuccessPeriod` in Half-Open).
+
+### State control
+
+```go
+cb.SetStatus(circuitbreaker.Opened)
+status := cb.Status() // circuitbreaker.Status
+```
+
+Parse a status string (e.g. from config or persistence):
+
+```go
+status := circuitbreaker.ParseStatus("half-open") // circuitbreaker.HalfOpen
+```
+
+Statuses:
+
+| Constant     | String          | Description                                      |
+|--------------|-----------------|--------------------------------------------------|
+| `Unknown`    | `"unknown"`     | Zero value; not normally used at runtime         |
+| `Closed`     | `"closed"`      | Normal operation — all calls pass through        |
+| `HalfOpen`   | `"half-open"`   | Probe mode — allows limited calls after timeout  |
+| `Opened`     | `"opened"`      | Tripped — calls rejected with `ErrOpened`        |
+| `Disabled`   | `"disabled"`    | Bypass mode — breaker logic is skipped entirely  |
+| `ForcedOpen` | `"forced-open"` | Permanently open until manually changed          |
+
+## State Machine
+
+```
+        failures >= FailureThreshold
+  Closed ──────────────────────────────► Opened
+    ▲                                      │
+    │                                      │ OpenTimeout elapsed
+    │ successes >= SuccessThreshold        ▼
+    └──────────────────────────────── HalfOpen
+                                           │
+                                           │ any failure
+                                           └──────────────► Opened
+```
+
+1. **Closed**: All calls pass through. Each failure increments a TTL counter (reset after `FailurePeriod`). When the counter reaches `FailureThreshold`, the breaker opens.
+2. **Opened**: Calls are immediately rejected with `ErrOpened`. After `OpenTimeout` elapses, the next call transitions the breaker to Half-Open.
+3. **Half-Open**: Probe calls are allowed. Successes increment a TTL counter (reset after `SuccessPeriod`). Once `SuccessThreshold` successes accumulate, the breaker closes. Any failure immediately reopens.
+
+`Disabled` bypasses the breaker and always executes the function. `ForcedOpen` is equivalent to `Opened` but stays open indefinitely until manually changed.
+
+## HTTP Transport Integration
+
+Use the provided `Transporter` to wrap any HTTP client. It treats HTTP 5xx responses as failures in addition to transport-level errors:
+
+```go
+import "net/http"
+
+client := &http.Client{}
+cb := circuitbreaker.New(circuitbreaker.DefaultConfig())
+
+client.Transport = circuitbreaker.NewTransporter(client.Transport, cb)
+
+// Now all HTTP requests will go through the circuit breaker.
+// 5xx responses and network errors both count as failures.
+resp, err := client.Get("https://api.example.com/users")
+if err == circuitbreaker.ErrOpened {
+    // Circuit is open — request was not sent.
+}
+```
+
+`Transporter.RoundTrip` wraps the underlying `RoundTripper` in `cb.Do` and returns `ErrOpened` when the circuit is open.
 
 ## Testing
 
-By injecting a custom `Now` and `AfterFunc`, you can advance or freeze time in tests, and assert transitions via `OnStateChange`.
+The breaker uses real time via `time.Now` for timeouts and TTL expiry. In tests, use short thresholds. For deterministic time control, wrap tests in `synctest.Test` from the standard library's `testing/synctest` package (Go 1.24+):
 
 ```go
-cb := circuitbreaker.New()
-cb.Now = func() time.Time { return startTime }
-cb.AfterFunc = func(d time.Duration, fn func()) *time.Timer {
-    // manual trigger or fake timer
+import "testing/synctest"
+
+func TestBreaker(t *testing.T) {
+    synctest.Test(t, func(t *testing.T) {
+        opts := circuitbreaker.DefaultConfig()
+        opts.FailureThreshold = 3
+        opts.SuccessThreshold = 3
+        opts.OpenTimeout = 100 * time.Millisecond
+        cb := circuitbreaker.New(opts)
+
+        // ... drive the breaker through states
+        time.Sleep(cb.OpenTimeout) // synthetic time inside synctest
+    })
 }
 ```
 
