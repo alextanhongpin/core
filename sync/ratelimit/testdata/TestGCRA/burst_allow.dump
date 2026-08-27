@@ -1,0 +1,19 @@
+evaltest.T[github.com/alextanhongpin/core/sync/ratelimit.GCRAInput,github.com/alextanhongpin/core/sync/ratelimit.GCRAOutput]{
+  Name: "burst allow",
+  Input: ratelimit.GCRAInput{
+    Limit: 2,
+    Period: 1000000000,
+    Burst: 2,
+    Key: "user1",
+    Action: "Allow",
+    N: 0,
+  },
+  Output: ratelimit.GCRAOutput{
+    Allow: true,
+    Remaining: 2,
+    ResetAfter: 0,
+  },
+  Error: nil,
+  ErrorString: "",
+  Logs: []interface {}{},
+}

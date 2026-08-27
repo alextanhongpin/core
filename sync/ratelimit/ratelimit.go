@@ -6,19 +6,38 @@ import (
 	"time"
 )
 
-var (
-	ErrInvalidNumber = errors.New("ratelimit: value must be positive")
-)
+var ErrTooManyRequests = errors.New("too many requests")
 
-func validate(limit int, period time.Duration, burst int) error {
-	if limit <= 0 {
-		return fmt.Errorf("%w: limit", ErrInvalidNumber)
+type ratelimiter interface {
+	Allow(key string) bool
+	AllowN(key string, n int) bool
+	Limit(key string) *Result
+	LimitN(key string, n int) *Result
+}
+
+type Config struct {
+	Limit  int
+	Period time.Duration
+	Burst  int
+}
+
+func DefaultConfig() *Config {
+	return &Config{
+		Limit:  100,
+		Period: time.Minute,
+		Burst:  0,
 	}
-	if period <= 0 {
-		return fmt.Errorf("%w: period", ErrInvalidNumber)
+}
+
+func (cfg *Config) Validate() error {
+	if cfg.Limit <= 0 {
+		return errors.New("limit must be greater than 0")
 	}
-	if burst < 0 {
-		return fmt.Errorf("%w: burst", ErrInvalidNumber)
+	if cfg.Period <= 0 {
+		return errors.New("period must be greater than 0")
+	}
+	if cfg.Burst < 0 {
+		return errors.New("burst must be equal or greater than 0")
 	}
 
 	return nil
@@ -29,6 +48,7 @@ type Result struct {
 	Remaining  int
 	ResetAfter time.Duration
 	RetryAfter time.Duration
+	Limit      int
 }
 
 func (r *Result) String() string {
