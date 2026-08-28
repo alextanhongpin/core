@@ -8,7 +8,7 @@ input:
   calls: 2
 evals:
   - name: error is capacity exceeded
-    expr: output.LastErr == "throttle: capacity exceeded"
+    expr: 'output.LastErr == "throttle: capacity exceeded"'
 ---
 name: within_limit
 description: Single call within limit should succeed
@@ -19,7 +19,7 @@ input:
   calls: 1
 evals:
   - name: no error
-    expr: output.LastErr == "" and err == nil
+    expr: 'output.LastErr == "" and err == nil'
 ---
 name: backlog_success
 description: Two calls with limit 1 and backlog 1 should succeed (primary + backlog)
@@ -30,7 +30,7 @@ input:
   calls: 2
 evals:
   - name: no error
-    expr: output.LastErr == "" and err == nil
+    expr: 'output.LastErr == "" and err == nil'
 ---
 name: backlog_exhausted
 description: Three calls with limit 1 and backlog 1 should exceed capacity on third call
@@ -41,7 +41,7 @@ input:
   calls: 3
 evals:
   - name: error is capacity exceeded
-    expr: output.LastErr == "throttle: capacity exceeded"
+    expr: 'output.LastErr == "throttle: capacity exceeded"'
 ---
 name: limit_zero_invalid
 description: Creating throttler with limit 0 should fail

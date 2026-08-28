@@ -1,0 +1,15 @@
+evaltest.T[github.com/alextanhongpin/core/sync/throttle.ThrottleInput,github.com/alextanhongpin/core/sync/throttle.ThrottleOutput]{
+  Name: "backlog_success",
+  Input: throttle.ThrottleInput{
+    Limit: 1,
+    BacklogLimit: 1,
+    BacklogTimeoutMs: 1000,
+    Calls: 2,
+  },
+  Output: throttle.ThrottleOutput{
+    LastErr: "",
+  },
+  Error: nil,
+  ErrorString: "",
+  Logs: []interface {}{},
+}

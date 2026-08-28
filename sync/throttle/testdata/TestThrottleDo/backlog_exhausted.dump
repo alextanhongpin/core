@@ -1,0 +1,15 @@
+evaltest.T[github.com/alextanhongpin/core/sync/throttle.ThrottleInput,github.com/alextanhongpin/core/sync/throttle.ThrottleOutput]{
+  Name: "backlog_exhausted",
+  Input: throttle.ThrottleInput{
+    Limit: 1,
+    BacklogLimit: 1,
+    BacklogTimeoutMs: 1000,
+    Calls: 3,
+  },
+  Output: throttle.ThrottleOutput{
+    LastErr: "throttle: capacity exceeded",
+  },
+  Error: nil,
+  ErrorString: "",
+  Logs: []interface {}{},
+}
