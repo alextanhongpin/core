@@ -1,6 +1,7 @@
 package ratelimit
 
 import (
+	"cmp"
 	"sync"
 	"time"
 )
@@ -18,7 +19,8 @@ type GCRA struct {
 	period int64
 }
 
-func NewGCRA(cfg Config) *GCRA {
+func NewGCRA(cfg *Config) *GCRA {
+	cfg = cmp.Or(cfg, DefaultConfig())
 	if err := cfg.Validate(); err != nil {
 		panic(err)
 	}
@@ -54,26 +56,33 @@ func (r *GCRA) LimitN(key string, n int) *Result {
 	defer r.mu.Unlock()
 
 	quantity := int64(n)
-	remaining := int64(-1)
 	delta := r.period / r.limit
 	now := time.Now().UnixNano()
 
-	last := r.state[key]
-	last = max(last, now)
-	if last-r.burst*delta <= now {
+	last := max(r.state[key], now)
+	allow := last-r.burst*delta <= now
+	if allow {
 		last += quantity * delta
-		up, lo := now+delta, last-r.burst*delta
-		remaining = max(0, (up-lo)/delta)
 	}
 	r.state[key] = last
 
-	retryAfter := max(0, last-r.burst*delta-now)
+	var retryAfter int64
+	if !allow {
+		retryAfter = last - r.burst*delta - now
+	}
+	remaining := int64(0)
+	if allow {
+		up := now + delta
+		lo := last - r.burst*delta
+		rem := max((up-lo)/delta, 0)
+		remaining = rem
+	}
 
 	return &Result{
-		Allow:      remaining >= 0,
-		Remaining:  int(max(0, remaining)),
-		RetryAfter: time.Duration(retryAfter),
-		ResetAfter: time.Duration(retryAfter),
+		Allow:      allow,
+		Remaining:  int(remaining),
+		RetryAfter: time.Duration(max(0, retryAfter)),
+		ResetAfter: time.Duration(max(0, retryAfter)),
 		Limit:      int(r.limit),
 	}
 }

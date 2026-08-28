@@ -6,17 +6,17 @@ import (
 	"net/http"
 )
 
-type handler[K, V any] func(context.Context, K) (V, error)
+type fun[K, V any] func(context.Context, K) (V, error)
 
-type HandlerConfig[T any] struct {
+type FuncConfig[T any] struct {
 	RateLimiter ratelimiter
-	NewKey      func(context.Context, T) (string, error)
+	KeyFn       func(context.Context, T) (string, error)
 }
 
-func Handler[K, V any](fn handler[K, V], cfg HandlerConfig[K]) handler[K, V] {
+func Func[K, V any](fn fun[K, V], cfg FuncConfig[K]) fun[K, V] {
 	return func(ctx context.Context, req K) (V, error) {
 		var zero V
-		key, err := cfg.NewKey(ctx, req)
+		key, err := cfg.KeyFn(ctx, req)
 		if err != nil {
 			return zero, err
 		}
@@ -28,9 +28,9 @@ func Handler[K, V any](fn handler[K, V], cfg HandlerConfig[K]) handler[K, V] {
 	}
 }
 
-func HTTP(next http.Handler, cfg HandlerConfig[*http.Request]) http.Handler {
+func HTTP(next http.Handler, cfg FuncConfig[*http.Request]) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		key, err := cfg.NewKey(r.Context(), r)
+		key, err := cfg.KeyFn(r.Context(), r)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
