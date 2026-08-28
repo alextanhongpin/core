@@ -3,7 +3,7 @@ package promise_test
 import (
 	"context"
 	"errors"
-	"fmt"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -31,7 +31,7 @@ func TestPromiseWithContext(t *testing.T) {
 		wg.Go(func() {
 			res, err := p.Await()
 			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
+				t.Fatalf("got error: %v", err)
 			}
 			if res != 42 {
 				t.Fatalf("want 42, got %d", res)
@@ -99,7 +99,7 @@ func TestPromiseStatus(t *testing.T) {
 	// Wait for completion
 	res, err := p.Await()
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatalf("got error: %v", err)
 	}
 	if res != 42 {
 		t.Fatalf("want 42, got %d", res)
@@ -219,7 +219,7 @@ func TestPromisesRace(t *testing.T) {
 		}),
 	)
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatalf("got error: %v", err)
 	}
 	if res != 2 {
 		t.Fatalf("want fastest promise (2), got %d", res)
@@ -238,7 +238,7 @@ func TestPromisesAny(t *testing.T) {
 	)
 
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatalf("got error: %v", err)
 	}
 	if res != 2 {
 		t.Fatalf("want successful promise (2), got %d", res)
@@ -272,8 +272,7 @@ func TestPromisesAnyAllRejected(t *testing.T) {
 }
 
 func TestMap(t *testing.T) {
-	m := promise.NewMap[string, int]()
-	ctx := t.Context()
+	m := promise.NewMap[string, int](t.Context())
 
 	var counter atomic.Int32
 	var wg sync.WaitGroup
@@ -282,13 +281,17 @@ func TestMap(t *testing.T) {
 
 	for range n {
 		wg.Go(func() {
-			res, err := m.Do(ctx, t.Name(), func(ctx context.Context) (int, error) {
-				<-ch
-				counter.Add(1)
-				return 42, nil
-			})
+			p, loaded, err := m.LoadOrCreate(t.Name())
 			if err != nil {
-				t.Errorf("unexpected error: %v", err)
+				t.Errorf("got error: %v", err)
+			}
+			if !loaded {
+				counter.Add(1)
+				p.Resolve(42)
+			}
+			res, err := p.Await()
+			if err != nil {
+				t.Errorf("got error: %v", err)
 			}
 			if res != 42 {
 				t.Errorf("want 42, got %d", res)
@@ -304,24 +307,38 @@ func TestMap(t *testing.T) {
 }
 
 func TestMapClear(t *testing.T) {
-	ctx := t.Context()
-	m := promise.NewMap[string, int]()
-
-	// Add some promises
-	n := 3
-	for i := range n {
-		key := fmt.Sprintf("key:%d", i)
-		m.Do(ctx, key, func(ctx context.Context) (int, error) {
-			return 42, nil
-		})
+	m := promise.NewMap[string, int](t.Context())
+	p, loaded, err := m.LoadOrCreate(t.Name())
+	if err != nil {
+		t.Fatalf("got error: %v", err)
 	}
-	if m.Size() != 3 {
-		t.Fatalf("want 3 promises, got %d", m.Size())
+	if loaded {
+		t.Fatal("loaded: want false, got true")
+	}
+	p.Resolve(42)
+	res, err := p.Await()
+	if err != nil {
+		t.Fatalf("got error: %v", err)
+	}
+	if res != 42 {
+		t.Fatalf("want 42, got %d", res)
 	}
 
-	m.Clear()
+	_, loaded, err = m.LoadOrCreate(t.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !loaded {
+		t.Fatalf("loaded: want true, got %v", loaded)
+	}
 
-	if m.Size() != 0 {
-		t.Fatalf("want 0 promises after clear, got %d", m.Size())
+	runtime.GC()
+
+	_, loaded, err = m.LoadOrCreate(t.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded {
+		t.Fatalf("loaded: want false, got %v", loaded)
 	}
 }

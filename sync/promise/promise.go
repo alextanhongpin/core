@@ -65,28 +65,28 @@ func (p *Promise[T]) run(ctx context.Context, fn handler[T]) {
 
 func Resolve[T any](ctx context.Context, v T) *Promise[T] {
 	p, _ := Deferred[T](ctx)
-	p.resolve(v)
+	p.Resolve(v)
 	return p
 }
 
 func Reject[T any](ctx context.Context, err error) *Promise[T] {
 	p, _ := Deferred[T](ctx)
-	p.reject(err)
+	p.Reject(err)
 	return p
 }
 
 func WithResolvers[T any](ctx context.Context) (p *Promise[T], resolve func(T), reject func(error)) {
 	p, _ = Deferred[T](ctx)
-	return p, p.resolve, p.reject
+	return p, p.Resolve, p.Reject
 }
 
-func (p *Promise[T]) resolve(v T) {
+func (p *Promise[T]) Resolve(v T) {
 	p.once.Do(func() {
 		p.ch <- result[T]{Data: v}
 	})
 }
 
-func (p *Promise[T]) reject(err error) {
+func (p *Promise[T]) Reject(err error) {
 	p.once.Do(func() {
 		p.ch <- result[T]{Error: err}
 	})
@@ -213,59 +213,11 @@ func AllSettled[T any](promises ...*Promise[T]) []*Result[T] {
 	return res
 }
 
-type Map[K comparable, V any] struct {
-	sync.Map
-}
+type Map[K comparable, V any] = Cache[K, Promise[V]]
 
-func NewMap[K comparable, V any]() *Map[K, V] {
-	return &Map[K, V]{}
-}
-
-func (m *Map[K, V]) Resolve(ctx context.Context, key K, val V) {
-	v, loaded := m.Map.LoadOrStore(key, Resolve(ctx, val))
-	if loaded {
-		p := v.(*Promise[V])
-		p.resolve(val)
-	}
-}
-
-func (m *Map[K, V]) Reject(ctx context.Context, key K, err error) {
-	v, loaded := m.Map.LoadOrStore(key, Reject[V](ctx, err))
-	if loaded {
-		p := v.(*Promise[V])
-		p.reject(err)
-	}
-}
-
-func (m *Map[K, V]) Delete(ctx context.Context, key K, err error) {
-	v, ok := m.Map.LoadAndDelete(key)
-	if ok {
-		p := v.(*Promise[V])
-		p.reject(err)
-	}
-}
-
-func (m *Map[K, V]) Defer(ctx context.Context, key K) *Promise[V] {
-	d, _ := Deferred[V](ctx)
-	v, _ := m.Map.LoadOrStore(key, d)
-	return v.(*Promise[V])
-}
-
-func (m *Map[K, V]) Do(ctx context.Context, key K, fn handler[V]) (V, error) {
-	d, ctx := Deferred[V](ctx)
-	v, loaded := m.Map.LoadOrStore(key, d)
-	p := v.(*Promise[V])
-	if !loaded {
-		p.run(ctx, fn)
-	}
-	return p.Await()
-}
-
-func (m *Map[K, V]) Size() int {
-	var count int
-	m.Map.Range(func(key, value any) bool {
-		count++
-		return true
+func NewMap[K comparable, V any](ctx context.Context) *Map[K, V] {
+	return NewCache(func(K) (*Promise[V], error) {
+		d, _ := Deferred[V](ctx)
+		return d, nil
 	})
-	return count
 }
