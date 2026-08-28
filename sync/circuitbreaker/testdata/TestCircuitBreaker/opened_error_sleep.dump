@@ -56,7 +56,7 @@ evaltest.T[github.com/alextanhongpin/core/sync/circuitbreaker_test.Input,string]
       Name: "sleep",
       Input: nil,
       Output: &circuitbreaker_test.Output{
-        Result: "TestCircuitBreaker/opened_error_sleep",
+        Result: "",
         Status: "half-open",
       },
       Error: nil,
@@ -67,7 +67,7 @@ evaltest.T[github.com/alextanhongpin/core/sync/circuitbreaker_test.Input,string]
       Name: "sleep",
       Input: nil,
       Output: &circuitbreaker_test.Output{
-        Result: "TestCircuitBreaker/opened_error_sleep",
+        Result: "",
         Status: "half-open",
       },
       Error: nil,
@@ -78,7 +78,7 @@ evaltest.T[github.com/alextanhongpin/core/sync/circuitbreaker_test.Input,string]
       Name: "sleep",
       Input: nil,
       Output: &circuitbreaker_test.Output{
-        Result: "TestCircuitBreaker/opened_error_sleep",
+        Result: "",
         Status: "closed",
       },
       Error: nil,
@@ -89,7 +89,7 @@ evaltest.T[github.com/alextanhongpin/core/sync/circuitbreaker_test.Input,string]
       Name: "sleep",
       Input: nil,
       Output: &circuitbreaker_test.Output{
-        Result: "TestCircuitBreaker/opened_error_sleep",
+        Result: "",
         Status: "closed",
       },
       Error: nil,

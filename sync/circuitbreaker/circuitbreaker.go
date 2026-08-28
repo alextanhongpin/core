@@ -47,7 +47,7 @@ const (
 
 var ErrOpened = errors.New("circuitbreaker: opened")
 
-type Options struct {
+type Config struct {
 	FailureThreshold int
 	FailurePeriod    time.Duration
 	SuccessThreshold int
@@ -57,8 +57,8 @@ type Options struct {
 	SlowCallCount    func(duration time.Duration) int
 }
 
-func NewOptions() *Options {
-	return &Options{
+func DefaultConfig() *Config {
+	return &Config{
 		FailureThreshold: 100,
 		FailurePeriod:    time.Second,
 		SuccessThreshold: 20,
@@ -86,51 +86,42 @@ func NewOptions() *Options {
 	}
 }
 
+var _ circuitbreaker = (*CircuitBreaker)(nil)
+
 // CircuitBreaker ...
 type CircuitBreaker struct {
-	*Options
-	mu      sync.RWMutex
-	timeout time.Time
-	status  Status
-	counter *TTL
+	*Config
+	mu            sync.RWMutex
+	counter       int
+	counterExpiry time.Time
+	status        Status
+	timeout       time.Time
 }
 
-func New(opts *Options) *CircuitBreaker {
-	o := cmp.Or(opts, NewOptions())
+func New(cfg *Config) *CircuitBreaker {
 	return &CircuitBreaker{
-		Options: o,
-		status:  Closed,
-		counter: &TTL{},
+		Config: cmp.Or(cfg, DefaultConfig()),
+		status: Closed,
 	}
 }
 
-type handler[K, V any] = func(context.Context, K) (V, error)
-
-func (cb *CircuitBreaker) Handler[K, V any](fn handler[K, V]) handler[K, V] {
-	return func(ctx context.Context, req K) (V, error) {
-		return cb.Do(ctx, fn, req)
-	}
-}
-
-func (cb *CircuitBreaker) Do[K, V any](ctx context.Context, fn func(context.Context, K) (V, error), req K) (V, error) {
+func (cb *CircuitBreaker) Do(fn func() error) error {
 	cb.mu.Lock()
 	defer cb.mu.Unlock()
-
-	var zero V
 
 	status := cb.begin()
 	switch status {
 	case Closed, HalfOpen:
 		start := time.Now()
-		res, err := fn(ctx, req)
+		err := fn()
 		if err != nil || status == HalfOpen {
 			cb.commit(err, time.Since(start))
 		}
-		return res, err
+		return err
 	case Opened, ForcedOpen:
-		return zero, ErrOpened
+		return ErrOpened
 	case Disabled:
-		return fn(ctx, req)
+		return fn()
 	default:
 		panic("unknown status")
 	}
@@ -185,13 +176,15 @@ func (cb *CircuitBreaker) onOpened() Status {
 
 func (cb *CircuitBreaker) onClosed() Status {
 	cb.status = Closed
-	cb.counter.Reset()
+	cb.counter = 0
+	cb.counterExpiry = time.Time{}
 	return Closed
 }
 
 func (cb *CircuitBreaker) onHalfOpened() Status {
 	cb.status = HalfOpen
-	cb.counter.Reset()
+	cb.counter = 0
+	cb.counterExpiry = time.Time{}
 	cb.timeout = time.Time{}
 	return HalfOpen
 }
@@ -200,11 +193,10 @@ func (cb *CircuitBreaker) halfOpen(failureCount, successCount int) Status {
 	// If success.
 	if failureCount == 0 {
 		// Increment success counter.
-		cb.counter.Add(successCount)
-		cb.counter.SetExpiry(cb.SuccessPeriod)
+		totalCount := cb.inc(successCount, cb.SuccessPeriod)
 
 		// If success count threshold reached.
-		if cb.counter.Load() >= cb.SuccessThreshold {
+		if totalCount >= cb.SuccessThreshold {
 			return cb.onClosed()
 		}
 
@@ -216,13 +208,21 @@ func (cb *CircuitBreaker) halfOpen(failureCount, successCount int) Status {
 
 func (cb *CircuitBreaker) close(failureCount int) Status {
 	// Increment failure counter.
-	cb.counter.Add(failureCount)
-	cb.counter.SetExpiry(cb.FailurePeriod)
+	totalCount := cb.inc(failureCount, cb.FailurePeriod)
 
 	// If failure threshold exceeded
-	if cb.counter.Load() >= cb.FailureThreshold {
+	if totalCount >= cb.FailureThreshold {
 		return cb.onOpened()
 	}
 
 	return Closed
+}
+
+func (cb *CircuitBreaker) inc(count int, ttl time.Duration) int {
+	if !time.Now().Before(cb.counterExpiry) {
+		cb.counter = 0
+	}
+	cb.counter += count
+	cb.counterExpiry = time.Now().Add(ttl)
+	return cb.counter
 }

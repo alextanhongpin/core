@@ -25,34 +25,39 @@ func TestCircuitBreaker(t *testing.T) {
 		var cb *circuitbreaker.CircuitBreaker
 		name := evaltest.Name(ctx)
 		synctest.Test(t, func(t *testing.T) {
-			opts := circuitbreaker.NewOptions()
-			opts.FailureThreshold = 3
-			opts.SuccessThreshold = 3
-			opts.OpenTimeout = 100 * time.Millisecond
-
-			cb = circuitbreaker.New(opts)
+			cb = newCircuitbreaker()
 			cb.SetStatus(circuitbreaker.ParseStatus(input.Status))
-			h := cb.Handler(func(ctx context.Context, name string) (string, error) {
+			fn := func(ctx context.Context, name string) (string, error) {
 				if strings.Contains(name, "error") {
 					return "", errors.ErrUnsupported
 				}
 				return name, nil
-			})
+			}
+			h := circuitbreaker.Func(fn, cb)
 			for range input.N {
 				res, err := h(ctx, t.Name())
 				evaltest.Log(ctx, evaltest.NewT[any, any]("do", nil, &Output{Result: res, Status: cb.Status().String()}, err))
 			}
 			if strings.Contains(name, "sleep") {
-				time.Sleep(opts.OpenTimeout)
+				time.Sleep(cb.OpenTimeout)
 
 				for range input.N {
-					res, err := cb.Do(ctx, func(ctx context.Context, name string) (string, error) {
-						return name, nil
-					}, t.Name())
-					evaltest.Log(ctx, evaltest.NewT[any, any]("sleep", nil, &Output{Result: res, Status: cb.Status().String()}, err))
+					err := cb.Do(func() error {
+						return nil
+					})
+					evaltest.Log(ctx, evaltest.NewT[any, any]("sleep", nil, &Output{Result: "", Status: cb.Status().String()}, err))
 				}
 			}
 		})
 		return cb.Status().String(), nil
 	})
+}
+
+func newCircuitbreaker() *circuitbreaker.CircuitBreaker {
+	cfg := circuitbreaker.DefaultConfig()
+	cfg.FailureThreshold = 3
+	cfg.SuccessThreshold = 3
+	cfg.OpenTimeout = 100 * time.Millisecond
+
+	return circuitbreaker.New(cfg)
 }
