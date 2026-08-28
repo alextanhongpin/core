@@ -1,6 +1,6 @@
 module github.com/alextanhongpin/core/sync/snapshot
 
-go 1.24.2
+go 1.27.0
 
 require github.com/stretchr/testify v1.10.0
 

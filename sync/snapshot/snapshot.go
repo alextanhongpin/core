@@ -3,117 +3,126 @@
 package snapshot
 
 import (
-	"context"
-	"errors"
+	"cmp"
+	"slices"
 	"sync"
 	"time"
 )
 
-var ErrTerminated = errors.New("snapshot: terminated")
-
-type Event struct {
-	Count  int
-	Policy Policy
-}
-
 type Policy struct {
-	Every    int
-	Interval time.Duration
+	Changes int
+	After   time.Duration
 }
 
 func NewOptions() []Policy {
 	return []Policy{
-		{Every: 1_000, Interval: time.Second},
-		{Every: 100, Interval: 10 * time.Second},
-		{Every: 10, Interval: time.Minute},
-		{Every: 1, Interval: time.Hour},
+		{Changes: 1_000, After: time.Second},
+		{Changes: 100, After: 10 * time.Second},
+		{Changes: 10, After: time.Minute},
+		{Changes: 1, After: time.Hour},
 	}
 }
 
 type Background struct {
-	opts []Policy
-	ch   chan int
-	ctx  context.Context
-	fn   func(ctx context.Context, evt Event)
+	*Broadcast[Policy]
+	policies []Policy
+	ch       chan int
+	done     chan struct{}
+	interval time.Duration
 }
 
-func New(ctx context.Context, fn func(context.Context, Event), opts ...Policy) (*Background, func()) {
+type Config struct {
+	Policies []Policy
+	Interval time.Duration
+}
+
+func New(cfg Config) (*Background, func()) {
+	interval := cmp.Or(cfg.Interval, minInterval(cfg.Policies))
+	if interval == 0 {
+		panic("snapshot: interval must be non-zero")
+	}
+	if len(cfg.Policies) == 0 {
+		panic("snapshot: policies is empty")
+	}
+	slices.SortFunc(cfg.Policies, func(a, b Policy) int {
+		return cmp.Compare(a.After, b.After)
+	})
+	b, stop := NewBroadcast[Policy]()
 	bg := &Background{
-		opts: opts,
-		ch:   make(chan int),
-		fn:   fn,
+		Broadcast: b,
+		ch:        make(chan int),
+		done:      make(chan struct{}),
+		policies:  cfg.Policies,
+		interval:  interval,
 	}
-	ctx, cancel := context.WithCancelCause(ctx)
-	stop := bg.init(ctx)
-	bg.ctx = ctx
-
-	return bg, func() {
-		cancel(ErrTerminated)
-		stop()
-	}
-}
-
-func (b *Background) Inc(n int) error {
-	select {
-	case <-b.ctx.Done():
-		return context.Cause(b.ctx)
-	case b.ch <- n:
-		return nil
-	}
-}
-
-func (b *Background) init(ctx context.Context) func() {
-	var count int
 
 	var wg sync.WaitGroup
-	wg.Add(len(b.opts))
+	wg.Go(bg.loop)
+	return bg, sync.OnceFunc(func() {
+		close(bg.done)
+		wg.Wait()
+		stop()
+	})
+}
 
-	ch := make(chan Policy)
+// Inc increments the counter by 1. Calls Add(1).
+func (b *Background) Inc() {
+	b.Add(1)
+}
 
-	for _, p := range b.opts {
-		go func() {
-			defer wg.Done()
-
-			t := time.NewTicker(p.Interval)
-			defer t.Stop()
-
-			for {
-				select {
-				case <-ctx.Done():
-					return
-				case <-t.C:
-					select {
-					case ch <- p:
-					case <-ctx.Done():
-						return
-					}
-				}
-			}
-		}()
+// Add increments the counter by n.
+func (b *Background) Add(n int) {
+	select {
+	case <-b.done:
+		return
+	case b.ch <- n:
 	}
+}
 
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		for {
-			select {
-			case <-ctx.Done():
+func (b *Background) loop() {
+	defer close(b.ch)
+
+	var count int
+	last := time.Now()
+	interval := minInterval(b.policies)
+
+	flush := func(n int) {
+		count += n
+		elapsed := time.Since(last)
+		for _, p := range b.policies {
+			if elapsed < p.After {
 				return
-			case n := <-b.ch:
-				count += n
-			case p := <-ch:
-				if count < p.Every {
-					continue
-				}
-				evt := Event{
-					Count:  count,
-					Policy: p,
-				}
+			}
+			if count >= p.Changes {
 				count = 0
-				b.fn(ctx, evt)
+				last = time.Now()
+				b.Send(p)
+				return
 			}
 		}
-	}()
+	}
+	defer flush(0)
 
-	return wg.Wait
+	for {
+		select {
+		case <-b.done:
+			return
+		case <-time.After(interval):
+			flush(0)
+		case n := <-b.ch:
+			flush(n)
+		}
+	}
+}
+
+func minInterval(policies []Policy) time.Duration {
+	// Take the first non-zero duration.
+	// It can be zero, essentially meaning always trigger when reach the amount.
+	for _, p := range policies {
+		if p.After != 0 {
+			return p.After
+		}
+	}
+
+	panic("snapshot: zero interval")
 }
