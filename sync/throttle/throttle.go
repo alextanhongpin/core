@@ -19,8 +19,8 @@ type Config struct {
 	Limit          int
 }
 
-// NewConfig creates a default, valid Config.
-func NewConfig() *Config {
+// DefaultConfig creates a default, valid Config.
+func DefaultConfig() *Config {
 	return &Config{
 		Limit:          1000,
 		BacklogLimit:   100,
@@ -73,9 +73,9 @@ type Throttler struct {
 
 // New creates and initializes a new Throttler.
 func New(cfg *Config) *Throttler {
-	cfg = cmp.Or(cfg, NewConfig())
-	if cfg.Limit <= 0 {
-		panic(errors.New("throttle: limit must be greater than 0"))
+	cfg = cmp.Or(cfg, DefaultConfig())
+	if err := cfg.Validate(); err != nil {
+		panic(err)
 	}
 
 	limit := cfg.Limit

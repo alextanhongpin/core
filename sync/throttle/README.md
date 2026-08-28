@@ -1,19 +1,19 @@
 # throttle
 
-A small Go package for rate-limiting work with a primary limit and an optional backlog queue. It is implemented with buffered channels and provides back-pressure via `ErrCapacityExceeded` and timeout via `ErrTimeout`.
+A small Go package for rate-limiting work with a primary concurrency limit and an optional backlog queue. It is implemented with buffered channels and provides back-pressure via `ErrCapacityExceeded` and timeout via `ErrTimeout`.
 
 ## Overview
 
 `Throttler` controls how many operations can run concurrently.
 
 * `Limit` – number of concurrent slots in the primary pool.
-* `BacklogLimit` – additional queued slots that can be waited on. When the primary pool is exhausted a caller can still grab a backlog token and then wait for a primary slot to free.
-* `BacklogTimeout` – maximum time a caller is allowed to wait in the backlog before the context is cancelled with `ErrTimeout`.
+* `BacklogLimit` – additional queued slots. When the primary pool is exhausted a caller can still take a backlog token and then wait for a primary slot to free.
+* `BacklogTimeout` – maximum time a caller is allowed to wait for a primary slot after acquiring a backlog token. The wait is enforced with `context.WithTimeoutCause` and fails with `ErrTimeout`.
 
 The design is deliberately simple:
-* tokens are represented by `struct{}` values in two buffered channels
-* `New` pre-fills `ch` with `Limit` tokens and `backlogCh` with `Limit+BacklogLimit` tokens
-* `Do` tries to take a backlog token, then a primary token, runs `fn`, and returns tokens on exit
+* tokens are `struct{}` values in two buffered channels
+* `New` pre-fills `ch` with `Limit` tokens and `backlogCh` with `Limit + BacklogLimit` tokens
+* `Do` tries to take a backlog token non-blocking, then takes a primary token with timeout, runs `fn`, and returns both tokens on exit
 
 This gives you a bounded concurrency primitive with graceful degradation: when both pools are empty `Do` returns `ErrCapacityExceeded` immediately.
 
@@ -36,15 +36,14 @@ import (
 )
 
 func main() {
-	cfg := throttle.NewConfig()
+	cfg := throttle.DefaultConfig()
 	cfg.Limit = 3
 	cfg.BacklogLimit = 2
 	cfg.BacklogTimeout = 5 * time.Second
 
-	t, err := throttle.New(cfg)
-	if err != nil { panic(err) }
+	t := throttle.New(cfg)
 
-	err = t.Do(context.Background(), func(ctx context.Context) error {
+	err := t.Do(context.Background(), func(ctx context.Context) error {
 		fmt.Println("doing work")
 		time.Sleep(1 * time.Second)
 		return nil
@@ -68,7 +67,7 @@ type Config struct {
 }
 ```
 
-`NewConfig()` returns a sensible default:
+`DefaultConfig()` returns a sensible default:
 
 ```go
 Limit:           1000
@@ -77,7 +76,6 @@ BacklogTimeout:  10 * time.Second
 ```
 
 `Validate()` checks:
-
 * `Limit > 0`
 * `BacklogLimit >= 0`
 * `BacklogTimeout >= 0`
@@ -85,10 +83,10 @@ BacklogTimeout:  10 * time.Second
 ### New
 
 ```go
-func New(config *Config) (*Throttler, error)
+func New(cfg *Config) *Throttler
 ```
 
-Creates a new throttler. `nil` config is replaced with `NewConfig()`. Returns an error if `Limit <= 0`.
+Creates a new throttler. `nil` config is replaced with `DefaultConfig()`. Panics if `Limit <= 0`.
 
 ### Do
 
@@ -96,22 +94,19 @@ Creates a new throttler. `nil` config is replaced with `NewConfig()`. Returns an
 func (t *Throttler) Do(ctx context.Context, fn func(context.Context) error) error
 ```
 
-Attempts to acquire a token within the configured `BacklogTimeout`.
+Attempts to acquire a token within `t.BacklogTimeout`.
 
 * Returns `nil` on success, `fn` is executed.
-* Returns `ErrTimeout` if the context is cancelled or the internal timeout expires.
-* Returns `ErrCapacityExceeded` if both `backlogCh` and `ch` are empty at call time.
+* Returns `ErrTimeout` if the context is cancelled or the configured timeout expires.
+* Returns `ErrCapacityExceeded` if `backlogCh` is empty at call time.
 
-The acquisition order is:
-
-1. non-blocking take from `backlogCh`
-2. blocked take from `ch`
+Acquisition order:
+1. non-blocking take from `backlogCh`; if empty return `ErrCapacityExceeded`
+2. take from `ch` with timeout derived from `BacklogTimeout` and the incoming context
 3. run `fn`
-4. return tokens to both channels on success
+4. return tokens to both channels on exit via deferred `select` with default to avoid deadlock
 
-If the backlog take fails the call fails fast with `ErrCapacityExceeded`.
-
-## Errors
+### Errors
 
 ```go
 var (
@@ -138,7 +133,7 @@ See `README_TESTS.md` for details.
 
 ## Notes
 
-* The throttler is not safe for reuse across `Close`; no Close method is provided in this version – channels are left for GC when the throttler is discarded.
+* The throttler has no `Close` method; channels are left for GC when the throttler is discarded.
 * Tokens are returned via `select` with default to avoid dead-lock on shutdown.
 * For production use consider adding metrics around `ErrCapacityExceeded` and `ErrTimeout` rates.
 
@@ -147,25 +142,13 @@ See `README_TESTS.md` for details.
 The package provides a generic helper in `func.go` for wrapping request functions with throttling:
 
 ```go
-package throttle
-
-import "context"
-
-type throttler interface {
-	Throttle(ctx context.Context, fn func(context.Context) error) error
-}
-
 type fun[K, V any] = func(ctx context.Context, req K) (V, error)
 
-func Func[K, V any](fn fun[K, V], t throttler) fun[K, V] {
-	return func(ctx context.Context, req K) (res V, err error) {
-		err = t.Throttle(ctx, func(ctx context.Context) error {
-			res, err = fn(ctx, req)
-			return err
-		})
-		return
-	}
+type throttler interface {
+	Do(ctx context.Context, fn func(context.Context) error) error
 }
+
+func Func[K, V any](fn fun[K, V], t throttler) fun[K, V]
 ```
 
-`Func` adapts a `func(context.Context, K) (V, error)` to run under a `throttler`. The returned function acquires a throttle token via `t.Throttle` before invoking the original `fn`. This is useful for decorating service methods with rate limiting without changing their signatures.
+`Func` adapts `func(context.Context, K) (V, error)` to run under a `throttler`. The returned function acquires a throttle token via `t.Do` before invoking the original `fn`. This is useful for decorating service methods with rate limiting without changing their signatures.
