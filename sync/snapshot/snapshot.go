@@ -26,7 +26,7 @@ func DefaultPolicies() []Policy {
 	}
 }
 
-type Background struct {
+type Snapshot struct {
 	*Config
 	*broadcast.Broadcast[Policy]
 	ch   chan int
@@ -52,7 +52,7 @@ func (cfg *Config) Validate() error {
 	return nil
 }
 
-func New(cfg *Config) (*Background, func()) {
+func New(cfg *Config) (*Snapshot, func()) {
 	if err := cfg.Validate(); err != nil {
 		panic(err)
 	}
@@ -60,7 +60,7 @@ func New(cfg *Config) (*Background, func()) {
 		return cmp.Compare(a.After, b.After)
 	})
 	b, stop := broadcast.New[Policy]()
-	bg := &Background{
+	bg := &Snapshot{
 		Broadcast: b,
 		Config:    cfg,
 		ch:        make(chan int, cfg.BufferSize),
@@ -78,12 +78,12 @@ func New(cfg *Config) (*Background, func()) {
 }
 
 // Inc increments the counter by 1. Calls Add(1).
-func (b *Background) Inc() {
+func (b *Snapshot) Inc() {
 	b.Add(1)
 }
 
 // Add increments the counter by n.
-func (b *Background) Add(n int) {
+func (b *Snapshot) Add(n int) {
 	select {
 	case <-b.done:
 		return
@@ -91,7 +91,7 @@ func (b *Background) Add(n int) {
 	}
 }
 
-func (b *Background) loop() {
+func (b *Snapshot) loop() {
 	defer close(b.ch)
 
 	var count int

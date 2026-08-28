@@ -114,11 +114,11 @@ type Config struct {
 - `snapshot.DefaultConfig() *Config`: Returns configuration with buffer size `0` and default policies.
 - `snapshot.DefaultPolicies() []Policy`: Returns the default set of 4 tiered policies.
 
-### `func New(cfg *Config) (*Background, func())`
+### `func New(cfg *Config) (*Snapshot, func())`
 
-Creates and starts a snapshot background worker. Returns the `*Background` instance and a `stop` cleanup function. `New` validates the config and sorts policies by `After` ascending.
+Creates and starts a snapshot background worker. Returns the `*Snapshot` instance and a `stop` cleanup function. `New` validates the config and sorts policies by `After` ascending.
 
-### `Background` Methods
+### `Snapshot` Methods
 
 - `Inc()`: Increments the change counter by 1. Calls `Add(1)`.
 - `Add(n int)`: Increments the change counter by `n`.
@@ -133,7 +133,7 @@ Creates and starts a snapshot background worker. Returns the `*Background` insta
 type Store struct {
 	mu   sync.RWMutex
 	data map[string]string
-	snap *snapshot.Background
+	snap *snapshot.Snapshot
 	stop func()
 }
 
