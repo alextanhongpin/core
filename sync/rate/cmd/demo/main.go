@@ -31,7 +31,7 @@ func demoRateCounter() {
 	fmt.Println("-------------------")
 
 	// Create a rate counter that tracks requests per second
-	counter := rate.NewRate(time.Second)
+	counter := rate.Per(time.Second)
 
 	fmt.Println("Simulating requests with varying intervals...")
 
@@ -185,7 +185,7 @@ func NewSmartService() *SmartService {
 	return &SmartService{
 		circuitBreaker: breaker,
 		errorTracker:   rate.NewErrors(time.Minute),
-		requestRate:    rate.NewRate(time.Second),
+		requestRate:    rate.Per(time.Second),
 	}
 }
 

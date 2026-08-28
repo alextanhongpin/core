@@ -21,8 +21,8 @@ type HTTPMiddleware struct {
 
 func NewHTTPMiddleware() *HTTPMiddleware {
 	return &HTTPMiddleware{
-		requestRate: rate.NewRate(time.Minute),
-		errorRate:   rate.NewRate(time.Minute),
+		requestRate: rate.Per(time.Minute),
+		errorRate:   rate.Per(time.Minute),
 	}
 }
 

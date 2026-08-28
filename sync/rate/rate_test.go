@@ -146,9 +146,9 @@ func ExampleRate() {
 }
 
 func testRate(name string, fn func(i int) time.Duration) {
-	r1 := rate.NewRate(time.Second)
-	r2 := rate.NewRate(time.Minute)
-	r3 := rate.NewRate(time.Hour)
+	r1 := rate.Per(time.Second)
+	r2 := rate.Per(time.Minute)
+	r3 := rate.Per(time.Hour)
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 1, ' ', tabwriter.AlignRight|tabwriter.Debug)
 	fmt.Fprintf(w, "%s\t%s\t%s\t%s\t\n", "ms", "s", "m", "h")
@@ -170,7 +170,7 @@ func TestRate(t *testing.T) {
 	now := time.Now()
 	period := 5 * time.Second
 
-	r := rate.NewRate(period)
+	r := rate.Per(period)
 	f := func(name string, d time.Duration, want float64) {
 		t.Run(name, func(t *testing.T) {
 			r.Now = func() time.Time { return now.Add(d) }
@@ -190,7 +190,7 @@ func TestRate(t *testing.T) {
 }
 
 func TestResetRate(t *testing.T) {
-	ps := rate.NewRate(time.Second)
+	ps := rate.Per(time.Second)
 	ps.Inc()
 	ps.Reset()
 	got := ps.Count()
@@ -245,7 +245,7 @@ func TestNewRateValidation(t *testing.T) {
 				t.Error("expected panic for zero period")
 			}
 		}()
-		rate.NewRate(0)
+		rate.Per(0)
 	})
 
 	t.Run("negative period panics", func(t *testing.T) {
@@ -254,11 +254,11 @@ func TestNewRateValidation(t *testing.T) {
 				t.Error("expected panic for negative period")
 			}
 		}()
-		rate.NewRate(-time.Second)
+		rate.Per(-time.Second)
 	})
 
 	t.Run("positive period works", func(t *testing.T) {
-		r := rate.NewRate(time.Second)
+		r := rate.Per(time.Second)
 		if r == nil {
 			t.Error("expected valid rate instance")
 		}

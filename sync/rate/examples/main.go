@@ -147,21 +147,21 @@ func NewLoadBalancer() *LoadBalancer {
 			Name:        "backend-1",
 			URL:         "http://backend1:8080",
 			Weight:      1.0,
-			RateTracker: rate.NewRate(time.Minute),
+			RateTracker: rate.Per(time.Minute),
 			HealthCheck: rate.NewErrors(time.Minute),
 		},
 		{
 			Name:        "backend-2",
 			URL:         "http://backend2:8080",
 			Weight:      1.0,
-			RateTracker: rate.NewRate(time.Minute),
+			RateTracker: rate.Per(time.Minute),
 			HealthCheck: rate.NewErrors(time.Minute),
 		},
 		{
 			Name:        "backend-3",
 			URL:         "http://backend3:8080",
 			Weight:      0.5, // Lower capacity backend
-			RateTracker: rate.NewRate(time.Minute),
+			RateTracker: rate.Per(time.Minute),
 			HealthCheck: rate.NewErrors(time.Minute),
 		},
 	}
