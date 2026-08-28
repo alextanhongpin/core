@@ -28,26 +28,6 @@ func DefaultConfig() *Config {
 	}
 }
 
-type Option func(*Config)
-
-func WithLimit(limit int) Option {
-	return func(cfg *Config) {
-		cfg.Limit = limit
-	}
-}
-
-func WithBacklogLimit(limit int) Option {
-	return func(cfg *Config) {
-		cfg.BacklogLimit = limit
-	}
-}
-
-func WithBacklogTimeout(timeout time.Duration) Option {
-	return func(cfg *Config) {
-		cfg.BacklogTimeout = timeout
-	}
-}
-
 // Validate checks if the Config settings are valid.
 func (c *Config) Validate() error {
 	if c.Limit <= 0 {
@@ -99,7 +79,7 @@ func New(cfg *Config) *Throttler {
 	}
 }
 
-// Throttle attempts to acquire a token within the specified context timeout.
+// Do executes fn with concurrency throttling.
 // It returns nil on success, ErrTimeout on context expiration, ErrCapacityExceeded when the limit is hit.
 func (t *Throttler) Do(ctx context.Context, fn func(context.Context) error) error {
 	// Set timeout context based on configuration

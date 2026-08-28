@@ -1,0 +1,37 @@
+evaltest.T[*github.com/alextanhongpin/core/sync/throttle.Config,interface {}]{
+  Name: "ok",
+  Input: &throttle.Config{
+    BacklogLimit: 0,
+    BacklogTimeout: 10000000,
+    Limit: 1,
+  },
+  Output: nil,
+  Error: nil,
+  ErrorString: "",
+  Logs: []interface {}{
+    &evaltest.T[interface {},interface {}]{
+      Name: "fn",
+      Input: nil,
+      Output: nil,
+      Error: &errors.errorString{},
+      ErrorString: "throttle: capacity exceeded",
+      Logs: []interface {}{},
+    },
+    &evaltest.T[interface {},interface {}]{
+      Name: "fn",
+      Input: nil,
+      Output: nil,
+      Error: nil,
+      ErrorString: "",
+      Logs: []interface {}{},
+    },
+    &evaltest.T[interface {},interface {}]{
+      Name: "fn",
+      Input: nil,
+      Output: nil,
+      Error: nil,
+      ErrorString: "",
+      Logs: []interface {}{},
+    },
+  },
+}
