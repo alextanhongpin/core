@@ -1,26 +1,16 @@
 # Rate Limiting Library
 
-A comprehensive, thread-safe, high-performance collection of rate limiting algorithms for Go. This library provides multiple rate limiting strategies including GCRA, Fixed Window, Sliding Window, and multi-key variants, each designed for different use cases and performance requirements.
+A small, thread-safe, key-based rate limiting library for Go. This package provides two classic algorithms — Fixed Window and GCRA — with a simple `Config` API and a `Result` type for introspection.
 
-## Overview
+## Features
 
-Rate limiting is essential for controlling traffic flow, preventing abuse, and ensuring system stability. This library implements industry-standard algorithms with:
-
-- **Multiple Algorithms** - Choose the best fit for your use case
-- **Thread-Safe** - Safe for concurrent use across multiple goroutines  
-- **Zero Dependencies** - Uses only Go standard library
-- **Memory Efficient** - Optimized for minimal memory footprint
-- **Edge Case Protection** - Comprehensive input validation and overflow protection
-- **Testing Support** - Injectable time functions for deterministic testing
-
-## Available Rate Limiters
-
-| Algorithm | Use Case | Memory | Precision | Burst Control |
-|-----------|----------|--------|-----------|---------------|
-| **GCRA** | High-precision, smooth distribution | Low | Nanosecond | Excellent |
-| **Fixed Window** | Simple counting, less memory | Very Low | Window-based | Poor |
-| **Sliding Window** | Balanced smoothness and efficiency | Medium | Sub-window | Good |
-| **Multi-Key Variants** | Per-user/API key limiting | Medium+ | Algorithm-dependent | Algorithm-dependent |
+- **Key-based limiting** – each `Allow(key)` call is tracked per unique key (user ID, API key, etc.)
+- **Two algorithms**
+  - `FixedWindow` – simple counter reset each period, minimal memory
+  - `GCRA` – Generic Cell Rate Algorithm, smooth traffic, burst support
+- **Zero dependencies** – only Go standard library
+- **Thread-safe** – `sync.RWMutex` for concurrent use
+- **Result introspection** – `Allow`, `Remaining`, `ResetAfter`, `RetryAfter`, `Limit`
 
 ## Installation
 
@@ -30,530 +20,185 @@ go get github.com/alextanhongpin/core/sync/ratelimit
 
 ## Quick Start
 
-### GCRA (Recommended for most use cases)
 ```go
 package main
 
 import (
     "fmt"
     "time"
-    
     "github.com/alextanhongpin/core/sync/ratelimit"
 )
 
 func main() {
-    // Create a GCRA rate limiter: 5 requests per second with burst of 2
-    rl, err := ratelimit.NewGCRA(5, time.Second, 2)
-    if err != nil {
-        panic(err)
+    cfg := ratelimit.Config{
+        Limit:  5,
+        Period: time.Second,
+        Burst:  0,
     }
-    
-    if rl.Allow() {
-        fmt.Println("Request allowed")
-    } else {
-        fmt.Printf("Request denied, retry at: %v\n", rl.RetryAt())
+    // Fixed Window
+    fw := ratelimit.NewFixedWindow(cfg)
+    if fw.Allow("user-1") {
+        fmt.Println("allowed")
     }
+
+    // GCRA with burst
+    cfgGCRA := ratelimit.Config{
+        Limit:  5,
+        Period: time.Second,
+        Burst:  2,
+    }
+    gcra := ratelimit.NewGCRA(cfgGCRA)
+    res := gcra.Limit("user-1")
+    fmt.Printf("allow=%v remaining=%d reset_after=%v\n", res.Allow, res.Remaining, res.ResetAfter)
 }
 ```
 
-### Fixed Window (Simple counting)
+## API
+
+### Config
+
 ```go
-// Create a fixed window rate limiter: 100 requests per minute
-rl, err := ratelimit.NewFixedWindow(100, time.Minute)
-if err != nil {
-    panic(err)
+type Config struct {
+    Limit  int           // >0
+    Period time.Duration // >0
+    Burst  int           // >=0, used by GCRA only
 }
-
-if rl.Allow() {
-    fmt.Printf("Remaining: %d\n", rl.Remaining())
-}
+func (cfg Config) Validate() error
 ```
 
-### Sliding Window (Balanced smoothness)
+`Validate` checks `Limit > 0`, `Period > 0`, `Burst >= 0`.
+
+### Constructors
+
 ```go
-// Create a sliding window rate limiter: 50 requests per 30 seconds
-rl, err := ratelimit.NewSlidingWindow(50, 30*time.Second)
-if err != nil {
-    panic(err)
-}
-
-if rl.AllowN(5) {
-    fmt.Printf("5 requests allowed, remaining: %d\n", rl.Remaining())
-}
+func NewFixedWindow(cfg Config) *FixedWindow
+func NewGCRA(cfg Config) *GCRA
 ```
 
-### Multi-Key Rate Limiting (Per-user limits)
-```go
-// Create a multi-key GCRA rate limiter: 10 requests per minute per user
-rl, err := ratelimit.NewMultiGCRA(10, time.Minute, 2)
-if err != nil {
-    panic(err)
-}
+Both validate via `cfg.Validate()` and panic on error. See *Improvements* for error-return variants.
 
-userID := "user123"
-if rl.Allow(userID) {
-    fmt.Printf("Request allowed for user %s\n", userID)
+### Common interface
+
+```go
+type RateLimiter interface {
+    Allow(key string) bool
+    AllowN(key string, n int) bool
+    Limit(key string) *Result
+    LimitN(key string, n int) *Result
 }
 ```
 
-## API Reference
+`Allow` is equivalent to `Limit(...).Allow`.
 
-### GCRA (Generic Cell Rate Algorithm)
+### Result
 
-#### Constructors
-
-##### `NewGCRA(limit int, period time.Duration, burst int) (*GCRA, error)`
-Creates a new GCRA rate limiter with validation.
-
-**Parameters:**
-- `limit` - Number of requests allowed per period (must be > 0)
-- `period` - Time period for the rate limit (must be > 0)  
-- `burst` - Additional requests allowed as burst (must be ≥ 0)
-
-##### `MustNewGCRA(limit int, period time.Duration, burst int) *GCRA`
-Creates a new GCRA rate limiter and panics on validation errors.
-
-#### Methods
-- `Allow() bool` - Check if a single request is allowed
-- `AllowN(n int) bool` - Check if N requests are allowed
-- `RetryAt() time.Time` - Get the earliest retry time
-
-### Fixed Window
-
-#### Constructors
-
-##### `NewFixedWindow(limit int, period time.Duration) (*FixedWindow, error)`
-Creates a new fixed window rate limiter with validation.
-
-##### `MustNewFixedWindow(limit int, period time.Duration) *FixedWindow`
-Creates a new fixed window rate limiter and panics on validation errors.
-
-#### Methods
-- `Allow() bool` - Check if a single request is allowed
-- `AllowN(n int) bool` - Check if N requests are allowed
-- `Remaining() int` - Get the number of remaining requests in current window
-- `RetryAt() time.Time` - Get the earliest retry time
-
-### Sliding Window
-
-#### Constructors
-
-##### `NewSlidingWindow(limit int, period time.Duration) (*SlidingWindow, error)`
-Creates a new sliding window rate limiter with validation.
-
-##### `MustNewSlidingWindow(limit int, period time.Duration) *SlidingWindow`
-Creates a new sliding window rate limiter and panics on validation errors.
-
-#### Methods
-- `Allow() bool` - Check if a single request is allowed
-- `AllowN(n int) bool` - Check if N requests are allowed
-- `Remaining() int` - Get the approximate number of remaining requests
-
-### Multi-Key Variants
-
-All multi-key rate limiters have similar APIs but require a `key` parameter:
-
-#### Multi Fixed Window
 ```go
-rl, _ := ratelimit.NewMultiFixedWindow(100, time.Hour)
-rl.Allow("user123")           // Check single request for user
-rl.AllowN("user123", 5)       // Check 5 requests for user
+type Result struct {
+    Allow      bool
+    Remaining  int
+    ResetAfter time.Duration // time until window resets
+    RetryAfter time.Duration // time until next request is allowed
+    Limit      int
+}
 ```
 
-#### Multi Sliding Window  
+### FixedWindow
+
+Simple counter per key that resets at period boundaries.
+
 ```go
-rl, _ := ratelimit.NewMultiSlidingWindow(50, 30*time.Second)
-rl.Allow("api_key_456")       // Check single request for API key
+cfg := ratelimit.Config{Limit: 100, Period: time.Minute}
+fw := ratelimit.NewFixedWindow(cfg)
+
+allowed := fw.Allow("api-key-123")
+res := fw.Limit("api-key-123")
+fmt.Println(res.Remaining, res.ResetAfter)
 ```
 
-#### Multi GCRA
+Memory: O(k) where k = number of unique keys. `Clear()` removes expired entries, `Size()` returns current key count.
+
+### GCRA
+
+Generic Cell Rate Algorithm provides smooth rate limiting with burst allowance.
+
 ```go
-rl, _ := ratelimit.NewMultiGCRA(10, time.Minute, 2)
-rl.Allow("session_789")       // Check single request for session
-rl.RetryAt("session_789")     // Get retry time for session
+cfg := ratelimit.Config{Limit: 10, Period: time.Minute, Burst: 5}
+rl := ratelimit.NewGCRA(cfg)
+
+if rl.Allow("user-42") {
+    // request permitted
+}
 ```
+
+Interval = `Period / Limit`. A request is allowed when `last - burst*interval <= now`. On success `last += interval`.
 
 ## Algorithm Details
 
-### GCRA (Generic Cell Rate Algorithm)
-GCRA tracks the theoretical "virtual scheduling time" for requests. Each request advances this time by the interval between requests (period/limit). A request is allowed if the current virtual time minus the burst allowance is not greater than the current real time.
-
-**Key Concepts:**
-- **Interval**: Time between consecutive requests = `period / limit`
-- **Offset**: Burst allowance in time units = `interval × burst`  
-- **Virtual Time**: Tracks when requests would be scheduled in ideal conditions
-
-**Best for**: High-precision applications, APIs requiring smooth traffic distribution
-
 ### Fixed Window
-Counts requests within fixed time windows. Simple but can allow traffic bursts at window boundaries.
 
-**How it works:**
-1. Reset counter at the start of each time window
-2. Increment counter for each request
-3. Reject requests when counter exceeds limit
+1. On first request for a key, record `last = now`, `count = 0`
+2. If `now >= last + period`, reset window: `last = now`, `count = 0`
+3. If `count + n <= limit`, allow and `count += n`
+4. `Remaining = limit - count`, `ResetAfter = last + period - now`
 
-**Best for**: Simple rate limiting, memory-constrained environments
+*Known limitation*: burst of requests at window boundaries. Consider GCRA for smoother traffic.
 
-### Sliding Window  
-Uses a combination of current and previous window counts with time-based interpolation to provide smoother rate limiting than fixed windows.
+### GCRA
 
-**How it works:**
-1. Maintain counters for current and previous windows
-2. Calculate weighted average based on time position within current window
-3. More accurate than fixed window, less precise than GCRA
+Tracks a virtual finish time `t` per key.
+- `t = max(t, now)`
+- Allow if `t - burst*interval <= now`
+- On allow: `t += interval`
 
-**Best for**: Balanced smoothness and memory efficiency
+Provides excellent burst control and smooth distribution.
 
-### Multi-Key Variants
-All algorithms have multi-key variants that maintain separate state per key (user ID, API key, etc.). Useful for per-user or per-tenant rate limiting.
+## Testing
 
-**Memory considerations**: Memory usage scales with the number of unique keys
+Tests are data-driven via `github.com/alextanhongpin/evaltest`. Run:
 
-## Configuration Examples
-
-### API Rate Limiting
-```go
-// Public API: 1000 requests per hour with 50 request burst
-publicAPI, _ := ratelimit.NewGCRA(1000, time.Hour, 50)
-
-// Premium API: 10,000 requests per hour with 200 request burst  
-premiumAPI, _ := ratelimit.NewGCRA(10000, time.Hour, 200)
-
-// Per-user limiting: 100 requests per 15 minutes per user
-perUser, _ := ratelimit.NewMultiGCRA(100, 15*time.Minute, 10)
+```bash
+go test -v
 ```
 
-### Microservice Protection
-```go
-// Database connection limiting: 50 queries per second
-dbQueries, _ := ratelimit.NewFixedWindow(50, time.Second)
+Example test input:
 
-// External API calls: 100 calls per minute with sliding window
-externalAPI, _ := ratelimit.NewSlidingWindow(100, time.Minute)
-
-// Memory-sensitive service: Fixed window for minimal overhead
-lightweight, _ := ratelimit.NewFixedWindow(1000, time.Second)
+```yaml
+name: valid allow
+input:
+  limit: 5
+  period: 1s
+  burst: 0
+  key: user1
+  action: Limit
+evals:
+  - expr: output.Allow == true
+  - expr: output.Remaining == 4
 ```
 
-### High-Frequency Operations
-```go
-// Real-time metrics: 10,000 requests per second
-metrics, _ := ratelimit.NewGCRA(10000, time.Second, 100)
+## Improvements & Known Issues
 
-// WebSocket connections: per-connection limiting
-wsConnections, _ := ratelimit.NewMultiSlidingWindow(50, 10*time.Second)
-```
+The current implementation is functional but has several areas for improvement:
 
-### Conservative Rate Limiting
-```go
-// Critical operations: 1 request per 5 seconds, no burst
-critical, _ := ratelimit.NewGCRA(1, 5*time.Second, 0)
+1. **Error handling** – constructors panic on invalid config. Prefer `NewFixedWindow(cfg) (*FixedWindow, error)` and `MustNewFixedWindow` for panicking variant.
 
-// Admin operations: 10 requests per minute with fixed window
-admin, _ := ratelimit.NewFixedWindow(10, time.Minute)
-```
+2. **Fixed Window off-by-one** – current `LimitN` allows `limit+1` requests due to `<= limit+1` check and increments before checking allowance. Fix to check `count + n <= limit` before increment, and return `Allow = false` without mutating state when denied.
 
-## Error Handling
+3. **Time source injection** – tests currently rely on real `time.Now()`. Add an optional `Now func() time.Time` field to allow deterministic testing.
 
-All rate limiters provide comprehensive error validation:
+4. **Burst parameter unused** – `FixedWindow` accepts `Burst` in `Config` but never uses it. Validate and ignore or document as no-op.
 
-```go
-// GCRA errors
-rl, err := ratelimit.NewGCRA(-1, time.Second, 0)
-if err != nil {
-    switch err {
-    case ratelimit.ErrInvalidLimit:
-        // Handle invalid limit
-    case ratelimit.ErrInvalidPeriod:
-        // Handle invalid period
-    case ratelimit.ErrInvalidBurst:
-        // Handle invalid burst
-    }
-}
+5. **Remaining calculation** – GCRA `Remaining` is approximate. Clarify semantics and ensure it matches `limit - used` for current window.
 
-// Fixed Window errors
-fw, err := ratelimit.NewFixedWindow(0, time.Second)
-if err != nil {
-    switch err {
-    case ratelimit.ErrInvalidFixedWindowLimit:
-        // Handle invalid limit
-    case ratelimit.ErrInvalidFixedWindowPeriod:
-        // Handle invalid period
-    }
-}
+6. **Empty key handling** – `LimitN` returns empty `Result` for empty key. Consider returning explicit error.
 
-// Similar patterns for other rate limiters...
-```
+7. **Memory cleanup** – `Clear()` iterates over all keys. For high cardinality keys, consider background eviction or sync.Map.
 
-### Error Types
+8. **Documentation** – README previously described Sliding Window, Multi-Key variants, metrics collectors, and old constructors that no longer exist. This README has been updated to match the current codebase.
 
-**GCRA:**
-- `ErrInvalidLimit` - Limit must be positive
-- `ErrInvalidPeriod` - Period must be positive
-- `ErrInvalidBurst` - Burst cannot be negative
+9. **Observability** – Add optional metrics hooks for allowed/denied counts.
 
-**Fixed Window:**
-- `ErrInvalidFixedWindowLimit` - Limit must be positive
-- `ErrInvalidFixedWindowPeriod` - Period must be positive
-
-**Sliding Window:**
-- `ErrInvalidSlidingWindowLimit` - Limit must be positive
-- `ErrInvalidSlidingWindowPeriod` - Period must be positive
-
-**Multi-Key Variants:**
-- Similar to single-key versions with prefix like `ErrInvalidMultiGCRALimit`
-- Additional validation for empty keys in `AllowN` methods
-
-## Testing Support
-
-All rate limiters support dependency injection for time, enabling deterministic testing:
-
-```go
-func TestRateLimit(t *testing.T) {
-    rl := ratelimit.MustNewGCRA(2, time.Second, 0)
-    
-    now := time.Now()
-    rl.Now = func() time.Time { return now }
-    
-    // First request should be allowed
-    assert.True(t, rl.Allow())
-    
-    // Advance time by 500ms
-    rl.Now = func() time.Time { return now.Add(500 * time.Millisecond) }
-    
-    // Second request should be allowed (500ms = 1/2 second interval)
-    assert.True(t, rl.Allow())
-    
-    // Third request should be denied (not enough time passed)
-    assert.False(t, rl.Allow())
-}
-
-func TestMultiKeyRateLimit(t *testing.T) {
-    rl := ratelimit.MustNewMultiFixedWindow(3, time.Second)
-    
-    now := time.Now()
-    rl.Now = func() time.Time { return now }
-    
-    // Different users should have independent limits
-    assert.True(t, rl.Allow("user1"))
-    assert.True(t, rl.Allow("user2"))
-    assert.True(t, rl.Allow("user1"))
-}
-```
-
-## Performance Characteristics
-
-| Algorithm | Time Complexity | Space Complexity | Memory Usage | Thread Safety |
-|-----------|-----------------|------------------|--------------|---------------|
-| **GCRA** | O(1) | O(1) | ~64 bytes | Read-write mutex |
-| **Fixed Window** | O(1) | O(1) | ~48 bytes | Read-write mutex |
-| **Sliding Window** | O(1) | O(1) | ~56 bytes | Read-write mutex |
-| **Multi Fixed Window** | O(1) | O(k) | ~48 bytes + 32*k | Read-write mutex |
-| **Multi Sliding Window** | O(1) | O(k) | ~56 bytes + 40*k | Read-write mutex |
-| **Multi GCRA** | O(1) | O(k) | ~64 bytes + 24*k | Read-write mutex |
-
-*k = number of unique keys*
-
-## Choosing the Right Algorithm
-
-### Decision Matrix
-
-| Use Case | Recommended Algorithm | Reason |
-|----------|----------------------|---------|
-| **High-precision APIs** | GCRA | Smooth distribution, nanosecond precision |
-| **Simple rate limiting** | Fixed Window | Minimal memory, easy to understand |
-| **Balanced performance** | Sliding Window | Good smoothness vs efficiency trade-off |
-| **Per-user/tenant limits** | Multi-* variants | Isolated limits per key |
-| **Memory-constrained** | Fixed Window | Lowest memory footprint |
-| **Burst-sensitive** | GCRA | Excellent burst control |
-| **WebSocket/real-time** | GCRA or Sliding Window | Smooth traffic handling |
-
-### Performance Guidelines
-
-- **GCRA**: Best overall choice for most applications
-- **Fixed Window**: Use when memory is extremely limited
-- **Sliding Window**: Good middle ground for moderate precision needs
-- **Multi-Key**: Add 24-40 bytes per unique key, use memory cleanup strategies
-
-### Algorithm Comparison
-
-| Algorithm | Smoothness | Burst Control | Memory | Precision | Complexity |
-|-----------|------------|---------------|--------|-----------|------------|
-| GCRA | Excellent | Excellent | Low | Nanosecond | Medium |
-| Fixed Window | Poor | Poor | Very Low | Window-based | Simple |
-| Sliding Window | Good | Fair | Medium | Sub-window | Medium |
-| Token Bucket | Good | Good | Low | Configurable | Medium |
-
-## Edge Cases Handled
-
-All rate limiter implementations include protection against:
-
-1. **Integer Overflow** - Prevents overflow in timestamp calculations
-2. **Invalid Parameters** - Comprehensive input validation with specific error types
-3. **Extreme Values** - Handles very large burst values and periods gracefully
-4. **Concurrent Access** - Thread-safe with proper read-write locking
-5. **Time Precision** - Nanosecond precision with overflow protection
-6. **Empty Keys** - Multi-key variants validate against empty key strings
-7. **Negative Values** - All parameters validated for appropriate ranges
-8. **Zero Division** - Protected against division by zero in rate calculations
-
-### Comprehensive Testing
-
-The library includes extensive edge case testing:
-- Input validation for all constructors
-- Concurrent access patterns
-- Integer overflow scenarios  
-- Extreme parameter values
-- High-frequency operations
-- Large burst configurations
-
-## Best Practices
-
-### Choosing Parameters
-
-1. **Start Conservative** - Begin with lower limits and increase based on monitoring
-2. **Monitor Metrics** - Track rejection rates, retry patterns, and system performance
-3. **Consider Burst** - Set burst based on expected traffic patterns and system capacity
-4. **Test Thoroughly** - Validate rate limiting behavior under realistic load conditions
-5. **Use Multi-Key Wisely** - Consider memory implications for large key spaces
-
-### Production Usage
-
-```go
-// Production-ready HTTP middleware
-func NewAPIRateLimiter() (*ratelimit.GCRA, error) {
-    return ratelimit.NewGCRA(
-        1000,              // 1000 requests
-        time.Hour,         // per hour
-        50,                // with 50 request burst
-    )
-}
-
-func RateLimitMiddleware(rl *ratelimit.GCRA) func(http.Handler) http.Handler {
-    return func(next http.Handler) http.Handler {
-        return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-            if !rl.Allow() {
-                retryAfter := rl.RetryAt().Sub(time.Now())
-                w.Header().Set("Retry-After", fmt.Sprintf("%.0f", retryAfter.Seconds()))
-                w.Header().Set("X-RateLimit-Remaining", "0")
-                w.WriteHeader(http.StatusTooManyRequests)
-                return
-            }
-            
-            next.ServeHTTP(w, r)
-        })
-    }
-}
-
-// Per-user rate limiting with cleanup
-type UserRateLimiter struct {
-    limiter   *ratelimit.MultiGCRA
-    mu        sync.RWMutex
-    lastSeen  map[string]time.Time
-    cleanupInterval time.Duration
-}
-
-func NewUserRateLimiter(limit int, period time.Duration, burst int) *UserRateLimiter {
-    rl := &UserRateLimiter{
-        limiter:   ratelimit.MustNewMultiGCRA(limit, period, burst),
-        lastSeen:  make(map[string]time.Time),
-        cleanupInterval: time.Hour,
-    }
-    
-    // Start cleanup goroutine
-    go rl.cleanup()
-    return rl
-}
-
-func (rl *UserRateLimiter) Allow(userID string) bool {
-    rl.mu.Lock()
-    rl.lastSeen[userID] = time.Now()
-    rl.mu.Unlock()
-    
-    return rl.limiter.Allow(userID)
-}
-
-func (rl *UserRateLimiter) cleanup() {
-    ticker := time.NewTicker(rl.cleanupInterval)
-    defer ticker.Stop()
-    
-    for range ticker.C {
-        rl.mu.Lock()
-        cutoff := time.Now().Add(-24 * time.Hour)
-        for userID, lastSeen := range rl.lastSeen {
-            if lastSeen.Before(cutoff) {
-                delete(rl.lastSeen, userID)
-                // Note: MultiGCRA doesn't expose state cleanup,
-                // consider implementing if memory is critical
-            }
-        }
-        rl.mu.Unlock()
-    }
-}
-```
-
-### Memory Management for Multi-Key Limiters
-
-```go
-// For applications with many keys, implement periodic cleanup
-type CleanupConfig struct {
-    MaxAge      time.Duration
-    CleanupInterval time.Duration
-    MaxKeys     int
-}
-
-func (config CleanupConfig) ShouldCleanup(keyCount int, lastCleanup time.Time) bool {
-    return keyCount > config.MaxKeys || 
-           time.Since(lastCleanup) > config.CleanupInterval
-}
-```
+10. **API consistency** – Provide a single-key convenience wrapper or deprecate key parameter if only per-key limiting is needed.
 
 ## License
 
-This implementation is part of the [alextanhongpin/core](https://github.com/alextanhongpin/core) library and is available under the MIT License.
-
-## References
-
-- [ATM Forum Traffic Management Specification](https://www.broadband-forum.org/technical/download/af-tm-0121.000.pdf) - Original GCRA specification
-- [Generic Cell Rate Algorithm on Wikipedia](https://en.wikipedia.org/wiki/Generic_cell_rate_algorithm) - Algorithm overview
-- [Token Bucket Algorithm](https://en.wikipedia.org/wiki/Token_bucket) - Alternative approach comparison
-- [Sliding Window Rate Limiting](https://konghq.com/blog/how-to-design-a-scalable-rate-limiting-algorithm) - Algorithm comparison and analysis
-- [Traffic Shaping and Rate Limiting Techniques](https://tools.ietf.org/html/rfc2475) - IETF standards for traffic control
-
-# Metrics & Observability
-
-All rate limiters in this package support pluggable metrics collectors for tracking requests, allowed, and denied counts. You can use the built-in atomic collector for in-memory stats, or integrate with Prometheus for production monitoring.
-
-### Using the Atomic Metrics Collector (default)
-
-By default, if you do not provide a metrics collector, an atomic in-memory collector is used:
-
-```go
-rl, _ := ratelimit.NewGCRA(5, time.Second, 2) // uses AtomicMetricsCollector by default
-```
-
-### Using Prometheus for Metrics
-
-To collect metrics with Prometheus, inject a `PrometheusMetricsCollector`:
-
-```go
-import (
-    "github.com/prometheus/client_golang/prometheus"
-    "github.com/alextanhongpin/core/sync/ratelimit"
-)
-
-totalRequests := prometheus.NewCounter(prometheus.CounterOpts{Name: "gcra_total_requests", Help: "Total GCRA requests."})
-allowed := prometheus.NewCounter(prometheus.CounterOpts{Name: "gcra_allowed", Help: "Allowed requests."})
-denied := prometheus.NewCounter(prometheus.CounterOpts{Name: "gcra_denied", Help: "Denied requests."})
-prometheus.MustRegister(totalRequests, allowed, denied)
-
-metrics := &ratelimit.PrometheusMetricsCollector{
-    TotalRequests: totalRequests,
-    Allowed:       allowed,
-    Denied:        denied,
-}
-rl, _ := ratelimit.NewGCRA(5, time.Second, 2, metrics)
-```
-
-The same pattern applies to all other rate limiters in this package.
+MIT – part of [alextanhongpin/core](https://github.com/alextanhongpin/core)

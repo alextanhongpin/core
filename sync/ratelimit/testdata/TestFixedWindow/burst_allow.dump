@@ -1,0 +1,19 @@
+evaltest.T[github.com/alextanhongpin/core/sync/ratelimit.FixedWindowInput,github.com/alextanhongpin/core/sync/ratelimit.FixedWindowOutput]{
+  Name: "burst allow",
+  Input: ratelimit.FixedWindowInput{
+    Limit: 2,
+    Period: 1000000000,
+    Burst: 2,
+    Key: "user1",
+    Action: "Allow",
+    N: 0,
+  },
+  Output: ratelimit.FixedWindowOutput{
+    Allow: true,
+    Remaining: 1,
+    ResetAfter: 1000000000,
+  },
+  Error: nil,
+  ErrorString: "",
+  Logs: []interface {}{},
+}

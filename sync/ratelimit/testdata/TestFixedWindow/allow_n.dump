@@ -1,0 +1,19 @@
+evaltest.T[github.com/alextanhongpin/core/sync/ratelimit.FixedWindowInput,github.com/alextanhongpin/core/sync/ratelimit.FixedWindowOutput]{
+  Name: "allow n",
+  Input: ratelimit.FixedWindowInput{
+    Limit: 5,
+    Period: 1000000000,
+    Burst: 0,
+    Key: "user1",
+    Action: "AllowN",
+    N: 3,
+  },
+  Output: ratelimit.FixedWindowOutput{
+    Allow: true,
+    Remaining: 2,
+    ResetAfter: 1000000000,
+  },
+  Error: nil,
+  ErrorString: "",
+  Logs: []interface {}{},
+}

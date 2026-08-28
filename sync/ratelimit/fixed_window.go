@@ -19,8 +19,9 @@ type FixedWindow struct {
 	state map[string]fixedWindowState
 
 	// Options.
-	limit  int64
-	period int64
+	limit   int64
+	period  int64
+	nowFunc func() time.Time
 }
 
 func NewFixedWindow(cfg Config) *FixedWindow {
@@ -29,9 +30,10 @@ func NewFixedWindow(cfg Config) *FixedWindow {
 	}
 
 	return &FixedWindow{
-		limit:  int64(cfg.Limit),
-		period: cfg.Period.Nanoseconds(),
-		state:  make(map[string]fixedWindowState),
+		limit:   int64(cfg.Limit),
+		period:  cfg.Period.Nanoseconds(),
+		state:   make(map[string]fixedWindowState),
+		nowFunc: time.Now,
 	}
 }
 
@@ -60,7 +62,7 @@ func (r *FixedWindow) LimitN(key string, n int) *Result {
 	defer r.mu.Unlock()
 
 	curr := r.state[key]
-	now := time.Now().UnixNano()
+	now := r.nowFunc().UnixNano()
 	quantity := int64(n)
 
 	if curr.last+r.period <= now {
@@ -68,29 +70,38 @@ func (r *FixedWindow) LimitN(key string, n int) *Result {
 		curr.count = 0
 	}
 
-	if curr.count+quantity <= r.limit+1 {
+	allow := curr.count+quantity <= r.limit
+	if allow {
 		curr.count += quantity
 	}
 
 	r.state[key] = curr
 	remaining := r.limit - curr.count
+	if remaining < 0 {
+		remaining = 0
+	}
+
+	resetAfter := time.Duration(curr.last+r.period-now) * time.Nanosecond
+	if resetAfter < 0 {
+		resetAfter = 0
+	}
 
 	res := &Result{
-		Allow:      remaining >= 0,
-		Remaining:  max(0, int(remaining)),
-		ResetAfter: time.Duration(curr.last+r.period-now) * time.Nanosecond,
+		Allow:      allow,
+		Remaining:  int(remaining),
+		ResetAfter: resetAfter,
 		RetryAfter: 0,
 		Limit:      int(r.limit),
 	}
-	if res.Remaining == 0 {
-		res.RetryAfter = res.ResetAfter
+	if !allow {
+		res.RetryAfter = resetAfter
 	}
 	return res
 }
 
 func (r *FixedWindow) Clear() {
 	r.mu.Lock()
-	now := time.Now().UnixNano()
+	now := r.nowFunc().UnixNano()
 	for k, v := range r.state {
 		if v.last+r.period <= now {
 			delete(r.state, k)
