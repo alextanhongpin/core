@@ -1,6 +1,7 @@
 package dataloader
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -19,34 +20,47 @@ var (
 type batchFn[K comparable, V any] = func(ctx context.Context, keys []K) (map[K]V, error)
 
 type DataLoader[K comparable, V any] struct {
+	*Config
 	batchFn batchFn[K, V]
 	ch      chan K
 	ctx     context.Context
 	pm      *promise.Map[K, V]
-	Config
 }
 
 type Config struct {
-	BatchSize     int
 	BatchInterval time.Duration
+	BatchSize     int
+	BufferSize    int
 }
 
-func New[K comparable, V any](ctx context.Context, fn batchFn[K, V], cfg Config) (*DataLoader[K, V], func()) {
+func DefaultConfig() *Config {
+	return &Config{
+		BatchInterval: 16 * time.Millisecond,
+		BatchSize:     25,
+	}
+}
+
+func New[K comparable, V any](ctx context.Context, fn batchFn[K, V], cfg *Config) (*DataLoader[K, V], func()) {
+	cfg = cmp.Or(cfg, DefaultConfig())
 	ctx, cancel := context.WithCancelCause(ctx)
 	dl := &DataLoader[K, V]{
-		batchFn: fn,
-		ctx:     ctx,
-		ch:      make(chan K),
-		pm:      promise.NewMap[K, V](ctx),
 		Config:  cfg,
+		batchFn: fn,
+		ch:      make(chan K, cfg.BufferSize),
+		ctx:     ctx,
+		pm:      promise.NewMap[K, V](ctx),
 	}
+
 	var wg sync.WaitGroup
 	wg.Go(func() {
 		dl.background(ctx)
 	})
+
 	return dl, sync.OnceFunc(func() {
 		cancel(ErrCanceled)
+
 		wg.Wait()
+
 		dl.pm.Range(func(key, val any) bool {
 			dl.Delete(key.(K), ErrCanceled)
 			return true
@@ -85,7 +99,7 @@ func (d *DataLoader[K, V]) background(ctx context.Context) {
 				p.Resolve(v)
 			} else {
 				// Key not found
-				p.Reject(fmt.Errorf("%w: key=%v", ErrNotFound, k))
+				p.Reject(fmt.Errorf("%w: %v", ErrNotFound, k))
 			}
 		}
 	})
@@ -101,6 +115,7 @@ func (d *DataLoader[K, V]) load(key K) *promise.Promise[V] {
 	case <-d.ctx.Done():
 		p.Reject(context.Cause(d.ctx))
 		return p
+
 	case d.ch <- key:
 	}
 

@@ -97,7 +97,7 @@ func TestDataloader_Func(t *testing.T) {
 		return fmt.Sprintf("hi, %s", u.Name), nil
 	}
 
-	dl, stop := dataloader.New(ctx, batchFn, dataloader.Config{
+	dl, stop := dataloader.New(ctx, batchFn, &dataloader.Config{
 		BatchInterval: 16 * time.Millisecond,
 		BatchSize:     5,
 	})
