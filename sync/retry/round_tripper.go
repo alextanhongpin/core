@@ -20,46 +20,41 @@ var retryableStatusCodes = []int{
 var _ http.RoundTripper = (*RoundTripper)(nil)
 
 type RoundTripper struct {
-	fn func(ctx context.Context, r *http.Request) (*http.Response, error)
+	rt                http.RoundTripper
+	r                 retry
+	StatusCodeHandler func(code int) error
 }
 
-func StatusCodeHandler(code int) error {
+func NewRoundTripper(rt http.RoundTripper, r retry) *RoundTripper {
+	return &RoundTripper{
+		rt:                cmp.Or(rt, http.DefaultTransport),
+		r:                 r,
+		StatusCodeHandler: DefaultStatusCodeHandler,
+	}
+}
+
+func (rt *RoundTripper) RoundTrip(r *http.Request) (resp *http.Response, err error) {
+	err = rt.r.Do(r.Context(), func(ctx context.Context) error {
+		resp, err = rt.RoundTrip(r)
+		if err != nil {
+			return err
+		}
+
+		if err = rt.StatusCodeHandler(resp.StatusCode); err != nil {
+			return err
+		}
+
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return
+}
+
+func DefaultStatusCodeHandler(code int) error {
 	if slices.Contains(retryableStatusCodes, code) {
 		return fmt.Errorf("status code: %d", code)
 	}
 	return nil
-}
-
-func NewRoundTripper(rt http.RoundTripper, statusCodeHandler func(statusCode int) error, opts ...Option) *RoundTripper {
-	rt = cmp.Or(rt, http.DefaultTransport)
-	if statusCodeHandler == nil {
-		statusCodeHandler = StatusCodeHandler
-	}
-	return &RoundTripper{
-		fn: Handler(func(ctx context.Context, r *http.Request) (*http.Response, error) {
-			if r.GetBody != nil {
-				body, err := r.GetBody()
-				if err != nil {
-					return nil, err
-				}
-				r.Body = body
-			}
-
-			resp, err := rt.RoundTrip(r)
-			if err != nil {
-				return nil, err
-			}
-
-			if err = statusCodeHandler(resp.StatusCode); err != nil {
-				_ = resp.Body.Close()
-				return nil, err
-			}
-
-			return resp, nil
-		}, opts...),
-	}
-}
-
-func (rt *RoundTripper) RoundTrip(r *http.Request) (*http.Response, error) {
-	return rt.fn(r.Context(), r)
 }

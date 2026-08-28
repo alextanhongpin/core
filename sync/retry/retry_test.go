@@ -36,14 +36,13 @@ func TestHandler(t *testing.T) {
 			return t.Name(), nil
 		}
 
-		opts := []retry.Option{
-			retry.N(input),
-			retry.Constant(1 * time.Millisecond),
-		}
+		rt := newRetry()
+		rt.Attempts = input
+		rt.Backoff = retry.NewConstantBackoff(1 * time.Millisecond)
 		if strings.Contains(name, "noretry") {
-			opts = append(opts, retry.WithNonRetryableErrors(errors.ErrUnsupported))
+			rt.Retryable = retry.NonRetryableErrors(errors.ErrUnsupported)
 		}
-		h := retry.Handler(fn, opts...)
+		h := retry.Func(fn, rt)
 		ctx, cancel := context.WithCancel(ctx)
 		defer cancel()
 
@@ -59,60 +58,24 @@ func TestHandler(t *testing.T) {
 	})
 }
 
-func TestDo(t *testing.T) {
-	evaltest.Run(t, func(t *testing.T, ctx context.Context, input int) (*DoOutput, error) {
-		name := evaltest.Name(ctx)
-		var count int
-		err := retry.Do(ctx, func(ctx context.Context) error {
-			count++
-			if strings.Contains(name, "error") {
-				return errors.ErrUnsupported
-			}
-			if strings.Contains(name, "retry") && count < 2 {
-				return errors.ErrUnsupported
-			}
-			return nil
-		}, retry.N(input), retry.NoWait)
-
-		return &DoOutput{
-			Attempts: count,
-		}, err
-	})
-}
-
-func TestDoValue(t *testing.T) {
-	evaltest.Run(t, func(t *testing.T, ctx context.Context, input int) (*Output, error) {
-		name := evaltest.Name(ctx)
-		var count int
-		res, err := retry.DoValue(ctx, func(ctx context.Context) (string, error) {
-			count++
-			if strings.Contains(name, "error") {
-				return "", errors.ErrUnsupported
-			}
-			if strings.Contains(name, "retry") && count < 2 {
-				return "", errors.ErrUnsupported
-			}
-			return "ok", nil
-		}, retry.N(input), retry.NoWait)
-
-		return &Output{
-			Attempts: count,
-			Result:   res,
-		}, err
-	})
-}
-
 func TestThrottle(t *testing.T) {
 	evaltest.Run(t, func(t *testing.T, ctx context.Context, input int) (*DoOutput, error) {
-		throttler := retry.NewThrottler(&retry.ThrottlerOptions{
+		throttler := retry.NewThrottler(&retry.ThrottlerConfig{
 			MaxTokens:  2,
 			TokenRatio: 0.1,
 		})
+
+		rt := newRetry()
+		rt.Throttler = throttler
+		rt.Attempts = input
+
 		var count int
-		err := retry.Do(ctx, func(ctx context.Context) error {
+
+		h := retry.Func(func(ctx context.Context, input any) (any, error) {
 			count++
-			return errors.ErrUnsupported
-		}, retry.N(input), retry.NoWait, retry.WithThrottler(throttler))
+			return nil, errors.ErrUnsupported
+		}, rt)
+		_, err := h(ctx, nil)
 
 		return &DoOutput{
 			Attempts: count,
@@ -134,4 +97,13 @@ func TestBackoff(t *testing.T) {
 			return 0, nil
 		}
 	})
+}
+
+func newRetry() *retry.Retry {
+	cfg := retry.DefaultConfig()
+	cfg.Attempts = 10
+	cfg.Backoff = retry.NewConstantBackoff(0)
+	cfg.Throttler = retry.NewNoopThrottler()
+	rt := retry.New(cfg)
+	return rt
 }

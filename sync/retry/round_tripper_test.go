@@ -20,9 +20,12 @@ func TestRoundTripper(t *testing.T) {
 		}))
 		defer ts.Close()
 
+		rt := newRetry()
+		rt.Attempts = 5
+
 		// Arrange.
 		client := ts.Client()
-		client.Transport = retry.NewRoundTripper(client.Transport, nil, retry.N(5), retry.NoWait)
+		client.Transport = retry.NewRoundTripper(client.Transport, rt)
 
 		// Act.
 		resp, err := ts.Client().Get(ts.URL)
@@ -49,8 +52,11 @@ func TestRoundTripperPost(t *testing.T) {
 		}))
 		defer ts.Close()
 
+		rt := newRetry()
+		rt.Attempts = 3
+
 		client := ts.Client()
-		client.Transport = retry.NewRoundTripper(client.Transport, nil, retry.N(3), retry.NoWait)
+		client.Transport = retry.NewRoundTripper(client.Transport, rt)
 
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, ts.URL, strings.NewReader(input))
 		if err != nil {
