@@ -1,0 +1,55 @@
+---
+name: capacity_exceeded
+description: Two calls with limit 1 and no backlog should exceed capacity on second call
+input:
+  limit: 1
+  backlog_limit: 0
+  backlog_timeout_ms: 1000
+  calls: 2
+evals:
+  - name: error is capacity exceeded
+    expr: output.LastErr == "throttle: capacity exceeded"
+---
+name: within_limit
+description: Single call within limit should succeed
+input:
+  limit: 3
+  backlog_limit: 0
+  backlog_timeout_ms: 1000
+  calls: 1
+evals:
+  - name: no error
+    expr: output.LastErr == "" and err == nil
+---
+name: backlog_success
+description: Two calls with limit 1 and backlog 1 should succeed (primary + backlog)
+input:
+  limit: 1
+  backlog_limit: 1
+  backlog_timeout_ms: 1000
+  calls: 2
+evals:
+  - name: no error
+    expr: output.LastErr == "" and err == nil
+---
+name: backlog_exhausted
+description: Three calls with limit 1 and backlog 1 should exceed capacity on third call
+input:
+  limit: 1
+  backlog_limit: 1
+  backlog_timeout_ms: 1000
+  calls: 3
+evals:
+  - name: error is capacity exceeded
+    expr: output.LastErr == "throttle: capacity exceeded"
+---
+name: limit_zero_invalid
+description: Creating throttler with limit 0 should fail
+input:
+  limit: 0
+  backlog_limit: 0
+  backlog_timeout_ms: 1000
+  calls: 1
+evals:
+  - name: creation error
+    expr: err != nil
