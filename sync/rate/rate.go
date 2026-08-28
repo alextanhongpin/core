@@ -43,13 +43,13 @@ type Rate struct {
 
 // New creates a new Rate counter with a default period of 1 second.
 func New() *Rate {
-	return NewRate(time.Second)
+	return Per(time.Second)
 }
 
-// NewRate creates a new Rate counter with the specified time period.
+// Per creates a new Rate counter with the specified time period.
 // The period determines the time window for rate calculations.
 // Panics if period is not positive.
-func NewRate(period time.Duration) *Rate {
+func Per(period time.Duration) *Rate {
 	if period <= 0 {
 		panic("rate: period must be positive")
 	}
@@ -101,7 +101,11 @@ func (r *Rate) reset() {
 
 func (r *Rate) add(n float64) float64 {
 	now := r.Now().UnixNano()
-	ratio := 1 - float64(min(now-r.last, r.period))/float64(r.period)
+	delta := now - r.last
+	if delta < 0 {
+		delta = 0
+	}
+	ratio := 1 - float64(min(delta, r.period))/float64(r.period)
 	r.count = r.count*ratio + n
 	r.last = now
 

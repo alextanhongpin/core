@@ -17,19 +17,21 @@ type Errors struct {
 // Both success and failure rates use the same period for consistency.
 func NewErrors(period time.Duration) *Errors {
 	return &Errors{
-		success: NewRate(period),
-		failure: NewRate(period),
+		success: Per(period),
+		failure: Per(period),
 	}
 }
 
 func (e *Errors) Reset() {
 	e.mu.Lock()
-	e.success.reset()
-	e.failure.reset()
-	e.mu.Unlock()
+	defer e.mu.Unlock()
+	e.success.Reset()
+	e.failure.Reset()
 }
 
 func (e *Errors) SetNow(now func() time.Time) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
 	e.success.Now = now
 	e.failure.Now = now
 }
@@ -44,11 +46,13 @@ func (e *Errors) Failure() counter {
 
 func (e *Errors) Rate() *ErrorRate {
 	e.mu.Lock()
-	defer e.mu.Unlock()
+	successRate := e.success
+	failureRate := e.failure
+	e.mu.Unlock()
 
 	// Use the public Count() method to maintain proper encapsulation
-	success := e.success.Count()
-	failure := e.failure.Count()
+	success := successRate.Count()
+	failure := failureRate.Count()
 
 	return &ErrorRate{
 		success: success,
