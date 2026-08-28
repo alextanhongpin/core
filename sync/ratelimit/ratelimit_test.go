@@ -10,7 +10,7 @@ import (
 
 func TestFixedWindow(t *testing.T) {
 	evaltest.Run(t, func(t *testing.T, ctx context.Context, input FixedWindowInput) (FixedWindowOutput, error) {
-		cfg := Config{
+		cfg := &Config{
 			Limit:  input.Limit,
 			Period: input.Period,
 			Burst:  input.Burst,
@@ -56,7 +56,7 @@ func TestGCRA(t *testing.T) {
 		if err := cfg.Validate(); err != nil {
 			return GCRAOutput{}, err
 		}
-		r := NewGCRA(cfg)
+		r := NewGCRA(&cfg)
 		switch input.Action {
 		case "Allow":
 			res := r.Limit(input.Key)

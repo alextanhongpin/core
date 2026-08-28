@@ -1,6 +1,7 @@
 package ratelimit
 
 import (
+	"cmp"
 	"sync"
 	"time"
 )
@@ -13,23 +14,22 @@ type GCRA struct {
 	state map[string]int64
 
 	// Option.
-	burst   int64
-	limit   int64
-	period  int64
-	nowFunc func() time.Time
+	burst  int64
+	limit  int64
+	period int64
 }
 
-func NewGCRA(cfg Config) *GCRA {
+func NewGCRA(cfg *Config) *GCRA {
+	cfg = cmp.Or(cfg, DefaultConfig())
 	if err := cfg.Validate(); err != nil {
 		panic(err)
 	}
 
 	return &GCRA{
-		burst:   int64(cfg.Burst),
-		limit:   int64(cfg.Limit),
-		period:  cfg.Period.Nanoseconds(),
-		state:   make(map[string]int64),
-		nowFunc: time.Now,
+		burst:  int64(cfg.Burst),
+		limit:  int64(cfg.Limit),
+		period: cfg.Period.Nanoseconds(),
+		state:  make(map[string]int64),
 	}
 }
 
@@ -57,12 +57,9 @@ func (r *GCRA) LimitN(key string, n int) *Result {
 
 	quantity := int64(n)
 	delta := r.period / r.limit
-	now := r.nowFunc().UnixNano()
+	now := time.Now().UnixNano()
 
-	last := r.state[key]
-	if last < now {
-		last = now
-	}
+	last := max(r.state[key], now)
 	allow := last-r.burst*delta <= now
 	if allow {
 		last += quantity * delta
@@ -77,10 +74,7 @@ func (r *GCRA) LimitN(key string, n int) *Result {
 	if allow {
 		up := now + delta
 		lo := last - r.burst*delta
-		rem := (up - lo) / delta
-		if rem < 0 {
-			rem = 0
-		}
+		rem := max((up-lo)/delta, 0)
 		remaining = rem
 	}
 
@@ -95,7 +89,7 @@ func (r *GCRA) LimitN(key string, n int) *Result {
 
 func (r *GCRA) Clear() {
 	r.mu.Lock()
-	now := r.nowFunc().UnixNano()
+	now := time.Now().UnixNano()
 	for k, v := range r.state {
 		if v+r.period <= now {
 			delete(r.state, k)

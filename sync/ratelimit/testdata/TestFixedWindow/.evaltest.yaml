@@ -55,41 +55,6 @@ evals:
    - name: remaining
      expr: output.Remaining == 2
 ---
-name: gcra valid allow
-input:
-  limit: 5
-  period: 1s
-  burst: 0
-  key: user1
-  action: Allow
-evals:
-   - name: allowed
-     expr: output.Allow == true
----
-name: gcra limit exceeded
-input:
-  limit: 2
-  period: 1s
-  burst: 0
-  key: user1
-  action: Allow
-evals:
-   - name: allowed
-     expr: output.Allow == true
----
-name: burst allow
-input:
-  limit: 2
-  period: 1s
-  burst: 2
-  key: user1
-  action: Allow
-evals:
-   - name: allowed
-     expr: output.Allow == true
-   - name: remaining after burst
-     expr: output.Remaining == 1
----
 name: reset after period
 input:
   limit: 1

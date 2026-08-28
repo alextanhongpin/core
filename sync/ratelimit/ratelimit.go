@@ -21,7 +21,15 @@ type Config struct {
 	Burst  int
 }
 
-func (cfg Config) Validate() error {
+func DefaultConfig() *Config {
+	return &Config{
+		Limit:  100,
+		Period: time.Minute,
+		Burst:  0,
+	}
+}
+
+func (cfg *Config) Validate() error {
 	if cfg.Limit <= 0 {
 		return errors.New("limit must be greater than 0")
 	}

@@ -1,6 +1,7 @@
 package ratelimit
 
 import (
+	"cmp"
 	"sync"
 	"time"
 )
@@ -24,16 +25,16 @@ type FixedWindow struct {
 	nowFunc func() time.Time
 }
 
-func NewFixedWindow(cfg Config) *FixedWindow {
+func NewFixedWindow(cfg *Config) *FixedWindow {
+	cfg = cmp.Or(cfg, DefaultConfig())
 	if err := cfg.Validate(); err != nil {
 		panic(err)
 	}
 
 	return &FixedWindow{
-		limit:   int64(cfg.Limit),
-		period:  cfg.Period.Nanoseconds(),
-		state:   make(map[string]fixedWindowState),
-		nowFunc: time.Now,
+		limit:  int64(cfg.Limit),
+		period: cfg.Period.Nanoseconds(),
+		state:  make(map[string]fixedWindowState),
 	}
 }
 
@@ -62,7 +63,7 @@ func (r *FixedWindow) LimitN(key string, n int) *Result {
 	defer r.mu.Unlock()
 
 	curr := r.state[key]
-	now := r.nowFunc().UnixNano()
+	now := time.Now().UnixNano()
 	quantity := int64(n)
 
 	if curr.last+r.period <= now {
@@ -76,15 +77,9 @@ func (r *FixedWindow) LimitN(key string, n int) *Result {
 	}
 
 	r.state[key] = curr
-	remaining := r.limit - curr.count
-	if remaining < 0 {
-		remaining = 0
-	}
+	remaining := max(r.limit-curr.count, 0)
 
-	resetAfter := time.Duration(curr.last+r.period-now) * time.Nanosecond
-	if resetAfter < 0 {
-		resetAfter = 0
-	}
+	resetAfter := max(time.Duration(curr.last+r.period-now)*time.Nanosecond, 0)
 
 	res := &Result{
 		Allow:      allow,
