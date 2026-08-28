@@ -32,8 +32,9 @@ type Background struct {
 }
 
 type Config struct {
-	Policies []Policy
-	Interval time.Duration
+	Policies   []Policy
+	Interval   time.Duration
+	BufferSize int
 }
 
 func New(cfg Config) (*Background, func()) {
@@ -50,7 +51,7 @@ func New(cfg Config) (*Background, func()) {
 	b, stop := NewBroadcast[Policy]()
 	bg := &Background{
 		Broadcast: b,
-		ch:        make(chan int),
+		ch:        make(chan int, cfg.BufferSize),
 		done:      make(chan struct{}),
 		policies:  cfg.Policies,
 		interval:  interval,
