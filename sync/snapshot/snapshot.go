@@ -3,117 +3,138 @@
 package snapshot
 
 import (
-	"context"
+	"cmp"
 	"errors"
+	"slices"
 	"sync"
 	"time"
+
+	"github.com/alextanhongpin/core/sync/broadcast"
 )
 
-var ErrTerminated = errors.New("snapshot: terminated")
-
-type Event struct {
-	Count  int
-	Policy Policy
-}
-
 type Policy struct {
-	Every    int
-	Interval time.Duration
+	After   time.Duration
+	Changes int
 }
 
-func NewOptions() []Policy {
+func DefaultPolicies() []Policy {
 	return []Policy{
-		{Every: 1_000, Interval: time.Second},
-		{Every: 100, Interval: 10 * time.Second},
-		{Every: 10, Interval: time.Minute},
-		{Every: 1, Interval: time.Hour},
+		{Changes: 1_000, After: time.Second},
+		{Changes: 100, After: 10 * time.Second},
+		{Changes: 10, After: time.Minute},
+		{Changes: 1, After: time.Hour},
 	}
 }
 
-type Background struct {
-	opts []Policy
+type Snapshot struct {
+	*Config
+	*broadcast.Broadcast[Policy]
 	ch   chan int
-	ctx  context.Context
-	fn   func(ctx context.Context, evt Event)
+	done chan struct{}
 }
 
-func New(ctx context.Context, fn func(context.Context, Event), opts ...Policy) (*Background, func()) {
-	bg := &Background{
-		opts: opts,
-		ch:   make(chan int),
-		fn:   fn,
-	}
-	ctx, cancel := context.WithCancelCause(ctx)
-	stop := bg.init(ctx)
-	bg.ctx = ctx
+type Config struct {
+	BufferSize int
+	Policies   []Policy
+}
 
-	return bg, func() {
-		cancel(ErrTerminated)
-		stop()
+func DefaultConfig() *Config {
+	return &Config{
+		BufferSize: 0,
+		Policies:   DefaultPolicies(),
 	}
 }
 
-func (b *Background) Inc(n int) error {
-	select {
-	case <-b.ctx.Done():
-		return context.Cause(b.ctx)
-	case b.ch <- n:
-		return nil
+func (cfg *Config) Validate() error {
+	if len(cfg.Policies) == 0 {
+		return errors.New("snapshot: no policies")
 	}
+	return nil
 }
 
-func (b *Background) init(ctx context.Context) func() {
-	var count int
+func New(cfg *Config) (*Snapshot, func()) {
+	if err := cfg.Validate(); err != nil {
+		panic(err)
+	}
+	slices.SortFunc(cfg.Policies, func(a, b Policy) int {
+		return cmp.Compare(a.After, b.After)
+	})
+	b, stop := broadcast.New[Policy]()
+	bg := &Snapshot{
+		Broadcast: b,
+		Config:    cfg,
+		ch:        make(chan int, cfg.BufferSize),
+		done:      make(chan struct{}),
+	}
 
 	var wg sync.WaitGroup
-	wg.Add(len(b.opts))
+	wg.Go(bg.loop)
 
-	ch := make(chan Policy)
+	return bg, sync.OnceFunc(func() {
+		close(bg.done)
+		wg.Wait()
+		stop()
+	})
+}
 
-	for _, p := range b.opts {
-		go func() {
-			defer wg.Done()
+// Inc increments the counter by 1. Calls Add(1).
+func (b *Snapshot) Inc() {
+	b.Add(1)
+}
 
-			t := time.NewTicker(p.Interval)
-			defer t.Stop()
-
-			for {
-				select {
-				case <-ctx.Done():
-					return
-				case <-t.C:
-					select {
-					case ch <- p:
-					case <-ctx.Done():
-						return
-					}
-				}
-			}
-		}()
+// Add increments the counter by n.
+func (b *Snapshot) Add(n int) {
+	select {
+	case <-b.done:
+		return
+	case b.ch <- n:
 	}
+}
 
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		for {
-			select {
-			case <-ctx.Done():
+func (b *Snapshot) loop() {
+	defer close(b.ch)
+
+	var count int
+	last := time.Now()
+	interval := minInterval(b.Policies)
+
+	flush := func(n int) {
+		count += n
+		elapsed := time.Since(last)
+		for _, p := range b.Policies {
+			if elapsed < p.After {
 				return
-			case n := <-b.ch:
-				count += n
-			case p := <-ch:
-				if count < p.Every {
-					continue
-				}
-				evt := Event{
-					Count:  count,
-					Policy: p,
-				}
+			}
+			if count >= p.Changes {
 				count = 0
-				b.fn(ctx, evt)
+				last = time.Now()
+				b.Send(p)
+				return
 			}
 		}
-	}()
+	}
+	defer flush(0)
 
-	return wg.Wait
+	for {
+		select {
+		case <-b.done:
+			return
+		case <-time.After(interval):
+			flush(0)
+		case n := <-b.ch:
+			flush(n)
+		}
+	}
+}
+
+func minInterval(policies []Policy) time.Duration {
+	// Take the first non-zero duration.
+	// It can be zero, essentially meaning always trigger when reach the amount.
+	for _, p := range policies {
+		if p.After != 0 {
+			return p.After
+		}
+	}
+
+	panic("snapshot: zero interval")
 }
