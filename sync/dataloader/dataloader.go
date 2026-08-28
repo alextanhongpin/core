@@ -23,7 +23,6 @@ type DataLoader[K comparable, V any] struct {
 	ch      chan K
 	ctx     context.Context
 	pm      *promise.Map[K, V]
-	wg      sync.WaitGroup
 	Config
 }
 
@@ -38,17 +37,18 @@ func New[K comparable, V any](ctx context.Context, fn batchFn[K, V], cfg Config)
 		batchFn: fn,
 		ctx:     ctx,
 		ch:      make(chan K),
-		pm:      promise.NewMap[K, V](),
+		pm:      promise.NewMap[K, V](ctx),
 		Config:  cfg,
 	}
-	dl.wg.Go(func() {
+	var wg sync.WaitGroup
+	wg.Go(func() {
 		dl.background(ctx)
 	})
 	return dl, sync.OnceFunc(func() {
 		cancel(ErrCanceled)
-		dl.wg.Wait()
+		wg.Wait()
 		dl.pm.Range(func(key, val any) bool {
-			dl.pm.Reject(context.Background(), key.(K), ErrCanceled)
+			dl.Delete(key.(K), ErrCanceled)
 			return true
 		})
 	})
@@ -62,33 +62,44 @@ type Result[K comparable, V any] struct {
 
 func (d *DataLoader[K, V]) background(ctx context.Context) {
 	p1 := pipeline.SourceChan(ctx, d.ch)
-	p2 := pipeline.Dedup(p1)
-	p3 := pipeline.Batch(p2, d.BatchSize, d.BatchInterval)
-	pipeline.Sink(p3, func(keys []K) {
+	p2 := pipeline.Batch(p1, d.BatchSize, d.BatchInterval)
+	pipeline.Sink(p2, func(keys []K) {
 		res, err := d.batchFn(ctx, keys)
 		if err != nil {
 			// All keys becomes error.
 			for _, key := range keys {
-				d.pm.Reject(ctx, key, err)
+				p, loaded, _ := d.pm.LoadOrCreate(key)
+				if !loaded {
+					panic("lost reference to strong pointer")
+				}
+				p.Reject(err)
 			}
 			return
 		}
 		for _, k := range keys {
+			p, loaded, _ := d.pm.LoadOrCreate(k)
+			if !loaded {
+				panic("lost reference to strong pointer")
+			}
 			if v, ok := res[k]; ok {
-				d.pm.Resolve(ctx, k, v)
+				p.Resolve(v)
 			} else {
 				// Key not found
-				d.pm.Reject(ctx, k, fmt.Errorf("%w: key=%v", ErrNotFound, k))
+				p.Reject(fmt.Errorf("%w: key=%v", ErrNotFound, k))
 			}
 		}
 	})
 }
 
 func (d *DataLoader[K, V]) load(key K) *promise.Promise[V] {
-	p := d.pm.Defer(d.ctx, key)
+	p, loaded, _ := d.pm.LoadOrCreate(key)
+	if loaded {
+		return p
+	}
 
 	select {
 	case <-d.ctx.Done():
+		p.Reject(context.Cause(d.ctx))
 		return p
 	case d.ch <- key:
 	}
@@ -96,8 +107,12 @@ func (d *DataLoader[K, V]) load(key K) *promise.Promise[V] {
 	return p
 }
 
-func (d *DataLoader[K, V]) Delete(key K) {
-	d.pm.Delete(d.ctx, key, ErrCanceled)
+func (d *DataLoader[K, V]) Delete(key K, err error) {
+	p, loaded := d.pm.LoadAndDelete(key)
+	if loaded {
+		p.Reject(err)
+	}
+	p.Await()
 }
 
 func (d *DataLoader[K, V]) Load(key K) (V, error) {
