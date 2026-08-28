@@ -17,7 +17,7 @@ func TestSnapshot(t *testing.T) {
 	}
 
 	synctest.Test(t, func(t *testing.T) {
-		s, stop := snapshot.New(snapshot.Config{
+		s, stop := snapshot.New(&snapshot.Config{
 			Policies: policies,
 		})
 		defer stop()

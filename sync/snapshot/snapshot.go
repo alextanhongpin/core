@@ -4,17 +4,20 @@ package snapshot
 
 import (
 	"cmp"
+	"errors"
 	"slices"
 	"sync"
 	"time"
+
+	"github.com/alextanhongpin/core/sync/broadcast"
 )
 
 type Policy struct {
-	Changes int
 	After   time.Duration
+	Changes int
 }
 
-func NewOptions() []Policy {
+func DefaultPolicies() []Policy {
 	return []Policy{
 		{Changes: 1_000, After: time.Second},
 		{Changes: 100, After: 10 * time.Second},
@@ -24,41 +27,49 @@ func NewOptions() []Policy {
 }
 
 type Background struct {
-	*Broadcast[Policy]
-	policies []Policy
-	ch       chan int
-	done     chan struct{}
-	interval time.Duration
+	*Config
+	*broadcast.Broadcast[Policy]
+	ch   chan int
+	done chan struct{}
 }
 
 type Config struct {
-	Policies   []Policy
-	Interval   time.Duration
 	BufferSize int
+	Policies   []Policy
 }
 
-func New(cfg Config) (*Background, func()) {
-	interval := cmp.Or(cfg.Interval, minInterval(cfg.Policies))
-	if interval == 0 {
-		panic("snapshot: interval must be non-zero")
+func DefaultConfig() *Config {
+	return &Config{
+		BufferSize: 0,
+		Policies:   DefaultPolicies(),
 	}
+}
+
+func (cfg *Config) Validate() error {
 	if len(cfg.Policies) == 0 {
-		panic("snapshot: policies is empty")
+		return errors.New("snapshot: no policies")
+	}
+	return nil
+}
+
+func New(cfg *Config) (*Background, func()) {
+	if err := cfg.Validate(); err != nil {
+		panic(err)
 	}
 	slices.SortFunc(cfg.Policies, func(a, b Policy) int {
 		return cmp.Compare(a.After, b.After)
 	})
-	b, stop := NewBroadcast[Policy]()
+	b, stop := broadcast.New[Policy]()
 	bg := &Background{
 		Broadcast: b,
+		Config:    cfg,
 		ch:        make(chan int, cfg.BufferSize),
 		done:      make(chan struct{}),
-		policies:  cfg.Policies,
-		interval:  interval,
 	}
 
 	var wg sync.WaitGroup
 	wg.Go(bg.loop)
+
 	return bg, sync.OnceFunc(func() {
 		close(bg.done)
 		wg.Wait()
@@ -85,12 +96,12 @@ func (b *Background) loop() {
 
 	var count int
 	last := time.Now()
-	interval := minInterval(b.policies)
+	interval := minInterval(b.Policies)
 
 	flush := func(n int) {
 		count += n
 		elapsed := time.Since(last)
-		for _, p := range b.policies {
+		for _, p := range b.Policies {
 			if elapsed < p.After {
 				return
 			}
