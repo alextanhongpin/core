@@ -5,6 +5,6 @@ evaltest.T[int,*github.com/alextanhongpin/core/sync/retry_test.DoOutput]{
     Attempts: 2,
   },
   Error: &errors.joinError{},
-  ErrorString: "unsupported operation\nretry: throttled",
+  ErrorString: "unsupported operation\nunsupported operation\nretry: throttled",
   Logs: []interface {}{},
 }

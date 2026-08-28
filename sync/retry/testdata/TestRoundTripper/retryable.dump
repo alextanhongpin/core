@@ -7,7 +7,7 @@ evaltest.T[int,interface {}]{
     URL: "http://127.0.0.1:8080",
     Err: &errors.joinError{},
   },
-  ErrorString: "Get \"http://127.0.0.1:8080\": status code: 500\nstatus code: 500\nstatus code: 500\nstatus code: 500\nstatus code: 500\nretry: limit exceeded: retried 5 times",
+  ErrorString: "Get \"http://127.0.0.1:8080\": status code: 500\nstatus code: 500\nstatus code: 500\nstatus code: 500\nstatus code: 500\nstatus code: 500\nretry: limit exceeded: retried 5 times",
   Logs: []interface {}{
     &evaltest.T[interface {},int]{
       Name: "request",

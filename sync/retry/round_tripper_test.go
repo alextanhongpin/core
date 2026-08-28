@@ -23,12 +23,10 @@ func TestRoundTripper(t *testing.T) {
 		rt := newRetry()
 		rt.Attempts = 5
 
-		// Arrange.
 		client := ts.Client()
 		client.Transport = retry.NewRoundTripper(client.Transport, rt)
 
-		// Act.
-		resp, err := ts.Client().Get(ts.URL)
+		resp, err := client.Get(ts.URL)
 		if resp != nil {
 			return resp.StatusCode, err
 		}

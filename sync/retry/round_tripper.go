@@ -33,14 +33,27 @@ func NewRoundTripper(rt http.RoundTripper, r retry) *RoundTripper {
 	}
 }
 
-func (rt *RoundTripper) RoundTrip(r *http.Request) (resp *http.Response, err error) {
-	err = rt.r.Do(r.Context(), func(ctx context.Context) error {
-		resp, err = rt.RoundTrip(r)
+func (rt *RoundTripper) RoundTrip(req *http.Request) (resp *http.Response, err error) {
+	err = rt.r.Do(req.Context(), func(ctx context.Context) error {
+		// Clone the request for each attempt so a consumed body can be rewound via GetBody.
+		attemptReq := req
+		if req.GetBody != nil {
+			body, getErr := req.GetBody()
+			if getErr != nil {
+				return getErr
+			}
+			attemptReq = req.Clone(ctx)
+			attemptReq.Body = body
+		}
+
+		resp, err = rt.rt.RoundTrip(attemptReq)
 		if err != nil {
 			return err
 		}
 
 		if err = rt.StatusCodeHandler(resp.StatusCode); err != nil {
+			// Close body to avoid connection leaks on retry.
+			resp.Body.Close()
 			return err
 		}
 
@@ -49,7 +62,7 @@ func (rt *RoundTripper) RoundTrip(r *http.Request) (resp *http.Response, err err
 	if err != nil {
 		return nil, err
 	}
-	return
+	return resp, nil
 }
 
 func DefaultStatusCodeHandler(code int) error {

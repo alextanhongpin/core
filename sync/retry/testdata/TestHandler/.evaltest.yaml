@@ -1,15 +1,4 @@
-name: ok
-evals:
-  - name: no error
-    expr: err == nil
----
 name: error
-evals:
-  - name: retry error
-    expr: err != nil
----
-name: error retry
-input: 10
 evals:
   - name: retry error
     expr: err != nil
@@ -25,3 +14,14 @@ input: 10
 evals:
   - name: retry error
     expr: err != nil
+---
+name: error retry
+input: 10
+evals:
+  - name: retry error
+    expr: err != nil
+---
+name: ok
+evals:
+  - name: no error
+    expr: err == nil

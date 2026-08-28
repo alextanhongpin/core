@@ -1,3 +1,9 @@
+name: non-retryable
+input: 401
+evals:
+  - name: no error
+    expr: err == nil
+---
 name: ok
 input: 200
 evals:
@@ -12,9 +18,3 @@ evals:
 replacements:
   - pattern: "http://127.0.0.1:(\\d+)"
     replacement: "http://127.0.0.1:8080"
----
-name: non-retryable
-input: 401
-evals:
-  - name: no error
-    expr: err == nil

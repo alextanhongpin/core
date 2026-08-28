@@ -6,6 +6,6 @@ evaltest.T[int,*github.com/alextanhongpin/core/sync/retry_test.Output]{
     Result: "",
   },
   Error: &errors.joinError{},
-  ErrorString: "retry: limit exceeded: retried 0 times",
+  ErrorString: "unsupported operation\nretry: limit exceeded: retried 0 times",
   Logs: []interface {}{},
 }

@@ -48,39 +48,34 @@ func (r *Retry) Do(ctx context.Context, fn func(context.Context) error) error {
 	backoff := r.Backoff
 	throttler := r.Throttler
 
-	err := fn(ctx)
-	if err == nil {
-		throttler.Success()
-		return nil
-	}
-
-	if cause, ok := retryable(err); !ok {
-		return cause
-	}
-
 	var errs []error
-	for i := range attempts {
-		if !throttler.Allow() {
-			return errors.Join(append(errs, ErrThrottled)...)
-		}
+	for i := range attempts + 1 {
+		if i != 0 {
+			if !throttler.Allow() {
+				return errors.Join(append(errs, ErrThrottled)...)
+			}
 
-		timer := time.NewTimer(backoff.At(i))
-		select {
-		case <-ctx.Done():
+			d := backoff.At(i)
+			timer := time.NewTimer(d)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return context.Cause(ctx)
+			case <-timer.C:
+			}
+			// timer is stopped by GC after firing; stop explicitly to avoid leak
 			timer.Stop()
-			return context.Cause(ctx)
-
-		case <-timer.C:
-			err = fn(ctx)
-			if err == nil {
-				throttler.Success()
-				return nil
-			}
-			if cause, ok := retryable(err); !ok {
-				return cause
-			}
-			errs = append(errs, err)
 		}
+
+		err := fn(ctx)
+		if err == nil {
+			throttler.Success()
+			return nil
+		}
+		if cause, ok := retryable(err); !ok {
+			return cause
+		}
+		errs = append(errs, err)
 	}
 
 	return errors.Join(append(errs, fmt.Errorf("%w: retried %d times", ErrLimitExceeded, attempts))...)
