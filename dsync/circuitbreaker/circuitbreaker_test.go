@@ -45,7 +45,7 @@ type CircuitBreakerSuite struct {
 }
 
 func (s *CircuitBreakerSuite) SetupTest() {
-	options := circuitbreaker.NewOptions()
+	options := circuitbreaker.DefaultConfig()
 	options.FailureThreshold = 10
 	options.SuccessThreshold = 10
 	options.OpenTimeout = 100 * time.Millisecond

@@ -41,7 +41,7 @@ const (
 
 var ErrOpened = errors.New("cb: opened")
 
-func NewOptions() *Options {
+func DefaultConfig() *Options {
 	return &Options{
 		FailureThreshold: 100,
 		FailurePeriod:    time.Second,
@@ -89,7 +89,7 @@ type CircuitBreaker struct {
 func New(client *redis.Client, opts *Options) *CircuitBreaker {
 	return &CircuitBreaker{
 		client:  client,
-		options: cmp.Or(opts, NewOptions()),
+		options: cmp.Or(opts, DefaultConfig()),
 	}
 }
 
