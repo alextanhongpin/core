@@ -4,19 +4,21 @@ A distributed lock implementation for Go using Redis, designed for coordinating 
 
 ## Features
 
-- **Distributed Locking**: Coordinate access across multiple processes/servers
-- **Lock Refresh**: Automatically extend locks during long operations
-- **Exponential Backoff**: Intelligent retry mechanism with configurable backoff
-- **PubSub Optimization**: Fast lock acquisition using Redis pub/sub notifications
+- **Distributed Locking**: Coordinate access across multiple processes/servers with Redis
+- **Automatic Lock Refresh**: Automatically extend locks during long operations using `RefreshRatio`
 - **Context Support**: Full context cancellation and timeout support
-- **Keyed Mutexes**: Prevent local deadlocks with per-key mutexes
-- **Structured Logging**: Built-in logging with configurable logger
+- **Keyed Mutexes**: Prevent local deadlocks with per-key in-process mutexes
+- **Structured Logging**: Built-in `slog.Logger` for debugging
+- **Exponential Backoff**: Intelligent retry mechanism with jitter when waiting for a lock
+- **Configurable TTL**: Separate wait timeout and lock TTL
 
 ## Installation
 
 ```bash
 go get github.com/alextanhongpin/core/dsync/lock
 ```
+
+Requires Go 1.27+ and a single-node Redis instance.
 
 ## Quick Start
 
@@ -34,13 +36,18 @@ import (
 
 func main() {
     // Create Redis client
-    client := redis.NewClient(&redis.Options{
+    redisClient := redis.NewClient(&redis.Options{
         Addr: "localhost:6379",
     })
-    defer client.Close()
+    defer redisClient.Close()
     
     // Create locker
-    locker := lock.New(client)
+    client := lock.NewClient(redisClient)
+    locker := lock.New(client, &lock.Config{
+        LockTTL:      30 * time.Second, // Duration for which the lock is held
+        WaitTTL:      5 * time.Second,  // Max time to wait for acquisition
+        RefreshRatio: 0.8,              // Refresh at 80% of LockTTL
+    })
     
     // Use the lock
     ctx := context.Background()
@@ -49,10 +56,6 @@ func main() {
         log.Println("Executing critical section")
         time.Sleep(2 * time.Second)
         return nil
-    }, &lock.LockOption{
-        Lock:         30 * time.Second,  // Lock duration
-        Wait:         5 * time.Second,   // Wait timeout
-        RefreshRatio: 0.8,              // Refresh at 80% of lock duration
     })
     
     if err != nil {
@@ -61,19 +64,47 @@ func main() {
 }
 ```
 
+## Configuration
+
+`lock.Config` holds the lock behavior:
+
+```go
+type Config struct {
+    // WaitTTL is the duration to wait for the lock to become available.
+    // 0 means don't wait.
+    WaitTTL time.Duration
+    // LockTTL is the duration for which the lock is held in Redis.
+    LockTTL time.Duration
+    // RefreshRatio is the ratio of LockTTL at which the lock is refreshed.
+    // Set to 0 or negative to disable refresh. The operation will then be
+    // bounded by a context timeout equal to LockTTL.
+    RefreshRatio float64
+}
+```
+
+Defaults:
+
+```go
+lock.DefaultConfig()
+// WaitTTL:      5 * time.Second
+// LockTTL:      30 * time.Second
+// RefreshRatio: 0.8
+```
+
 ## Usage Patterns
 
 ### Basic Locking
 
 ```go
-// Simple lock without waiting
-locker := lock.New(client)
+locker := lock.New(client, &lock.Config{
+    LockTTL: 30 * time.Second,
+    WaitTTL: 0, // Don't wait if lock is busy
+})
+
+// No wait
 err := locker.Do(ctx, "resource-key", func(ctx context.Context) error {
     // Critical section
     return nil
-}, &lock.LockOption{
-    Lock: 30 * time.Second,
-    Wait: 0, // Don't wait if lock is busy
 })
 
 if errors.Is(err, lock.ErrLocked) {
@@ -84,80 +115,54 @@ if errors.Is(err, lock.ErrLocked) {
 ### Lock with Waiting
 
 ```go
-// Wait up to 10 seconds for lock
+locker := lock.New(client, &lock.Config{
+    LockTTL:      30 * time.Second,
+    WaitTTL:      10 * time.Second,
+    RefreshRatio: 0.7,
+})
+
 err := locker.Do(ctx, "resource-key", func(ctx context.Context) error {
     // Critical section
     return nil
-}, &lock.LockOption{
-    Lock: 30 * time.Second,
-    Wait: 10 * time.Second,
-    RefreshRatio: 0.7, // Refresh every 70% of lock duration
-})
-```
-
-### PubSub Optimization
-
-For better performance when multiple processes are waiting for the same lock:
-
-```go
-// Use PubSub for faster lock acquisition
-pubsubLocker := lock.NewPubSub(client)
-err := pubsubLocker.Do(ctx, "resource-key", func(ctx context.Context) error {
-    // Critical section
-    return nil
-}, &lock.LockOption{
-    Lock: 30 * time.Second,
-    Wait: 10 * time.Second,
-    RefreshRatio: 0.8,
 })
 ```
 
 ### Manual Lock Control
 
-```go
-locker := lock.New(client)
+The underlying `lock.Client` exposes explicit acquire/extend/release operations:
 
-// Try to acquire lock
+```go
+c := lock.NewClient(redisClient)
+
+ctx := context.Background()
 token := "my-unique-token"
-err := locker.TryLock(ctx, "resource-key", token, 30*time.Second)
+err := c.Lock(ctx, "resource-key", token, 30*time.Second, 5*time.Second)
 if err != nil {
     if errors.Is(err, lock.ErrLocked) {
         log.Println("Resource is locked")
     }
     return
 }
+defer c.Unlock(ctx, "resource-key", token)
 
-// Extend lock if needed
-err = locker.Extend(ctx, "resource-key", token, 30*time.Second)
-if err != nil {
-    log.Printf("Failed to extend lock: %v", err)
-}
-
-// Always unlock
-err = locker.Unlock(ctx, "resource-key", token)
-if err != nil {
-    log.Printf("Failed to unlock: %v", err)
-}
+// Extend if needed
+err = c.Extend(ctx, "resource-key", token, 30*time.Second)
 ```
 
-## Configuration Options
+### Func Helper
 
-### LockOption Fields
-
-- **Lock** (`time.Duration`): Duration for which the lock is held
-- **Wait** (`time.Duration`): Maximum time to wait for lock acquisition (0 = no wait)
-- **RefreshRatio** (`float64`): Ratio of lock duration at which to refresh (0.8 = refresh at 80%)
-- **Token** (`string`): Optional custom token for lock ownership
-
-### Default Values
+Wrap any function with locking:
 
 ```go
-&lock.LockOption{
-    Lock:         30 * time.Second,
-    Wait:         5 * time.Second,
-    RefreshRatio: 0.8,
-    Token:        "", // Auto-generated UUID
+fn := func(ctx context.Context, id int) (string, error) {
+    return fmt.Sprintf("result-%d", id), nil
 }
+
+lockedFn := lock.Func(fn, locker, func(id int) string {
+    return fmt.Sprintf("key:%d", id)
+})
+
+res, err := lockedFn(ctx, 123)
 ```
 
 ## Error Types
@@ -171,49 +176,44 @@ var (
 )
 ```
 
-## Best Practices
-
-### 1. Lock Duration Guidelines
-
-- Set lock duration longer than expected operation time
-- Use RefreshRatio to automatically extend locks during long operations
-- Consider network latency and clock skew between servers
-
-### 2. Wait Time Configuration
-
-- Set reasonable wait times to avoid indefinite blocking
-- Use context with timeout for additional safety
-- Consider exponential backoff for retry scenarios
-
-### 3. Error Handling
+Error handling example:
 
 ```go
-err := locker.Do(ctx, key, fn, opts)
+err := locker.Do(ctx, key, fn)
 switch {
 case errors.Is(err, lock.ErrLocked):
-    // Handle busy resource
+    // Busy resource
 case errors.Is(err, lock.ErrLockWaitTimeout):
-    // Handle timeout waiting for lock
+    // Timeout waiting for lock
 case errors.Is(err, lock.ErrLockTimeout):
-    // Handle lock expiration during operation
+    // Lock expired during operation
 case errors.Is(err, lock.ErrExpired):
-    // Handle lock expiration (e.g., Redis restart)
+    // Lock expired, e.g., Redis restart
 default:
-    // Handle other errors
+    // Other errors
 }
 ```
 
-### 4. Resource Naming
+## Best Practices
 
+### 1. Lock Duration Guidelines
+- Set `LockTTL` longer than expected operation time
+- Use `RefreshRatio` > 0 to automatically extend locks during long operations
+- Consider network latency and clock skew between servers
+
+### 2. Wait Time Configuration
+- Set `WaitTTL` to avoid indefinite blocking
+- Use context with timeout for additional safety
+- Backoff with jitter is applied automatically while waiting
+
+### 3. Resource Naming
 - Use descriptive, hierarchical lock keys: `user:123:profile`, `order:456:payment`
-- Avoid overly long keys (Redis key length limits)
-- Consider key expiration for cleanup
+- Avoid overly long keys
 
-### 5. Monitoring and Observability
+### 4. Monitoring and Observability
 
 ```go
-// Custom logger for lock operations
-locker := lock.New(client)
+locker := lock.New(client, cfg)
 locker.Logger = slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
     Level: slog.LevelInfo,
 }))
@@ -223,31 +223,29 @@ locker.Logger = slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
 
 ### Single Redis Instance
 
-The lock package is designed for single Redis node deployments. For Redis Cluster or high availability setups, consider using Redis Sentinel or implementing additional coordination mechanisms.
+Designed for a single Redis node. Not suitable for Redis Cluster without additional coordination.
 
 ### Lock Refresh Mechanism
 
-When `RefreshRatio > 0`, the lock is automatically refreshed:
-
+When `RefreshRatio > 0`:
 1. Function executes in a goroutine
-2. Timer triggers at `RefreshRatio * LockDuration`
-3. Lock TTL is extended atomically
-4. Process continues until function completes
+2. Ticker triggers at `RefreshRatio * LockTTL`
+3. `Extend` is called atomically to refresh TTL
+4. Loop continues until function completes or context is cancelled
 
-### Exponential Backoff
+When `RefreshRatio <= 0`:
+- No refresh is performed
+- A context with timeout `LockTTL` is applied, causing `ErrLockTimeout` if the operation exceeds the TTL
 
-The default backoff policy implements exponential backoff with jitter:
+### Keyed Mutex
 
-- Base: 1 second
-- Limit: 1 minute
-- Formula: `rand(min(base * 2^attempt, limit))`
+An in-process `cache.Cache[string, sync.Mutex]` ensures only one goroutine per key proceeds in the same process, preventing local deadlocks.
 
 ## Performance Considerations
 
-- **Throughput**: Depends on Redis latency and lock contention
-- **Memory Usage**: ~64 bytes per active lock + keyed mutex overhead
-- **Network**: 2-3 Redis operations per lock acquisition
-- **PubSub**: Reduces polling overhead for high-contention scenarios
+- Throughput depends on Redis latency and lock contention
+- Memory: ~64 bytes per active Redis lock + in-process mutex overhead
+- Each acquisition uses `SET NX` and each refresh uses `SET IF DEQ` via Redis
 
 ## Testing
 
@@ -257,7 +255,7 @@ Run tests with Redis:
 go test -v ./...
 ```
 
-Run tests with race detection:
+Run with race detection:
 
 ```bash
 go test -v -race ./...
@@ -265,17 +263,10 @@ go test -v -race ./...
 
 ## Limitations
 
-1. **Single Redis Node**: Not suitable for Redis Cluster
+1. **Single Redis Node**: Not designed for Redis Cluster
 2. **Clock Skew**: Sensitive to time differences between servers
 3. **Network Partitions**: No automatic failover mechanism
-4. **Memory Growth**: KeyedMutex accumulates mutexes (consider periodic cleanup)
-
-## Contributing
-
-1. Ensure all tests pass
-2. Add tests for new features
-3. Update documentation
-4. Run `go vet` and `golint`
+4. **Mutex Growth**: In-process keyed mutexes accumulate; consider periodic cleanup for long-running processes
 
 ## License
 
