@@ -312,8 +312,8 @@ func TestLock_Concurrent(t *testing.T) {
 		}
 	)
 
-	fn = lock.Func(fn, locker, func(any) string {
-		return key
+	fn = lock.Func(fn, locker, func(context.Context, any) (string, error) {
+		return key, nil
 	})
 
 	for range 10 {
