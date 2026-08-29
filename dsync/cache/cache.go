@@ -89,8 +89,7 @@ func (c *Cache[T]) Load(ctx context.Context, key string) (T, error) {
 		return zero, err
 	}
 
-	var t T
-	err = c.unmarshal(b, &t)
+	t, err := c.unmarshal(b)
 	if err != nil {
 		return zero, err
 	}
@@ -105,8 +104,8 @@ func (c *Cache[T]) LoadAndDelete(ctx context.Context, key string) (T, error) {
 	if err != nil {
 		return zero, err
 	}
-	var t T
-	err = c.unmarshal(b, &t)
+
+	t, err := c.unmarshal(b)
 	if err != nil {
 		return zero, err
 	}
@@ -126,8 +125,7 @@ func (c *Cache[T]) LoadOrStore(ctx context.Context, key string, value T, ttl tim
 		return zero, false, err
 	}
 
-	var t T
-	err = c.unmarshal(b, &t)
+	t, err := c.unmarshal(b)
 	if err != nil {
 		return zero, false, err
 	}
@@ -162,9 +160,9 @@ func (c *Cache[T]) TTL(ctx context.Context, key string) (time.Duration, error) {
 	return c.Cache.TTL(ctx, key)
 }
 
-func (c *Cache[T]) LoadOrStoreFunc(ctx context.Context, key string, getter func(context.Context, string) (T, time.Duration, error)) (value T, loaded bool, err error) {
-	b, loaded, err := c.Cache.LoadOrStoreFunc(ctx, key, func(ctx context.Context, key string) ([]byte, time.Duration, error) {
-		v, ttl, err := getter(ctx, key)
+func (c *Cache[T]) LoadOrCreate(ctx context.Context, key string, create func(context.Context, string) (T, time.Duration, error)) (value T, loaded bool, err error) {
+	b, loaded, err := c.Cache.LoadOrCreate(ctx, key, func(ctx context.Context, key string) ([]byte, time.Duration, error) {
+		v, ttl, err := create(ctx, key)
 		if err != nil {
 			return nil, 0, err
 		}
@@ -180,7 +178,7 @@ func (c *Cache[T]) LoadOrStoreFunc(ctx context.Context, key string, getter func(
 	}
 
 	// Unmarshal the current value (either from storage or what we just stored)
-	err = c.unmarshal(b, &value)
+	value, err = c.unmarshal(b)
 	if err != nil {
 		return zero, false, err
 	}
@@ -188,7 +186,7 @@ func (c *Cache[T]) LoadOrStoreFunc(ctx context.Context, key string, getter func(
 	return value, loaded, nil
 }
 
-func (c *Cache[T]) marshal(v any) ([]byte, error) {
+func (c *Cache[T]) marshal(v T) ([]byte, error) {
 	var b bytes.Buffer
 	err := c.Codec.NewEncoder(&b).Encode(v)
 	if err != nil {
@@ -197,6 +195,8 @@ func (c *Cache[T]) marshal(v any) ([]byte, error) {
 	return b.Bytes(), nil
 }
 
-func (c *Cache[T]) unmarshal(b []byte, v any) error {
-	return c.Codec.NewDecoder(bytes.NewReader(b)).Decode(v)
+func (c *Cache[T]) unmarshal(b []byte) (T, error) {
+	var v T
+	err := c.Codec.NewDecoder(bytes.NewReader(b)).Decode(&v)
+	return v, err
 }

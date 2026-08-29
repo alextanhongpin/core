@@ -86,11 +86,11 @@ func (r *Redis) LoadOrStore(ctx context.Context, key string, value []byte, ttl t
 	return []byte(s), true, nil
 }
 
-// LoadOrStoreFunc returns the existing value for the key if present. Otherwise, it
+// LoadOrCreate returns the existing value for the key if present. Otherwise, it
 // stores and returns the given value. The loaded result is true if the value
 // was loaded, false if stored.
 // Also see usecase here: https://github.com/golang/go/issues/33762#issuecomment-523757434
-func (r *Redis) LoadOrStoreFunc(ctx context.Context, key string, getter func(context.Context, string) ([]byte, time.Duration, error)) (curr []byte, loaded bool, err error) {
+func (r *Redis) LoadOrCreate(ctx context.Context, key string, create func(context.Context, string) ([]byte, time.Duration, error)) (curr []byte, loaded bool, err error) {
 	val, err := r.Load(ctx, key)
 	if err == nil {
 		return val, true, nil
@@ -98,16 +98,11 @@ func (r *Redis) LoadOrStoreFunc(ctx context.Context, key string, getter func(con
 	if !errors.Is(err, ErrNotExist) {
 		return nil, false, err
 	}
-	type cache struct {
-		hit bool
-		val []byte
-	}
 
-	var called atomic.Bool
+	var created atomic.Bool
 	// The "shared" value will be true if all the values are shared.
-	c, err, shared := r.group.Do(key, func() (any, error) {
-		called.Store(true)
-		val, ttl, err := getter(ctx, key)
+	res, err, _ := r.group.Do(key, func() (any, error) {
+		val, ttl, err := create(ctx, key)
 		if err != nil {
 			return nil, err
 		}
@@ -116,18 +111,17 @@ func (r *Redis) LoadOrStoreFunc(ctx context.Context, key string, getter func(con
 		if err != nil {
 			return nil, err
 		}
+		if !loaded {
+			created.Store(true)
+		}
 
-		return &cache{
-			val: curr,
-			hit: loaded,
-		}, nil
+		return curr, nil
 	})
 	if err != nil {
 		return nil, false, err
 	}
-	res := c.(*cache)
 
-	return res.val, res.hit || (!called.Load() && shared), nil
+	return res.([]byte), !created.Load(), nil
 }
 
 // LoadAndDelete deletes the value for a key, returning the previous value if

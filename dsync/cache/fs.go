@@ -5,73 +5,51 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
 	"os"
-	"path/filepath"
 	"sync"
 	"time"
-
-	"golang.org/x/sys/unix"
 )
 
-type Event struct {
-	Key       string    `json:"key,omitzero"`
-	Val       []byte    `json:"val,omitzero"`
-	ExpiresAt time.Time `json:"expiresAt,omitzero"`
-}
+const indexFile = ".index"
 
-func (e *Event) IsExpired() bool {
-	return !e.ExpiresAt.IsZero() && time.Since(e.ExpiresAt) > 0
-}
-
-func NewEvent(key string, val []byte, ttl time.Duration) *Event {
-	var expiresAt time.Time
-	if ttl > 0 {
-		expiresAt = time.Now().Add(ttl)
-	}
-	return &Event{
-		Key:       key,
-		Val:       val,
-		ExpiresAt: expiresAt,
-	}
-}
-
-type File struct {
-	file  *os.File
-	close func() error
-
-	// TODO: Add sync snapshot.
+type FS struct {
+	root *os.Root
 	mu   sync.Mutex
-	data map[string]*Event
+	data map[string]time.Time
 }
 
-var _ cache[[]byte] = (*File)(nil)
+var _ cache[[]byte] = (*FS)(nil)
 
-// NewFile creates a new File instance with the provided File client.
-func NewFile(path string) (*File, error) {
-	f, close, err := lockFile(path)
+// NewFile creates a new FS instance with the provided FS client.
+func NewFS(dir string) (*FS, error) {
+	root, err := os.OpenRoot(dir)
 	if err != nil {
 		return nil, err
 	}
-
-	data := make(map[string]*Event)
-	err = json.NewDecoder(f).Decode(&data)
-	if err != nil && !errors.Is(err, io.EOF) {
+	data := make(map[string]time.Time)
+	b, err := root.ReadFile(indexFile)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return nil, err
 	}
 
-	return &File{
-		file:  f,
-		close: close,
-		data:  data,
+	if json.Valid(b) {
+		err = json.Unmarshal(b, &data)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return &FS{
+		root: root,
+		data: data,
 	}, nil
 }
 
-func (f *File) Close() error {
-	return f.close()
+func (f *FS) Close() error {
+	return nil
 }
 
-func (f *File) Load(ctx context.Context, key string) ([]byte, error) {
+func (f *FS) Load(ctx context.Context, key string) ([]byte, error) {
 	f.mu.Lock()
 	val, err := f.load(key)
 	f.mu.Unlock()
@@ -82,14 +60,14 @@ func (f *File) Load(ctx context.Context, key string) ([]byte, error) {
 	return val.Val, nil
 }
 
-func (f *File) Store(ctx context.Context, key string, value []byte, ttl time.Duration) error {
+func (f *FS) Store(ctx context.Context, key string, value []byte, ttl time.Duration) error {
 	f.mu.Lock()
 	err := f.save(key, value, ttl)
 	f.mu.Unlock()
 	return err
 }
 
-func (f *File) StoreOnce(ctx context.Context, key string, value []byte, ttl time.Duration) error {
+func (f *FS) StoreOnce(ctx context.Context, key string, value []byte, ttl time.Duration) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
@@ -108,7 +86,7 @@ func (f *File) StoreOnce(ctx context.Context, key string, value []byte, ttl time
 // stores and returns the given value. The loaded result is true if the value
 // was loaded, false if stored.
 // Also see usecase here: https://github.com/golang/go/issues/33762#issuecomment-523757434
-func (f *File) LoadOrStore(ctx context.Context, key string, value []byte, ttl time.Duration) (curr []byte, loaded bool, err error) {
+func (f *FS) LoadOrStore(ctx context.Context, key string, value []byte, ttl time.Duration) (curr []byte, loaded bool, err error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
@@ -125,10 +103,11 @@ func (f *File) LoadOrStore(ctx context.Context, key string, value []byte, ttl ti
 	if err != nil {
 		return nil, false, err
 	}
+
 	return value, false, nil
 }
 
-func (f *File) LoadOrCreate(ctx context.Context, key string, create func(context.Context, string) ([]byte, time.Duration, error)) (curr []byte, loaded bool, err error) {
+func (f *FS) LoadOrCreate(ctx context.Context, key string, create func(context.Context, string) ([]byte, time.Duration, error)) (curr []byte, loaded bool, err error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
@@ -156,7 +135,7 @@ func (f *File) LoadOrCreate(ctx context.Context, key string, create func(context
 // LoadAndDelete deletes the value for a key, returning the previous value if
 // any. The loaded result reports whether the key was present.
 // Also see usecase here: https://github.com/golang/go/issues/33762#issuecomment-523757434
-func (f *File) LoadAndDelete(ctx context.Context, key string) (value []byte, err error) {
+func (f *FS) LoadAndDelete(ctx context.Context, key string) (value []byte, err error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
@@ -176,7 +155,7 @@ func (f *File) LoadAndDelete(ctx context.Context, key string) (value []byte, err
 // old value must be of a comparable type.
 // If there is no current value for key in the map, CompareAndDelete returns
 // false (even if the old value is the nil interface value).
-func (f *File) CompareAndDelete(ctx context.Context, key string, old []byte) error {
+func (f *FS) CompareAndDelete(ctx context.Context, key string, old []byte) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
@@ -194,7 +173,7 @@ func (f *File) CompareAndDelete(ctx context.Context, key string, old []byte) err
 
 // CompareAndSwap swaps the old and new values for key if the value stored in
 // the map is equal to old. The old value must be of a comparable type.
-func (f *File) CompareAndSwap(ctx context.Context, key string, old, value []byte, ttl time.Duration) error {
+func (f *FS) CompareAndSwap(ctx context.Context, key string, old, value []byte, ttl time.Duration) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
@@ -215,7 +194,7 @@ func (f *File) CompareAndSwap(ctx context.Context, key string, old, value []byte
 }
 
 // Exists checks if a key exists in the cache.
-func (f *File) Exists(ctx context.Context, key string) (bool, error) {
+func (f *FS) Exists(ctx context.Context, key string) (bool, error) {
 	_, err := f.Load(ctx, key)
 	if errors.Is(err, ErrNotExist) {
 		return false, nil
@@ -226,7 +205,7 @@ func (f *File) Exists(ctx context.Context, key string) (bool, error) {
 // TTL returns the remaining time to live for a key.
 // Returns -1 if the key exists but has no expiration.
 // Returns -2 if the key does not exist.
-func (f *File) TTL(ctx context.Context, key string) (time.Duration, error) {
+func (f *FS) TTL(ctx context.Context, key string) (time.Duration, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
@@ -241,7 +220,7 @@ func (f *File) TTL(ctx context.Context, key string) (time.Duration, error) {
 }
 
 // Expire sets a timeout on a key. After the timeout has expired, the key will automatically be deleted.
-func (f *File) Expire(ctx context.Context, key string, ttl time.Duration) error {
+func (f *FS) Expire(ctx context.Context, key string, ttl time.Duration) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
@@ -255,93 +234,90 @@ func (f *File) Expire(ctx context.Context, key string, ttl time.Duration) error 
 }
 
 // Delete removes one or more keys from the cache.
-func (f *File) Delete(ctx context.Context, keys ...string) (int64, error) {
+func (f *FS) Delete(ctx context.Context, keys ...string) (int64, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
 	var count int64
 	for _, key := range keys {
-		if _, ok := f.data[key]; ok {
+		err := f.delete(key)
+		if err == nil {
 			count++
-			if err := f.delete(key); err != nil {
-				return 0, err
-			}
 		}
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		return 0, err
 	}
 	return count, nil
 }
 
-func (f *File) Size(ctx context.Context) (int, error) {
+func (f *FS) Size(ctx context.Context) (int, error) {
 	f.mu.Lock()
-	count := len(f.data)
+	dir, err := f.root.Open(".")
+	if err != nil {
+		return 0, err
+	}
+	entries, err := dir.ReadDir(-1)
+	if err != nil {
+		return 0, err
+	}
+	var count int
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		count++
+	}
 	f.mu.Unlock()
 
 	return count, nil
 }
 
-func (f *File) load(key string) (*Event, error) {
-	it, ok := f.data[key]
-	if !ok {
+func (f *FS) load(key string) (*Event, error) {
+	key = hash([]byte(key))
+	b, err := f.root.ReadFile(key)
+	if errors.Is(err, os.ErrNotExist) {
 		return nil, ErrNotExist
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	it := &Event{
+		Key:       key,
+		Val:       b,
+		ExpiresAt: f.data[key],
 	}
 
 	if it.IsExpired() {
-		err := f.delete(key)
-		if err != nil {
+		if err := f.delete(key); err != nil {
 			return nil, err
 		}
-
 		return nil, ErrNotExist
 	}
 
 	return it, nil
 }
 
-func (f *File) save(key string, value []byte, ttl time.Duration) error {
-	f.data[key] = NewEvent(key, value, ttl)
-	return f.flush()
-}
-
-func (f *File) delete(key string) error {
+func (f *FS) delete(key string) error {
+	key = hash([]byte(key))
 	delete(f.data, key)
-	return f.flush()
+	return errors.Join(f.root.RemoveAll(key), f.saveIndex())
 }
 
-func (f *File) flush() error {
-	if err := f.file.Truncate(0); err != nil {
-		return err
+func (f *FS) save(key string, value []byte, ttl time.Duration) error {
+	key = hash([]byte(key))
+	if ttl != 0 {
+		f.data[key] = time.Now().Add(ttl)
 	}
-	if _, err := f.file.Seek(0, 0); err != nil {
-		return err
-	}
-	return json.NewEncoder(f.file).Encode(f.data)
+	return errors.Join(f.root.WriteFile(key, value, 0o644), f.saveIndex())
 }
 
-func lockFile(name string) (*os.File, func() error, error) {
-	err := os.MkdirAll(filepath.Dir(name), 0o755)
+func (f *FS) saveIndex() error {
+	b, err := json.Marshal(f.data)
 	if err != nil {
-		return nil, nil, err
+		return err
 	}
-
-	// 1. Open or create the file
-	file, err := os.OpenFile(name, os.O_CREATE|os.O_RDWR, 0o644)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	// 2. Acquire an exclusive, blocking lock
-	// Use unix.LOCK_EX | unix.LOCK_NB for a non-blocking attempt instead
-	err = unix.Flock(int(file.Fd()), unix.LOCK_EX)
-	if err != nil {
-		defer file.Close()
-		return nil, nil, err
-	}
-
-	// 3. Ensure the lock is released when the function exits
-	return file, func() error {
-		return errors.Join(
-			unix.Flock(int(file.Fd()), unix.LOCK_UN),
-			file.Close(),
-		)
-	}, nil
+	return f.root.WriteFile(indexFile, b, 0o644)
 }

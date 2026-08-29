@@ -76,6 +76,29 @@ func TestFileGob(t *testing.T) {
 	testUnmarshaler(t, c)
 }
 
+func TestFSJSON(t *testing.T) {
+	dir := t.TempDir()
+	storage, err := cache.NewFS(dir)
+	assert.NoError(t, err)
+
+	c := cache.New[*User]()
+	c.Cache = storage
+
+	testUnmarshaler(t, c)
+}
+
+func TestFSGob(t *testing.T) {
+	dir := t.TempDir()
+	storage, err := cache.NewFS(dir)
+	assert.NoError(t, err)
+
+	c := cache.New[*User]()
+	c.Cache = storage
+	c.Codec = cache.NewGobCodec()
+
+	testUnmarshaler(t, c)
+}
+
 func testUnmarshaler(t *testing.T, c cache.C[*User]) {
 	t.Helper()
 	t.Cleanup(func() {
@@ -191,17 +214,17 @@ func testUnmarshaler(t *testing.T, c cache.C[*User]) {
 		key := sep.Join("users", t.Name())
 
 		is := assert.New(t)
-		getter := func(ctx context.Context, key string) (*User, time.Duration, error) {
+		create := func(ctx context.Context, key string) (*User, time.Duration, error) {
 			parts := sep.Split(key)
 			t.Log("fetching", parts[1])
 			return john, time.Minute, nil
 		}
 
-		u, loaded, err := c.LoadOrStoreFunc(ctx, key, getter)
+		u, loaded, err := c.LoadOrCreate(ctx, key, create)
 		is.NoError(err)
 		is.False(loaded)
 
-		v, loaded, err := c.LoadOrStoreFunc(ctx, key, getter)
+		v, loaded, err := c.LoadOrCreate(ctx, key, create)
 		is.NoError(err)
 		is.True(loaded)
 		is.Equal(u, v)
@@ -212,7 +235,7 @@ func testUnmarshaler(t *testing.T, c cache.C[*User]) {
 		is := assert.New(t)
 
 		var calls atomic.Int64
-		getter := func(ctx context.Context, key string) (*User, time.Duration, error) {
+		create := func(ctx context.Context, key string) (*User, time.Duration, error) {
 			calls.Add(1)
 			time.Sleep(100 * time.Millisecond)
 			return john, time.Minute, nil
@@ -222,7 +245,7 @@ func testUnmarshaler(t *testing.T, c cache.C[*User]) {
 		var wg sync.WaitGroup
 		for range 10 {
 			wg.Go(func() {
-				u, loaded, err := c.LoadOrStoreFunc(ctx, key, getter)
+				u, loaded, err := c.LoadOrCreate(ctx, key, create)
 				is.NoError(err)
 				is.Equal(u, john)
 				if loaded {

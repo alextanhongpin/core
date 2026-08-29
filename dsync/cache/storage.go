@@ -29,7 +29,7 @@ type cache[T any] interface {
 	// Returns the current value and whether it was loaded (true) or stored (false).
 	LoadOrStore(ctx context.Context, key string, value T, ttl time.Duration) (curr T, loaded bool, err error)
 
-	LoadOrStoreFunc(ctx context.Context, key string, fn func(ctx context.Context, key string) (T, time.Duration, error)) (curr T, loaded bool, err error)
+	LoadOrCreate(ctx context.Context, key string, fn func(ctx context.Context, key string) (T, time.Duration, error)) (curr T, loaded bool, err error)
 
 	// Store sets a key's value with the specified TTL.
 	Store(ctx context.Context, key string, value T, ttl time.Duration) error
