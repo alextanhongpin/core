@@ -27,6 +27,7 @@ func (g *Goroutine) Stop() {
 	defer g.mu.Unlock()
 
 	g.stop()
+	g.wg.Wait()
 }
 
 func (g *Goroutine) stop() {
@@ -35,7 +36,6 @@ func (g *Goroutine) stop() {
 	}
 	g.cancel()
 	g.cancel = nil
-	g.wg.Wait()
 }
 
 func (g *Goroutine) start(ctx context.Context, fn func(context.Context)) {
