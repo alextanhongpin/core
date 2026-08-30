@@ -16,7 +16,7 @@ func New[K comparable, V any](create func(K) (*V, error)) *Cache[K, V] {
 	return &Cache[K, V]{create: create}
 }
 
-func (c *Cache[K, V]) Get(key K) (*V, error) {
+func (c *Cache[K, V]) LoadOrCreate(key K) (*V, bool, error) {
 	var newValue *V
 	for {
 		// Try to load an existing value out of the cache.
@@ -27,7 +27,7 @@ func (c *Cache[K, V]) Get(key K) (*V, error) {
 				var err error
 				newValue, err = c.create(key)
 				if err != nil {
-					return nil, err
+					return nil, false, err
 				}
 			}
 
@@ -41,13 +41,13 @@ func (c *Cache[K, V]) Get(key K) (*V, error) {
 					// else already deleted the entry and installed a new mapped file.
 					c.m.CompareAndDelete(key, wp)
 				}, key)
-				return newValue, nil
+				return newValue, false, nil
 			}
 		}
 
 		// See if our cache entry is valid.
 		if mf := value.(weak.Pointer[V]).Value(); mf != nil {
-			return mf, nil
+			return mf, true, nil
 		}
 
 		// Discovered a nil entry awaiting cleanup. Eagerly delete it.
