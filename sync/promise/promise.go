@@ -4,7 +4,8 @@ import (
 	"context"
 	"errors"
 	"sync"
-	"sync/atomic"
+
+	"github.com/alextanhongpin/core/sync/cache"
 )
 
 type Status int
@@ -16,11 +17,7 @@ const (
 )
 
 type Promise[T any] struct {
-	cancel func(error)
-	done   *atomic.Bool
-	once   sync.Once
-	fn     func() (T, error)
-	ch     chan result[T]
+	ch *Channel[*result[T]]
 }
 
 type result[T any] struct {
@@ -31,77 +28,40 @@ type result[T any] struct {
 type handler[T any] = func(ctx context.Context) (T, error)
 
 func New[T any](ctx context.Context, fn handler[T]) *Promise[T] {
-	p, ctx := Deferred[T](ctx)
-	go p.run(ctx, fn)
-	return p
-}
-
-func Deferred[T any](ctx context.Context) (*Promise[T], context.Context) {
-	ctx, cancel := context.WithCancelCause(ctx)
-	p := &Promise[T]{
-		ch:     make(chan result[T], 1),
-		done:   new(atomic.Bool),
-		cancel: cancel,
-	}
-	p.fn = sync.OnceValues(func() (T, error) {
-		defer p.done.Store(true)
-		select {
-		case <-ctx.Done():
-			var zero T
-			return zero, context.Cause(ctx)
-		case res := <-p.ch:
-			return res.Data, res.Error
-		}
-	})
-	return p, ctx
-}
-
-func (p *Promise[T]) run(ctx context.Context, fn handler[T]) {
-	p.once.Do(func() {
+	p := Deferred[T](ctx)
+	go func() {
 		res, err := fn(ctx)
-		p.ch <- result[T]{Data: res, Error: err}
-	})
-}
-
-func Resolve[T any](ctx context.Context, v T) *Promise[T] {
-	p, _ := Deferred[T](ctx)
-	p.Resolve(v)
+		p.ch.Send(&result[T]{
+			Data:  res,
+			Error: err,
+		})
+	}()
 	return p
-}
-
-func Reject[T any](ctx context.Context, err error) *Promise[T] {
-	p, _ := Deferred[T](ctx)
-	p.Reject(err)
-	return p
-}
-
-func WithResolvers[T any](ctx context.Context) (p *Promise[T], resolve func(T), reject func(error)) {
-	p, _ = Deferred[T](ctx)
-	return p, p.Resolve, p.Reject
 }
 
 func (p *Promise[T]) Resolve(v T) {
-	p.once.Do(func() {
-		p.ch <- result[T]{Data: v}
-	})
+	p.ch.Send(&result[T]{Data: v})
 }
 
 func (p *Promise[T]) Reject(err error) {
-	p.once.Do(func() {
-		p.ch <- result[T]{Error: err}
-	})
+	p.ch.Send(&result[T]{Error: err})
 }
 
 func (p *Promise[T]) Abort(cause error) {
-	p.cancel(cause)
+	p.ch.Close(cause)
 }
 
 func (p *Promise[T]) Await() (T, error) {
-	return p.fn()
+	res, err := p.ch.Recv()
+	if err != nil {
+		var zero T
+		return zero, err
+	}
+	return res.Data, res.Error
 }
 
 func (p *Promise[T]) Status() Status {
-	if !p.done.Load() {
+	if !p.ch.Done() {
 		return StatusPending
 	}
 	_, err := p.Await()
@@ -213,11 +173,34 @@ func AllSettled[T any](promises ...*Promise[T]) []*Result[T] {
 	return res
 }
 
-type Map[K comparable, V any] = Cache[K, Promise[V]]
+func Deferred[T any](ctx context.Context) *Promise[T] {
+	return &Promise[T]{
+		ch: NewChannel[*result[T]](ctx),
+	}
+}
+
+func Resolve[T any](ctx context.Context, v T) *Promise[T] {
+	p := Deferred[T](ctx)
+	p.Resolve(v)
+	return p
+}
+
+func Reject[T any](ctx context.Context, err error) *Promise[T] {
+	p := Deferred[T](ctx)
+	p.Reject(err)
+	return p
+}
+
+func WithResolvers[T any](ctx context.Context) (p *Promise[T], resolve func(T), reject func(error)) {
+	p = Deferred[T](ctx)
+	return p, p.Resolve, p.Reject
+}
+
+type Map[K comparable, V any] = cache.Cache[K, Promise[V]]
 
 func NewMap[K comparable, V any](ctx context.Context) *Map[K, V] {
-	return NewCache(func(K) (*Promise[V], error) {
-		d, _ := Deferred[V](ctx)
+	return cache.New(func(K) (*Promise[V], error) {
+		d := Deferred[V](ctx)
 		return d, nil
 	})
 }

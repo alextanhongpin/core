@@ -11,6 +11,7 @@ A lightweight Go implementation of JavaScript-style promises, built on generics 
 - **Status tracking** — non-blocking `Status()` check (`Pending`, `Fulfilled`, `Rejected`)
 - **Collection helpers** — `All`, `AllSettled`, `Race`, `Any` mirror the JS Promise API
 - **GC-aware Map** — `Map[K, V]` stores promises under keys using weak pointers; entries are collected when no longer referenced
+- **Channel primitive** — `Channel[T]` provides single-value delivery with context cancellation and one-time send/receive semantics, used internally by `Promise`
 - **Generics** — fully type-safe thanks to Go generics
 
 ## Installation
@@ -293,6 +294,32 @@ After all references to the promise are dropped and the GC runs, the entry is re
 #### `(*Map[K, V]).LoadAndDelete(key K) (*Promise[V], bool)`
 
 Removes and returns the promise for the key if it exists and is still live.
+
+---
+
+### Channel
+
+`Channel[T]` is a low-level primitive that underpins `Promise`. It provides single-value delivery with context cancellation and guarantees that the value is sent at most once and received at most once.
+
+#### `NewChannel[T any](ctx context.Context) *Channel[T]`
+
+Creates a new channel bound to `ctx`.
+
+#### `(*Channel[T]).Send(v T)`
+
+Publishes a value. Only the first call succeeds; subsequent calls are no-ops.
+
+#### `(*Channel[T]).Recv() (T, error)`
+
+Blocks until a value is sent or the context is cancelled.
+
+#### `(*Channel[T]).Close(cause error)`
+
+Cancels the context with `cause`. If no value was sent, `Recv` returns `cause`.
+
+#### `(*Channel[T]).Done() bool`
+
+Reports whether `Recv` has completed.
 
 ---
 
