@@ -52,11 +52,11 @@ func (r *FixedWindow) allowN(ctx context.Context, key string, n int) (int, error
 
 // AllowN checks if N requests are allowed for the given key.
 func (r *FixedWindow) AllowN(ctx context.Context, key string, n int) (bool, error) {
-	remaining, err := r.allowN(ctx, key, n)
+	res, err := r.LimitN(ctx, key, n)
 	if err != nil {
 		return false, err
 	}
-	return remaining >= 0, nil
+	return res.Allow, nil
 }
 
 // Allow checks if a single request is allowed for the given key.
@@ -65,7 +65,17 @@ func (r *FixedWindow) Allow(ctx context.Context, key string) (bool, error) {
 }
 
 func (r *FixedWindow) LimitN(ctx context.Context, key string, n int) (*Result, error) {
-	remaining, err := r.allowN(ctx, key, n)
+	res, err := r.client.IncrEXInt(ctx, key, redis.IncrEXIntArgs{
+		By:        int64(n),
+		HasBy:     n > 0,
+		UBound:    int64(r.limit),
+		HasUBound: r.limit > 0,
+		Expiration: &redis.ExpirationOption{
+			Mode:  redis.EX,
+			Value: int64(r.period.Seconds()),
+		},
+		ENX: true,
+	}).Result()
 	if err != nil {
 		return nil, err
 	}
@@ -76,15 +86,16 @@ func (r *FixedWindow) LimitN(ctx context.Context, key string, n int) (*Result, e
 	}
 
 	result := &Result{
-		Allow:      remaining >= 0,
-		Remaining:  remaining,
+		Allow:      res.AppliedIncrement > 0,
+		Remaining:  r.limit - int(res.Value),
 		ResetAfter: resetAfter,
 		RetryAfter: resetAfter,
 	}
-	if remaining > 0 {
-		// Can immediately retry.
+	// Can immediately retry.
+	if result.Remaining > 0 {
 		result.RetryAfter = 0
 	}
+
 	return result, nil
 }
 

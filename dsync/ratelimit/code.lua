@@ -14,45 +14,19 @@ local function gcra(keys, args)
 	local period = tonumber(args[3])
 	local quantity = tonumber(args[4])
 
-	local delta = period / limit;
+	local delta = period / limit
 	local now = now_ms()
-	local ts = tonumber(redis.call('GET', key) or 0)
-	local remaining = -1
-	ts = math.max(ts, now)
 
-	-- Allow hitting above quantity*delta, because we can lazily evaluate the
-	-- usage later.
-	if ts - burst * delta <= now then
-		ts = ts + quantity * delta
-		local max = now + delta
-		local min = ts - burst * delta
-		remaining = math.max(0, math.floor((max - min) / delta))
-		redis.call('SET', key, ts, 'PX', period)
+	local lo = math.floor(now - (burst * delta))
+	local up = math.floor(now) + 1
+	local inc = quantity * delta
+
+	local result = redis.call('INCREX', key, 'BYINT', inc, 'LBOUND', lo, 'UBOUND', up, 'PX', period)
+	if result[1] + inc <= lo and result[2] == 0 then
+		return redis.call('INCREX', key, 'BYINT', inc, 'LBOUND', lo, 'UBOUND', up, 'SATURATE', 'PX', period)
 	end
 
-	local retryAfter = ts - burst * delta - now
-	return {remaining, math.max(0, retryAfter)}
+	return result
 end
 
 redis.register_function('gcra', gcra)
-
-local function fixed_window(keys, args)
-	local key = keys[1]
-
-	local limit = tonumber(args[1])
-	local period = tonumber(args[2])
-	local quantity = tonumber(args[3])
-
-	local count = tonumber(redis.call('INCRBY', key, quantity))
-	if count == quantity then
-		redis.call('PEXPIRE', key, period)
-	end
-
-	if count <= limit then
-		return limit - count
-	end
-
-	return -1
-end
-
-redis.register_function('fixed_window', fixed_window)

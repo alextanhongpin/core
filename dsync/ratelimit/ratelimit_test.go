@@ -10,7 +10,9 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	stop := redistest.Init()
+	stop := redistest.Init(redistest.Options{
+		Image: "redis:8.10.1",
+	})
 	code := m.Run()
 	stop()
 	os.Exit(code)
