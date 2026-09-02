@@ -1,7 +1,9 @@
 package stringcase
 
 import (
-	"iter"
+	"fmt"
+	"math"
+	"regexp"
 	"slices"
 	"strings"
 	"unicode"
@@ -11,6 +13,8 @@ import (
 )
 
 var (
+	// In Go, the "s" in a plural initialism or acronym should be lowercase
+	// (e.g., IDs, URLs, JSONs), keeping the base initialism fully uppercase
 	DefaultInitialisms = strings.Fields("API APIs ASCII ASCIIs CPU CPUs CSS DNS EOF EOFs GUID GUIDs HTML HTMLs HTTP HTTPS HTTPs ID IDs IP IPs JSON JSONs LHS QPS RAM RAMs RHS RPC RPCs SLA SLAs SMTP SMTPs SQL SQLs SSH SSHs TCP TCPs TLS TTL TTLs UDP UDPs UI UID UIDs UIs URI URIs URL URLs UTF8 UTF8s UUID UUIDs VM VMs XML XMLs XSRF XSRFs XSS")
 	tokenizer          = NewTokenizer(DefaultInitialisms...)
 )
@@ -70,7 +74,7 @@ func NewTokenizer(initialisms ...string) *Tokenizer {
 func (t *Tokenizer) Title(text string) string {
 	caser := cases.Title(language.English)
 	var result []string
-	for token := range t.Tokenize(text) {
+	for _, token := range t.Tokenize(text) {
 		upper, ok := t.lowerToUpper[token]
 		if ok {
 			result = append(result, upper)
@@ -84,7 +88,7 @@ func (t *Tokenizer) Title(text string) string {
 
 func (t *Tokenizer) Pascal(text string) string {
 	var result []string
-	for token := range t.Tokenize(text) {
+	for _, token := range t.Tokenize(text) {
 		upper, ok := t.lowerToUpper[token]
 		if ok {
 			result = append(result, upper)
@@ -98,7 +102,7 @@ func (t *Tokenizer) Pascal(text string) string {
 
 func (t *Tokenizer) Camel(text string) string {
 	var result []string
-	for token := range t.Tokenize(text) {
+	for _, token := range t.Tokenize(text) {
 		if len(result) == 0 {
 			result = append(result, token)
 			continue
@@ -116,97 +120,15 @@ func (t *Tokenizer) Camel(text string) string {
 }
 
 func (t *Tokenizer) Snake(text string) string {
-	return strings.Join(slices.Collect(t.Tokenize(text)), "_")
+	return strings.Join(t.Tokenize(text), "_")
 }
 
 func (t *Tokenizer) Kebab(text string) string {
-	return strings.Join(slices.Collect(t.Tokenize(text)), "-")
+	return strings.Join(t.Tokenize(text), "-")
 }
 
-func (t *Tokenizer) Tokenize(text string) iter.Seq[string] {
-	return func(yield func(string) bool) {
-		text = strings.Map(func(r rune) rune {
-			if unicode.IsDigit(r) || unicode.IsLetter(r) {
-				return r
-			}
-			return ' '
-		}, text)
-
-		for word := range strings.FieldsSeq(text) {
-			for token := range t.tokenize(word) {
-				if !yield(strings.ToLower(token)) {
-					break
-				}
-			}
-		}
-	}
-}
-
-func (t *Tokenizer) tokenize(text string) iter.Seq[string] {
-	return func(yield func(string) bool) {
-		next, stop := iter.Pull(segment(text))
-		defer stop()
-		for {
-			a, ok := next()
-			if !ok {
-				break
-			}
-			if strings.ToLower(a) == a {
-				if !yield(a) {
-					break
-				}
-				continue
-			}
-			b, ok := next()
-			if !ok {
-				yield(a)
-				break
-			}
-			if len(a) == 1 {
-				if !yield(a + b) {
-					return
-				}
-				continue
-			}
-
-			if slices.Contains(t.initialisms, a+b) {
-				if !yield(a + b) {
-					return
-				}
-				continue
-			}
-
-			upper, last := a[:len(a)-1], a[len(a)-1:]
-			if !yield(upper) {
-				return
-			}
-			if !yield(last + b) {
-				return
-			}
-		}
-	}
-}
-
-func segment(text string) iter.Seq[string] {
-	return func(yield func(string) bool) {
-		runes := []rune(text)
-		isUpper := unicode.IsUpper(runes[0])
-		var start int
-		for i, r := range runes {
-			toggle := (isUpper && unicode.IsLower(r)) || (!isUpper && unicode.IsUpper(r))
-			if !toggle {
-				continue
-			}
-			isUpper = unicode.IsUpper(r)
-			if !yield(string(runes[start:i])) {
-				return
-			}
-			start = i
-		}
-		if s := string(runes[start:]); s != "" {
-			yield(s)
-		}
-	}
+func (t *Tokenizer) Tokenize(text string) []string {
+	return Tokenize(text, t.initialisms)
 }
 
 func uppercaseFirst(s string) string {
@@ -216,4 +138,132 @@ func uppercaseFirst(s string) string {
 	r := []rune(s)
 	r[0] = unicode.ToUpper(r[0])
 	return string(r)
+}
+
+func Tokenize(s string, initialisms []string) []string {
+	// Replace all special characters with space.
+	s = strings.Map(func(r rune) rune {
+		if unicode.IsDigit(r) || unicode.IsLetter(r) {
+			return r
+		}
+		return ' '
+	}, s)
+	var words []string
+	for c := range strings.FieldsSeq(s) {
+		for _, word := range segment(c, initialisms) {
+			if slices.Contains(initialisms, word) {
+				words = append(words, strings.ToLower(word))
+				continue
+			}
+			bounds := splitBoundary(word)
+			for _, b := range bounds {
+				words = append(words, strings.ToLower(b))
+			}
+		}
+	}
+	return words
+}
+
+type item struct {
+	score  int
+	text   string
+	before []string
+	after  []string
+}
+
+func (i item) String() string {
+	return fmt.Sprintf("%d:%s", i.score, strings.Join(append(append(i.before, i.text), i.after...), " "))
+}
+
+func (i item) Tokens() []string {
+	result := append(i.before, i.text)
+	result = append(result, i.after...)
+	return strings.Fields(strings.Join(result, " "))
+}
+
+// segment scores the fragments, taking only the ones with the highest score.
+func segment(s string, initialisms []string) []string {
+	q := []item{{text: s}}
+
+	var bestScore int = -math.MaxInt
+	var bestResult []string
+	seen := make(map[string]bool)
+	for len(q) > 0 {
+		var h item
+		h, q = q[0], q[1:]
+		if h.text == "" {
+			result := h.Tokens()
+			if seen[fmt.Sprint(result)] {
+				continue
+			}
+			seen[fmt.Sprint(result)] = true
+			for _, res := range result {
+				if slices.Contains(initialisms, res) {
+					h.score += 1
+				}
+			}
+			if h.score > bestScore {
+				bestScore = h.score
+				bestResult = result
+				continue
+			}
+
+			continue
+		}
+		for _, d := range initialisms {
+			if after, ok := strings.CutPrefix(h.text, d); ok && isValidAfter(after) {
+				q = append(q, item{
+					score:  h.score + 1,
+					text:   after,
+					before: append(h.before, d),
+					after:  h.after,
+				})
+			}
+			if before, ok := strings.CutSuffix(h.text, d); ok {
+				q = append(q, item{
+					score:  h.score + 1,
+					text:   before,
+					before: h.before,
+					after:  append([]string{d}, h.after...),
+				})
+			}
+		}
+		q = append(q, item{
+			score:  h.score,
+			before: append(h.before, h.text),
+			after:  h.after,
+		})
+	}
+	return bestResult
+}
+
+// isValid checks if the segment that follows the initialism is valid.
+// it must start with uppercase or a digit.
+func isValidAfter(s string) bool {
+	r := []rune(s)
+	if len(r) == 0 {
+		return true
+	}
+	valid := unicode.IsUpper(r[0]) || unicode.IsDigit(r[0])
+	if !valid {
+		return false
+	}
+	if len(r) == 1 {
+		return true
+	}
+
+	return unicode.IsLower(r[1]) || unicode.IsDigit(r[1])
+}
+
+// 1. digits followed by uppercase, e.g. 1990Year, spilt at 1990<split>Year
+// 2. lowercase followed by uppercase, e.g. apiServer, split at api<split>Server
+// 3. two uppercase followed by lowercase, e.g. HTTPSServer, split at HTTPS<split>Server.
+// 4. an uppercase followed by digit, initialism doesn't mix with digits, e.g. UserID1, split at UserID<split>1
+var re = regexp.MustCompile(`([0-9][A-Z]|[a-z][A-Z]|[A-Z][A-Z][a-z]|[A-Z][0-9])`)
+
+func splitBoundary(s string) []string {
+	s = re.ReplaceAllStringFunc(s, func(s string) string {
+		return s[:1] + " " + s[1:]
+	})
+	return strings.Fields(s)
 }

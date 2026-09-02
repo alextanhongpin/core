@@ -70,11 +70,36 @@ func TestStringCaseConversions(t *testing.T) {
 				t.Errorf("FromSnake(%q) = %q, want %q", tt.snake, got, tt.fromSnk)
 			}
 		})
+
+		t.Run(tt.name+"_Cycle", func(t *testing.T) {
+			funcs := []func(string) string{
+				ToSnake,
+				ToKebab,
+				ToPascal,
+				ToTitle,
+				ToCamel,
+			}
+			values := []string{
+				tt.snake,
+				tt.kebab,
+				tt.pascal,
+				tt.title,
+				tt.camel,
+			}
+
+			got := tt.input
+			for i, fn := range funcs {
+				got = fn(got)
+				if got != values[i] {
+					t.Errorf("Cycle(%q) = %q, want %q", tt.input, got, values[i])
+				}
+			}
+		})
 	}
 }
 
 func TestTokenizer(t *testing.T) {
-	withInitialism := NewTokenizer(DefaultInitialisms...)
+	withInitialism := NewTokenizer(append(DefaultInitialisms, "HTTPS")...)
 	withoutInitialism := NewTokenizer()
 
 	word := "https_server_api"
