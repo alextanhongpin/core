@@ -5,9 +5,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"sync"
 	"time"
+
+	"github.com/redis/go-redis/v9/helper"
 )
 
 const indexFile = ".index"
@@ -216,6 +219,9 @@ func (f *FS) TTL(ctx context.Context, key string) (time.Duration, error) {
 	if err != nil {
 		return 0, err
 	}
+	if v.ExpiresAt.IsZero() {
+		return -1, nil
+	}
 	return time.Until(v.ExpiresAt), nil
 }
 
@@ -275,7 +281,7 @@ func (f *FS) Size(ctx context.Context) (int, error) {
 }
 
 func (f *FS) load(key string) (*Event, error) {
-	key = hash([]byte(key))
+	key = fmt.Sprint(helper.DigestString(key))
 	b, err := f.root.ReadFile(key)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, ErrNotExist
@@ -301,13 +307,13 @@ func (f *FS) load(key string) (*Event, error) {
 }
 
 func (f *FS) delete(key string) error {
-	key = hash([]byte(key))
+	key = fmt.Sprint(helper.DigestString(key))
 	delete(f.data, key)
 	return errors.Join(f.root.RemoveAll(key), f.saveIndex())
 }
 
 func (f *FS) save(key string, value []byte, ttl time.Duration) error {
-	key = hash([]byte(key))
+	key = fmt.Sprint(helper.DigestString(key))
 	if ttl != 0 {
 		f.data[key] = time.Now().Add(ttl)
 	}

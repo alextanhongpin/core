@@ -2,32 +2,124 @@ package cache
 
 import (
 	"bytes"
-	"cmp"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
-	"errors"
+	"encoding/json/v2"
 	"fmt"
-	"os"
-	"path/filepath"
 	"reflect"
 	"runtime"
-	"sync"
 	"time"
+
+	"github.com/redis/go-redis/v9/helper"
+	"github.com/zeebo/xxh3"
 )
 
-type handler[K, V any] = func(context.Context, K) (V, error)
+type fun[K, V any] = func(ctx context.Context, req K) (V, time.Duration, error)
+type ifun[K, V any] = func(ctx context.Context, req K) (V, bool, error)
+type gofun[K, V any] = func(context.Context, K) (V, error)
+type keyfun[K any] = func(ctx context.Context, req K) (string, error)
 
-func Func2[K, V any](fn handler[K, V], c cache[[]byte], codec Codec) handler[K, V] {
+type FuncConfig[K any] struct {
+	Codec Codec
+	KeyFn keyfun[K]
+	Lock  *Lock
+}
+
+func Func[K, V any](fn fun[K, V], cfg *FuncConfig[K]) ifun[K, V] {
+	return func(ctx context.Context, args K) (V, bool, error) {
+		var zero V
+		key, err := cfg.KeyFn(ctx, args)
+		if err != nil {
+			return zero, false, err
+		}
+
+		curr, loaded, err := cfg.Lock.LoadOrCreate(ctx, key, &LoadOrCreateConfig[[]byte]{
+			Create: func(ctx context.Context, key string) ([]byte, time.Duration, error) {
+				v, ttl, err := fn(ctx, args)
+				if err != nil {
+					return nil, 0, err
+				}
+				bb := new(bytes.Buffer)
+				err = cfg.Codec.NewEncoder(bb).Encode(v)
+				if err != nil {
+					return nil, 0, err
+				}
+				return bb.Bytes(), ttl, nil
+			},
+		})
+		if err != nil {
+			return zero, false, err
+		}
+		var v V
+		err = cfg.Codec.NewDecoder(bytes.NewBuffer(curr)).Decode(&v)
+		if err != nil {
+			return zero, false, err
+		}
+
+		return v, loaded, nil
+	}
+}
+
+func Idempotent[K, V any](fn fun[K, V], cfg *FuncConfig[K]) ifun[K, V] {
+	type dto struct {
+		Request  K `json:"request"`
+		Response V `json:"response"`
+	}
+
+	return func(ctx context.Context, req K) (V, bool, error) {
+		var zero V
+		key, err := cfg.KeyFn(ctx, req)
+		if err != nil {
+			return zero, false, err
+		}
+		b, loaded, err := cfg.Lock.LoadOrCreate(ctx, key, &LoadOrCreateConfig[[]byte]{
+			Create: func(ctx context.Context, key string) ([]byte, time.Duration, error) {
+				v, ttl, err := fn(ctx, req)
+				if err != nil {
+					return nil, 0, err
+				}
+				bb := new(bytes.Buffer)
+				err = cfg.Codec.NewEncoder(bb).Encode(&dto{
+					Request:  req,
+					Response: v,
+				})
+				if err != nil {
+					return nil, 0, err
+				}
+				return bb.Bytes(), ttl, nil
+			},
+		})
+		if err != nil {
+			return zero, false, err
+		}
+		curr, err := hash(req)
+		if err != nil {
+			return zero, false, err
+		}
+		var res dto
+		if err := json.Unmarshal(b, &res); err != nil {
+			return zero, false, err
+		}
+		prev, err := hash(res.Request)
+		if err != nil {
+			return zero, false, err
+		}
+		if curr != prev {
+			return zero, false, fmt.Errorf("%w: request", ErrConflict)
+		}
+
+		return res.Response, loaded, err
+	}
+}
+
+func GoFunc[K, V any](fn gofun[K, V], c cache[[]byte], codec Codec) gofun[K, V] {
 	return func(ctx context.Context, args K) (V, error) {
 		var zero V
-		b, err := jsonStringify(args)
+		b, err := orderedJSON(args)
 		if err != nil {
 			return zero, err
 		}
-		name := hash(fmt.Appendf(nil, "%s:%s", getFunctionName(fn), b))
-		file := fmt.Sprintf("%s.dat", name)
+		key := helper.DigestString(fmt.Sprintf("%s:%s", getFunctionName(fn), b))
+		file := fmt.Sprintf("%d.dat", key)
 		curr, _, err := c.LoadOrCreate(ctx, file, func(ctx context.Context, key string) ([]byte, time.Duration, error) {
 			v, err := fn(ctx, args)
 			if err != nil {
@@ -51,69 +143,14 @@ func Func2[K, V any](fn handler[K, V], c cache[[]byte], codec Codec) handler[K, 
 
 		return v, nil
 	}
-
 }
 
-type FuncConfig struct {
-	CacheDir string
-	Codec    Codec
+func getFunctionName(fn any) string {
+	// Extract the PC pointer and look up its metadata
+	return runtime.FuncForPC(reflect.ValueOf(fn).Pointer()).Name()
 }
 
-func Func[K, V any](fn handler[K, V], cfg *FuncConfig) handler[K, V] {
-	cfg = cmp.Or(cfg, new(FuncConfig))
-	cacheDir := cmp.Or(cfg.CacheDir, ".cache")
-	var codec Codec = NewGobCodec()
-	if cfg.Codec != nil {
-		codec = cfg.Codec
-	}
-	mkdirAll := sync.OnceValue(func() error {
-		return os.MkdirAll(cacheDir, 0o755)
-	})
-	return func(ctx context.Context, args K) (V, error) {
-		var zero V
-		if err := mkdirAll(); err != nil {
-			return zero, err
-		}
-
-		b, err := jsonStringify(args)
-		if err != nil {
-			return zero, err
-		}
-		name := hash(fmt.Appendf(nil, "%s:%s", getFunctionName(fn), b))
-		file := filepath.Join(cacheDir, fmt.Sprintf("%s.dat", name))
-		f, err := os.OpenFile(file, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
-		if errors.Is(err, os.ErrExist) {
-			f, err := os.Open(file)
-			if err != nil {
-				return zero, err
-			}
-			defer func() {
-				_ = f.Close()
-			}()
-			var v V
-			err = codec.NewDecoder(f).Decode(&v)
-			if err != nil {
-				return zero, err
-			}
-			return v, nil
-		}
-		defer func() {
-			_ = f.Close()
-		}()
-		v, err := fn(ctx, args)
-		if err != nil {
-			return zero, err
-		}
-		err = codec.NewEncoder(f).Encode(v)
-		if err != nil {
-			return zero, err
-		}
-
-		return v, nil
-	}
-}
-
-func jsonStringify(v any) ([]byte, error) {
+func orderedJSON(v any) ([]byte, error) {
 	b, err := json.Marshal(v)
 	if err != nil {
 		return nil, err
@@ -124,15 +161,14 @@ func jsonStringify(v any) ([]byte, error) {
 		return nil, err
 	}
 
-	return json.Marshal(a)
+	return json.Marshal(a, json.Deterministic(true))
 }
 
-func getFunctionName(fn any) string {
-	// Extract the PC pointer and look up its metadata
-	return runtime.FuncForPC(reflect.ValueOf(fn).Pointer()).Name()
-}
+func hash(v any) (string, error) {
+	b, err := orderedJSON(v)
+	if err != nil {
+		return "", err
+	}
 
-func hash(data []byte) string {
-	hash := sha256.Sum256([]byte(data))
-	return hex.EncodeToString(hash[:])
+	return fmt.Sprint(xxh3.Hash(b)), nil
 }

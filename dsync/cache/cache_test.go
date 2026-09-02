@@ -97,6 +97,13 @@ func TestFSGob(t *testing.T) {
 	c.Codec = cache.NewGobCodec()
 
 	testUnmarshaler(t, c)
+
+	{
+		c := cache.New[[]byte]()
+		c.Cache = storage
+		c.Codec = cache.NewGobCodec()
+		testAll(t, c)
+	}
 }
 
 func testUnmarshaler(t *testing.T, c cache.C[*User]) {

@@ -9,4 +9,6 @@ import (
 var (
 	ErrNotExist = errors.New("not exists")
 	ErrExists   = errors.New("already exists")
+	ErrLocked   = errors.New("locked")
+	ErrConflict = errors.New("conflict")
 )
