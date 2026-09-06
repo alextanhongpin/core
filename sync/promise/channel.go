@@ -15,9 +15,9 @@ var errDone = errors.New("done")
 // Recv returns context.Cause(ctx).
 type Channel[T any] struct {
 	cancel func(err error)
+	ctx    context.Context
 	p      atomic.Pointer[T]
 	zero   *T
-	ctx    context.Context
 }
 
 // NewChannel creates a new Channel[T] bound to ctx. The returned channel will

@@ -31,10 +31,11 @@ func New[T any](ctx context.Context, fn handler[T]) *Promise[T] {
 	p := Deferred[T](ctx)
 	go func() {
 		res, err := fn(ctx)
-		p.ch.Send(&result[T]{
-			Data:  res,
-			Error: err,
-		})
+		if err != nil {
+			p.Reject(err)
+		} else {
+			p.Resolve(res)
+		}
 	}()
 	return p
 }
