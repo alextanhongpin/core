@@ -1,0 +1,11 @@
+name: array dict key
+input:
+  data:
+    - foo:
+        bar:
+          baz: value
+  key: foo.bar.baz
+output:
+  - foo:
+      bar:
+        baz: value

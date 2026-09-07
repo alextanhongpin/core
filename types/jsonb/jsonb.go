@@ -39,7 +39,7 @@ func (p Path) String() string {
 	return strings.Join(p, ".")
 }
 
-func (p Path) AsArrayIndex(i int) Path {
+func (p Path) asArrayPos(i int) Path {
 	if len(p) > 0 {
 		path := slices.Clone(p)
 		path[len(path)-1] += fmt.Sprintf("[%d]", i)
@@ -48,7 +48,7 @@ func (p Path) AsArrayIndex(i int) Path {
 	return Path{fmt.Sprintf("[%d]", i)}
 }
 
-func (p Path) AsArray() Path {
+func (p Path) asArray() Path {
 	if len(p) > 0 {
 		path := slices.Clone(p)
 		path[len(path)-1] += "[]"
@@ -62,6 +62,15 @@ func (p Path) Base() (string, bool) {
 		return p[len(p)-1], true
 	}
 	return "", false
+}
+
+func Delete(a any, key string) error {
+	return Reviver(a, func(path Path, val any) (any, error) {
+		if path.Match(key) {
+			return nil, nil
+		}
+		return val, nil
+	})
 }
 
 func Set(a any, key string, value any) error {
@@ -94,7 +103,7 @@ func Reviver(a any, fn func(path Path, value any) (any, error)) error {
 	next = func(path Path, a any) (any, error) {
 		switch m := a.(type) {
 		case []any:
-			arr := path.AsArray()
+			arr := path.asArray()
 			for i, v := range m {
 				n, err := next(arr, v)
 				if err != nil {
@@ -102,7 +111,7 @@ func Reviver(a any, fn func(path Path, value any) (any, error)) error {
 				}
 				m[i] = n
 
-				o, err := next(path.AsArrayIndex(i), n)
+				o, err := next(path.asArrayPos(i), n)
 				if err != nil {
 					return m, err
 				}

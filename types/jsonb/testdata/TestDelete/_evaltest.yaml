@@ -1,0 +1,16 @@
+---
+name: dict key
+input:
+  data: {foo: {bar: {baz: value}}}
+  key: "foo.bar.baz"
+assert:
+  - name: exact
+    value: not ("baz" in output.foo.bar)
+---
+name: array dict key
+input:
+  data: [{foo: {bar: {baz: value}}}]
+  key: "foo.bar.baz"
+assert:
+  - name: exact
+    value: not ("bar" in output[0].foo.bar)

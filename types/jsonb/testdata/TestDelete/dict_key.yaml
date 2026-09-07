@@ -1,0 +1,9 @@
+name: dict key
+input:
+  data:
+    foo:
+      bar: {}
+  key: foo.bar.baz
+output:
+  foo:
+    bar: {}

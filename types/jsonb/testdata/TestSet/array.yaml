@@ -1,0 +1,12 @@
+name: array
+input:
+  data:
+    - foo:
+        bar:
+          baz: edited value
+  key: "[].foo.bar.baz"
+  value: edited value
+output:
+  - foo:
+      bar:
+        baz: edited value
