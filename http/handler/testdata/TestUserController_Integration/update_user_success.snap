@@ -1,0 +1,24 @@
+Created 2026-09-08 15:30:37
+-- Request.http --
+PUT /users/1 HTTP/1.1
+Host: example.com
+Content-Type: application/json
+
+{
+  "name": "Updated Name",
+  "email": "updated@example.com"
+}
+-- Response.http --
+HTTP/1.1 200 OK
+Connection: close
+Content-Type: application/json; charset=utf-8
+
+{
+  "data": {
+    "user": {
+      "id": 1,
+      "name": "Updated Name",
+      "email": "updated@example.com"
+    }
+  }
+}

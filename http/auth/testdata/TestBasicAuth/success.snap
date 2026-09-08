@@ -1,0 +1,12 @@
+Created 2026-09-08 15:34:44
+-- Request.http --
+GET / HTTP/1.1
+Host: example.com
+Authorization: Basic am9objoxMjM0NTY=
+
+-- Response.http --
+HTTP/1.1 200 OK
+Connection: close
+Content-Type: text/plain; charset=utf-8
+
+hello world

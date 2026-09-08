@@ -2,7 +2,8 @@ package response
 
 import (
 	"cmp"
-	"encoding/json"
+	jsonv1 "encoding/json"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -29,7 +30,7 @@ func NoContent(w http.ResponseWriter) {
 
 // RawJSON sends raw JSON data with proper validation
 func RawJSON(w http.ResponseWriter, data []byte, code int) {
-	if !json.Valid(data) {
+	if !jsonv1.Valid(data) {
 		ErrorJSON(w, errors.New("invalid JSON data"))
 		return
 	}
@@ -45,14 +46,15 @@ func RawJSON(w http.ResponseWriter, data []byte, code int) {
 
 // JSON sends a JSON response
 func JSON(w http.ResponseWriter, data any, code int) {
-	b, err := json.Marshal(data)
+	w.Header().Set("Content-Type", ContentTypeJSON)
+	w.WriteHeader(cmp.Or(code, http.StatusOK))
+
+	err := json.MarshalWrite(w, data)
 	if err != nil {
 		ErrorJSON(w, err)
 
 		return
 	}
-
-	RawJSON(w, b, code)
 }
 
 // Text sends a plain text response
@@ -81,17 +83,22 @@ func ErrorJSON(w http.ResponseWriter, err error) {
 		c  *cause.Error
 		e  *Error
 		ve interface {
-			Map() map[string]any
+			Map() map[string][]string
 		}
 		code = http.StatusInternalServerError
 	)
 
 	switch {
 	case errors.As(err, &ve):
+		m := make(map[string]any)
+		for k, v := range ve.Map() {
+			m[k] = v
+		}
+
 		e = &Error{
 			Code:    "VALIDATION_ERROR",
 			Message: "Validation failed",
-			Errors:  ve.Map(),
+			Errors:  m,
 		}
 		code = http.StatusBadRequest
 

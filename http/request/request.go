@@ -143,7 +143,7 @@ func DecodeQuery(r *http.Request, v any) error {
 // bindFormToStruct binds form values to struct fields
 func bindFormToStruct(values url.Values, v any) error {
 	rv := reflect.ValueOf(v)
-	if rv.Kind() != reflect.Ptr || rv.Elem().Kind() != reflect.Struct {
+	if rv.Kind() != reflect.Pointer || rv.Elem().Kind() != reflect.Struct {
 		return errors.New("request: destination must be a pointer to struct")
 	}
 

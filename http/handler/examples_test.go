@@ -13,8 +13,8 @@ import (
 	"github.com/alextanhongpin/core/http/handler"
 	"github.com/alextanhongpin/errors/cause"
 	"github.com/alextanhongpin/errors/codes"
-	"github.com/alextanhongpin/errors/validator"
-	"github.com/alextanhongpin/testdump/httpdump"
+	"github.com/alextanhongpin/errors/validation"
+	"github.com/alextanhongpin/snapshot"
 )
 
 // Real-world example: User management API
@@ -30,10 +30,10 @@ type CreateUserRequest struct {
 }
 
 func (r CreateUserRequest) Validate() error {
-	return validator.Map(map[string]error{
-		"name":  validator.Required(r.Name),
-		"email": validator.Required(r.Email),
-	})
+	ve := make(validation.Errors)
+	ve.If("name", r.Name == "", "required")
+	ve.If("email", r.Email == "", "required")
+	return ve.Error()
 }
 
 type UpdateUserRequest struct {
@@ -42,10 +42,10 @@ type UpdateUserRequest struct {
 }
 
 func (r UpdateUserRequest) Validate() error {
-	return validator.Map(map[string]error{
-		"name":  validator.Required(r.Name),
-		"email": validator.Required(r.Email),
-	})
+	ve := make(validation.Errors)
+	ve.If("name", r.Name == "", "required")
+	ve.If("email", r.Email == "", "required")
+	return ve.Error()
 }
 
 type GetUserResponse struct {
@@ -96,7 +96,7 @@ func (s *UserService) Create(ctx context.Context, req CreateUserRequest) (User, 
 func (s *UserService) GetByID(ctx context.Context, id int) (User, error) {
 	user, exists := s.users[id]
 	if !exists {
-		return User{}, cause.New(codes.NotFound, "user/not_found", "User not found").Wrap(sql.ErrNoRows)
+		return User{}, cause.New(codes.NotFound, "user/not_found", "User not found").WithCause(sql.ErrNoRows)
 	}
 	return user, nil
 }
@@ -261,7 +261,7 @@ func TestUserController_Integration(t *testing.T) {
 		r.Header.Set("Content-Type", "application/json")
 		r.Header.Set("X-Request-ID", "test-request-123")
 
-		hd := httpdump.HandlerFunc(t, controller.CreateUser)
+		hd := snapshot.HTTP(t, http.HandlerFunc(controller.CreateUser))
 		hd.ServeHTTP(w, r)
 
 		if w.Code != http.StatusCreated {
@@ -278,7 +278,7 @@ func TestUserController_Integration(t *testing.T) {
 		r := httptest.NewRequest(http.MethodPost, "/users", strings.NewReader(`{"name":"","email":"john@example.com"}`))
 		r.Header.Set("Content-Type", "application/json")
 
-		hd := httpdump.HandlerFunc(t, controller.CreateUser)
+		hd := snapshot.HTTP(t, http.HandlerFunc(controller.CreateUser))
 		hd.ServeHTTP(w, r)
 
 		if w.Code != http.StatusBadRequest {
@@ -297,7 +297,7 @@ func TestUserController_Integration(t *testing.T) {
 		r := httptest.NewRequest(http.MethodPost, "/users", strings.NewReader(`{"name":"John Doe","email":"jane@example.com"}`))
 		r.Header.Set("Content-Type", "application/json")
 
-		hd := httpdump.HandlerFunc(t, controller.CreateUser)
+		hd := snapshot.HTTP(t, http.HandlerFunc(controller.CreateUser))
 		hd.ServeHTTP(w, r)
 
 		if w.Code != http.StatusConflict {
@@ -316,7 +316,7 @@ func TestUserController_Integration(t *testing.T) {
 		r := httptest.NewRequest(http.MethodGet, "/users/1", nil)
 		r.Header.Set("X-Correlation-ID", "correlation-456")
 
-		hd := httpdump.HandlerFunc(t, controller.GetUser)
+		hd := snapshot.HTTP(t, http.HandlerFunc(controller.GetUser))
 		hd.ServeHTTP(w, r)
 
 		if w.Code != http.StatusOK {
@@ -334,7 +334,7 @@ func TestUserController_Integration(t *testing.T) {
 		w := httptest.NewRecorder()
 		r := httptest.NewRequest(http.MethodGet, "/users/999?id=999", nil)
 
-		hd := httpdump.HandlerFunc(t, controller.GetUser)
+		hd := snapshot.HTTP(t, http.HandlerFunc(controller.GetUser))
 		hd.ServeHTTP(w, r)
 
 		if w.Code != http.StatusNotFound {
@@ -353,7 +353,7 @@ func TestUserController_Integration(t *testing.T) {
 		r := httptest.NewRequest(http.MethodPut, "/users/1", strings.NewReader(`{"name":"Updated Name","email":"updated@example.com"}`))
 		r.Header.Set("Content-Type", "application/json")
 
-		hd := httpdump.HandlerFunc(t, controller.UpdateUser)
+		hd := snapshot.HTTP(t, http.HandlerFunc(controller.UpdateUser))
 		hd.ServeHTTP(w, r)
 
 		if w.Code != http.StatusOK {
@@ -371,7 +371,7 @@ func TestUserController_Integration(t *testing.T) {
 		w := httptest.NewRecorder()
 		r := httptest.NewRequest(http.MethodDelete, "/users/1", nil)
 
-		hd := httpdump.HandlerFunc(t, controller.DeleteUser)
+		hd := snapshot.HTTP(t, http.HandlerFunc(controller.DeleteUser))
 		hd.ServeHTTP(w, r)
 
 		if w.Code != http.StatusNoContent {
@@ -383,7 +383,7 @@ func TestUserController_Integration(t *testing.T) {
 		w := httptest.NewRecorder()
 		r := httptest.NewRequest(http.MethodDelete, "/users/999?id=999", nil)
 
-		hd := httpdump.HandlerFunc(t, controller.DeleteUser)
+		hd := snapshot.HTTP(t, http.HandlerFunc(controller.DeleteUser))
 		hd.ServeHTTP(w, r)
 
 		if w.Code != http.StatusNotFound {
@@ -395,7 +395,7 @@ func TestUserController_Integration(t *testing.T) {
 		w := httptest.NewRecorder()
 		r := httptest.NewRequest(http.MethodGet, "/users", nil)
 
-		hd := httpdump.HandlerFunc(t, controller.ListUsers)
+		hd := snapshot.HTTP(t, http.HandlerFunc(controller.ListUsers))
 		hd.ServeHTTP(w, r)
 
 		if w.Code != http.StatusOK {

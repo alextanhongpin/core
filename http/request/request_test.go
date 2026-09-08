@@ -8,8 +8,8 @@ import (
 	"testing"
 
 	"github.com/alextanhongpin/core/http/request"
-	"github.com/alextanhongpin/errors/validator"
-	"github.com/alextanhongpin/testdump/jsondump"
+	"github.com/alextanhongpin/errors/validation"
+	"github.com/alextanhongpin/snapshot"
 	"github.com/google/go-cmp/cmp"
 	"github.com/stretchr/testify/assert"
 )
@@ -19,9 +19,9 @@ type loginRequest struct {
 }
 
 func (req *loginRequest) Validate() error {
-	return validator.Map(map[string]error{
-		"email": validator.Required(req.Email, validator.Assert(strings.Contains(req.Email, "@"), "The email is invalid")),
-	})
+	ve := make(validation.Errors)
+	ve.If("email", !strings.Contains(req.Email, "@"), "The email is invalid")
+	return ve.Error()
 }
 
 func TestBody(t *testing.T) {
@@ -55,7 +55,7 @@ func TestBody(t *testing.T) {
 		err = request.DecodeJSON(r, &req)
 		is.Error(err)
 		is.Empty(cmp.Diff(req, body))
-		jsondump.Dump(t, err)
+		snapshot.New(t).JSON(err)
 	})
 }
 

@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/alextanhongpin/core/http/auth"
-	"github.com/alextanhongpin/testdump/httpdump"
+	"github.com/alextanhongpin/snapshot"
 )
 
 func TestBearerHandler(t *testing.T) {
@@ -40,7 +40,7 @@ func TestBearerHandler(t *testing.T) {
 		r.Header.Set("Authorization", "Bearer "+token)
 		r = r.WithContext(ctx)
 
-		httpdump.Handler(t, h, httpdump.IgnoreRequestHeaders("Authorization")).ServeHTTP(w, r)
+		snapshot.HTTP(t, h, snapshot.Ignore("Authorization")).ServeHTTP(w, r)
 	})
 
 	t.Run("expired", func(t *testing.T) {
@@ -49,7 +49,7 @@ func TestBearerHandler(t *testing.T) {
 		r = r.WithContext(ctx)
 		r.Header.Set("Authorization", expiredToken)
 
-		httpdump.Handler(t, h).ServeHTTP(w, r)
+		snapshot.HTTP(t, h).ServeHTTP(w, r)
 	})
 
 	t.Run("no token", func(t *testing.T) {
@@ -57,7 +57,7 @@ func TestBearerHandler(t *testing.T) {
 		r := httptest.NewRequest(http.MethodGet, "/", nil)
 		r = r.WithContext(ctx)
 
-		httpdump.Handler(t, h).ServeHTTP(w, r)
+		snapshot.HTTP(t, h).ServeHTTP(w, r)
 	})
 
 	t.Run("no token but required", func(t *testing.T) {
@@ -65,6 +65,6 @@ func TestBearerHandler(t *testing.T) {
 		r := httptest.NewRequest(http.MethodGet, "/", nil)
 		r = r.WithContext(ctx)
 
-		httpdump.Handler(t, auth.RequireBearerHandler(h)).ServeHTTP(w, r)
+		snapshot.HTTP(t, auth.RequireBearerHandler(h)).ServeHTTP(w, r)
 	})
 }

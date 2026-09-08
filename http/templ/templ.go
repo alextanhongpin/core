@@ -25,7 +25,7 @@ type Template struct {
 }
 
 func (t *Template) Compile(patterns ...string) *Template {
-	t.patterns = slices.Clone(patterns)
+	t.patterns = append(t.patterns, patterns...)
 	// ParseFS returns the first file, which is the "" in the template.New("").
 	// We want to lookup the first file we passed in instead.
 
@@ -58,12 +58,11 @@ func (t *Template) compile() *template.Template {
 	return template.Must(template.New("").Funcs(t.Funcs).ParseFS(t.FS, t.patterns...)).Lookup(filepath.Base(t.patterns[0]))
 }
 
-func (t *Template) Extend(patterns ...string) *Template {
-	tpl := &Template{
+func (t *Template) Clone() *Template {
+	return &Template{
 		FS:        t.FS,
 		Funcs:     maps.Clone(t.Funcs),
 		HotReload: t.HotReload,
+		patterns:  slices.Clone(t.patterns),
 	}
-
-	return tpl.Compile(append(t.patterns, patterns...)...)
 }

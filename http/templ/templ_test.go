@@ -22,13 +22,13 @@ func TestCompile(t *testing.T) {
 	}
 }
 
-func TestExtend(t *testing.T) {
+func TestClone(t *testing.T) {
 	tpl := &templ.Template{
 		FS: newFS(),
 	}
 	base := tpl.Compile("base.html", "partials/*.html")
-	home := base.Extend("home.html")
-	about := base.Extend("about.html")
+	home := base.Clone().Compile("home.html")
+	about := base.Clone().Compile("about.html")
 
 	var b bytes.Buffer
 	err := home.Execute(&b, nil)
@@ -80,6 +80,15 @@ func TestPartial(t *testing.T) {
 		t.Fatalf("ExecuteTemplate = %v, want nil", err)
 	}
 	if want, got := "footer", b.String(); want != got {
+		t.Errorf("want %q, got %q", want, got)
+	}
+
+	b.Reset()
+	err = page.ExecuteTemplate(&b, "aside", 42)
+	if err != nil {
+		t.Fatalf("ExecuteTemplate = %v, want nil", err)
+	}
+	if want, got := "aside: 42", b.String(); want != got {
 		t.Errorf("want %q, got %q", want, got)
 	}
 }
@@ -175,6 +184,9 @@ func newFS() fstest.MapFS {
 		},
 		"partials/footer.html": {
 			Data: []byte(`{{ define "footer" }}footer{{ end }}`),
+		},
+		"partials/aside.html": {
+			Data: []byte(`{{ define "aside" }}aside: {{ . }}{{ end }}`),
 		},
 	}
 }

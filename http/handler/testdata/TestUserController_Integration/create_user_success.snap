@@ -1,0 +1,26 @@
+Created 2026-09-08 15:30:37
+-- Request.http --
+POST /users HTTP/1.1
+Host: example.com
+Content-Type: application/json
+X-Request-Id: test-request-123
+
+{
+  "name": "John Doe",
+  "email": "john@example.com"
+}
+-- Response.http --
+HTTP/1.1 201 Created
+Connection: close
+Content-Type: application/json; charset=utf-8
+X-Request-Id: test-request-123
+
+{
+  "data": {
+    "user": {
+      "id": 1,
+      "name": "John Doe",
+      "email": "john@example.com"
+    }
+  }
+}

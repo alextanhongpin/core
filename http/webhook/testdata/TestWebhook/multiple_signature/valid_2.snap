@@ -1,0 +1,13 @@
+Created 2026-09-08 15:23:03
+-- Request.http --
+GET / HTTP/1.1
+Host: example.com
+X-Webhook-Id: bd91d8d0-af10-4f3b-a525-3fc2678182df
+X-Webhook-Signature: YJpGHEV2lAAPSbbplmtL_f0OvhpuWKXM6xsUhtGWHfY=
+X-Webhook-Signature: TCJNjB0RcEY3r9GRUNwWpd-W_8ACplitMkaBOIFf33I=
+X-Webhook-Timestamp: 1788852183191670000
+
+-- Response.http --
+HTTP/1.1 200 OK
+Connection: close
+

@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/alextanhongpin/core/http/requestid"
-	"github.com/alextanhongpin/testdump/httpdump"
+	"github.com/alextanhongpin/snapshot"
 )
 
 func TestRequestID(t *testing.T) {
@@ -30,7 +30,7 @@ func TestRequestID(t *testing.T) {
 		w := httptest.NewRecorder()
 		r := httptest.NewRequest(http.MethodGet, "/", nil)
 
-		httpdump.Handler(t, h).ServeHTTP(w, r)
+		snapshot.HTTP(t, h).ServeHTTP(w, r)
 	})
 
 	t.Run("old", func(t *testing.T) {
@@ -38,6 +38,6 @@ func TestRequestID(t *testing.T) {
 		r := httptest.NewRequest(http.MethodGet, "/", nil)
 		r.Header.Set("X-Request-Id", "abc")
 
-		httpdump.Handler(t, h).ServeHTTP(w, r)
+		snapshot.HTTP(t, h).ServeHTTP(w, r)
 	})
 }

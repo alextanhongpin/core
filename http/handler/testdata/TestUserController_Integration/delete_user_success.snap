@@ -1,0 +1,9 @@
+Created 2026-09-08 15:30:37
+-- Request.http --
+DELETE /users/1 HTTP/1.1
+Host: example.com
+
+-- Response.http --
+HTTP/1.1 204 No Content
+Connection: close
+

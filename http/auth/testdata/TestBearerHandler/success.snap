@@ -1,0 +1,12 @@
+Created 2026-09-08 15:34:44
+-- Request.http --
+GET / HTTP/1.1
+Host: example.com
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJqb2huLmFwcGxlc2VlZEBtYWlsLmNvbSIsImV4cCI6MTc4ODg1NjQ4NCwibmJmIjoxNzg4ODUyODg0LCJpYXQiOjE3ODg4NTI4ODR9.jAAvg-dBTHnCBIm1zNLYaaqTFRosaSyiSIqWsFmwxDQ
+
+-- Response.http --
+HTTP/1.1 200 OK
+Connection: close
+Content-Type: text/plain; charset=utf-8
+
+hello world

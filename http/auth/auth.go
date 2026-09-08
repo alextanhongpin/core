@@ -38,5 +38,8 @@ const Bearer = "Bearer"
 func BearerAuth(r *http.Request) (string, bool) {
 	authz := r.Header.Get("Authorization")
 	token, ok := strings.CutPrefix(authz, "Bearer ")
+	if !ok {
+		return "", false
+	}
 	return token, ok
 }

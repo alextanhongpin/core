@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/alextanhongpin/core/http/auth"
-	"github.com/alextanhongpin/testdump/httpdump"
+	"github.com/alextanhongpin/snapshot"
 )
 
 func TestBasicAuth(t *testing.T) {
@@ -23,7 +23,7 @@ func TestBasicAuth(t *testing.T) {
 		r := httptest.NewRequest(http.MethodGet, "/", nil)
 		r.SetBasicAuth("john", "123456")
 
-		httpdump.Handler(t, h).ServeHTTP(w, r)
+		snapshot.HTTP(t, h).ServeHTTP(w, r)
 	})
 
 	t.Run("failed", func(t *testing.T) {
@@ -31,6 +31,6 @@ func TestBasicAuth(t *testing.T) {
 		r := httptest.NewRequest(http.MethodGet, "/", nil)
 		r.SetBasicAuth("john", "123")
 
-		httpdump.Handler(t, h).ServeHTTP(w, r)
+		snapshot.HTTP(t, h).ServeHTTP(w, r)
 	})
 }

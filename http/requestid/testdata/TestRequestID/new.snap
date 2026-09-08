@@ -1,0 +1,13 @@
+Created 2026-09-08 15:23:02
+-- Request.http --
+GET / HTTP/1.1
+Host: example.com
+X-Request-Id: random-token
+
+-- Response.http --
+HTTP/1.1 200 OK
+Connection: close
+Content-Type: text/plain; charset=utf-8
+X-Request-Id: random-token
+
+hello world

@@ -12,7 +12,7 @@ import (
 	"github.com/alextanhongpin/errors/cause"
 	"github.com/alextanhongpin/errors/codes"
 	"github.com/alextanhongpin/errors/validator"
-	"github.com/alextanhongpin/testdump/httpdump"
+	"github.com/alextanhongpin/snapshot"
 )
 
 type HelloRequest struct {
@@ -41,7 +41,7 @@ func (c *Controller) Hello(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.Name == "bob" {
-		c.Next(w, r, cause.New(codes.NotFound, "user/not_found", "User not found").Wrap(sql.ErrNoRows))
+		c.Next(w, r, cause.New(codes.NotFound, "user/not_found", "User not found").WithCause(sql.ErrNoRows))
 		return
 	}
 
@@ -58,7 +58,7 @@ func TestHandler(t *testing.T) {
 		wr := httptest.NewRecorder()
 		r := httptest.NewRequest(http.MethodGet, "/", strings.NewReader(`{"name":"john"}`))
 		r.Header.Set("Content-Type", "application/json")
-		hd := httpdump.HandlerFunc(t, c.Hello)
+		hd := snapshot.HTTP(t, http.HandlerFunc(c.Hello))
 		hd.ServeHTTP(wr, r)
 	})
 
@@ -66,7 +66,7 @@ func TestHandler(t *testing.T) {
 		wr := httptest.NewRecorder()
 		r := httptest.NewRequest(http.MethodGet, "/", strings.NewReader(`{}`))
 		r.Header.Set("Content-Type", "application/json")
-		hd := httpdump.HandlerFunc(t, c.Hello)
+		hd := snapshot.HTTP(t, http.HandlerFunc(c.Hello))
 		hd.ServeHTTP(wr, r)
 	})
 
@@ -74,7 +74,7 @@ func TestHandler(t *testing.T) {
 		wr := httptest.NewRecorder()
 		r := httptest.NewRequest(http.MethodGet, "/", strings.NewReader(`{"name":"bob"}`))
 		r.Header.Set("Content-Type", "application/json")
-		hd := httpdump.HandlerFunc(t, c.Hello)
+		hd := snapshot.HTTP(t, http.HandlerFunc(c.Hello))
 		hd.ServeHTTP(wr, r)
 	})
 }

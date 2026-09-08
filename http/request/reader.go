@@ -3,6 +3,7 @@ package request
 
 import (
 	"bytes"
+	"encoding/json/v2"
 	"io"
 	"net/http"
 )
@@ -86,4 +87,17 @@ func Clone(r *http.Request) (*http.Request, error) {
 	rc.Body = io.NopCloser(bytes.NewBuffer(b))
 
 	return rc, nil
+}
+
+func Parse[T any](r *http.Request) (T, error) {
+	var v T
+	b := new(bytes.Buffer)
+	body := io.TeeReader(r.Body, b)
+	err := json.UnmarshalRead(body, &v)
+	if err != nil {
+		var zero T
+		return zero, err
+	}
+	r.Body = io.NopCloser(body)
+	return v, nil
 }

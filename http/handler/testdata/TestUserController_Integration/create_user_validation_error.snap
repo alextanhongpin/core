@@ -1,0 +1,26 @@
+Created 2026-09-08 15:34:00
+-- Request.http --
+POST /users HTTP/1.1
+Host: example.com
+Content-Type: application/json
+
+{
+  "name": "",
+  "email": "john@example.com"
+}
+-- Response.http --
+HTTP/1.1 400 Bad Request
+Connection: close
+Content-Type: application/json; charset=utf-8
+
+{
+  "error": {
+    "code": "VALIDATION_ERROR",
+    "message": "Validation failed",
+    "errors": {
+      "name": [
+        "required"
+      ]
+    }
+  }
+}

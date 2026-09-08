@@ -1,0 +1,16 @@
+Created 2026-09-08 15:30:37
+-- Request.http --
+GET /users/999?id=999 HTTP/1.1
+Host: example.com
+
+-- Response.http --
+HTTP/1.1 404 Not Found
+Connection: close
+Content-Type: application/json; charset=utf-8
+
+{
+  "error": {
+    "code": "user/not_found",
+    "message": "User not found"
+  }
+}

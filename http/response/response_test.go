@@ -13,8 +13,8 @@ import (
 	"github.com/alextanhongpin/core/http/response"
 	"github.com/alextanhongpin/errors/cause"
 	"github.com/alextanhongpin/errors/codes"
-	"github.com/alextanhongpin/errors/validator"
-	"github.com/alextanhongpin/testdump/httpdump"
+	"github.com/alextanhongpin/errors/validation"
+	"github.com/alextanhongpin/snapshot"
 )
 
 func TestErrorJSON(t *testing.T) {
@@ -26,7 +26,7 @@ func TestErrorJSON(t *testing.T) {
 		h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			response.ErrorJSON(w, err)
 		})
-		hd := httpdump.Handler(t, h)
+		hd := snapshot.HTTP(t, h)
 		hd.ServeHTTP(wr, r)
 	}
 
@@ -47,10 +47,9 @@ func TestErrorJSON(t *testing.T) {
 
 	t.Run("validation errors", func(t *testing.T) {
 		email := "xyz"
-		err := validator.Map(map[string]error{
-			"email": validator.Required(email, validator.Assert(strings.Contains(email, "@"), "The email is invalid")),
-		})
-		dumpError(t, err)
+		ve := make(validation.Errors)
+		ve.If("email", !strings.Contains(email, "@"), "The email is invalid")
+		dumpError(t, ve.Error())
 	})
 
 	t.Run("unknown error", func(t *testing.T) {
@@ -76,7 +75,7 @@ func TestJSON(t *testing.T) {
 			response.JSON(w, response.Body[[]user]{Data: data}, http.StatusCreated)
 		})
 
-		hd := httpdump.Handler(t, h)
+		hd := snapshot.HTTP(t, h)
 		hd.ServeHTTP(wr, r)
 	})
 
@@ -90,7 +89,7 @@ func TestJSON(t *testing.T) {
 			response.JSON(w, response.Body[map[string]any]{Data: data}, http.StatusOK)
 		})
 
-		hd := httpdump.Handler(t, h)
+		hd := snapshot.HTTP(t, h)
 		hd.ServeHTTP(wr, r)
 	})
 
@@ -101,7 +100,7 @@ func TestJSON(t *testing.T) {
 			response.NoContent(w)
 		})
 
-		hd := httpdump.Handler(t, h)
+		hd := snapshot.HTTP(t, h)
 		hd.ServeHTTP(wr, r)
 	})
 
@@ -116,7 +115,7 @@ func TestJSON(t *testing.T) {
 			}, http.StatusOK)
 		})
 
-		hd := httpdump.Handler(t, h)
+		hd := snapshot.HTTP(t, h)
 		hd.ServeHTTP(wr, r)
 	})
 
@@ -130,7 +129,7 @@ func TestJSON(t *testing.T) {
 			response.JSON(w, body, http.StatusAccepted)
 		})
 
-		hd := httpdump.Handler(t, h)
+		hd := snapshot.HTTP(t, h)
 		hd.ServeHTTP(wr, r)
 	})
 }

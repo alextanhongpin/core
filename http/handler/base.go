@@ -143,7 +143,7 @@ func (h BaseHandler) Next(w http.ResponseWriter, r *http.Request, err error) {
 		}
 
 		var ve interface {
-			Map() map[string]any
+			Map() map[string][]string
 		}
 		var c *cause.Error
 
@@ -220,7 +220,7 @@ func (h BaseHandler) JSON(w http.ResponseWriter, data any, code int) {
 // It wraps the data in a response.Body struct, which includes a Data field.
 // This is useful for consistent API responses that include metadata or additional fields.
 func (h BaseHandler) Body(w http.ResponseWriter, data any, code int) {
-	response.JSON(w, &response.Body{Data: data}, code)
+	response.JSON(w, &response.Body[any]{Data: data}, code)
 }
 
 // ErrorHandler wraps a handler function and automatically handles errors.
