@@ -11,7 +11,7 @@ import (
 
 type Template struct {
 	cached   *template.Template
-	patterns []string
+	Patterns []string
 
 	// FS is the filesystem to load templates from (e.g. os.DirFS(".") or embed.FS)
 	FS fs.FS
@@ -24,14 +24,11 @@ type Template struct {
 	HotReload bool
 }
 
-func (t *Template) Compile(patterns ...string) *Template {
-	t.patterns = append(t.patterns, patterns...)
+func (t *Template) Compile(Patterns ...string) *Template {
+	t.Patterns = append(t.Patterns, Patterns...)
 	// ParseFS returns the first file, which is the "" in the template.New("").
 	// We want to lookup the first file we passed in instead.
-
-	if !t.HotReload {
-		t.cached = t.compile()
-	}
+	t.cached = t.compile()
 
 	return t
 }
@@ -55,7 +52,7 @@ func (t *Template) ExecuteTemplate(wr io.Writer, name string, data any) error {
 }
 
 func (t *Template) compile() *template.Template {
-	return template.Must(template.New("").Funcs(t.Funcs).ParseFS(t.FS, t.patterns...)).Lookup(filepath.Base(t.patterns[0]))
+	return template.Must(template.New("").Funcs(t.Funcs).ParseFS(t.FS, t.Patterns...)).Lookup(filepath.Base(t.Patterns[0]))
 }
 
 func (t *Template) Clone() *Template {
@@ -63,6 +60,6 @@ func (t *Template) Clone() *Template {
 		FS:        t.FS,
 		Funcs:     maps.Clone(t.Funcs),
 		HotReload: t.HotReload,
-		patterns:  slices.Clone(t.patterns),
+		Patterns:  slices.Clone(t.Patterns),
 	}
 }
