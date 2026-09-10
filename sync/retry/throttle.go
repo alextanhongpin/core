@@ -45,6 +45,7 @@ func DefaultThrottlerConfig() *ThrottlerConfig {
 	}
 }
 
+// See: https://grpc.io/docs/guides/request-hedging/#throttling-hedged-rpcs
 func NewThrottler(cfg *ThrottlerConfig) *Throttler {
 	cfg = cmp.Or(cfg, DefaultThrottlerConfig())
 
