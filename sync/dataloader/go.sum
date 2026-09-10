@@ -1,7 +1,7 @@
+github.com/alextanhongpin/core/sync/cache v0.0.2 h1:Wre0bL6N4DddppOSqOhwY9CI3mWhWpM6Gg1Gu1l7TtQ=
+github.com/alextanhongpin/core/sync/cache v0.0.2/go.mod h1:U3MelrHlotkykz9jUufIy79BjMOZtVVecVwB6fYLUvQ=
 github.com/alextanhongpin/core/sync/pipeline v0.0.6 h1:4+I5JuF+l4xzd8i7RNEifpTPgVSMWjU9gzsecmKTWY0=
 github.com/alextanhongpin/core/sync/pipeline v0.0.6/go.mod h1:ejyaz/bL4Q59may3GKOwSTyTC6crlM87FaxJQBqZM9k=
-github.com/alextanhongpin/core/sync/promise v0.0.3 h1:2IJWZ3/yY7d6gWoJtYZ2KAuXmk5ibfzflLF18kpMt+A=
-github.com/alextanhongpin/core/sync/promise v0.0.3/go.mod h1:TScBRSJpKJFqm61wcftmU+sxlxneB/TmXBtGHZt87F0=
 github.com/alextanhongpin/evaltest v0.0.6 h1:A0sFd9F0mqla7LOI00OYQ2TQ1jAI+2Nz1J0IDEL4BXg=
 github.com/alextanhongpin/evaltest v0.0.6/go.mod h1:h57U/H9xiTQwgKmkNCxs//LrEa+r0s4e+4JYEOCrf8Y=
 github.com/creack/pty v1.1.9/go.mod h1:oKZEueFk5CKHvIhNR5MUki03XCEU+Q6VDXinZuGJ33E=

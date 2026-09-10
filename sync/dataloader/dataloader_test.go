@@ -18,8 +18,6 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-var ctx = context.Background()
-
 func TestDataLoader(t *testing.T) {
 	batchFn := func(ctx context.Context, keys []string) (res map[string]int, err error) {
 		slices.Sort(keys)
@@ -75,6 +73,8 @@ func TestDataLoader(t *testing.T) {
 }
 
 func TestDataloader_Func(t *testing.T) {
+	ctx := t.Context()
+
 	type User struct {
 		ID   int
 		Name string
@@ -133,8 +133,9 @@ func TestDataloader_Func(t *testing.T) {
 }
 
 func TestDataloader_ErrNotFound(t *testing.T) {
+	ctx := t.Context()
 	is := assert.New(t)
-	dl, stop := newDataloader(func(ctx context.Context, keys []string) (map[string]int, error) {
+	dl, stop := newDataloader(ctx, func(ctx context.Context, keys []string) (map[string]int, error) {
 		return newBatchFn(ctx, nil)
 	})
 	defer stop()
@@ -145,8 +146,9 @@ func TestDataloader_ErrNotFound(t *testing.T) {
 }
 
 func TestDataloader_ErrCanceled(t *testing.T) {
+	ctx := t.Context()
 	is := assert.New(t)
-	dl, stop := newDataloader(newBatchFn)
+	dl, stop := newDataloader(ctx, newBatchFn)
 	stop()
 
 	v, err := dl.Load("1")
@@ -155,8 +157,9 @@ func TestDataloader_ErrCanceled(t *testing.T) {
 }
 
 func TestDataloader_Error(t *testing.T) {
+	ctx := t.Context()
 	is := assert.New(t)
-	dl, stop := newDataloader(newBatchFn)
+	dl, stop := newDataloader(ctx, newBatchFn)
 	defer stop()
 
 	v, err := dl.Load("abc")
@@ -165,7 +168,7 @@ func TestDataloader_Error(t *testing.T) {
 	t.Log(err)
 }
 
-func newDataloader(batchFn func(context.Context, []string) (map[string]int, error)) (*dataloader.DataLoader[string, int], func()) {
+func newDataloader(ctx context.Context, batchFn func(context.Context, []string) (map[string]int, error)) (*dataloader.DataLoader[string, int], func()) {
 	return dataloader.New(ctx, batchFn, &dataloader.Config{
 		BatchInterval: 16 * time.Millisecond,
 		BatchSize:     5,

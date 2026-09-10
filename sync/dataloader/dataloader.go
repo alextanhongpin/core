@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/alextanhongpin/core/sync/cache"
 	"github.com/alextanhongpin/core/sync/pipeline"
-	"github.com/alextanhongpin/core/sync/promise"
 )
 
 var (
@@ -24,7 +24,7 @@ type DataLoader[K comparable, V any] struct {
 	batchFn batchFn[K, V]
 	ch      chan K
 	ctx     context.Context
-	pm      *promise.Map[K, V]
+	cache   *cache.Cache[K, future[V]]
 }
 
 type Config struct {
@@ -48,7 +48,9 @@ func New[K comparable, V any](ctx context.Context, fn batchFn[K, V], cfg *Config
 		batchFn: fn,
 		ch:      make(chan K, cfg.BufferSize),
 		ctx:     ctx,
-		pm:      promise.NewMap[K, V](ctx),
+		cache: cache.New(func(key K) (*future[V], error) {
+			return newFuture[V](ctx), nil
+		}),
 	}
 
 	var wg sync.WaitGroup
@@ -60,11 +62,6 @@ func New[K comparable, V any](ctx context.Context, fn batchFn[K, V], cfg *Config
 		cancel(ErrCanceled)
 
 		wg.Wait()
-
-		dl.pm.Range(func(key, val any) bool {
-			dl.Delete(key.(K), ErrCanceled)
-			return true
-		})
 	})
 }
 
@@ -82,71 +79,122 @@ func (d *DataLoader[K, V]) background(ctx context.Context) {
 		if err != nil {
 			// All keys becomes error.
 			for _, key := range keys {
-				p, loaded, _ := d.pm.LoadOrCreate(key)
+				f, loaded, _ := d.cache.LoadOrCreate(key)
 				if !loaded {
 					panic("lost reference to strong pointer")
 				}
-				p.Reject(err)
+				f.Reject(err)
 			}
 			return
 		}
 		for _, k := range keys {
-			p, loaded, _ := d.pm.LoadOrCreate(k)
+			f, loaded, _ := d.cache.LoadOrCreate(k)
 			if !loaded {
 				panic("lost reference to strong pointer")
 			}
 			if v, ok := res[k]; ok {
-				p.Resolve(v)
+				f.Resolve(v)
 			} else {
 				// Key not found
-				p.Reject(fmt.Errorf("%w: %v", ErrNotFound, k))
+				f.Reject(fmt.Errorf("%w: %v", ErrNotFound, k))
 			}
 		}
 	})
 }
 
-func (d *DataLoader[K, V]) load(key K) *promise.Promise[V] {
-	p, loaded, _ := d.pm.LoadOrCreate(key)
-	if loaded {
-		return p
-	}
-
+func (d *DataLoader[K, V]) load(key K) (*future[V], error) {
 	select {
 	case <-d.ctx.Done():
-		p.Reject(context.Cause(d.ctx))
-		return p
+		return nil, context.Cause(d.ctx)
 
-	case d.ch <- key:
+	default:
+		fut, loaded, _ := d.cache.LoadOrCreate(key)
+		if loaded {
+			return fut, nil
+		}
+
+		select {
+		case <-d.ctx.Done():
+			fut.Reject(context.Cause(d.ctx))
+		case d.ch <- key:
+		}
+
+		return fut, nil
 	}
-
-	return p
-}
-
-func (d *DataLoader[K, V]) Delete(key K, err error) {
-	p, loaded := d.pm.LoadAndDelete(key)
-	if loaded {
-		p.Reject(err)
-	}
-	p.Await()
 }
 
 func (d *DataLoader[K, V]) Load(key K) (V, error) {
-	return d.load(key).Await()
+	fut, err := d.load(key)
+	if err != nil {
+		var zero V
+		return zero, err
+	}
+	return fut.Wait()
 }
 
 func (d *DataLoader[K, V]) LoadMany(keys ...K) ([]*Result[K, V], error) {
-	ps := make([]*promise.Promise[V], len(keys))
-	for i, key := range keys {
-		ps[i] = d.load(key)
-	}
-	res := make([]*Result[K, V], len(keys))
-	for i, p := range ps {
-		v, err := p.Await()
-		res[i] = &Result[K, V]{
-			Key:   keys[i],
-			Value: v,
-			Error: err,
+	select {
+	case <-d.ctx.Done():
+		return nil, context.Cause(d.ctx)
+
+	default:
+		fs := make([]*future[V], len(keys))
+		for i, key := range keys {
+			f, err := d.load(key)
+			if err != nil {
+				return nil, err
+			}
+			fs[i] = f
 		}
+		res := make([]*Result[K, V], len(keys))
+		for i, f := range fs {
+			v, err := f.Wait()
+			res[i] = &Result[K, V]{
+				Key:   keys[i],
+				Value: v,
+				Error: err,
+			}
+		}
+		return res, nil
 	}
-	return res, nil
+}
+
+type future[T any] struct {
+	ctx    context.Context
+	cancel func(error)
+}
+
+func newFuture[T any](ctx context.Context) *future[T] {
+	ctx, cancel := context.WithCancelCause(ctx)
+
+	return &future[T]{
+		ctx:    ctx,
+		cancel: cancel,
+	}
+}
+
+func (f *future[T]) Reject(err error) {
+	f.cancel(err)
+}
+
+func (f *future[T]) Resolve(val T) {
+	f.cancel(&errVal[T]{val})
+}
+
+func (f *future[T]) Wait() (T, error) {
+	<-f.ctx.Done()
+	err := context.Cause(f.ctx)
+	if e, ok := errors.AsType[*errVal[T]](err); ok {
+		return e.val, nil
+	}
+	var zero T
+	return zero, err
+}
+
+type errVal[T any] struct {
+	val T
+}
+
+func (e *errVal[T]) Error() string {
+	return ""
 }

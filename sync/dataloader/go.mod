@@ -3,8 +3,8 @@ module github.com/alextanhongpin/core/sync/dataloader
 go 1.27.0
 
 require (
+	github.com/alextanhongpin/core/sync/cache v0.0.2
 	github.com/alextanhongpin/core/sync/pipeline v0.0.6
-	github.com/alextanhongpin/core/sync/promise v0.0.3
 	github.com/alextanhongpin/evaltest v0.0.6
 	github.com/stretchr/testify v1.10.0
 )
