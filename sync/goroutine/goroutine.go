@@ -18,6 +18,7 @@ func New() *Goroutine {
 func (g *Goroutine) Start(ctx context.Context, fn func(context.Context)) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
+
 	g.stop()
 	g.start(ctx, fn)
 }
@@ -30,18 +31,18 @@ func (g *Goroutine) Stop() {
 	g.wg.Wait()
 }
 
-func (g *Goroutine) stop() {
-	if g.cancel == nil {
-		return
-	}
-	g.cancel()
-	g.cancel = nil
-}
-
 func (g *Goroutine) start(ctx context.Context, fn func(context.Context)) {
 	ctx, cancel := context.WithCancel(ctx)
 	g.cancel = cancel
 	g.wg.Go(func() {
 		fn(ctx)
 	})
+}
+
+func (g *Goroutine) stop() {
+	if g.cancel == nil {
+		return
+	}
+	g.cancel()
+	g.cancel = nil
 }
