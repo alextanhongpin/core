@@ -1,0 +1,7 @@
+name: allowlist only, matching input
+input:
+  value: write
+  allowlist:
+  - read
+  - write
+output: true

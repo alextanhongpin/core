@@ -1,0 +1,6 @@
+name: allowlist only, not matching input
+description: since there is no match, default deny
+input:
+  value: write
+  allowlist:
+  - read

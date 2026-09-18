@@ -1,0 +1,53 @@
+name: empty input, zero list
+input:
+  value: ""
+assert:
+  - name: default allow
+    value: output
+---
+name: non-empty input, zero list
+input:
+  value: "foo"
+assert:
+  - name: default allow
+    value: output
+---
+name: allowlist only, not matching input
+description: since there is no match, default deny
+input:
+  value: write
+  allowlist:
+    - read
+assert:
+  - name: default deny
+    value: not output
+---
+name: allowlist only, matching input
+input:
+  value: write
+  allowlist:
+    - read
+    - write
+assert:
+  - name: allow
+    value: output
+---
+name: denylist only, not matching input
+description: since there is no match, default allow
+input:
+  value: write
+  denylist:
+    - read
+assert:
+  - name: default deny
+    value: output
+---
+name: denylist only, matching input
+input:
+  value: write
+  denylist:
+    - read
+    - write
+assert:
+  - name: allow
+    value: not output

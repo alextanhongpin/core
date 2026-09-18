@@ -1,0 +1,7 @@
+name: denylist only, not matching input
+description: since there is no match, default allow
+input:
+  value: write
+  denylist:
+  - read
+output: true

@@ -1,0 +1,4 @@
+name: non-empty input, zero list
+input:
+  value: foo
+output: true
