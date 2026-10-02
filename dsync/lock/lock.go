@@ -1,28 +1,25 @@
-// Package lock provides distributed locking mechanisms using Redis.
-//
-// The package offers two main implementations:
-//   - Basic Locker: Simple distributed locking with exponential backoff
-//   - PubSub Locker: Optimized locking using Redis pub/sub for faster acquisition
+// Package lock provides a distributed locking mechanism using Redis.
 //
 // Key features:
-//   - Automatic lock refresh during long operations
+//   - Atomic acquisition and release using Redis SETNX and DELEX/SETIFDEQ
+//   - Automatic lock refresh during long operations via RefreshRatio
+//   - Configurable retry strategies via sync/retry
 //   - Context-based cancellation and timeouts
-//   - Configurable backoff strategies
-//   - Keyed mutexes to prevent local deadlocks
-//   - Comprehensive error handling
+//   - In-process keyed mutexes to serialize concurrent attempts within the same process
+//   - Safe panic recovery to guarantee lock release
 //
 // Example usage:
 //
-//	client := redis.NewClient(&redis.Options{Addr: "localhost:6379"})
-//	locker := lock.New(client)
+//	rdb := redis.NewClient(&redis.Options{Addr: "localhost:6379"})
+//	client := lock.NewClient(rdb)
+//	locker := lock.New(client, &lock.Config{
+//		LockTTL:      30 * time.Second,
+//		RefreshRatio: 0.8,
+//	})
 //
 //	err := locker.Do(ctx, "resource-key", func(ctx context.Context) error {
 //		// Critical section
 //		return nil
-//	}, &lock.Config{
-//		Lock: 30 * time.Second,
-//		Wait: 10 * time.Second,
-//		RefreshRatio: 0.8,
 //	})
 package lock
 
@@ -36,42 +33,58 @@ import (
 	"uuid"
 
 	"github.com/alextanhongpin/core/sync/cache"
+	"github.com/alextanhongpin/core/sync/retry"
 )
 
 var (
-	ErrExpired         = errors.New("lock: lock expired")
-	ErrLockTimeout     = errors.New("lock: exceeded lock duration")
-	ErrLockWaitTimeout = errors.New("lock: failed to acquire lock within the wait duration")
-	ErrLocked          = errors.New("lock: another process has acquired the lock")
+	ErrExpired     = errors.New("lock: lock expired")
+	ErrLockTimeout = errors.New("lock: exceeded lock duration")
+	ErrLocked      = errors.New("lock: another process has acquired the lock")
 )
 
+type Retry interface {
+	Do(ctx context.Context, fn func(context.Context) error) error
+}
+
 type Config struct {
-	//  The duration to wait for the lock to be available.
-	WaitTTL time.Duration
 	// The duration for which the lock is held.
 	LockTTL time.Duration
 	// The ratio of the lock duration to refresh the lock.
 	RefreshRatio float64
+
+	// The retry for acquiring lock.
+	Retry Retry
 }
 
 func (c *Config) Validate() error {
-	if c.LockTTL == 0 {
-		return errors.New("lock: lock duration cannot be zero")
+	if c.LockTTL <= 0 {
+		return errors.New("lock: lock duration must be greater than zero")
+	}
+	if c.RefreshRatio < 0 || c.RefreshRatio >= 1 {
+		return errors.New("lock: refresh ratio must be in the range [0, 1)")
 	}
 
 	return nil
 }
 
+func DefaultRetry() Retry {
+	cfg := retry.DefaultConfig()
+	cfg.Attempts = 10
+	cfg.Backoff = retry.NewExponentialBackoff(50*time.Millisecond, 2*time.Second)
+	cfg.Throttler = retry.NewNoopThrottler()
+	return retry.New(cfg)
+}
+
 func DefaultConfig() *Config {
 	return &Config{
-		WaitTTL:      5 * time.Second,
 		LockTTL:      30 * time.Second,
 		RefreshRatio: 0.8,
+		Retry:        DefaultRetry(),
 	}
 }
 
 // Locker represents a distributed lock implementation using Redis.
-// Works on with a single redis node.
+// Works on a single redis node.
 type Locker struct {
 	*Config
 	*cache.Cache[string, sync.Mutex]
@@ -81,12 +94,19 @@ type Locker struct {
 
 // New returns a pointer to Locker.
 func New(c client, cfg *Config) *Locker {
+	if c == nil {
+		panic(errors.New("lock: client cannot be nil"))
+	}
+	cfg = cmp.Or(cfg, DefaultConfig())
+	if cfg.Retry == nil {
+		cfg.Retry = DefaultRetry()
+	}
 	if err := cfg.Validate(); err != nil {
 		panic(err)
 	}
 	return &Locker{
-		Config: cmp.Or(cfg, DefaultConfig()),
-		Cache: cache.New[string, sync.Mutex](func(string) (*sync.Mutex, error) {
+		Config: cfg,
+		Cache: cache.New(func(string) (*sync.Mutex, error) {
 			return new(sync.Mutex), nil
 		}),
 		Logger: slog.Default(), // Default logger, can be overridden.
@@ -95,23 +115,27 @@ func New(c client, cfg *Config) *Locker {
 }
 
 func (l *Locker) Do(ctx context.Context, key string, fn func(ctx context.Context) error) error {
-	mu, _ := l.Cache.Get(key)
+	mu, _, _ := l.Cache.LoadOrCreate(key)
 	mu.Lock()
 	defer mu.Unlock()
 
 	token := uuid.NewV7().String()
 
 	// Try to acquire the lock.
-	if err := l.Lock(ctx, key, token, l.LockTTL, l.WaitTTL); err != nil {
+	if err := l.Config.Retry.Do(ctx, func(ctx context.Context) error {
+		return l.Lock(ctx, key, token, l.LockTTL)
+	}); err != nil {
 		return err
 	}
 
 	unlock := sync.OnceValue(func() error {
-		return l.Unlock(context.WithoutCancel(ctx), key, token)
+		unlockCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		return l.Unlock(unlockCtx, key, token)
 	})
 	// Lock acquired. Remember to unlock.
 	defer func() {
-		if err := unlock(); err != nil {
+		if err := unlock(); err != nil && !errors.Is(err, ErrExpired) {
 			l.Logger.Error("unlocking", "key", key, "token", token, "err", err)
 		}
 	}()
@@ -124,27 +148,48 @@ func (l *Locker) Do(ctx context.Context, key string, fn func(ctx context.Context
 		defer cancel()
 
 		ch := make(chan error, 1)
+		panicVal := make(chan any, 1)
+
 		go func() {
+			defer close(ch)
+			defer func() {
+				if r := recover(); r != nil {
+					panicVal <- r
+				}
+			}()
 			ch <- fn(ctx)
-			close(ch)
 		}()
 
 		select {
-		// In case the client does not handle context cancellation.
+		case p := <-panicVal:
+			_ = unlock()
+			panic(p)
+
 		case <-ctx.Done():
 			return errors.Join(context.Cause(ctx), unlock())
 
 		case err := <-ch:
+			if ctx.Err() != nil {
+				return errors.Join(context.Cause(ctx), err, unlock())
+			}
 			return errors.Join(err, unlock())
 		}
 	}
 
-	// Create a channel with a buffer of 1 to prevent goroutine leak.
+	ctx, cancel := context.WithCancelCause(ctx)
+	defer cancel(nil)
+
 	ch := make(chan error, 1)
+	panicVal := make(chan any, 1)
 
 	go func() {
+		defer close(ch)
+		defer func() {
+			if r := recover(); r != nil {
+				panicVal <- r
+			}
+		}()
 		ch <- fn(ctx)
-		close(ch)
 	}()
 
 	t := time.NewTicker(refresh)
@@ -152,14 +197,22 @@ func (l *Locker) Do(ctx context.Context, key string, fn func(ctx context.Context
 
 	for {
 		select {
+		case p := <-panicVal:
+			_ = unlock()
+			panic(p)
+
 		case <-ctx.Done():
 			return errors.Join(context.Cause(ctx), unlock())
 
 		case err := <-ch:
+			if ctx.Err() != nil {
+				return errors.Join(context.Cause(ctx), err, unlock())
+			}
 			return errors.Join(err, unlock())
 
 		case <-t.C:
 			if err := l.Extend(ctx, key, token, l.LockTTL); err != nil {
+				cancel(err)
 				return errors.Join(err, unlock())
 			}
 		}

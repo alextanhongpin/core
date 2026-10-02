@@ -4,15 +4,16 @@ package idempotent
 import (
 	"context"
 	"encoding/json"
+	"encoding/json/jsontext"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
+	"uuid"
 
 	"github.com/alextanhongpin/core/sync/lock"
 	"github.com/google/go-cmp/cmp"
-	"github.com/google/uuid"
 	redis "github.com/redis/go-redis/v9"
-	"github.com/redis/go-redis/v9/helper"
 )
 
 var (
@@ -37,8 +38,14 @@ var (
 	lockRefreshRatio = 0.7
 )
 
+type client interface {
+	CompareAndDelete(ctx context.Context, key, oldValue string) error
+	CompareAndSwap(ctx context.Context, key string, oldValue, newValue string, ttl time.Duration) error
+	LoadOrStore(ctx context.Context, key string, value string, ttl time.Duration) (curr string, loaded bool, err error)
+}
+
 type RedisStore struct {
-	client *redis.Client
+	client client
 	locker *lock.KeyLock
 }
 
@@ -46,18 +53,19 @@ type RedisStore struct {
 // client, lock TTL, and keep TTL.
 func NewRedisStore(client *redis.Client) *RedisStore {
 	return &RedisStore{
-		client: client,
+		client: NewClient(client),
 		locker: lock.New(),
 	}
 }
 
 // Do executes the provided function idempotently, using the specified key and
 // request.
-func (s *RedisStore) Do(ctx context.Context, key string, fn func(context.Context, []byte) ([]byte, error), req []byte, lockTTL, keepTTL time.Duration) (res []byte, loaded bool, err error) {
+func (s *RedisStore) Do(ctx context.Context, key string, fn fun[JSON, JSON], req []byte, lockTTL, keepTTL time.Duration) (res []byte, loaded bool, err error) {
 	l := s.locker.Lock(key)
 	defer l.Unlock()
 
-	data, loaded, err := s.loadOrStore(ctx, key, newToken(), lockTTL)
+	token := uuid.NewV7()
+	data, loaded, err := s.loadOrStore(ctx, key, &data{Token: token, Request: req}, lockTTL)
 	if err != nil {
 		return nil, false, err
 	}
@@ -65,7 +73,6 @@ func (s *RedisStore) Do(ctx context.Context, key string, fn func(context.Context
 	// There are two possible scenarios:
 	// 1) The key/value pair exists. Process the value.
 	// 2) The key/value pair does not exist. Proceed with the request.
-
 	if loaded {
 		// 1)
 		res, err := s.parse(req, data)
@@ -76,18 +83,48 @@ func (s *RedisStore) Do(ctx context.Context, key string, fn func(context.Context
 		return res, true, nil
 	}
 	// 2)
-
-	res, err = s.runInLock(ctx, key, data, fn, req, lockTTL, keepTTL)
+	res, err = s.runInLock(ctx, key, token, fn, req, lockTTL, keepTTL)
 	return res, false, err
 }
 
-func (s *RedisStore) runInLock(ctx context.Context, key, token string, fn func(context.Context, []byte) ([]byte, error), req []byte, lockTTL, keepTTL time.Duration) ([]byte, error) {
+func (s *RedisStore) loadOrStore[T any](ctx context.Context, key string, val T, ttl time.Duration) (T, bool, error) {
+	var zero T
+	b, err := json.Marshal(val)
+	if err != nil {
+		return zero, false, fmt.Errorf("marshaling value of type %T: %w", val, err)
+	}
+	data, loaded, err := s.client.LoadOrStore(ctx, key, string(b), ttl)
+	if err != nil {
+		return zero, false, fmt.Errorf("loading or storing: %w", err)
+	}
+	var v T
+	err = json.Unmarshal([]byte(data), &v)
+	if err != nil {
+		return zero, false, fmt.Errorf("unmarshaling value of type %T: %w", v, err)
+	}
+	return v, loaded, nil
+}
+
+func (s *RedisStore) runInLock(ctx context.Context, key string, token uuid.UUID, fn fun[JSON, JSON], req []byte, lockTTL, keepTTL time.Duration) ([]byte, error) {
+	oldValueBytes, err := json.Marshal(&data{Token: token, Request: req})
+	if err != nil {
+		return nil, fmt.Errorf("marshaling: %w", err)
+	}
+	oldValue := string(oldValueBytes)
 	// Any failure will just unlock the resource.
 	// context.WithoutCancel ensures that the unlock is always called.
 	// If the operation is successful, the token will be replaced with the
 	// response, so the operation should fail.
+	var done bool
 	defer func() {
-		_ = s.compareAndDelete(context.WithoutCancel(ctx), key, token)
+		// The value will change after successful execution, so ignore it.
+		if done {
+			return
+		}
+		err := s.client.CompareAndDelete(context.WithoutCancel(ctx), key, oldValue)
+		if err != nil {
+			slog.ErrorContext(ctx, "comparing and deleting", "err", err)
+		}
 	}()
 
 	// Create a new channel to handle the result.
@@ -101,11 +138,7 @@ func (s *RedisStore) runInLock(ctx context.Context, key, token string, fn func(c
 		defer close(ch)
 		// Process the request in a separate goroutine.
 		res, err := fn(fnCtx, req)
-		select {
-		case ch <- result[[]byte]{err: err, data: res}:
-		case <-fnCtx.Done():
-			// Context cancelled, don't send to channel
-		}
+		ch <- result[JSON]{err: err, data: res}
 	}()
 
 	t := time.NewTicker(time.Duration(float64(lockTTL) * lockRefreshRatio))
@@ -120,44 +153,35 @@ func (s *RedisStore) runInLock(ctx context.Context, key, token string, fn func(c
 				return nil, ErrFunctionExecutionFailed
 			}
 			// Extend once more to prevent token from expiring.
-			if err := s.compareAndSwap(ctx, key, []byte(token), []byte(token), lockTTL); err != nil {
-				return nil, err
+			if err := s.client.CompareAndSwap(ctx, key, oldValue, oldValue, lockTTL); err != nil {
+				return nil, fmt.Errorf("extending lease: %w", err)
 			}
 
 			res, err := d.unwrap()
 			if err != nil {
-				return nil, err
+				return nil, fmt.Errorf("executing function: %w", err)
 			}
 
-			b, err := json.Marshal(data{Request: req, Response: res})
+			newValueBytes, err := json.Marshal(&data{Request: req, Response: res})
 			if err != nil {
-				return nil, err
+				return nil, fmt.Errorf("marshaling response: %w", err)
 			}
 
 			// Replace the token with the response.
-			if err := s.compareAndSwap(ctx, key, []byte(token), b, keepTTL); err != nil {
-				return nil, err
+			if err := s.client.CompareAndSwap(ctx, key, oldValue, string(newValueBytes), keepTTL); err != nil {
+				return nil, fmt.Errorf("updating final value: %w", err)
 			}
+			done = true
 
 			// Return the response.
 			return res, nil
 		case <-t.C:
 			// Extend the lock to prevent the token from expiring.
-			if err := s.compareAndSwap(ctx, key, []byte(token), []byte(token), lockTTL); err != nil {
-				return nil, err
+			if err := s.client.CompareAndSwap(ctx, key, oldValue, oldValue, lockTTL); err != nil {
+				return nil, fmt.Errorf("extending lease: %w", err)
 			}
 		}
 	}
-}
-
-// compareAndSwap swaps the old and new values for key if the value stored in
-// the map is equal to old. The old value must be of a comparable type.
-func (s *RedisStore) compareAndSwap(ctx context.Context, key string, old, value []byte, ttl time.Duration) error {
-	_, err := s.client.SetIFDEQ(ctx, key, value, helper.DigestBytes(old), ttl).Result()
-	if errors.Is(err, redis.Nil) {
-		return ErrLockConflict
-	}
-	return err
 }
 
 // parse parses the value and returns the response if the request matches.
@@ -166,85 +190,44 @@ func (s *RedisStore) compareAndSwap(ctx context.Context, key string, old, value 
 //  2. The value is a JSON object, which means the request has been processed.
 //     2.1) The request does not match, return an error.
 //     2.2) The request matches, return the response.
-func (s *RedisStore) parse(req []byte, val string) ([]byte, error) {
+func (s *RedisStore) parse(req []byte, payload *data) ([]byte, error) {
 	// 1)
-	if isUUID(val) {
+	if payload.Token != uuid.Nil() {
 		return nil, ErrRequestInFlight
 	}
 
 	// 2)
-	var d data
-	if err := json.Unmarshal([]byte(val), &d); err != nil {
+	// 2.1)
+	err := jsonBytesDiff(payload.Request, req)
+	if err != nil {
 		return nil, err
 	}
 
-	// 2.1)
-	if hash(d.Request) != hash(req) {
-		return nil, fmt.Errorf("%w: \n%s", ErrRequestMismatch, cmp.Diff(d.Request, req))
-	}
-
 	// 2.2)
-	return d.Response, nil
+	return payload.Response, nil
 }
 
-// CompareAndDelete deletes the entry for key if its value is equal to old. The
-// old value must be of a comparable type.
-// If there is no current value for key in the map, CompareAndDelete returns
-// false (even if the old value is the nil interface value).
-func (r *RedisStore) compareAndDelete(ctx context.Context, key, old string) error {
-	n, err := r.client.DelExArgs(ctx, key, redis.DelExArgs{
-		Mode:        "IFDEQ",
-		MatchDigest: helper.DigestString(old),
-	}).Result()
+func jsonBytesDiff(a, b []byte) error {
+	var c, d any
+	err := json.Unmarshal(a, &c)
 	if err != nil {
-		return err
+		return fmt.Errorf("unmarshaling %q: %w", a, err)
 	}
-	if n == 0 {
-		return redis.Nil
+	err = json.Unmarshal(b, &d)
+	if err != nil {
+		return fmt.Errorf("unmarshaling %q: %w", b, err)
+	}
+
+	if diff := cmp.Diff(a, b); diff != "" {
+		return fmt.Errorf("%w: %s", ErrRequestMismatch, diff)
 	}
 	return nil
 }
 
-// loadOrStore returns the existing value for the key if present. Otherwise, it
-// stores and returns the given value. The loaded result is true if the value
-// was loaded, false if stored.
-// Also see usecase here: https://github.com/golang/go/issues/33762#issuecomment-523757434
-func (r *RedisStore) loadOrStore(ctx context.Context, key string, value string, ttl time.Duration) (curr string, loaded bool, err error) {
-	s, err := r.client.SetArgs(ctx, key, value, redis.SetArgs{
-		Get:  true,
-		Mode: string(redis.NX),
-		TTL:  ttl,
-	}).Result()
-	// If the previous value does not exist when GET, then it will be nil.
-	// But since we successfully set the value, we skip the error.
-	if errors.Is(err, redis.Nil) {
-		return value, false, nil
-	}
-	if err != nil {
-		return "", false, err
-	}
-
-	return s, true, nil
-}
-
-// hash generates a uint64 of the provided data.
-// We hash the request because
-// 1) The request may contain sensitive information.
-// 2) The request may be too long to store in Redis.
-// 3) We just need to compare the request, not the response.
-func hash(data []byte) uint64 {
-	return helper.DigestBytes(data)
-}
-
-// isUUID checks if the provided byte slice represents a valid UUID.
-func isUUID(s string) bool {
-	_, err := uuid.Parse(s)
-	return err == nil
-}
-
 type data struct {
-	Request  []byte `json:"request,omitempty"`
-	Response []byte `json:"response,omitempty"`
+	Token    uuid.UUID      `json:"token,omitzero"`
+	Request  jsontext.Value `json:"request,omitempty"`
+	Response jsontext.Value `json:"response,omitempty"`
 }
 
 type result[T any] struct {
@@ -254,8 +237,4 @@ type result[T any] struct {
 
 func (r result[T]) unwrap() (T, error) {
 	return r.data, r.err
-}
-
-func newToken() string {
-	return uuid.Must(uuid.NewV7()).String()
 }

@@ -3,6 +3,7 @@ package lock_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"math/rand/v2"
 	"sync"
@@ -10,12 +11,11 @@ import (
 	"time"
 
 	"github.com/alextanhongpin/core/dsync/lock"
+	"github.com/alextanhongpin/core/sync/retry"
 	"github.com/alextanhongpin/dbtx/testing/redistest"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 )
-
-var wantErr = errors.New("want error")
 
 func TestMain(m *testing.M) {
 	stop := redistest.Init()
@@ -28,30 +28,37 @@ func TestLock_WaitSuccess(t *testing.T) {
 	var (
 		ch     = make(chan bool)
 		events []string
+		mu     sync.Mutex
 		is     = assert.New(t)
 		wg     sync.WaitGroup
 	)
+
+	addEvent := func(s string) {
+		mu.Lock()
+		events = append(events, s)
+		mu.Unlock()
+	}
 
 	wg.Go(func() {
 		// Lock 1 will spend 100ms on the work, and release the lock.
 		err := runInLock(t, t.Context(), func(ctx context.Context) error {
 			// Start the second goroutine.
-			events = append(events, "worker #1: lock acquired")
+			addEvent("worker #1: lock acquired")
 			close(ch)
 
 			// Hold for 100 ms.
 			time.Sleep(100 * time.Millisecond)
 
-			events = append(events, "worker #1: awake")
+			addEvent("worker #1: awake")
 			return nil
 		}, &lock.Config{
 			LockTTL:      time.Second,
-			WaitTTL:      time.Second,
+			Retry:        newRetry(time.Second),
 			RefreshRatio: 0.7, // Enable refresh to prevent timeout
 		})
 		is.NoError(err)
 
-		events = append(events, "worker #1: done")
+		addEvent("worker #1: done")
 	})
 
 	wg.Go(func() {
@@ -60,14 +67,14 @@ func TestLock_WaitSuccess(t *testing.T) {
 
 		// Lock 2 will acquire the lock after 100ms.
 		err := runInLock(t, t.Context(), func(ctx context.Context) error {
-			events = append(events, "worker #2: lock acquired")
+			addEvent("worker #2: lock acquired")
 			return nil
 		}, &lock.Config{
 			LockTTL:      time.Second,
-			WaitTTL:      200 * time.Millisecond,
+			Retry:        newRetry(200 * time.Millisecond),
 			RefreshRatio: 0.7, // Enable refresh to prevent timeout
 		})
-		events = append(events, "worker #2: done")
+		addEvent("worker #2: done")
 		is.NoError(err)
 	})
 
@@ -90,27 +97,34 @@ func TestLock_WaitTimeout(t *testing.T) {
 	var (
 		ch     = make(chan bool)
 		events []string
+		mu     sync.Mutex
 		is     = assert.New(t)
 		wg     sync.WaitGroup
 	)
 
+	addEvent := func(s string) {
+		mu.Lock()
+		events = append(events, s)
+		mu.Unlock()
+	}
+
 	wg.Go(func() {
 		err := runInLock(t, t.Context(), func(ctx context.Context) error {
 			// Start the second goroutine.
-			events = append(events, "worker #1: lock acquired")
+			addEvent("worker #1: lock acquired")
 			close(ch)
 
 			// Hold for 200 ms.
 			time.Sleep(200 * time.Millisecond)
 
-			events = append(events, "worker #1: awake")
+			addEvent("worker #1: awake")
 			return nil
 		}, &lock.Config{
 			LockTTL:      time.Second,
-			WaitTTL:      time.Second,
+			Retry:        newRetry(time.Second),
 			RefreshRatio: 0.7,
 		})
-		events = append(events, "worker #1: done")
+		addEvent("worker #1: done")
 		is.NoError(err)
 	})
 
@@ -119,15 +133,15 @@ func TestLock_WaitTimeout(t *testing.T) {
 		<-ch
 
 		err := runInLock(t, t.Context(), func(ctx context.Context) error {
-			events = append(events, "worker #2: lock acquired")
+			addEvent("worker #2: lock acquired")
 			return nil
 		}, &lock.Config{
 			LockTTL:      time.Second,
-			WaitTTL:      100 * time.Millisecond,
+			Retry:        newRetry(100 * time.Millisecond),
 			RefreshRatio: 0.7,
 		})
-		events = append(events, "worker #2: done")
-		is.ErrorIs(err, lock.ErrLockWaitTimeout)
+		addEvent("worker #2: done")
+		is.ErrorIs(err, retry.ErrLimitExceeded)
 	})
 
 	wg.Wait()
@@ -160,7 +174,7 @@ func TestLock_NoWait(t *testing.T) {
 			return nil
 		}, &lock.Config{
 			LockTTL:      time.Second,
-			WaitTTL:      time.Second,
+			Retry:        newRetry(time.Second),
 			RefreshRatio: 0.7,
 		})
 		is.NoError(err)
@@ -172,7 +186,7 @@ func TestLock_NoWait(t *testing.T) {
 		return nil
 	}, &lock.Config{
 		LockTTL:      time.Second,
-		WaitTTL:      0, // No wait.
+		Retry:        newRetry(0), // No wait.
 		RefreshRatio: 0.7,
 	})
 	is.ErrorIs(err, lock.ErrLocked)
@@ -192,7 +206,7 @@ func TestLock_Unlock_ContextCanceled(t *testing.T) {
 		return nil
 	}, &lock.Config{
 		LockTTL:      time.Second,
-		WaitTTL:      time.Second,
+		Retry:        newRetry(time.Second),
 		RefreshRatio: 0.7,
 	})
 	is.ErrorIs(err, context.Canceled)
@@ -201,13 +215,13 @@ func TestLock_Unlock_ContextCanceled(t *testing.T) {
 
 func TestLock_Unlock_Error(t *testing.T) {
 	err := runInLock(t, t.Context(), func(ctx context.Context) error {
-		return wantErr
+		return assert.AnError
 	}, &lock.Config{
 		LockTTL:      time.Second,
-		WaitTTL:      time.Second,
+		Retry:        newRetry(time.Second),
 		RefreshRatio: 0.7,
 	})
-	assert.ErrorIs(t, err, wantErr)
+	assert.ErrorIs(t, err, assert.AnError)
 	assertNoKey(t)
 }
 
@@ -237,7 +251,7 @@ func TestLock_Unlock_Deleted(t *testing.T) {
 		return nil
 	}, &lock.Config{
 		LockTTL:      lockTTL,
-		WaitTTL:      waitTTL,
+		Retry:        newRetry(waitTTL),
 		RefreshRatio: 0.5, // Enable extension so it can detect key deletion
 	})
 	is.ErrorIs(err, lock.ErrLocked)
@@ -262,7 +276,7 @@ func TestLock_Extend_Success(t *testing.T) {
 			return nil
 		}, &lock.Config{
 			LockTTL:      100 * time.Millisecond,
-			WaitTTL:      0,
+			Retry:        newRetry(0),
 			RefreshRatio: 0.7,
 		})
 		is.NoError(err)
@@ -274,7 +288,7 @@ func TestLock_Extend_Success(t *testing.T) {
 
 		locker := lock.New(lock.NewClient(client), &lock.Config{
 			LockTTL:      100 * time.Millisecond,
-			WaitTTL:      0,
+			Retry:        newRetry(0),
 			RefreshRatio: 0.7,
 		})
 
@@ -302,7 +316,7 @@ func TestLock_Concurrent(t *testing.T) {
 		wg     sync.WaitGroup
 		cfg    = &lock.Config{
 			LockTTL:      1 * time.Second,
-			WaitTTL:      1 * time.Second,
+			Retry:        newRetry(1 * time.Second),
 			RefreshRatio: 0.7,
 		}
 		locker = lock.New(client, cfg)
@@ -332,9 +346,9 @@ func TestLock_DoTimeout(t *testing.T) {
 		key    = t.Name()
 		logger = slog.New(slog.NewTextHandler(t.Output(), nil))
 		cfg    = &lock.Config{
-			RefreshRatio: 0,
 			LockTTL:      50 * time.Millisecond,
-			WaitTTL:      time.Second,
+			RefreshRatio: 0,
+			Retry:        newRetry(time.Second),
 		}
 		locker = lock.New(client, cfg)
 	)
@@ -342,7 +356,7 @@ func TestLock_DoTimeout(t *testing.T) {
 	locker.Logger = logger
 	err := locker.Do(t.Context(), key, func(ctx context.Context) error {
 		time.Sleep(100 * time.Millisecond)
-		return wantErr
+		return assert.AnError
 	})
 	is.ErrorIs(err, lock.ErrLockTimeout)
 
@@ -372,4 +386,181 @@ func runInLock(t *testing.T, ctx context.Context, fn func(context.Context) error
 	locker := lock.New(client, cfg)
 	locker.Logger = logger
 	return locker.Do(ctx, key, fn)
+}
+
+func newRetry(duration time.Duration) lock.Retry {
+	cfg := retry.DefaultConfig()
+	cfg.Attempts = 1
+	cfg.Backoff = retry.NewConstantBackoff(duration)
+	cfg.Throttler = retry.NewNoopThrottler()
+	return retry.New(cfg)
+}
+
+func TestNew_Defaults(t *testing.T) {
+	rc := redistest.Client(t)
+	client := lock.NewClient(rc)
+
+	t.Run("nil config applies defaults", func(t *testing.T) {
+		locker := lock.New(client, nil)
+		assert.Equal(t, 30*time.Second, locker.LockTTL)
+		assert.Equal(t, 0.8, locker.RefreshRatio)
+		assert.NotNil(t, locker.Retry)
+	})
+
+	t.Run("partial config populates default retry", func(t *testing.T) {
+		locker := lock.New(client, &lock.Config{
+			LockTTL: 5 * time.Second,
+		})
+		assert.Equal(t, 5*time.Second, locker.LockTTL)
+		assert.NotNil(t, locker.Retry)
+	})
+
+	t.Run("nil client panics", func(t *testing.T) {
+		assert.Panics(t, func() {
+			lock.New(nil, nil)
+		})
+	})
+}
+
+func TestConfig_Validate(t *testing.T) {
+	tests := []struct {
+		name    string
+		cfg     lock.Config
+		wantErr bool
+	}{
+		{
+			name:    "valid config",
+			cfg:     lock.Config{LockTTL: time.Second, RefreshRatio: 0.5},
+			wantErr: false,
+		},
+		{
+			name:    "zero LockTTL",
+			cfg:     lock.Config{LockTTL: 0, RefreshRatio: 0.5},
+			wantErr: true,
+		},
+		{
+			name:    "negative LockTTL",
+			cfg:     lock.Config{LockTTL: -time.Second, RefreshRatio: 0.5},
+			wantErr: true,
+		},
+		{
+			name:    "negative RefreshRatio",
+			cfg:     lock.Config{LockTTL: time.Second, RefreshRatio: -0.1},
+			wantErr: true,
+		},
+		{
+			name:    "RefreshRatio equal to 1",
+			cfg:     lock.Config{LockTTL: time.Second, RefreshRatio: 1.0},
+			wantErr: true,
+		},
+		{
+			name:    "RefreshRatio greater than 1",
+			cfg:     lock.Config{LockTTL: time.Second, RefreshRatio: 1.5},
+			wantErr: true,
+		},
+		{
+			name:    "zero RefreshRatio (no refresh) is valid",
+			cfg:     lock.Config{LockTTL: time.Second, RefreshRatio: 0},
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.cfg.Validate()
+			if tt.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestLock_Panic(t *testing.T) {
+	rc := redistest.Client(t)
+	client := lock.NewClient(rc)
+
+	t.Run("panic with refresh releases lock", func(t *testing.T) {
+		key := t.Name()
+		locker := lock.New(client, &lock.Config{
+			LockTTL:      time.Second,
+			RefreshRatio: 0.7,
+		})
+
+		assert.PanicsWithValue(t, "something went wrong", func() {
+			_ = locker.Do(t.Context(), key, func(ctx context.Context) error {
+				panic("something went wrong")
+			})
+		})
+
+		// Ensure lock was unlocked even after panic.
+		_, err := client.Get(context.Background(), key).Result()
+		assert.ErrorIs(t, err, redis.Nil)
+	})
+
+	t.Run("panic without refresh releases lock", func(t *testing.T) {
+		key := t.Name()
+		locker := lock.New(client, &lock.Config{
+			LockTTL:      time.Second,
+			RefreshRatio: 0,
+		})
+
+		assert.PanicsWithValue(t, "critical error", func() {
+			_ = locker.Do(t.Context(), key, func(ctx context.Context) error {
+				panic("critical error")
+			})
+		})
+
+		// Ensure lock was unlocked even after panic.
+		_, err := client.Get(context.Background(), key).Result()
+		assert.ErrorIs(t, err, redis.Nil)
+	})
+}
+
+func TestFunc(t *testing.T) {
+	rc := redistest.Client(t)
+	client := lock.NewClient(rc)
+	locker := lock.New(client, nil)
+
+	t.Run("success", func(t *testing.T) {
+		fn := func(ctx context.Context, id int) (string, error) {
+			return fmt.Sprintf("val-%d", id), nil
+		}
+		lockedFn := lock.Func(fn, locker, func(ctx context.Context, id int) (string, error) {
+			return fmt.Sprintf("key-%d", id), nil
+		})
+
+		res, err := lockedFn(t.Context(), 42)
+		assert.NoError(t, err)
+		assert.Equal(t, "val-42", res)
+	})
+
+	t.Run("keyFn error", func(t *testing.T) {
+		wantErr := errors.New("key failed")
+		fn := func(ctx context.Context, id int) (string, error) {
+			return "should-not-run", nil
+		}
+		lockedFn := lock.Func(fn, locker, func(ctx context.Context, id int) (string, error) {
+			return "", wantErr
+		})
+
+		res, err := lockedFn(t.Context(), 1)
+		assert.ErrorIs(t, err, wantErr)
+		assert.Empty(t, res)
+	})
+
+	t.Run("fn error suppresses partial result", func(t *testing.T) {
+		wantErr := errors.New("work failed")
+		fn := func(ctx context.Context, id int) (string, error) {
+			return "partial-dirty-data", wantErr
+		}
+		lockedFn := lock.Func(fn, locker, func(ctx context.Context, id int) (string, error) {
+			return fmt.Sprintf("key-%d", id), nil
+		})
+
+		res, err := lockedFn(t.Context(), 2)
+		assert.ErrorIs(t, err, wantErr)
+		assert.Empty(t, res, "should return zero value on error")
+	})
 }

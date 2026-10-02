@@ -14,8 +14,12 @@ const (
 	keepTTL = 24 * time.Hour
 )
 
+type JSON = []byte
+
+type fun[K, V any] = func(ctx context.Context, req K) (V, error)
+
 type Store interface {
-	Do(ctx context.Context, key string, fn func(context.Context, []byte) ([]byte, error), req []byte, lockTTL, keepTTL time.Duration) (res []byte, loaded bool, err error)
+	Do(ctx context.Context, key string, fn fun[JSON, JSON], req JSON, lockTTL, keepTTL time.Duration) (res JSON, loaded bool, err error)
 }
 
 type HandlerOptions struct {

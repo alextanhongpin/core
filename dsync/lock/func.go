@@ -9,16 +9,21 @@ type locker interface {
 }
 
 func Func[K, V any](fn fun[K, V], l locker, keyFn func(context.Context, K) (string, error)) fun[K, V] {
-	return func(ctx context.Context, req K) (res V, err error) {
+	return func(ctx context.Context, req K) (V, error) {
 		var zero V
 		key, err := keyFn(ctx, req)
 		if err != nil {
 			return zero, err
 		}
+		var res V
 		err = l.Do(ctx, key, func(ctx context.Context) error {
-			res, err = fn(ctx, req)
-			return err
+			var fnErr error
+			res, fnErr = fn(ctx, req)
+			return fnErr
 		})
-		return
+		if err != nil {
+			return zero, err
+		}
+		return res, nil
 	}
 }

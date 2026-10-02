@@ -3,12 +3,15 @@ package idempotent_test
 import (
 	"context"
 	"errors"
+	"fmt"
+	"log"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	redis "github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/alextanhongpin/core/dsync/idempotent"
@@ -25,28 +28,37 @@ func TestMain(m *testing.M) {
 }
 
 func TestRedisStore(t *testing.T) {
+	client := redistest.Client(t)
+	t.Cleanup(func() {
+		scanAll(client)
+	})
 	fn := func(ctx context.Context, req []byte) ([]byte, error) {
-		return []byte("world"), nil
+		scanAll(client)
+		return []byte(`"world"`), nil
 	}
 
-	store := idempotent.NewRedisStore(redistest.Client(t))
-	res, shared, err := store.Do(ctx, t.Name(), fn, []byte("hello"), time.Minute, time.Hour)
+	store := idempotent.NewRedisStore(client)
+	res, shared, err := store.Do(ctx, t.Name(), fn, []byte(`"hello"`), time.Minute, time.Hour)
 	is := assert.New(t)
 	is.Nil(err)
 	is.False(shared)
-	is.Equal([]byte("world"), res)
+	is.Equal([]byte(`"world"`), res)
 
-	res, shared, err = store.Do(ctx, t.Name(), fn, []byte("hello"), time.Minute, time.Hour)
+	res, shared, err = store.Do(ctx, t.Name(), fn, []byte(`"hello"`), time.Minute, time.Hour)
 	is.Nil(err)
 	is.True(shared)
-	is.Equal([]byte("world"), res)
+	is.Equal([]byte(`"world"`), res)
 }
 
 func TestMakeHandler(t *testing.T) {
 	fn := func(ctx context.Context, req string) (string, error) {
 		return "world", nil
 	}
-	h := idempotent.NewHandler(redistest.Client(t), fn, nil)
+	client := redistest.Client(t)
+	t.Cleanup(func() {
+		scanAll(client)
+	})
+	h := idempotent.NewHandler(client, fn, nil)
 
 	res, shared, err := h.Handle(ctx, t.Name(), "hello")
 	is := assert.New(t)
@@ -82,6 +94,9 @@ func TestConcurrent(t *testing.T) {
 	}
 
 	client := redistest.Client(t)
+	t.Cleanup(func() {
+		scanAll(client)
+	})
 	h := idempotent.NewHandler(client, fn, nil)
 	n := 10
 
@@ -149,6 +164,9 @@ func TestConcurrent(t *testing.T) {
 // We expect the lock to be refresh periodically.
 func TestExtendLock(t *testing.T) {
 	client := redistest.Client(t)
+	t.Cleanup(func() {
+		scanAll(client)
+	})
 
 	fn := func(ctx context.Context, req string) (int, error) {
 		// slow function
@@ -163,5 +181,43 @@ func TestExtendLock(t *testing.T) {
 	_, _, err := h.Handle(ctx, t.Name(), "world")
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+func scanAll(rdb *redis.Client) {
+	// 2. Use Scan to safely find all keys without blocking Redis
+	// Match "*" retrieves all keys. You can change this to "prefix:*" if needed.
+	iter := rdb.Scan(ctx, 0, "*", 0).Iterator()
+
+	var keys []string
+	for iter.Next(ctx) {
+		keys = append(keys, iter.Val())
+	}
+
+	if err := iter.Err(); err != nil {
+		log.Fatalf("Failed to scan keys: %v", err)
+	}
+
+	if len(keys) == 0 {
+		fmt.Println("No keys found in Redis.")
+		return
+	}
+
+	// 3. Fetch all values efficiently using MGet (Multi-Get)
+	values, err := rdb.MGet(ctx, keys...).Result()
+	if err != nil {
+		log.Fatalf("Failed to MGet values: %v", err)
+	}
+
+	// 4. Map keys to their respective values
+	// Note: MGet returns nil for keys that don't exist or expired during execution
+	fmt.Println("--- Key-Value Pairs ---")
+	for i, key := range keys {
+		val := values[i]
+		if val == nil {
+			fmt.Printf("%s: <nil> (key may have expired)\n", key)
+		} else {
+			fmt.Printf("%s: %v\n", key, val)
+		}
 	}
 }

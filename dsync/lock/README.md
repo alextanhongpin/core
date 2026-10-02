@@ -45,8 +45,7 @@ func main() {
     client := lock.NewClient(redisClient)
     locker := lock.New(client, &lock.Config{
         LockTTL:      30 * time.Second, // Duration for which the lock is held
-        WaitTTL:      5 * time.Second,  // Max time to wait for acquisition
-        RefreshRatio: 0.8,              // Refresh at 80% of LockTTL
+        RefreshRatio: 0.8,              // Refresh at 80% of LockTTL (24s)
     })
     
     // Use the lock
@@ -66,19 +65,19 @@ func main() {
 
 ## Configuration
 
-`lock.Config` holds the lock behavior:
+`lock.Config` defines locking behavior:
 
 ```go
 type Config struct {
-    // WaitTTL is the duration to wait for the lock to become available.
-    // 0 means don't wait.
-    WaitTTL time.Duration
     // LockTTL is the duration for which the lock is held in Redis.
     LockTTL time.Duration
     // RefreshRatio is the ratio of LockTTL at which the lock is refreshed.
-    // Set to 0 or negative to disable refresh. The operation will then be
+    // Set to 0 to disable refresh. The operation will then be
     // bounded by a context timeout equal to LockTTL.
     RefreshRatio float64
+    // Retry controls the retry strategy when waiting to acquire a lock.
+    // Defaults to 10 attempts with exponential backoff.
+    Retry Retry
 }
 ```
 
@@ -86,22 +85,26 @@ Defaults:
 
 ```go
 lock.DefaultConfig()
-// WaitTTL:      5 * time.Second
 // LockTTL:      30 * time.Second
 // RefreshRatio: 0.8
+// Retry:        DefaultRetry() (10 attempts, 50ms-2s exponential backoff)
 ```
 
 ## Usage Patterns
 
-### Basic Locking
+### Basic Locking (No Wait)
+
+To fail immediately if the lock is held by another process:
 
 ```go
+cfg := retry.DefaultConfig()
+cfg.Attempts = 0 // Don't retry
+
 locker := lock.New(client, &lock.Config{
     LockTTL: 30 * time.Second,
-    WaitTTL: 0, // Don't wait if lock is busy
+    Retry:   retry.New(cfg),
 })
 
-// No wait
 err := locker.Do(ctx, "resource-key", func(ctx context.Context) error {
     // Critical section
     return nil
@@ -112,13 +115,17 @@ if errors.Is(err, lock.ErrLocked) {
 }
 ```
 
-### Lock with Waiting
+### Locking with Custom Retry / Backoff
 
 ```go
+retryCfg := retry.DefaultConfig()
+retryCfg.Attempts = 5
+retryCfg.Backoff = retry.NewConstantBackoff(100 * time.Millisecond)
+
 locker := lock.New(client, &lock.Config{
     LockTTL:      30 * time.Second,
-    WaitTTL:      10 * time.Second,
     RefreshRatio: 0.7,
+    Retry:        retry.New(retryCfg),
 })
 
 err := locker.Do(ctx, "resource-key", func(ctx context.Context) error {
@@ -136,7 +143,7 @@ c := lock.NewClient(redisClient)
 
 ctx := context.Background()
 token := "my-unique-token"
-err := c.Lock(ctx, "resource-key", token, 30*time.Second, 5*time.Second)
+err := c.Lock(ctx, "resource-key", token, 30*time.Second)
 if err != nil {
     if errors.Is(err, lock.ErrLocked) {
         log.Println("Resource is locked")
@@ -151,15 +158,15 @@ err = c.Extend(ctx, "resource-key", token, 30*time.Second)
 
 ### Func Helper
 
-Wrap any function with locking:
+Wrap any function with distributed locking:
 
 ```go
 fn := func(ctx context.Context, id int) (string, error) {
     return fmt.Sprintf("result-%d", id), nil
 }
 
-lockedFn := lock.Func(fn, locker, func(id int) string {
-    return fmt.Sprintf("key:%d", id)
+lockedFn := lock.Func(fn, locker, func(ctx context.Context, id int) (string, error) {
+    return fmt.Sprintf("key:%d", id), nil
 })
 
 res, err := lockedFn(ctx, 123)
@@ -169,10 +176,9 @@ res, err := lockedFn(ctx, 123)
 
 ```go
 var (
-    ErrLocked          = errors.New("lock: another process has acquired the lock")
-    ErrExpired         = errors.New("lock: lock expired")
-    ErrLockTimeout     = errors.New("lock: exceeded lock duration")
-    ErrLockWaitTimeout = errors.New("lock: failed to acquire lock within the wait duration")
+    ErrLocked      = errors.New("lock: another process has acquired the lock")
+    ErrExpired     = errors.New("lock: lock expired")
+    ErrLockTimeout = errors.New("lock: exceeded lock duration")
 )
 ```
 
@@ -183,14 +189,14 @@ err := locker.Do(ctx, key, fn)
 switch {
 case errors.Is(err, lock.ErrLocked):
     // Busy resource
-case errors.Is(err, lock.ErrLockWaitTimeout):
-    // Timeout waiting for lock
+case errors.Is(err, retry.ErrLimitExceeded):
+    // Retries exhausted waiting for lock
 case errors.Is(err, lock.ErrLockTimeout):
-    // Lock expired during operation
+    // Lock duration exceeded when refresh is disabled
 case errors.Is(err, lock.ErrExpired):
-    // Lock expired, e.g., Redis restart
+    // Lock expired or was removed during execution
 default:
-    // Other errors
+    // Other errors (e.g. context.Canceled)
 }
 ```
 

@@ -3,7 +3,6 @@ package lock
 import (
 	"context"
 	"errors"
-	"math/rand/v2"
 	"time"
 
 	redis "github.com/redis/go-redis/v9"
@@ -11,9 +10,9 @@ import (
 )
 
 type client interface {
-	Lock(ctx context.Context, key, token string, ttl, wait time.Duration) error
-	Unlock(ctx context.Context, key, token string) error
+	Lock(ctx context.Context, key, token string, ttl time.Duration) error
 	Extend(ctx context.Context, key, token string, ttl time.Duration) error
+	Unlock(ctx context.Context, key, token string) error
 }
 
 var _ client = (*Client)(nil)
@@ -28,12 +27,15 @@ func NewClient(client *redis.Client) *Client {
 	}
 }
 
-func (c *Client) Lock(ctx context.Context, key, token string, ttl, wait time.Duration) error {
-	if wait <= 0 {
-		return c.tryLock(ctx, key, token, ttl)
+func (c *Client) Lock(ctx context.Context, key, token string, ttl time.Duration) error {
+	ok, err := c.Client.SetNX(ctx, key, token, ttl).Result()
+	if err != nil {
+		return err
 	}
-
-	return c.lockWait(ctx, key, token, ttl, wait)
+	if !ok {
+		return ErrLocked
+	}
+	return nil
 }
 
 // Unlocks the key with the given token.
@@ -60,51 +62,5 @@ func (c *Client) Extend(ctx context.Context, key, token string, ttl time.Duratio
 	if errors.Is(err, redis.Nil) {
 		return ErrLocked
 	}
-	return err
-}
-
-// lockWait waits until the lock is acquired.
-func (c *Client) lockWait(ctx context.Context, key, token string, ttl, wait time.Duration) error {
-	// NOTE: We don't use context for cancellation because it will be passed down.
-	timeout := time.After(wait)
-	tryLock := func() error {
-		return c.tryLock(ctx, key, token, ttl)
-	}
-
-	var sleep time.Duration
-	for {
-		select {
-		case <-timeout:
-			err := tryLock()
-			if errors.Is(err, ErrLocked) {
-				return ErrLockWaitTimeout
-			}
-
-			return err
-		case <-ctx.Done():
-			return context.Cause(ctx)
-
-		case <-time.After(sleep):
-			err := tryLock()
-			if errors.Is(err, ErrLocked) {
-				sleep = rand.N(wait)
-
-				continue
-			}
-
-			return err
-		}
-	}
-}
-
-func (c *Client) tryLock(ctx context.Context, key, token string, ttl time.Duration) error {
-	err := c.Client.SetArgs(ctx, key, token, redis.SetArgs{
-		Mode: string(redis.NX),
-		TTL:  ttl,
-	}).Err()
-	if errors.Is(err, redis.Nil) {
-		return ErrLocked
-	}
-
 	return err
 }
