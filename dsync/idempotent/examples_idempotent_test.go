@@ -21,7 +21,7 @@ type Response struct {
 	UserID int64
 }
 
-func ExampleNewHandler() {
+func ExampleNewWithRedis() {
 	ctx := context.Background()
 
 	client := redis.NewClient(&redis.Options{
@@ -52,8 +52,10 @@ func ExampleNewHandler() {
 		}
 
 		// Execute the idempotent operation and handle the response
-		h := idempotent.NewHandler(client, fn, nil)
-		v, shared, err := h.Handle(ctx, "get-user", req)
+		idb := idempotent.NewWithRedis(client)
+		idp := idb.HandlerFunc(fn, nil)
+
+		v, shared, err := idp.Do(ctx, "get-user", req)
 		if err != nil {
 			panic(err)
 		}
@@ -75,8 +77,9 @@ func ExampleNewHandler() {
 		}
 
 		// Execute the idempotent operation and handle the response.
-		h := idempotent.NewHandler(client, fn, nil)
-		_, _, err := h.Handle(ctx, "get-user", req)
+		idb := idempotent.NewWithRedis(client)
+		idp := idb.HandlerFunc(fn, nil)
+		_, _, err := idp.Do(ctx, "get-user", req)
 		if err == nil {
 			fmt.Println(err)
 			panic("want error, got nil")
@@ -102,8 +105,9 @@ func ExampleNewHandler() {
 		}
 
 		// Execute the idempotent operation and handle the response.
-		h := idempotent.NewHandler(client, fn, nil)
-		v, shared, err := h.Handle(ctx, "get-user", req)
+		idb := idempotent.NewWithRedis(client)
+		idp := idb.HandlerFunc(fn, nil)
+		v, shared, err := idp.Do(ctx, "get-user", req)
 		if err != nil {
 			panic(err)
 		}

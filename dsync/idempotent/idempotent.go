@@ -1,233 +1,296 @@
-// Package idempotent provides a mechanism for executing requests idempotently using Redis.
+// Package idempotent provides Redis-backed idempotent request execution.
+//
+// A request identified by a key is guaranteed to run at most once; subsequent
+// calls with the same key return the cached result without re-executing the
+// function. This guarantee holds across multiple processes via Redis and within
+// a single process via an in-memory key-level mutex.
 package idempotent
 
 import (
+	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
-	"encoding/json/jsontext"
 	"errors"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 	"uuid"
 
-	"github.com/alextanhongpin/core/sync/lock"
-	"github.com/google/go-cmp/cmp"
+	"github.com/alextanhongpin/core/sync/cache"
 	redis "github.com/redis/go-redis/v9"
 )
 
+const (
+	defaultLockTTL = 10 * time.Second
+	defaultKeepTTL = 24 * time.Hour
+)
+
 var (
-	// ErrRequestInFlight indicates that a request is already in flight for the
-	// specified key.
+	// ErrRequestInFlight is returned when a cross-process caller arrives while
+	// the same key is already being processed.
 	ErrRequestInFlight = errors.New("idempotent: request in flight")
 
-	// ErrRequestMismatch indicates that the request does not match the stored
-	// request for the specified key.
+	// ErrRequestMismatch is returned when the incoming request body differs from
+	// the one stored under the same key.
 	ErrRequestMismatch = errors.New("idempotent: request mismatch")
 
-	// ErrFunctionExecutionFailed indicates that the function execution failed.
+	// ErrFunctionExecutionFailed is returned when the worker goroutine's result
+	// channel is closed before a value is sent (defensive; normally unreachable).
 	ErrFunctionExecutionFailed = errors.New("idempotent: function execution failed")
 
-	// ErrEmptyKey indicates that an empty key was provided.
-	ErrEmptyKey = errors.New("idempotent: key cannot be empty")
-
-	// ErrLockConflict indicates that the lock has expired or is already held by another process.
+	// ErrLockConflict is returned when a compare-and-swap fails because the
+	// Redis entry was modified or expired by another process.
 	ErrLockConflict = errors.New("idempotent: lock expired or is already held by another process")
 
-	// lockRefreshRatio defines when to refresh the lock (70% of TTL)
+	// ErrEmptyKey is returned when an empty key is provided.
+	ErrEmptyKey = errors.New("idempotent: key cannot be empty")
+
+	// lockRefreshRatio controls how early the lock TTL is renewed (70 % of TTL).
 	lockRefreshRatio = 0.7
 )
 
+type (
+	// Task represents an idempotent unit of work that can be executed.
+	Task[K, V any] interface {
+		Do(ctx context.Context, req K) (V, error)
+	}
+
+	// Handler executes tasks idempotently for a given key.
+	Handler[K, V any] interface {
+		Do(ctx context.Context, key string, req K) (V, bool, error)
+	}
+)
+
+// client abstracts the Redis operations used by Idempotent.
 type client interface {
 	CompareAndDelete(ctx context.Context, key, oldValue string) error
 	CompareAndSwap(ctx context.Context, key string, oldValue, newValue string, ttl time.Duration) error
 	LoadOrStore(ctx context.Context, key string, value string, ttl time.Duration) (curr string, loaded bool, err error)
 }
 
-type RedisStore struct {
+type Idempotent struct {
 	client client
-	locker *lock.KeyLock
+	cache  *cache.Cache[string, sync.Mutex]
 }
 
-// NewRedisStore creates a new RedisStore instance with the specified Redis
-// client, lock TTL, and keep TTL.
-func NewRedisStore(client *redis.Client) *RedisStore {
-	return &RedisStore{
-		client: NewClient(client),
-		locker: lock.New(),
+type HandlerConfig struct {
+	// LockTTL is how long the in-flight Redis entry is kept before expiring.
+	// It should exceed the expected execution time of the handler function.
+	// Defaults to 10 seconds.
+	LockTTL time.Duration
+
+	// KeepTTL is how long the completed response is cached in Redis.
+	// Defaults to 24 hours.
+	KeepTTL time.Duration
+}
+
+func DefaultConfig() *HandlerConfig {
+	return &HandlerConfig{
+		LockTTL: defaultLockTTL,
+		KeepTTL: defaultKeepTTL,
 	}
 }
 
-// Do executes the provided function idempotently, using the specified key and
-// request.
-func (s *RedisStore) Do(ctx context.Context, key string, fn fun[JSON, JSON], req []byte, lockTTL, keepTTL time.Duration) (res []byte, loaded bool, err error) {
-	l := s.locker.Lock(key)
-	defer l.Unlock()
+func NewWithRedis(client *redis.Client) *Idempotent {
+	return New(NewClient(client))
+}
 
-	token := uuid.NewV7()
-	data, loaded, err := s.loadOrStore(ctx, key, &data{Token: token, Request: req}, lockTTL)
-	if err != nil {
-		return nil, false, err
+func New(client client) *Idempotent {
+	return &Idempotent{
+		client: client,
+		cache: cache.New(func(string) (*sync.Mutex, error) {
+			return new(sync.Mutex), nil
+		}),
 	}
+}
 
-	// There are two possible scenarios:
-	// 1) The key/value pair exists. Process the value.
-	// 2) The key/value pair does not exist. Proceed with the request.
-	if loaded {
-		// 1)
-		res, err := s.parse(req, data)
-		if err != nil {
-			return nil, false, err
+func (i *Idempotent) HandlerFunc[K, V any](fn HandlerFunc[K, V], cfg *HandlerConfig) Handler[K, V] {
+	return i.Handler(fn, cfg)
+}
+
+func (i *Idempotent) Handler[K, V any](fn Task[K, V], cfg *HandlerConfig) Handler[K, V] {
+	cfg = cmp.Or(cfg, DefaultConfig())
+	lockTTL := cmp.Or(cfg.LockTTL, defaultLockTTL)
+	keepTTL := cmp.Or(cfg.KeepTTL, defaultKeepTTL)
+
+	return idempotentHandlerFunc[K, V](func(ctx context.Context, key string, req K) (V, bool, error) {
+		var zero V
+		if key == "" {
+			return zero, false, ErrEmptyKey
+		}
+		if err := ctx.Err(); err != nil {
+			return zero, false, context.Cause(ctx)
 		}
 
-		return res, true, nil
-	}
-	// 2)
-	res, err = s.runInLock(ctx, key, token, fn, req, lockTTL, keepTTL)
-	return res, false, err
+		mu := i.getMutex(key)
+		mu.Lock()
+		defer mu.Unlock()
+
+		token := uuid.NewV7()
+		payload, rawOldValue, loaded, err := i.loadOrStore(ctx, key, &data[K, V]{Token: token, Request: req}, lockTTL)
+		if err != nil {
+			return zero, false, err
+		}
+
+		if loaded {
+			// Key already exists — parse the stored payload and return the result.
+			res, err := i.parse(req, payload)
+			if err != nil {
+				return zero, false, err
+			}
+			return res, true, nil
+		}
+
+		// Key was freshly stored — run the function under the distributed lock.
+		res, err := i.runInLock(ctx, key, rawOldValue, fn, req, lockTTL, keepTTL)
+		return res, false, err
+	})
 }
 
-func (s *RedisStore) loadOrStore[T any](ctx context.Context, key string, val T, ttl time.Duration) (T, bool, error) {
+func (i *Idempotent) getMutex(key string) *sync.Mutex {
+	if i.cache == nil {
+		return new(sync.Mutex)
+	}
+	mu, _, _ := i.cache.LoadOrCreate(key)
+	return mu
+}
+
+// loadOrStore marshals val, stores it in Redis under key (SET NX with ttl),
+// and returns the unmarshaled payload, the raw JSON string, and a loaded flag.
+func (i *Idempotent) loadOrStore[T any](ctx context.Context, key string, val T, ttl time.Duration) (curr T, raw string, loaded bool, err error) {
 	var zero T
 	b, err := json.Marshal(val)
 	if err != nil {
-		return zero, false, fmt.Errorf("marshaling value of type %T: %w", val, err)
+		return zero, "", false, fmt.Errorf("marshaling value of type %T: %w", val, err)
 	}
-	data, loaded, err := s.client.LoadOrStore(ctx, key, string(b), ttl)
+	raw, loaded, err = i.client.LoadOrStore(ctx, key, string(b), ttl)
 	if err != nil {
-		return zero, false, fmt.Errorf("loading or storing: %w", err)
+		return zero, "", false, fmt.Errorf("loading or storing: %w", err)
+	}
+	if !loaded {
+		return val, string(b), false, nil
 	}
 	var v T
-	err = json.Unmarshal([]byte(data), &v)
-	if err != nil {
-		return zero, false, fmt.Errorf("unmarshaling value of type %T: %w", v, err)
+	if err := json.Unmarshal([]byte(raw), &v); err != nil {
+		return zero, raw, true, fmt.Errorf("unmarshaling value of type %T: %w", v, err)
 	}
-	return v, loaded, nil
+	return v, raw, true, nil
 }
 
-func (s *RedisStore) runInLock(ctx context.Context, key string, token uuid.UUID, fn fun[JSON, JSON], req []byte, lockTTL, keepTTL time.Duration) ([]byte, error) {
-	oldValueBytes, err := json.Marshal(&data{Token: token, Request: req})
-	if err != nil {
-		return nil, fmt.Errorf("marshaling: %w", err)
-	}
-	oldValue := string(oldValueBytes)
-	// Any failure will just unlock the resource.
-	// context.WithoutCancel ensures that the unlock is always called.
-	// If the operation is successful, the token will be replaced with the
-	// response, so the operation should fail.
-	var done bool
+// runInLock executes fn while holding the distributed Redis lock.
+// A background goroutine periodically refreshes the lock TTL so it does not expire
+// during long operations. On success the in-flight entry is atomically replaced with
+// the completed response. On any failure or panic the in-flight entry is deleted so
+// the lock is released.
+func (i *Idempotent) runInLock[K, V any](
+	ctx context.Context,
+	key string,
+	oldValue string,
+	fn Task[K, V],
+	req K,
+	lockTTL, keepTTL time.Duration,
+) (V, error) {
+	var zero V
+
+	stopTicker := make(chan struct{})
+	tickerDone := make(chan struct{})
+
+	// Refresh the lock TTL in the background so it does not expire during long operations.
+	go func() {
+		defer close(tickerDone)
+		ticker := time.NewTicker(time.Duration(float64(lockTTL) * lockRefreshRatio))
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-stopTicker:
+				return
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if err := i.client.CompareAndSwap(ctx, key, oldValue, oldValue, lockTTL); err != nil {
+					slog.ErrorContext(ctx, "idempotent: failed to refresh lock TTL", "err", err)
+					return
+				}
+			}
+		}
+	}()
+
+	var succeeded bool
 	defer func() {
-		// The value will change after successful execution, so ignore it.
-		if done {
+		close(stopTicker)
+		<-tickerDone
+
+		if succeeded {
 			return
 		}
-		err := s.client.CompareAndDelete(context.WithoutCancel(ctx), key, oldValue)
-		if err != nil {
-			slog.ErrorContext(ctx, "comparing and deleting", "err", err)
+		if err := i.client.CompareAndDelete(context.WithoutCancel(ctx), key, oldValue); err != nil {
+			slog.ErrorContext(ctx, "idempotent: failed to delete in-flight entry", "err", err)
 		}
 	}()
 
-	// Create a new channel to handle the result.
-	ch := make(chan result[[]byte], 1)
-
-	// Use a context with cancellation to ensure goroutine cleanup
-	fnCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
-	go func() {
-		defer close(ch)
-		// Process the request in a separate goroutine.
-		res, err := fn(fnCtx, req)
-		ch <- result[JSON]{err: err, data: res}
-	}()
-
-	t := time.NewTicker(time.Duration(float64(lockTTL) * lockRefreshRatio))
-	defer t.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return nil, context.Cause(ctx)
-		case d, ok := <-ch:
-			if !ok {
-				return nil, ErrFunctionExecutionFailed
-			}
-			// Extend once more to prevent token from expiring.
-			if err := s.client.CompareAndSwap(ctx, key, oldValue, oldValue, lockTTL); err != nil {
-				return nil, fmt.Errorf("extending lease: %w", err)
-			}
-
-			res, err := d.unwrap()
-			if err != nil {
-				return nil, fmt.Errorf("executing function: %w", err)
-			}
-
-			newValueBytes, err := json.Marshal(&data{Request: req, Response: res})
-			if err != nil {
-				return nil, fmt.Errorf("marshaling response: %w", err)
-			}
-
-			// Replace the token with the response.
-			if err := s.client.CompareAndSwap(ctx, key, oldValue, string(newValueBytes), keepTTL); err != nil {
-				return nil, fmt.Errorf("updating final value: %w", err)
-			}
-			done = true
-
-			// Return the response.
-			return res, nil
-		case <-t.C:
-			// Extend the lock to prevent the token from expiring.
-			if err := s.client.CompareAndSwap(ctx, key, oldValue, oldValue, lockTTL); err != nil {
-				return nil, fmt.Errorf("extending lease: %w", err)
-			}
-		}
+	res, err := fn.Do(ctx, req)
+	if err != nil {
+		return zero, fmt.Errorf("executing function: %w", err)
 	}
+
+	newValueBytes, err := json.Marshal(&data[K, V]{Done: true, Request: req, Response: res})
+	if err != nil {
+		return zero, fmt.Errorf("marshaling completed entry: %w", err)
+	}
+
+	// Atomically replace the in-flight token with the completed response.
+	if err := i.client.CompareAndSwap(ctx, key, oldValue, string(newValueBytes), keepTTL); err != nil {
+		return zero, fmt.Errorf("storing completed response: %w", err)
+	}
+
+	succeeded = true
+	return res, nil
 }
 
-// parse parses the value and returns the response if the request matches.
-// There are two possible scenarios:
-//  1. The value is a UUID, which means the request is in flight.
-//  2. The value is a JSON object, which means the request has been processed.
-//     2.1) The request does not match, return an error.
-//     2.2) The request matches, return the response.
-func (s *RedisStore) parse(req []byte, payload *data) ([]byte, error) {
-	// 1)
-	if payload.Token != uuid.Nil() {
-		return nil, ErrRequestInFlight
+// parse interprets a stored payload for an existing key:
+//  1. Not done → request is still in flight; return [ErrRequestInFlight].
+//  2. Done, request mismatch → return [ErrRequestMismatch].
+//  3. Done, request matches → return the cached response.
+func (i *Idempotent) parse[K, V any](req K, payload *data[K, V]) (V, error) {
+	var zero V
+	if !payload.Done {
+		return zero, ErrRequestInFlight
 	}
-
-	// 2)
-	// 2.1)
-	err := jsonBytesDiff(payload.Request, req)
-	if err != nil {
-		return nil, err
+	if err := jsonEqual(payload.Request, req); err != nil {
+		return zero, err
 	}
-
-	// 2.2)
 	return payload.Response, nil
 }
 
-func jsonBytesDiff(a, b []byte) error {
-	var c, d any
-	err := json.Unmarshal(a, &c)
+// jsonEqual reports whether two request payloads serialize to equivalent JSON bytes,
+// avoiding panics on structs with unexported fields and handling JSON normalization.
+func jsonEqual[K any](stored, incoming K) error {
+	storedBytes, err := json.Marshal(stored)
 	if err != nil {
-		return fmt.Errorf("unmarshaling %q: %w", a, err)
+		return fmt.Errorf("marshaling stored request: %w", err)
 	}
-	err = json.Unmarshal(b, &d)
+	incomingBytes, err := json.Marshal(incoming)
 	if err != nil {
-		return fmt.Errorf("unmarshaling %q: %w", b, err)
+		return fmt.Errorf("marshaling incoming request: %w", err)
 	}
-
-	if diff := cmp.Diff(a, b); diff != "" {
-		return fmt.Errorf("%w: %s", ErrRequestMismatch, diff)
+	if !bytes.Equal(storedBytes, incomingBytes) {
+		return fmt.Errorf("%w: stored %s, incoming %s", ErrRequestMismatch, string(storedBytes), string(incomingBytes))
 	}
 	return nil
 }
 
-type data struct {
-	Token    uuid.UUID      `json:"token,omitzero"`
-	Request  jsontext.Value `json:"request,omitempty"`
-	Response jsontext.Value `json:"response,omitempty"`
+// data is the JSON value stored in Redis for an idempotent key.
+//
+// In-flight entry:  Done=false, Token=<uuid>, Request=<req>
+// Completed entry:  Done=true,  Token=<zero>, Request=<req>, Response=<res>
+type data[K, V any] struct {
+	Done     bool      `json:"done"`
+	Token    uuid.UUID `json:"token,omitzero"`
+	Request  K         `json:"request"`
+	Response V         `json:"response"`
 }
 
 type result[T any] struct {
@@ -237,4 +300,16 @@ type result[T any] struct {
 
 func (r result[T]) unwrap() (T, error) {
 	return r.data, r.err
+}
+
+type HandlerFunc[K, V any] func(ctx context.Context, req K) (V, error)
+
+func (h HandlerFunc[K, V]) Do(ctx context.Context, req K) (V, error) {
+	return h(ctx, req)
+}
+
+type idempotentHandlerFunc[K, V any] func(ctx context.Context, key string, req K) (V, bool, error)
+
+func (h idempotentHandlerFunc[K, V]) Do(ctx context.Context, key string, req K) (V, bool, error) {
+	return h(ctx, key, req)
 }

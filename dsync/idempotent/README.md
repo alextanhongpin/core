@@ -1,16 +1,23 @@
 # Idempotent Package
 
-A Redis-based idempotent request handler for Go that ensures requests are executed only once, even when received multiple times. This package provides distributed idempotency across multiple application instances.
+A Redis-backed idempotent request execution library for Go that ensures operations identified by a key are executed at most once, returning cached results on subsequent invocations.
+
+This package provides distributed idempotency across multiple application instances using Redis, and eliminates redundant execution on the same instance via an in-memory key-level mutex.
 
 ## Features
 
-- **Distributed Idempotency**: Works across multiple application instances using Redis
-- **Type Safety**: Generic handler with type-safe request/response handling
-- **Concurrent Safety**: Handles concurrent requests for the same key gracefully
-- **Lock Extension**: Automatically extends locks for long-running operations
-- **Memory Efficient**: Smart memory management with cleanup mechanisms
-- **Request Validation**: Ensures request consistency using SHA-256 hashing
-- **Flexible Configuration**: Customizable lock and storage TTL settings
+- **Distributed Idempotency**: Coordinates across multiple nodes via Redis atomic conditional commands.
+- **In-Process Single-Flight**: Prevents redundant execution on the same node using a garbage-collected per-key mutex.
+- **Type Safety**: Fully generic API (`[K, V any]`) with type-safe request and response handling.
+- **Lock Extension (Heartbeat)**: Automatically refreshes the lock TTL in the background for long-running operations.
+- **Safe Cancellation & Panic Handling**: Safely cleans up locks on error, cancellation, or handler panics without crashing background goroutines.
+- **Semantic Request Validation**: Ensures that repeated calls with the same key have matching request payloads.
+- **Flexible Configuration**: Customizable lock acquisition and response retention TTLs.
+
+## Requirements
+
+- Go 1.24+
+- Redis 8.4+ (uses `SET ... IFDEQ` and `DELEX ... IFDEQ` conditional digest operations)
 
 ## Installation
 
@@ -47,17 +54,15 @@ type CreateUserResponse struct {
 }
 
 func main() {
-    // Create Redis client
     client := redis.NewClient(&redis.Options{
         Addr: "localhost:6379",
     })
     defer client.Close()
 
-    // Define your business logic
     createUser := func(ctx context.Context, req CreateUserRequest) (*CreateUserResponse, error) {
-        // Simulate user creation (database call, etc.)
+        // Business logic (e.g. database write, payment, third-party API)
         time.Sleep(100 * time.Millisecond)
-        
+
         return &CreateUserResponse{
             UserID: 12345,
             Name:   req.Name,
@@ -65,8 +70,8 @@ func main() {
         }, nil
     }
 
-    // Create idempotent handler
-    handler := idempotent.NewHandler(client, createUser, nil)
+    idb := idempotent.NewWithRedis(client)
+    handler := idb.HandlerFunc(createUser, nil)
 
     ctx := context.Background()
     req := CreateUserRequest{
@@ -74,15 +79,15 @@ func main() {
         Email: "john@example.com",
     }
 
-    // First request - will execute the function
-    resp1, shared1, err := handler.Handle(ctx, "create-user-123", req)
+    // First request - executes the function
+    resp1, shared1, err := handler.Do(ctx, "create-user-123", req)
     if err != nil {
         log.Fatal(err)
     }
     fmt.Printf("First request: %+v (shared: %v)\n", resp1, shared1)
 
-    // Second request - will return cached result
-    resp2, shared2, err := handler.Handle(ctx, "create-user-123", req)
+    // Second request - returns the cached result without calling createUser
+    resp2, shared2, err := handler.Do(ctx, "create-user-123", req)
     if err != nil {
         log.Fatal(err)
     }
@@ -90,141 +95,77 @@ func main() {
 }
 ```
 
-### Advanced Configuration
+### Custom Configuration
 
 ```go
-// Custom configuration
-handler := idempotent.NewHandler(client, businessLogic, &idempotent.HandlerOptions{
-    LockTTL: 30 * time.Second,  // Lock expires after 30 seconds
-    KeepTTL: 24 * time.Hour,    // Results cached for 24 hours
+handler := idb.HandlerFunc(businessLogic, &idempotent.HandlerConfig{
+    LockTTL: 30 * time.Second, // Max time for in-flight execution (auto-refreshed)
+    KeepTTL: 24 * time.Hour,   // How long the completed response is cached
 })
-```
-
-### Using the Store Interface Directly
-
-```go
-store := idempotent.NewRedisStore(client)
-
-fn := func(ctx context.Context, req []byte) ([]byte, error) {
-    // Your business logic here
-    return []byte("response"), nil
-}
-
-result, shared, err := store.Do(
-    ctx, 
-    "operation-key", 
-    fn, 
-    []byte("request-data"), 
-    time.Minute,  // Lock TTL
-    time.Hour,    // Keep TTL
-)
 ```
 
 ## How It Works
 
-1. **Request Hashing**: Each request is hashed using SHA-256 for comparison
-2. **Lock Acquisition**: A distributed lock is acquired using Redis
-3. **Duplicate Detection**: Checks if the same request was already processed
-4. **Result Caching**: Stores the result with configurable TTL
-5. **Lock Extension**: Automatically extends locks for long-running operations
+1. **In-Process Coordination**: Callers on the same instance contend on an in-memory key-level mutex (`cache.Cache` backed by weak pointers and automatic GC finalizers).
+2. **Lock Acquisition**: The winner attempts to atomically claim the distributed key in Redis via `SET NX GET` storing the request payload alongside a unique UUIDv7 in-flight token.
+3. **Duplicate Detection**:
+   - If another process arrives while the operation is in flight, Redis returns the existing uncompleted entry and the caller receives `ErrRequestInFlight`.
+   - If the operation already completed, the stored payload is verified against the incoming request. If they match, the cached response is returned (`shared = true`). If payloads differ, `ErrRequestMismatch` is returned.
+4. **Lock Extension**: A background goroutine refreshes the Redis lock TTL at 70% of `LockTTL` so that long-running operations do not lose their lock.
+5. **Result Caching & Cleanup**:
+   - On success, the in-flight token is atomically replaced with the response payload using compare-and-swap (`SET IFDEQ`) for `KeepTTL`.
+   - On error or handler panic, the lock is released immediately (`DELEX IFDEQ`) so retries can proceed.
 
 ## Error Handling
 
-The package provides specific error types for different scenarios:
+The package provides standard sentinel errors for predictable error handling:
 
 ```go
-resp, shared, err := handler.Handle(ctx, key, req)
+resp, shared, err := handler.Do(ctx, key, req)
 if err != nil {
     switch {
     case errors.Is(err, idempotent.ErrRequestInFlight):
-        // Another request with the same key is currently being processed
+        // Another instance is currently processing this key (e.g. return 409 Conflict)
         log.Println("Request already in flight")
     case errors.Is(err, idempotent.ErrRequestMismatch):
-        // Same key but different request content
-        log.Println("Request mismatch for key")
+        // Same idempotency key was reused with a different request payload
+        log.Println("Request body mismatch for key")
     case errors.Is(err, idempotent.ErrLockConflict):
-        // Lock expired or conflict occurred
-        log.Println("Lock conflict")
+        // Lock expired or was preempted
+        log.Println("Lock expired or conflict occurred")
     case errors.Is(err, idempotent.ErrEmptyKey):
         // Empty key provided
         log.Println("Key cannot be empty")
     default:
-        log.Printf("Other error: %v", err)
+        log.Printf("Execution error: %v", err)
     }
 }
 ```
 
-## Performance Characteristics
-
-Based on benchmarks:
-- **Throughput**: ~27k operations/second for different keys
-- **Latency**: ~37µs average for new requests, ~125µs for cached results
-- **Memory**: ~1.4KB per operation with 33 allocations
-- **Concurrent Performance**: Handles high concurrency gracefully
-
-## Best Practices
-
-### 1. Choose Good Keys
-Use meaningful, unique keys that identify your operations:
-```go
-key := fmt.Sprintf("create-user:%s", userEmail)
-key := fmt.Sprintf("payment:%s", transactionID)
-```
-
-### 2. Configure TTL Appropriately
-```go
-opts := &idempotent.HandlerOptions{
-    LockTTL: 30 * time.Second,  // Should be > expected operation time
-    KeepTTL: 24 * time.Hour,    // Based on business requirements
-}
-```
-
-### 3. Handle Errors Gracefully
-```go
-resp, shared, err := handler.Handle(ctx, key, req)
-if err != nil {
-    if errors.Is(err, idempotent.ErrRequestInFlight) {
-        // Maybe retry after a delay
-        time.Sleep(100 * time.Millisecond)
-        return handler.Handle(ctx, key, req)
-    }
-    return nil, false, err
-}
-```
-
-### 4. Monitor Performance
-Use the `shared` return value to monitor cache hit rates:
-```go
-if shared {
-    cacheHitCounter.Inc()
-} else {
-    cacheMissCounter.Inc()
-}
-```
-
-## Examples
-
-### HTTP API with Idempotency
+## HTTP Middleware / Handler Example
 
 ```go
-func createUserHandler(w http.ResponseWriter, r *http.Request) {
-    var req CreateUserRequest
-    if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-        http.Error(w, err.Error(), http.StatusBadRequest)
-        return
-    }
-
-    // Use idempotency key from header
+func (s *Server) CreateUserHandler(w http.ResponseWriter, r *http.Request) {
     key := r.Header.Get("Idempotency-Key")
     if key == "" {
         http.Error(w, "Missing Idempotency-Key header", http.StatusBadRequest)
         return
     }
 
-    resp, shared, err := handler.Handle(r.Context(), key, req)
+    var req CreateUserRequest
+    if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+        http.Error(w, err.Error(), http.StatusBadRequest)
+        return
+    }
+
+    resp, shared, err := s.createUserHandler.Do(r.Context(), key, req)
     if err != nil {
         if errors.Is(err, idempotent.ErrRequestInFlight) {
             http.Error(w, "Request in progress", http.StatusConflict)
+            return
+        }
+        if errors.Is(err, idempotent.ErrRequestMismatch) {
+            http.Error(w, "Idempotency key payload mismatch", http.StatusUnprocessableEntity)
             return
         }
         http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -232,58 +173,11 @@ func createUserHandler(w http.ResponseWriter, r *http.Request) {
     }
 
     w.Header().Set("X-Idempotent-Replayed", fmt.Sprintf("%t", shared))
+    w.Header().Set("Content-Type", "application/json")
     json.NewEncoder(w).Encode(resp)
 }
 ```
 
-### Batch Operations
-
-```go
-func processBatch(ctx context.Context, items []BatchItem) error {
-    var wg sync.WaitGroup
-    errChan := make(chan error, len(items))
-
-    for _, item := range items {
-        wg.Add(1)
-        go func(item BatchItem) {
-            defer wg.Done()
-            
-            key := fmt.Sprintf("batch-item:%s", item.ID)
-            _, _, err := handler.Handle(ctx, key, item)
-            if err != nil {
-                errChan <- err
-            }
-        }(item)
-    }
-
-    wg.Wait()
-    close(errChan)
-
-    for err := range errChan {
-        if err != nil {
-            return err
-        }
-    }
-    return nil
-}
-```
-
-## Architecture
-
-The package consists of several key components:
-
-- **Handler**: Type-safe wrapper with JSON marshaling
-- **Store**: Core idempotency logic with Redis operations
-- **Cache**: Atomic Redis operations using compare-and-swap
-- **muKey**: Memory-efficient key-based mutex with cleanup
-
-## Thread Safety
-
-All operations are thread-safe and designed for concurrent use:
-- Redis operations are atomic using Lua scripts
-- Local mutexes prevent race conditions
-- Automatic cleanup prevents memory leaks
-
 ## License
 
-MIT License - see the LICENSE file for details.
+MIT License
