@@ -22,7 +22,7 @@ func TestMain(m *testing.M) {
 }
 
 func TestRedis(t *testing.T) {
-	c := cache.NewRedis(newClient(t))
+	c := cache.MustNewRedis(newClient(t))
 
 	testStorage(t, c)
 }

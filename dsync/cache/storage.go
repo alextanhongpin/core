@@ -8,8 +8,8 @@ import (
 
 type C[T any] = cache[T]
 
-// cache defines the interface for cache operations with atomic guarantees.
-// All operations are thread-safe and provide strong consistency through cache.
+// cache defines storage operations. Atomicity and persistence guarantees depend
+// on the backend. Implementations support concurrent calls within one instance.
 type cache[T any] interface {
 	io.Closer
 

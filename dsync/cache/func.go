@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json/v2"
+	"errors"
 	"fmt"
 	"reflect"
 	"runtime"
@@ -24,7 +25,14 @@ type FuncConfig[K any] struct {
 	Lock  *Lock
 }
 
-func Func[K, V any](fn fun[K, V], cfg *FuncConfig[K]) ifun[K, V] {
+func Func[K, V any](fn fun[K, V], cfg FuncConfig[K]) (ifun[K, V], error) {
+	cfg = cfg.WithDefaults()
+	if err := cfg.Validate(); err != nil {
+		return nil, err
+	}
+	if fn == nil {
+		return nil, errors.New("cache: function is required")
+	}
 	return func(ctx context.Context, args K) (V, bool, error) {
 		var zero V
 		key, err := cfg.KeyFn(ctx, args)
@@ -32,7 +40,7 @@ func Func[K, V any](fn fun[K, V], cfg *FuncConfig[K]) ifun[K, V] {
 			return zero, false, err
 		}
 
-		curr, loaded, err := cfg.Lock.LoadOrCreate(ctx, key, &LoadOrCreateConfig[[]byte]{
+		curr, loaded, err := cfg.Lock.LoadOrCreate(ctx, key, LoadOrCreateConfig[[]byte]{
 			Create: func(ctx context.Context, key string) ([]byte, time.Duration, error) {
 				v, ttl, err := fn(ctx, args)
 				if err != nil {
@@ -56,10 +64,17 @@ func Func[K, V any](fn fun[K, V], cfg *FuncConfig[K]) ifun[K, V] {
 		}
 
 		return v, loaded, nil
-	}
+	}, nil
 }
 
-func Idempotent[K, V any](fn fun[K, V], cfg *FuncConfig[K]) ifun[K, V] {
+func Idempotent[K, V any](fn fun[K, V], cfg FuncConfig[K]) (ifun[K, V], error) {
+	cfg = cfg.WithDefaults()
+	if err := cfg.Validate(); err != nil {
+		return nil, err
+	}
+	if fn == nil {
+		return nil, errors.New("cache: function is required")
+	}
 	type dto struct {
 		Request  K `json:"request"`
 		Response V `json:"response"`
@@ -71,7 +86,7 @@ func Idempotent[K, V any](fn fun[K, V], cfg *FuncConfig[K]) ifun[K, V] {
 		if err != nil {
 			return zero, false, err
 		}
-		b, loaded, err := cfg.Lock.LoadOrCreate(ctx, key, &LoadOrCreateConfig[[]byte]{
+		b, loaded, err := cfg.Lock.LoadOrCreate(ctx, key, LoadOrCreateConfig[[]byte]{
 			Create: func(ctx context.Context, key string) ([]byte, time.Duration, error) {
 				v, ttl, err := fn(ctx, req)
 				if err != nil {
@@ -96,7 +111,7 @@ func Idempotent[K, V any](fn fun[K, V], cfg *FuncConfig[K]) ifun[K, V] {
 			return zero, false, err
 		}
 		var res dto
-		if err := json.Unmarshal(b, &res); err != nil {
+		if err := cfg.Codec.NewDecoder(bytes.NewReader(b)).Decode(&res); err != nil {
 			return zero, false, err
 		}
 		prev, err := hash(res.Request)
@@ -108,7 +123,7 @@ func Idempotent[K, V any](fn fun[K, V], cfg *FuncConfig[K]) ifun[K, V] {
 		}
 
 		return res.Response, loaded, err
-	}
+	}, nil
 }
 
 func GoFunc[K, V any](fn gofun[K, V], c cache[[]byte], codec Codec) gofun[K, V] {
@@ -171,4 +186,31 @@ func hash(v any) (string, error) {
 	}
 
 	return fmt.Sprint(xxh3.Hash(b)), nil
+}
+
+func (c FuncConfig[K]) WithDefaults() FuncConfig[K] {
+	if c.Codec == nil {
+		c.Codec = NewJSONCodec()
+	}
+	return c
+}
+func (c FuncConfig[K]) Validate() error {
+	if c.KeyFn == nil || c.Lock == nil || c.Codec == nil {
+		return errors.New("cache: key function, lock, and codec are required")
+	}
+	return nil
+}
+func MustFunc[K, V any](fn fun[K, V], cfg FuncConfig[K]) ifun[K, V] {
+	f, err := Func(fn, cfg)
+	if err != nil {
+		panic(err)
+	}
+	return f
+}
+func MustIdempotent[K, V any](fn fun[K, V], cfg FuncConfig[K]) ifun[K, V] {
+	f, err := Idempotent(fn, cfg)
+	if err != nil {
+		panic(err)
+	}
+	return f
 }

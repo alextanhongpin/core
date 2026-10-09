@@ -20,7 +20,20 @@ type Lock struct {
 	cache  *Redis
 }
 
-func NewLock(client *redis.Client) *Lock { return &Lock{client: client, cache: NewRedis(client)} }
+func NewLock(client *redis.Client) (*Lock, error) {
+	r, err := NewRedis(client)
+	if err != nil {
+		return nil, err
+	}
+	return &Lock{client: client, cache: r}, nil
+}
+func MustNewLock(client *redis.Client) *Lock {
+	l, err := NewLock(client)
+	if err != nil {
+		panic(err)
+	}
+	return l
+}
 
 type AdvisoryLockConfig struct {
 	Do           func(context.Context, string, []byte) error
@@ -143,8 +156,12 @@ func (l *Lock) run(ctx context.Context, key string, token []byte, ttl time.Durat
 	return err
 }
 
-func (l *Lock) AdvisoryLock(ctx context.Context, key string, cfg *AdvisoryLockConfig) error {
-	if cfg == nil || cfg.Do == nil || key == "" {
+func (l *Lock) AdvisoryLock(ctx context.Context, key string, cfg AdvisoryLockConfig) error {
+	cfg = cfg.WithDefaults()
+	if err := cfg.Validate(); err != nil {
+		return err
+	}
+	if key == "" {
 		return errors.New("cache: key and callback are required")
 	}
 	ttl, err := leaseConfig(cfg.Lock, cfg.Wait, cfg.RefreshRatio)
@@ -159,11 +176,11 @@ func (l *Lock) AdvisoryLock(ctx context.Context, key string, cfg *AdvisoryLockCo
 	return l.run(ctx, lk, token, ttl, cfg.RefreshRatio, func(ctx context.Context) error { return cfg.Do(ctx, key, token) }, func(ctx context.Context) error { return l.cache.CompareAndSwap(ctx, lk, token, token, ttl) })
 }
 
-func (l *Lock) LoadOrCreateT[T any](ctx context.Context, key string, cfg *LoadOrCreateConfig[T]) (curr T, loaded bool, err error) {
-	if cfg == nil || cfg.Create == nil {
+func (l *Lock) LoadOrCreateT[T any](ctx context.Context, key string, cfg LoadOrCreateConfig[T]) (curr T, loaded bool, err error) {
+	if cfg.Create == nil {
 		return curr, false, errors.New("cache: create is required")
 	}
-	b, loaded, err := l.LoadOrCreate(ctx, key, &LoadOrCreateConfig[[]byte]{
+	b, loaded, err := l.LoadOrCreate(ctx, key, LoadOrCreateConfig[[]byte]{
 		Create: func(ctx context.Context, key string) ([]byte, time.Duration, error) {
 			v, ttl, err := cfg.Create(ctx, key)
 			if err != nil {
@@ -185,8 +202,12 @@ const publishValue = `if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end
 if tonumber(ARGV[3]) > 0 then redis.call('SET', KEYS[2], ARGV[2], 'PX', ARGV[3]) else redis.call('SET', KEYS[2], ARGV[2]) end
 return 1`
 
-func (l *Lock) LoadOrCreate(ctx context.Context, key string, cfg *LoadOrCreateConfig[[]byte]) (curr []byte, loaded bool, err error) {
-	if cfg == nil || cfg.Create == nil || key == "" {
+func (l *Lock) LoadOrCreate(ctx context.Context, key string, cfg LoadOrCreateConfig[[]byte]) (curr []byte, loaded bool, err error) {
+	cfg = cfg.WithDefaults()
+	if err := cfg.Validate(); err != nil {
+		return nil, false, err
+	}
+	if key == "" {
 		return nil, false, errors.New("cache: key and create are required")
 	}
 	ttl, err := leaseConfig(cfg.Lock, cfg.Wait, cfg.RefreshRatio)
@@ -240,4 +261,31 @@ func (l *Lock) LoadOrCreate(ctx context.Context, key string, cfg *LoadOrCreateCo
 		return nil, false, err
 	}
 	return curr, loaded, nil
+}
+
+func (c AdvisoryLockConfig) WithDefaults() AdvisoryLockConfig {
+	if c.Lock == 0 {
+		c.Lock = 10 * time.Second
+	}
+	return c
+}
+func (c AdvisoryLockConfig) Validate() error {
+	if c.Do == nil {
+		return errors.New("cache: callback is required")
+	}
+	_, err := leaseConfig(c.Lock, c.Wait, c.RefreshRatio)
+	return err
+}
+func (c LoadOrCreateConfig[T]) WithDefaults() LoadOrCreateConfig[T] {
+	if c.Lock == 0 {
+		c.Lock = 10 * time.Second
+	}
+	return c
+}
+func (c LoadOrCreateConfig[T]) Validate() error {
+	if c.Create == nil {
+		return errors.New("cache: create is required")
+	}
+	_, err := leaseConfig(c.Lock, c.Wait, c.RefreshRatio)
+	return err
 }

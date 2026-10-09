@@ -1,9 +1,10 @@
-// Package storage provides Cache serialization wrapper for the storage interface.
+// Package cache provides typed caches, file storage, and Redis lease coordination.
 package cache
 
 import (
 	"bytes"
 	"context"
+	"errors"
 	"strings"
 	"time"
 )
@@ -20,25 +21,51 @@ func (sep Separator) Split(s string) []string {
 
 var _ cache[any] = (*Cache[any])(nil)
 
-// Cache provides automatic Cache marshaling/unmarshaling for storage operations.
-// It wraps a Cache implementation and handles serialization transparently.
-// All methods that take value parameters expect pointers for unmarshaling operations.
-type Cache[T any] struct {
-	Cache cache[[]byte]
-	Codec Codec
+// Config borrows Storage and Codec. Close forwards to Storage.Close; callers
+// must coordinate shared storage lifetime. Codec must support concurrent use.
+type Config struct {
+	Storage C[[]byte]
+	Codec   Codec
 }
 
-// New creates a new Cache storage wrapper with the given Redis client.
-// The returned Cache storage provides automatic serialization/deserialization
-// for Go structs and values.
-func New[T any]() *Cache[T] {
-	return &Cache[T]{
-		Codec: NewJSONCodec(),
+func (c Config) WithDefaults() Config {
+	if c.Codec == nil {
+		c.Codec = NewJSONCodec()
 	}
+	return c
+}
+func (c Config) Validate() error {
+	if c.Storage == nil {
+		return errors.New("cache: storage is required")
+	}
+	if c.Codec == nil {
+		return errors.New("cache: codec is required")
+	}
+	return nil
+}
+
+type Cache[T any] struct {
+	storage C[[]byte]
+	codec   Codec
+}
+
+func New[T any](cfg Config) (*Cache[T], error) {
+	cfg = cfg.WithDefaults()
+	if err := cfg.Validate(); err != nil {
+		return nil, err
+	}
+	return &Cache[T]{storage: cfg.Storage, codec: cfg.Codec}, nil
+}
+func MustNew[T any](cfg Config) *Cache[T] {
+	c, err := New[T](cfg)
+	if err != nil {
+		panic(err)
+	}
+	return c
 }
 
 func (c *Cache[T]) Close() error {
-	return c.Cache.Close()
+	return c.storage.Close()
 }
 
 // CompareAndDelete atomically deletes a key only if its current Cache value matches the expected old value.
@@ -48,7 +75,7 @@ func (c *Cache[T]) CompareAndDelete(ctx context.Context, key string, old T) erro
 		return err
 	}
 
-	return c.Cache.CompareAndDelete(ctx, key, b)
+	return c.storage.CompareAndDelete(ctx, key, b)
 }
 
 // CompareAndSwap atomically updates a key only if its current Cache value matches the expected old value.
@@ -62,29 +89,29 @@ func (c *Cache[T]) CompareAndSwap(ctx context.Context, key string, old, value T,
 		return err
 	}
 
-	return c.Cache.CompareAndSwap(ctx, key, a, b, ttl)
+	return c.storage.CompareAndSwap(ctx, key, a, b, ttl)
 }
 
 // Delete removes one or more keys from the storage.
 func (c *Cache[T]) Delete(ctx context.Context, keys ...string) (int64, error) {
-	return c.Cache.Delete(ctx, keys...)
+	return c.storage.Delete(ctx, keys...)
 }
 
 // Exists checks if a key exists in the storage.
 func (c *Cache[T]) Exists(ctx context.Context, key string) (bool, error) {
-	return c.Cache.Exists(ctx, key)
+	return c.storage.Exists(ctx, key)
 }
 
 // Expire sets a timeout on a key. After the timeout has expired, the key will automatically be deleted.
 func (c *Cache[T]) Expire(ctx context.Context, key string, ttl time.Duration) error {
-	return c.Cache.Expire(ctx, key, ttl)
+	return c.storage.Expire(ctx, key, ttl)
 }
 
 // Load retrieves and unmarshals a Cache value from the storage.
 // The value parameter should be a pointer to the destination type.
 func (c *Cache[T]) Load(ctx context.Context, key string) (T, error) {
 	var zero T
-	b, err := c.Cache.Load(ctx, key)
+	b, err := c.storage.Load(ctx, key)
 	if err != nil {
 		return zero, err
 	}
@@ -100,7 +127,7 @@ func (c *Cache[T]) Load(ctx context.Context, key string) (T, error) {
 // The value parameter should be a pointer to the destination type.
 func (c *Cache[T]) LoadAndDelete(ctx context.Context, key string) (T, error) {
 	var zero T
-	b, err := c.Cache.LoadAndDelete(ctx, key)
+	b, err := c.storage.LoadAndDelete(ctx, key)
 	if err != nil {
 		return zero, err
 	}
@@ -120,7 +147,7 @@ func (c *Cache[T]) LoadOrStore(ctx context.Context, key string, value T, ttl tim
 		return zero, false, err
 	}
 
-	b, loaded, err = c.Cache.LoadOrStore(ctx, key, b, ttl)
+	b, loaded, err = c.storage.LoadOrStore(ctx, key, b, ttl)
 	if err != nil {
 		return zero, false, err
 	}
@@ -140,7 +167,7 @@ func (c *Cache[T]) Store(ctx context.Context, key string, value T, ttl time.Dura
 		return err
 	}
 
-	return c.Cache.Store(ctx, key, b, ttl)
+	return c.storage.Store(ctx, key, b, ttl)
 }
 
 // StoreOnce stores a key'c Cache value only if the key doesn't already exist.
@@ -150,18 +177,18 @@ func (c *Cache[T]) StoreOnce(ctx context.Context, key string, value T, ttl time.
 		return err
 	}
 
-	return c.Cache.StoreOnce(ctx, key, b, ttl)
+	return c.storage.StoreOnce(ctx, key, b, ttl)
 }
 
 // TTL returns the remaining time to live for a key.
 // Returns -1 if the key exists but has no expiration.
 // Returns -2 if the key does not exist.
 func (c *Cache[T]) TTL(ctx context.Context, key string) (time.Duration, error) {
-	return c.Cache.TTL(ctx, key)
+	return c.storage.TTL(ctx, key)
 }
 
 func (c *Cache[T]) LoadOrCreate(ctx context.Context, key string, create func(context.Context, string) (T, time.Duration, error)) (value T, loaded bool, err error) {
-	b, loaded, err := c.Cache.LoadOrCreate(ctx, key, func(ctx context.Context, key string) ([]byte, time.Duration, error) {
+	b, loaded, err := c.storage.LoadOrCreate(ctx, key, func(ctx context.Context, key string) ([]byte, time.Duration, error) {
 		v, ttl, err := create(ctx, key)
 		if err != nil {
 			return nil, 0, err
@@ -188,7 +215,7 @@ func (c *Cache[T]) LoadOrCreate(ctx context.Context, key string, create func(con
 
 func (c *Cache[T]) marshal(v T) ([]byte, error) {
 	var b bytes.Buffer
-	err := c.Codec.NewEncoder(&b).Encode(v)
+	err := c.codec.NewEncoder(&b).Encode(v)
 	if err != nil {
 		return nil, err
 	}
@@ -197,6 +224,6 @@ func (c *Cache[T]) marshal(v T) ([]byte, error) {
 
 func (c *Cache[T]) unmarshal(b []byte) (T, error) {
 	var v T
-	err := c.Codec.NewDecoder(bytes.NewReader(b)).Decode(&v)
+	err := c.codec.NewDecoder(bytes.NewReader(b)).Decode(&v)
 	return v, err
 }

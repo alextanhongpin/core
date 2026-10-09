@@ -21,17 +21,21 @@ type Redis struct {
 
 var _ cache[[]byte] = (*Redis)(nil)
 
-// NewRedis creates a new Redis instance with the provided Redis client.
-func NewRedis(client *redis.Client) *Redis {
-	return &Redis{
-		client: client,
+// NewRedis borrows client; Close does not close the caller's client.
+func NewRedis(client *redis.Client) (*Redis, error) {
+	if client == nil {
+		return nil, errors.New("cache: Redis client is required")
 	}
+	return &Redis{client: client}, nil
 }
-
-// Close closes the redis connection.
-func (r *Redis) Close() error {
-	return r.client.Close()
+func MustNewRedis(client *redis.Client) *Redis {
+	r, err := NewRedis(client)
+	if err != nil {
+		panic(err)
+	}
+	return r
 }
+func (r *Redis) Close() error { return nil }
 
 func (r *Redis) Load(ctx context.Context, key string) ([]byte, error) {
 	s, err := r.client.Get(ctx, key).Result()

@@ -14,8 +14,8 @@ func TestLockPreservesArbitraryValues(t *testing.T) {
 	ctx := t.Context()
 	key := t.Name()
 	require.NoError(t, client.Set(ctx, key, "lock:valid-data", 0).Err())
-	l := cache.NewLock(client)
-	v, loaded, err := l.LoadOrCreate(ctx, key, &cache.LoadOrCreateConfig[[]byte]{Create: func(context.Context, string) ([]byte, time.Duration, error) {
+	l := cache.MustNewLock(client)
+	v, loaded, err := l.LoadOrCreate(ctx, key, cache.LoadOrCreateConfig[[]byte]{Create: func(context.Context, string) ([]byte, time.Duration, error) {
 		t.Fatal("cached value should bypass factory")
 		return nil, 0, nil
 	}})
@@ -24,14 +24,14 @@ func TestLockPreservesArbitraryValues(t *testing.T) {
 	require.Equal(t, []byte("lock:valid-data"), v)
 }
 func TestLockRenewalAndAdmission(t *testing.T) {
-	l := cache.NewLock(newClient(t))
+	l := cache.MustNewLock(newClient(t))
 	ctx := t.Context()
 	key := t.Name()
 	started := make(chan struct{})
 	finish := make(chan struct{})
 	result := make(chan error, 1)
 	go func() {
-		result <- l.AdvisoryLock(ctx, key, &cache.AdvisoryLockConfig{Lock: 100 * time.Millisecond, RefreshRatio: .5, Do: func(work context.Context, _ string, _ []byte) error {
+		result <- l.AdvisoryLock(ctx, key, cache.AdvisoryLockConfig{Lock: 100 * time.Millisecond, RefreshRatio: .5, Do: func(work context.Context, _ string, _ []byte) error {
 			close(started)
 			select {
 			case <-finish:
@@ -43,18 +43,18 @@ func TestLockRenewalAndAdmission(t *testing.T) {
 	}()
 	<-started
 	time.Sleep(250 * time.Millisecond)
-	err := l.AdvisoryLock(ctx, key, &cache.AdvisoryLockConfig{Wait: 30 * time.Millisecond, Do: func(context.Context, string, []byte) error { t.Error("admitted while leader active"); return nil }})
+	err := l.AdvisoryLock(ctx, key, cache.AdvisoryLockConfig{Wait: 30 * time.Millisecond, Do: func(context.Context, string, []byte) error { t.Error("admitted while leader active"); return nil }})
 	require.ErrorIs(t, err, context.DeadlineExceeded)
 	close(finish)
 	require.NoError(t, <-result)
-	require.NoError(t, l.AdvisoryLock(ctx, key, &cache.AdvisoryLockConfig{Do: func(context.Context, string, []byte) error { return nil }}))
+	require.NoError(t, l.AdvisoryLock(ctx, key, cache.AdvisoryLockConfig{Do: func(context.Context, string, []byte) error { return nil }}))
 }
 func TestLostLeaseCannotPublish(t *testing.T) {
 	client := newClient(t)
-	l := cache.NewLock(client)
+	l := cache.MustNewLock(client)
 	ctx := t.Context()
 	key := t.Name()
-	_, _, err := l.LoadOrCreate(ctx, key, &cache.LoadOrCreateConfig[[]byte]{Lock: 20 * time.Millisecond, Create: func(context.Context, string) ([]byte, time.Duration, error) {
+	_, _, err := l.LoadOrCreate(ctx, key, cache.LoadOrCreateConfig[[]byte]{Lock: 20 * time.Millisecond, Create: func(context.Context, string) ([]byte, time.Duration, error) {
 		time.Sleep(50 * time.Millisecond)
 		return []byte("stale"), time.Minute, nil
 	}})
@@ -62,12 +62,12 @@ func TestLostLeaseCannotPublish(t *testing.T) {
 	require.EqualValues(t, 0, client.Exists(ctx, key).Val())
 }
 func TestLockPanicReleasesLease(t *testing.T) {
-	l := cache.NewLock(newClient(t))
+	l := cache.MustNewLock(newClient(t))
 	key := t.Name()
 	require.Panics(t, func() {
-		_ = l.AdvisoryLock(t.Context(), key, &cache.AdvisoryLockConfig{Do: func(context.Context, string, []byte) error { panic("boom") }})
+		_ = l.AdvisoryLock(t.Context(), key, cache.AdvisoryLockConfig{Do: func(context.Context, string, []byte) error { panic("boom") }})
 	})
-	require.NoError(t, l.AdvisoryLock(t.Context(), key, &cache.AdvisoryLockConfig{Do: func(context.Context, string, []byte) error { return nil }}))
+	require.NoError(t, l.AdvisoryLock(t.Context(), key, cache.AdvisoryLockConfig{Do: func(context.Context, string, []byte) error { return nil }}))
 }
 func TestStorageFactoryReentrancy(t *testing.T) {
 	file, err := cache.NewFile(t.TempDir() + "/cache.json")
@@ -89,7 +89,7 @@ func TestStorageFactoryReentrancy(t *testing.T) {
 	}
 }
 func TestRedisExpiryPrecisionAndMissing(t *testing.T) {
-	c := cache.NewRedis(newClient(t))
+	c := cache.MustNewRedis(newClient(t))
 	ctx := t.Context()
 	require.ErrorIs(t, c.Expire(ctx, "missing", time.Second), cache.ErrNotExist)
 	require.NoError(t, c.Store(ctx, "short", []byte("x"), 1500*time.Millisecond))
