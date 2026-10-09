@@ -29,8 +29,9 @@ func DefaultPolicies() []Policy {
 type Snapshot struct {
 	*Config
 	*broadcast.Broadcast[Policy]
-	ch   chan int
-	done chan struct{}
+	ch       chan int
+	policies []Policy
+	done     chan struct{}
 }
 
 type Config struct {
@@ -46,6 +47,17 @@ func DefaultConfig() *Config {
 }
 
 func (cfg *Config) Validate() error {
+	if cfg == nil {
+		return errors.New("snapshot: nil config")
+	}
+	if cfg.BufferSize < 0 {
+		return errors.New("snapshot: negative buffer size")
+	}
+	for _, p := range cfg.Policies {
+		if p.After < 0 || p.Changes <= 0 {
+			return errors.New("snapshot: policies require nonnegative durations and positive changes")
+		}
+	}
 	if len(cfg.Policies) == 0 {
 		return errors.New("snapshot: no policies")
 	}
@@ -56,6 +68,9 @@ func New(cfg *Config) (*Snapshot, func()) {
 	if err := cfg.Validate(); err != nil {
 		panic(err)
 	}
+	owned := *cfg
+	owned.Policies = slices.Clone(cfg.Policies)
+	cfg = &owned
 	slices.SortFunc(cfg.Policies, func(a, b Policy) int {
 		return cmp.Compare(a.After, b.After)
 	})
@@ -63,6 +78,7 @@ func New(cfg *Config) (*Snapshot, func()) {
 	bg := &Snapshot{
 		Broadcast: b,
 		Config:    cfg,
+		policies:  slices.Clone(cfg.Policies),
 		ch:        make(chan int, cfg.BufferSize),
 		done:      make(chan struct{}),
 	}
@@ -72,8 +88,8 @@ func New(cfg *Config) (*Snapshot, func()) {
 
 	return bg, sync.OnceFunc(func() {
 		close(bg.done)
-		wg.Wait()
 		stop()
+		wg.Wait()
 	})
 }
 
@@ -92,16 +108,15 @@ func (b *Snapshot) Add(n int) {
 }
 
 func (b *Snapshot) loop() {
-	defer close(b.ch)
 
 	var count int
 	last := time.Now()
-	interval := minInterval(b.Policies)
+	interval := minInterval(b.policies)
 
 	flush := func(n int) {
 		count += n
 		elapsed := time.Since(last)
-		for _, p := range b.Policies {
+		for _, p := range b.policies {
 			if elapsed < p.After {
 				return
 			}
@@ -113,13 +128,18 @@ func (b *Snapshot) loop() {
 			}
 		}
 	}
-	defer flush(0)
 
+	var ticks <-chan time.Time
+	if interval > 0 {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		ticks = ticker.C
+	}
 	for {
 		select {
 		case <-b.done:
 			return
-		case <-time.After(interval):
+		case <-ticks:
 			flush(0)
 		case n := <-b.ch:
 			flush(n)
@@ -136,5 +156,5 @@ func minInterval(policies []Policy) time.Duration {
 		}
 	}
 
-	panic("snapshot: zero interval")
+	return 0
 }

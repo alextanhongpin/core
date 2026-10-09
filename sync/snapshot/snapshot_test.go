@@ -34,15 +34,18 @@ func TestSnapshot(t *testing.T) {
 		is.Equal(policies[0], <-ch)
 
 		time.Sleep(21 * time.Millisecond)
+		synctest.Wait()
 		is.Equal(policies[:1], logs)
 		s.Add(1_000)
 		is.Equal(policies[1], <-ch)
 
 		time.Sleep(31 * time.Millisecond)
+		synctest.Wait()
 		is.Equal(policies[:2], logs)
 		s.Add(100)
 		is.Equal(policies[2], <-ch)
 		time.Sleep(10 * time.Millisecond)
+		synctest.Wait()
 		is.Equal(policies, logs)
 	})
 }
