@@ -94,61 +94,63 @@ func New(client *redis.Client, opts *Options) *CircuitBreaker {
 }
 
 func (cb *CircuitBreaker) Do(ctx context.Context, key string, fn func() error) error {
-	status, err := cb.call(ctx, "begin", key, nil, 0)
+	if ctx.Err() != nil {
+		return context.Cause(ctx)
+	}
+	admission, err := cb.client.FCall(ctx, "cb_begin", []string{key}).Int64Slice()
 	if err != nil {
 		return err
 	}
+	if len(admission) != 2 {
+		return errors.New("circuitbreaker: invalid admission response")
+	}
+	status, generation := Status(admission[0]), admission[1]
 	switch status {
-	case Closed, HalfOpen:
 	case Opened, ForcedOpen:
 		return ErrOpened
 	case Disabled:
 		return fn()
+	case Closed, HalfOpen:
 	default:
-		panic("unknown status")
+		return errors.New("circuitbreaker: invalid state")
 	}
-
 	start := time.Now()
-	// Do not pass context, as the cancelation should not affect the redis cancelation.
-	err = fn()
-	if err != nil {
-		_, callErr := cb.call(ctx, "commit", key, err, time.Since(start))
-		return cmp.Or(callErr, err)
-	}
-	if status != HalfOpen {
+	operationErr := fn()
+	if operationErr == nil && status == Closed {
 		return nil
 	}
-
-	_, err = cb.call(ctx, "commit", key, nil, 0)
-	return err
+	commitCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	_, commitErr := cb.call(commitCtx, "cb_commit", key, operationErr, time.Since(start), generation)
+	return errors.Join(operationErr, commitErr)
 }
 
-func (cb *CircuitBreaker) call(ctx context.Context, method, key string, cause error, duration time.Duration) (Status, error) {
-	var failureCount int
-	var successCount int
+func (cb *CircuitBreaker) call(ctx context.Context, method, key string, cause error, duration time.Duration, generation int64) (Status, error) {
+	failureCount, successCount := 0, 0
 	if cause != nil {
-		failureCount = 1 + cb.options.FailureCount(cause) + cb.options.SlowCallCount(duration)
+		failureCount = 1
+		if cb.options.FailureCount != nil {
+			failureCount += cb.options.FailureCount(cause)
+		}
+		if cb.options.SlowCallCount != nil {
+			failureCount += cb.options.SlowCallCount(duration)
+		}
 	} else {
 		successCount = 1
 	}
-
-	keys := []string{key}
-	args := []any{
-		failureCount,
-		cb.options.FailureThreshold,
-		cb.options.FailurePeriod.Milliseconds(),
-		successCount,
-		cb.options.SuccessThreshold,
-		cb.options.SuccessPeriod.Milliseconds(),
-		cb.options.OpenTimeout.Milliseconds(),
+	if failureCount < 0 {
+		return Unknown, errors.New("circuitbreaker: negative failure weighting")
 	}
-	status, err := cb.client.FCall(ctx, method, keys, args...).Int()
+	args := []any{failureCount, cb.options.FailureThreshold, cb.options.FailurePeriod.Milliseconds(), successCount, cb.options.SuccessThreshold, cb.options.SuccessPeriod.Milliseconds(), cb.options.OpenTimeout.Milliseconds(), generation}
+	status, err := cb.client.FCall(ctx, method, []string{key}, args...).Int()
 	return Status(status), err
 }
 
 func (cb *CircuitBreaker) SetStatus(ctx context.Context, key string, status Status) error {
-	_, err := cb.client.HSet(ctx, key, "status", status.Int()).Result()
-	return err
+	if status < Closed || status > ForcedOpen {
+		return errors.New("circuitbreaker: invalid status")
+	}
+	return cb.client.FCall(ctx, "cb_set_status", []string{key}, status.Int(), cb.options.OpenTimeout.Milliseconds()).Err()
 }
 
 func (cb *CircuitBreaker) Status(ctx context.Context, key string) (Status, error) {

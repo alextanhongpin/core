@@ -1,132 +1,49 @@
 #!lua name=circuitbreaker
-
-local UNKNOWN = 0
-local CLOSED = 1
-local HALF_OPEN = 2
-local OPENED = 3
-local DISABLED = 4
-local FORCED_OPEN = 5
-
+local CLOSED, HALF_OPEN, OPENED, DISABLED, FORCED_OPEN = 1, 2, 3, 4, 5
 local function now_ms()
-	local time = redis.pcall('TIME')
-	local seconds = time[1]
-	local microseconds = time[2]
-	return seconds * 1000 + microseconds/1000 -- in milliseconds
+ local t=redis.call('TIME')
+ return tonumber(t[1])*1000+tonumber(t[2])/1000
 end
-
-local function get_status(keys)
-	return tonumber(redis.pcall('HGET', keys[1], 'status') or CLOSED)
+local function transition(key,status,timeout)
+ redis.call('HINCRBY',key,'generation',1)
+ redis.call('HSET',key,'status',status)
+ redis.call('HDEL',key,'counter','timeout')
+ if status==OPENED then redis.call('HSET',key,'timeout',now_ms()+timeout) end
+ return status
 end
-
-local function on_half_opened(key)
-		redis.pcall('HMSET', key, 'status', HALF_OPEN, 'counter', 0)
-		return HALF_OPEN
+local function begin(keys,args)
+ local key=keys[1]
+ redis.call('HSETNX',key,'generation',0)
+ local status=tonumber(redis.call('HGET',key,'status') or CLOSED)
+ local timeout=tonumber(redis.call('HGET',key,'timeout') or 0)
+ if status==OPENED and now_ms()>=timeout then status=transition(key,HALF_OPEN,0) end
+ return {status,tonumber(redis.call('HGET',key,'generation'))}
 end
-
-local function on_closed(key)
-		redis.pcall('HMSET', key, 'status', CLOSED, 'counter', 0)
-		return CLOSED
+local function commit(keys,args)
+ local key=keys[1]
+ local status=tonumber(redis.call('HGET',key,'status') or CLOSED)
+ local generation=tonumber(redis.call('HGET',key,'generation') or 0)
+ if generation~=tonumber(args[8]) then return status end
+ local failure=tonumber(args[1])
+ local success=tonumber(args[4])
+ if status~=CLOSED and status~=HALF_OPEN then return status end
+ if status==HALF_OPEN and failure>0 then return transition(key,OPENED,tonumber(args[7])) end
+ local increment,threshold,ttl
+ if status==CLOSED then
+  if failure==0 then return status end
+  increment,threshold,ttl=failure,tonumber(args[2]),tonumber(args[3])
+ else increment,threshold,ttl=success,tonumber(args[5]),tonumber(args[6]) end
+ local total=redis.call('HINCRBY',key,'counter',increment)
+ redis.call('HPEXPIRE',key,ttl,'FIELDS',1,'counter')
+ if total>=threshold then
+  if status==CLOSED then return transition(key,OPENED,tonumber(args[7])) end
+  return transition(key,CLOSED,0)
+ end
+ return status
 end
-
-local function on_opened(key, timeout_after)
-		redis.pcall('HMSET', key, 'status', OPENED, 'timeout', timeout_after)
-		return OPENED
+local function set_status(keys,args)
+ return transition(keys[1],tonumber(args[1]),tonumber(args[2]))
 end
-
-local function inc(key, value, ttl)
-	local total = tonumber(redis.pcall('HINCRBY', key, 'counter', value))
-	if total == value then
-		redis.pcall('HPEXPIRE', key, ttl, 'FIELDS', 'counter')
-	end
-
-	return total
-end
-
-local function close(keys, args)
-	local key = keys[1]
-
-	local failure_count = tonumber(args[1])
-	local failure_threshold = tonumber(args[2])
-	local failure_period = tonumber(args[3])
-	local success_count = tonumber(args[4])
-	local success_threshold = tonumber(args[5])
-	local success_period = tonumber(args[6])
-	local open_timeout = tonumber(args[7])
-
-	-- if success
-	if failure_count == 0 then
-		return CLOSED
-	end
-
-	-- increment failure counter
-	local total_count = inc(key, failure_count, failure_period)
-
-  -- if failure threshold exceeded
-	if total_count >= failure_threshold then
-		return on_opened(key, now_ms() + open_timeout)
-	end
-
-	return CLOSED
-end
-
-
-local function half_open(keys, args)
-	local key = keys[1]
-
-	local failure_count = tonumber(args[1])
-	local failure_threshold = tonumber(args[2])
-	local failure_period = tonumber(args[3])
-	local success_count = tonumber(args[4])
-	local success_threshold = tonumber(args[5])
-	local success_period = tonumber(args[6])
-	local open_timeout = tonumber(args[7])
-
-	-- if success
-	if failure_count == 0 then
-		-- increment success counter
-		local total_count = inc(key, success_count, success_period)
-
-		-- if success count threshold reached
-		if total_count > success_threshold then
-			return on_closed(key)
-		end
-
-		return HALF_OPEN
-	end
-
-	local timeout_after = now_ms() + open_timeout
-	return on_opened(key, timeout_after)
-end
-
-
-local function begin(keys, args)
-	local key = keys[1]
-	local result = redis.pcall('HMGET', key, 'status', 'timeout')
-	local status = tonumber(result[1] or CLOSED)
-	local timeout = tonumber(result[2] or 0)
-
-	-- if timeout timer expired
-	if status == OPENED and now_ms() >= timeout then
-		return on_half_opened(key)
-	end
-
-	return status
-end
-
-
-local function commit(keys, args)
-	local status = get_status(keys)
-
-	if status == CLOSED then
-		return close(keys, args)
-	elseif status == HALF_OPEN then
-		return half_open(keys, args)
-	else
-		-- Not possible
-		return UNKNOWN
-	end
-end
-
-
-redis.register_function('begin', begin)
-redis.register_function('commit', commit)
+redis.register_function('cb_begin',begin)
+redis.register_function('cb_commit',commit)
+redis.register_function('cb_set_status',set_status)

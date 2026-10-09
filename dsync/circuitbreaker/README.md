@@ -150,3 +150,5 @@ go test ./...
 This project is licensed under the MIT License.  See the `LICENSE`
 file for details.
 
+
+State transitions now advance a Redis generation, so results admitted in an earlier state cannot change a newer one. Half-open closes at the exact success threshold. SetStatus(Opened) starts an open timeout. Setup must be rerun on each Redis primary to install the updated cb_begin/cb_commit/cb_set_status functions; deploy callers and functions together. Failed-operation commits use a bounded context detached from caller cancellation and preserve both operation and Redis errors.
