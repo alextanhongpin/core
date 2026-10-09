@@ -12,11 +12,13 @@
 // Example usage:
 //
 //	// Fixed Window: 1000 requests per hour
-//	fw := ratelimit.NewFixedWindow(redisClient, 1000, time.Hour)
+//	fw, err := ratelimit.NewFixedWindow(redisClient, ratelimit.Config{Limit: 1000, Period: time.Hour})
+//	if err != nil { return err }
 //	allowed, err := fw.Allow(ctx, "user:123")
 //
 //	// GCRA: 100 requests per second with 10 burst capacity
-//	gcra := ratelimit.NewGCRA(redisClient, 100, time.Second, 10)
+//	gcra, err := ratelimit.NewGCRA(redisClient, ratelimit.Config{Limit: 100, Period: time.Second, Burst: 10})
+//	if err != nil { return err }
 //	allowed, err := gcra.Allow(ctx, "api:key")
 //
 // Performance characteristics:
