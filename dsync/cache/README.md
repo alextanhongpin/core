@@ -564,3 +564,5 @@ When contributing:
 3. Use sentinel errors for consistent error handling
 4. Document new methods with godoc comments
 5. Ensure backward compatibility
+
+File snapshots are now replaced atomically while a stable sidecar .lock file holds the lifetime advisory lock. Preserve that lock file and avoid mixing older writers that lock the data file. File owns byte slices, persists expiry changes, and closes resources on decode failure. FS owns its root handle, removes expired entries using original keys, resets TTL on persistent overwrite, and counts/deletes entries correctly. FS is intended for a sole directory owner; it does not coordinate independent processes. Its value and TTL-index writes are separate, so storage errors may leave partial changes.

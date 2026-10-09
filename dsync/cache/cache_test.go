@@ -48,7 +48,7 @@ func TestRedisGob(t *testing.T) {
 }
 
 func TestFileJSON(t *testing.T) {
-	path := fmt.Sprintf("testdata/%s.jsonl", t.Name())
+	path := fmt.Sprintf("%s/%s.jsonl", t.TempDir(), t.Name())
 	t.Cleanup(func() {
 		assert.NoError(t, os.Remove(path))
 	})
@@ -62,7 +62,7 @@ func TestFileJSON(t *testing.T) {
 }
 
 func TestFileGob(t *testing.T) {
-	path := fmt.Sprintf("testdata/%s.jsonl", t.Name())
+	path := fmt.Sprintf("%s/%s.jsonl", t.TempDir(), t.Name())
 	t.Cleanup(func() {
 		assert.NoError(t, os.Remove(path))
 	})

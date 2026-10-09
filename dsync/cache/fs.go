@@ -16,9 +16,10 @@ import (
 const indexFile = ".index"
 
 type FS struct {
-	root *os.Root
-	mu   sync.Mutex
-	data map[string]time.Time
+	root   *os.Root
+	mu     sync.Mutex
+	data   map[string]time.Time
+	closed bool
 }
 
 var _ cache[[]byte] = (*FS)(nil)
@@ -32,14 +33,17 @@ func NewFS(dir string) (*FS, error) {
 	data := make(map[string]time.Time)
 	b, err := root.ReadFile(indexFile)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return nil, err
+		return nil, errors.Join(err, root.Close())
 	}
 
-	if json.Valid(b) {
+	if len(b) > 0 {
 		err = json.Unmarshal(b, &data)
 		if err != nil {
-			return nil, err
+			return nil, errors.Join(err, root.Close())
 		}
+	}
+	if data == nil {
+		data = make(map[string]time.Time)
 	}
 
 	return &FS{
@@ -49,7 +53,13 @@ func NewFS(dir string) (*FS, error) {
 }
 
 func (f *FS) Close() error {
-	return nil
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.closed {
+		return nil
+	}
+	f.closed = true
+	return f.root.Close()
 }
 
 func (f *FS) Load(ctx context.Context, key string) ([]byte, error) {
@@ -234,9 +244,11 @@ func (f *FS) Expire(ctx context.Context, key string, ttl time.Duration) error {
 	if err != nil {
 		return err
 	}
-	v.ExpiresAt = time.Now().Add(ttl)
-
-	return nil
+	if ttl <= 0 {
+		return f.delete(key)
+	}
+	f.data[v.Key] = time.Now().Add(ttl)
+	return f.saveIndex()
 }
 
 // Delete removes one or more keys from the cache.
@@ -247,40 +259,46 @@ func (f *FS) Delete(ctx context.Context, keys ...string) (int64, error) {
 	var count int64
 	for _, key := range keys {
 		err := f.delete(key)
-		if err == nil {
-			count++
-		}
 		if errors.Is(err, os.ErrNotExist) {
 			continue
 		}
-		return 0, err
+		if err != nil {
+			return count, err
+		}
+		count++
 	}
 	return count, nil
 }
 
 func (f *FS) Size(ctx context.Context) (int, error) {
 	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.closed {
+		return 0, ErrClosed
+	}
 	dir, err := f.root.Open(".")
 	if err != nil {
 		return 0, err
 	}
+	defer dir.Close()
 	entries, err := dir.ReadDir(-1)
 	if err != nil {
 		return 0, err
 	}
-	var count int
+	count := 0
 	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
+		if !entry.IsDir() && entry.Name() != indexFile {
+			count++
 		}
-		count++
 	}
-	f.mu.Unlock()
-
 	return count, nil
 }
 
 func (f *FS) load(key string) (*Event, error) {
+	if f.closed {
+		return nil, ErrClosed
+	}
+	original := key
 	key = fmt.Sprint(helper.DigestString(key))
 	b, err := f.root.ReadFile(key)
 	if errors.Is(err, os.ErrNotExist) {
@@ -297,7 +315,7 @@ func (f *FS) load(key string) (*Event, error) {
 	}
 
 	if it.IsExpired() {
-		if err := f.delete(key); err != nil {
+		if err := f.delete(original); err != nil {
 			return nil, err
 		}
 		return nil, ErrNotExist
@@ -307,15 +325,26 @@ func (f *FS) load(key string) (*Event, error) {
 }
 
 func (f *FS) delete(key string) error {
+	if f.closed {
+		return ErrClosed
+	}
 	key = fmt.Sprint(helper.DigestString(key))
+	if err := f.root.Remove(key); err != nil {
+		return err
+	}
 	delete(f.data, key)
-	return errors.Join(f.root.RemoveAll(key), f.saveIndex())
+	return f.saveIndex()
 }
 
 func (f *FS) save(key string, value []byte, ttl time.Duration) error {
 	key = fmt.Sprint(helper.DigestString(key))
-	if ttl != 0 {
+	if f.closed {
+		return ErrClosed
+	}
+	if ttl > 0 {
 		f.data[key] = time.Now().Add(ttl)
+	} else {
+		delete(f.data, key)
 	}
 	return errors.Join(f.root.WriteFile(key, value, 0o644), f.saveIndex())
 }

@@ -11,7 +11,7 @@ import (
 )
 
 func TestFileStorage(t *testing.T) {
-	path := fmt.Sprintf("testdata/%s.jsonl", t.Name())
+	path := fmt.Sprintf("%s/%s.jsonl", t.TempDir(), t.Name())
 	t.Cleanup(func() {
 		assert.NoError(t, os.Remove(path))
 	})
@@ -25,7 +25,7 @@ func TestFileStorage(t *testing.T) {
 
 func TestFileStorageInit(t *testing.T) {
 	is := assert.New(t)
-	path := fmt.Sprintf("testdata/%s.jsonl", t.Name())
+	path := fmt.Sprintf("%s/%s.jsonl", t.TempDir(), t.Name())
 	t.Cleanup(func() {
 		is.NoError(os.Remove(path))
 	})

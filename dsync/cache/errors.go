@@ -10,5 +10,6 @@ var (
 	ErrNotExist = errors.New("not exists")
 	ErrExists   = errors.New("already exists")
 	ErrLocked   = errors.New("locked")
+	ErrClosed   = errors.New("cache: closed")
 	ErrConflict = errors.New("conflict")
 )

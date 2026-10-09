@@ -6,8 +6,10 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"time"
 
@@ -31,14 +33,16 @@ func NewEvent(key string, val []byte, ttl time.Duration) *Event {
 	}
 	return &Event{
 		Key:       key,
-		Val:       val,
+		Val:       slices.Clone(val),
 		ExpiresAt: expiresAt,
 	}
 }
 
 type File struct {
-	file  *os.File
-	close func() error
+	path   string
+	closed bool
+	file   *os.File
+	close  func() error
 
 	// TODO: Add sync snapshot.
 	mu   sync.Mutex
@@ -57,10 +61,13 @@ func NewFile(path string) (*File, error) {
 	data := make(map[string]*Event)
 	err = json.NewDecoder(f).Decode(&data)
 	if err != nil && !errors.Is(err, io.EOF) {
-		return nil, err
+		return nil, errors.Join(err, close())
 	}
-
+	if data == nil {
+		data = make(map[string]*Event)
+	}
 	return &File{
+		path:  path,
 		file:  f,
 		close: close,
 		data:  data,
@@ -68,6 +75,12 @@ func NewFile(path string) (*File, error) {
 }
 
 func (f *File) Close() error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.closed {
+		return nil
+	}
+	f.closed = true
 	return f.close()
 }
 
@@ -79,7 +92,7 @@ func (f *File) Load(ctx context.Context, key string) ([]byte, error) {
 		return nil, err
 	}
 
-	return val.Val, nil
+	return slices.Clone(val.Val), nil
 }
 
 func (f *File) Store(ctx context.Context, key string, value []byte, ttl time.Duration) error {
@@ -114,7 +127,7 @@ func (f *File) LoadOrStore(ctx context.Context, key string, value []byte, ttl ti
 
 	v, err := f.load(key)
 	if err == nil {
-		return v.Val, true, nil
+		return slices.Clone(v.Val), true, nil
 	}
 
 	if !errors.Is(err, ErrNotExist) {
@@ -134,7 +147,7 @@ func (f *File) LoadOrCreate(ctx context.Context, key string, create func(context
 
 	v, err := f.load(key)
 	if err == nil {
-		return v.Val, true, nil
+		return slices.Clone(v.Val), true, nil
 	}
 
 	if !errors.Is(err, ErrNotExist) {
@@ -237,6 +250,9 @@ func (f *File) TTL(ctx context.Context, key string) (time.Duration, error) {
 	if err != nil {
 		return 0, err
 	}
+	if v.ExpiresAt.IsZero() {
+		return -1, nil
+	}
 	return time.Until(v.ExpiresAt), nil
 }
 
@@ -249,9 +265,10 @@ func (f *File) Expire(ctx context.Context, key string, ttl time.Duration) error 
 	if err != nil {
 		return err
 	}
-	v.ExpiresAt = time.Now().Add(ttl)
-
-	return nil
+	if ttl <= 0 {
+		return f.delete(key)
+	}
+	return f.save(key, v.Val, ttl)
 }
 
 // Delete removes one or more keys from the cache.
@@ -280,6 +297,9 @@ func (f *File) Size(ctx context.Context) (int, error) {
 }
 
 func (f *File) load(key string) (*Event, error) {
+	if f.closed {
+		return nil, ErrClosed
+	}
 	it, ok := f.data[key]
 	if !ok {
 		return nil, ErrNotExist
@@ -298,50 +318,58 @@ func (f *File) load(key string) (*Event, error) {
 }
 
 func (f *File) save(key string, value []byte, ttl time.Duration) error {
+	if f.closed {
+		return ErrClosed
+	}
+	before := maps.Clone(f.data)
 	f.data[key] = NewEvent(key, value, ttl)
-	return f.flush()
+	if err := f.flush(); err != nil {
+		f.data = before
+		return err
+	}
+	return nil
 }
-
 func (f *File) delete(key string) error {
+	if f.closed {
+		return ErrClosed
+	}
+	before := maps.Clone(f.data)
 	delete(f.data, key)
-	return f.flush()
+	if err := f.flush(); err != nil {
+		f.data = before
+		return err
+	}
+	return nil
 }
-
 func (f *File) flush() error {
-	if err := f.file.Truncate(0); err != nil {
+	file, err := os.CreateTemp(filepath.Dir(f.path), ".cache-*")
+	if err != nil {
 		return err
 	}
-	if _, err := f.file.Seek(0, 0); err != nil {
+	defer os.Remove(file.Name())
+	encodeErr := json.NewEncoder(file).Encode(f.data)
+	chmodErr := file.Chmod(0o644)
+	if err := errors.Join(encodeErr, chmodErr, file.Close()); err != nil {
 		return err
 	}
-	return json.NewEncoder(f.file).Encode(f.data)
+	return os.Rename(file.Name(), f.path)
 }
 
 func lockFile(name string) (*os.File, func() error, error) {
-	err := os.MkdirAll(filepath.Dir(name), 0o755)
+	if err := os.MkdirAll(filepath.Dir(name), 0o755); err != nil {
+		return nil, nil, err
+	}
+	lock, err := os.OpenFile(name+".lock", os.O_CREATE|os.O_RDWR, 0o644)
 	if err != nil {
 		return nil, nil, err
 	}
-
-	// 1. Open or create the file
+	if err := unix.Flock(int(lock.Fd()), unix.LOCK_EX); err != nil {
+		return nil, nil, errors.Join(err, lock.Close())
+	}
+	release := func() error { return errors.Join(unix.Flock(int(lock.Fd()), unix.LOCK_UN), lock.Close()) }
 	file, err := os.OpenFile(name, os.O_CREATE|os.O_RDWR, 0o644)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, errors.Join(err, release())
 	}
-
-	// 2. Acquire an exclusive, blocking lock
-	// Use unix.LOCK_EX | unix.LOCK_NB for a non-blocking attempt instead
-	err = unix.Flock(int(file.Fd()), unix.LOCK_EX)
-	if err != nil {
-		defer file.Close()
-		return nil, nil, err
-	}
-
-	// 3. Ensure the lock is released when the function exits
-	return file, func() error {
-		return errors.Join(
-			unix.Flock(int(file.Fd()), unix.LOCK_UN),
-			file.Close(),
-		)
-	}, nil
+	return file, sync.OnceValue(func() error { return errors.Join(file.Close(), release()) }), nil
 }

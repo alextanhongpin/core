@@ -10,7 +10,7 @@ import (
 	"time"
 	"uuid"
 
-	"github.com/alextanhongpin/dsync/channel"
+	"github.com/alextanhongpin/core/dsync/channel"
 	redis "github.com/redis/go-redis/v9"
 )
 
@@ -26,7 +26,7 @@ type Lock struct {
 func NewLock(client *redis.Client) *Lock {
 	return &Lock{
 		cache: NewRedis(client),
-		ch:    channel.New(client),
+		ch:    channel.MustNew(client),
 	}
 }
 
