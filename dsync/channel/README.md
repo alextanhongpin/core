@@ -1,0 +1,11 @@
+# Redis stream channels
+
+New(client) returns a Channel and error; MustNew is the panicking startup helper. The Redis client is borrowed and must be closed by its owner. Instances support concurrent calls.
+
+Send appends one entry per call, including repeated identical payloads. Recv waits only for new entries arriving after Redis starts the read. To replay existing entries and avoid gaps between reads, use RecvAfter with a caller-owned cursor: start at "0-0", then pass each returned Message.ID to the next call. Reads do not consume entries and independent callers can receive the same values.
+
+Zero block waits indefinitely, negative block polls, and positive block limits each server read. For prompt context interruption, configure the borrowed Redis client's context timeout support appropriately. Close deletes the stream; it does not wake blocked reads or permanently prevent new sends. Stream trimming and retention are caller-owned.
+
+## Migration from v0.0.x
+
+Handle New's error or use MustNew. Equal payloads are no longer suppressed through producer idempotency. Use explicit cursors when replay and continuity are required.
