@@ -1,11 +1,14 @@
 package cache
 
 import (
+	"errors"
 	"runtime"
 	"sync"
 	"weak"
 )
 
+// Cache holds weak references to values. Callers must retain returned values
+// while they need them. Concurrent misses may invoke create more than once.
 // https://go.dev/blog/cleanups-and-weak
 type Cache[K comparable, V any] struct {
 	create func(K) (*V, error)
@@ -28,6 +31,9 @@ func (c *Cache[K, V]) LoadOrCreate(key K) (*V, bool, error) {
 				newValue, err = c.create(key)
 				if err != nil {
 					return nil, false, err
+				}
+				if newValue == nil {
+					return nil, false, errors.New("cache: create returned nil value")
 				}
 			}
 
