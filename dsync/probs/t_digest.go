@@ -57,7 +57,7 @@ func (t *TDigest) Add(ctx context.Context, key string, values ...float64) (strin
 		return "", err
 	}
 
-	return t.Add(ctx, key, values...)
+	return t.Client.TDigestAdd(ctx, key, values...).Result()
 }
 
 func (t *TDigest) CDF(ctx context.Context, key string, values ...float64) ([]float64, error) {

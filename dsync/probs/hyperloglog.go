@@ -20,7 +20,7 @@ func NewHyperLogLog(client *redis.Client) *HyperLogLog {
 }
 
 func (c *HyperLogLog) Add(ctx context.Context, key string, values ...any) (int64, error) {
-	return c.Client.PFAdd(ctx, key, values).Result()
+	return c.Client.PFAdd(ctx, key, values...).Result()
 }
 
 func (c *HyperLogLog) Count(ctx context.Context, keys ...string) (int64, error) {

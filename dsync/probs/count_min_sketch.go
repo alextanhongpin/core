@@ -86,7 +86,7 @@ func (cms *CountMinSketch) Merge(ctx context.Context, destKey string, sourceKeys
 		return "", err
 	}
 
-	return cms.Merge(ctx, destKey, sourceKeys...)
+	return cms.Client.CMSMerge(ctx, destKey, sourceKeys...).Result()
 }
 
 func (cms *CountMinSketch) MergeWithWeight(ctx context.Context, destKey string, sourceKeys map[string]int64) (string, error) {
@@ -98,7 +98,7 @@ func (cms *CountMinSketch) MergeWithWeight(ctx context.Context, destKey string, 
 		return "", err
 	}
 
-	return cms.MergeWithWeight(ctx, destKey, sourceKeys)
+	return cms.Client.CMSMergeWithWeight(ctx, destKey, sourceKeys).Result()
 }
 
 func (cms *CountMinSketch) Query(ctx context.Context, key string, values ...any) ([]int64, error) {

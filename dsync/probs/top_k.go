@@ -2,6 +2,7 @@ package probs
 
 import (
 	"context"
+	"errors"
 	"math"
 	"slices"
 
@@ -86,8 +87,11 @@ func (t *TopK) ReserveWithOptions(ctx context.Context, key string, k, width, dep
 }
 
 func (t *TopK) Create(ctx context.Context, key string, k int64) (string, error) {
+	if k <= 0 {
+		return "", errors.New("probs: k must be positive")
+	}
 	logK := math.Log(float64(k))
-	width := int64(float64(k) * logK)
+	width := max(int64(float64(k)*logK), 1)
 	depth := int64(max(logK, 5))
 	decay := 0.9
 	status, err := t.Client.TopKReserveWithOptions(ctx, key, k, width, depth, decay).Result()
