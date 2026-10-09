@@ -13,7 +13,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"sync"
 	"time"
 	"uuid"
@@ -114,6 +113,9 @@ func (i *Idempotent) Handler[K, V any](fn Task[K, V], cfg *HandlerConfig) Handle
 	cfg = cmp.Or(cfg, DefaultConfig())
 	lockTTL := cmp.Or(cfg.LockTTL, defaultLockTTL)
 	keepTTL := cmp.Or(cfg.KeepTTL, defaultKeepTTL)
+	if lockTTL < time.Millisecond || keepTTL < 0 {
+		panic("idempotent: invalid TTL")
+	}
 
 	return idempotentHandlerFunc[K, V](func(ctx context.Context, key string, req K) (V, bool, error) {
 		var zero V
@@ -191,61 +193,56 @@ func (i *Idempotent) runInLock[K, V any](
 	fn Task[K, V],
 	req K,
 	lockTTL, keepTTL time.Duration,
-) (V, error) {
+) (value V, err error) {
 	var zero V
-
-	stopTicker := make(chan struct{})
-	tickerDone := make(chan struct{})
-
-	// Refresh the lock TTL in the background so it does not expire during long operations.
+	workCtx, cancel := context.WithCancelCause(ctx)
+	defer cancel(nil)
+	stop, stopped := make(chan struct{}), make(chan struct{})
 	go func() {
-		defer close(tickerDone)
+		defer close(stopped)
 		ticker := time.NewTicker(time.Duration(float64(lockTTL) * lockRefreshRatio))
 		defer ticker.Stop()
-
 		for {
 			select {
-			case <-stopTicker:
+			case <-stop:
 				return
-			case <-ctx.Done():
+			case <-workCtx.Done():
 				return
 			case <-ticker.C:
-				if err := i.client.CompareAndSwap(ctx, key, oldValue, oldValue, lockTTL); err != nil {
-					slog.ErrorContext(ctx, "idempotent: failed to refresh lock TTL", "err", err)
+				if err := i.client.CompareAndSwap(workCtx, key, oldValue, oldValue, lockTTL); err != nil {
+					cancel(err)
 					return
 				}
 			}
 		}
 	}()
-
-	var succeeded bool
+	stopRefresh := sync.OnceFunc(func() { close(stop); <-stopped })
+	succeeded := false
 	defer func() {
-		close(stopTicker)
-		<-tickerDone
-
-		if succeeded {
-			return
-		}
-		if err := i.client.CompareAndDelete(context.WithoutCancel(ctx), key, oldValue); err != nil {
-			slog.ErrorContext(ctx, "idempotent: failed to delete in-flight entry", "err", err)
+		stopRefresh()
+		if !succeeded {
+			cleanupCtx, cleanupCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			defer cleanupCancel()
+			if cleanupErr := i.client.CompareAndDelete(cleanupCtx, key, oldValue); cleanupErr != nil {
+				err = errors.Join(err, cleanupErr)
+			}
 		}
 	}()
-
-	res, err := fn.Do(ctx, req)
+	res, err := fn.Do(workCtx, req)
+	stopRefresh()
+	if workCtx.Err() != nil {
+		return zero, errors.Join(err, context.Cause(workCtx))
+	}
 	if err != nil {
 		return zero, fmt.Errorf("executing function: %w", err)
 	}
-
-	newValueBytes, err := json.Marshal(&data[K, V]{Done: true, Request: req, Response: res})
+	b, err := json.Marshal(&data[K, V]{Done: true, Request: req, Response: res})
 	if err != nil {
 		return zero, fmt.Errorf("marshaling completed entry: %w", err)
 	}
-
-	// Atomically replace the in-flight token with the completed response.
-	if err := i.client.CompareAndSwap(ctx, key, oldValue, string(newValueBytes), keepTTL); err != nil {
+	if err := i.client.CompareAndSwap(workCtx, key, oldValue, string(b), keepTTL); err != nil {
 		return zero, fmt.Errorf("storing completed response: %w", err)
 	}
-
 	succeeded = true
 	return res, nil
 }
@@ -256,6 +253,9 @@ func (i *Idempotent) runInLock[K, V any](
 //  3. Done, request matches → return the cached response.
 func (i *Idempotent) parse[K, V any](req K, payload *data[K, V]) (V, error) {
 	var zero V
+	if payload == nil {
+		return zero, ErrRequestMismatch
+	}
 	if !payload.Done {
 		return zero, ErrRequestInFlight
 	}
@@ -277,7 +277,7 @@ func jsonEqual[K any](stored, incoming K) error {
 		return fmt.Errorf("marshaling incoming request: %w", err)
 	}
 	if !bytes.Equal(storedBytes, incomingBytes) {
-		return fmt.Errorf("%w: stored %s, incoming %s", ErrRequestMismatch, string(storedBytes), string(incomingBytes))
+		return ErrRequestMismatch
 	}
 	return nil
 }

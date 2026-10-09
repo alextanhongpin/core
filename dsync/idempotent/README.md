@@ -181,3 +181,5 @@ func (s *Server) CreateUserHandler(w http.ResponseWriter, r *http.Request) {
 ## License
 
 MIT License
+
+Renewal loss now cancels the task context and prevents publication of a successful result. Tasks run synchronously and cleanup waits for completion. Renewal stops before completed-result replacement to avoid racing the completed entry. Cleanup is bounded and its errors are joined. A Redis lease cannot promise exactly-once external effects across expiry, failures, or data loss; tasks must use application-level idempotency/fencing where required.
