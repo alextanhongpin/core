@@ -2,15 +2,14 @@ package singleflight
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
-	"math"
-	"math/rand/v2"
 	"sync"
 	"time"
+	"uuid"
 
 	"github.com/alextanhongpin/core/dsync/lock"
-	"github.com/alextanhongpin/core/sync/singleflight"
 	redis "github.com/redis/go-redis/v9"
 )
 
@@ -21,34 +20,68 @@ var (
 
 const OK = "ok"
 
-type BackOff interface {
-	Duration(i int) time.Duration
+// Config is copied at construction. Zero durations select defaults.
+type Config struct{ LockTTL, WaitTTL, PollInterval time.Duration }
+
+func (c Config) WithDefaults() Config {
+	if c.LockTTL == 0 {
+		c.LockTTL = 10 * time.Second
+	}
+	if c.WaitTTL == 0 {
+		c.WaitTTL = 10 * time.Second
+	}
+	if c.PollInterval == 0 {
+		c.PollInterval = 10 * time.Millisecond
+	}
+	return c
+}
+func (c Config) Validate() error {
+	if c.LockTTL < time.Millisecond || c.WaitTTL <= 0 || c.PollInterval <= 0 {
+		return errors.New("singleflight: positive lease, wait, and polling durations are required")
+	}
+	return nil
 }
 
 type flight struct {
 	done chan struct{}
 	err  error
 }
+type lease struct{ key, token string }
+type leaseContextKey struct{}
 
+// Group borrows a Redis client and owns local flight coordination. Callbacks
+// execute synchronously; followers may cancel their wait independently.
 type Group struct {
 	mu      sync.Mutex
 	flights map[string]*flight
-	BackOff BackOff
-	Client  *redis.Client
-	Locker  *lock.Locker
-	Group   *singleflight.Group[bool]
+	cfg     Config
+	client  *redis.Client
+	locker  *lock.Client
 }
 
-func New(client *redis.Client) *Group {
-	return &Group{
-		Client: client,
-		Locker: lock.New(client),
-		Group:  singleflight.New[bool](),
+func New(client *redis.Client, cfg Config) (*Group, error) {
+	if client == nil {
+		return nil, errors.New("singleflight: Redis client is required")
 	}
+	cfg = cfg.WithDefaults()
+	if err := cfg.Validate(); err != nil {
+		return nil, err
+	}
+	return &Group{client: client, locker: lock.NewClient(client), cfg: cfg, flights: make(map[string]*flight)}, nil
+}
+func MustNew(client *redis.Client, cfg Config) *Group {
+	g, err := New(client, cfg)
+	if err != nil {
+		panic(err)
+	}
+	return g
+}
+func leaseKey(key string) string {
+	return fmt.Sprintf("singleflight:lease:%x", sha256.Sum256([]byte(key)))
 }
 
-func (g *Group) Do(ctx context.Context, key string, fn func(context.Context) error, lockTTL, waitTTL time.Duration) (did bool, err error) {
-	if key == "" || fn == nil || lockTTL < time.Millisecond || waitTTL <= 0 {
+func (g *Group) Do(ctx context.Context, key string, fn func(context.Context) error) (did bool, err error) {
+	if key == "" || fn == nil {
 		return false, fmt.Errorf("singleflight: key, callback, and positive lease/wait durations are required")
 	}
 	if err := context.Cause(ctx); err != nil {
@@ -82,13 +115,14 @@ func (g *Group) Do(ctx context.Context, key string, fn func(context.Context) err
 		delete(g.flights, key)
 		close(f.done)
 	}()
-	did, err = g.doOrWait(ctx, key, fn, lockTTL, waitTTL)
+	did, err = g.doOrWait(ctx, leaseKey(key), fn, g.cfg.LockTTL, g.cfg.WaitTTL)
 	completed = true
 	return did, err
 }
 
 func (g *Group) doOrWait(ctx context.Context, key string, fn func(context.Context) error, lockTTL, waitTTL time.Duration) (doOrWait bool, err error) {
-	token, err := g.Locker.Lock(ctx, key, lockTTL)
+	token := fmt.Sprint(uuid.NewV7())
+	err = g.locker.Lock(ctx, key, token, lockTTL)
 	if errors.Is(err, lock.ErrLocked) {
 		waitErr := g.wait(ctx, key, waitTTL)
 		if waitErr == nil {
@@ -112,7 +146,7 @@ func (g *Group) doOrWait(ctx context.Context, key string, fn func(context.Contex
 }
 
 func (g *Group) do(ctx context.Context, key string, token string, fn func(context.Context) error, lockTTL time.Duration) (err error) {
-	work, cancel := context.WithCancelCause(ctx)
+	work, cancel := context.WithCancelCause(context.WithValue(ctx, leaseContextKey{}, lease{key: key, token: token}))
 	defer cancel(nil)
 	stop := make(chan struct{})
 	done := make(chan struct{})
@@ -127,7 +161,7 @@ func (g *Group) do(ctx context.Context, key string, token string, fn func(contex
 			case <-work.Done():
 				return
 			case <-ticker.C:
-				if e := g.Locker.Extend(work, key, token, lockTTL); e != nil {
+				if e := g.locker.Extend(work, key, token, lockTTL); e != nil {
 					cancel(e)
 					return
 				}
@@ -150,20 +184,24 @@ func (g *Group) do(ctx context.Context, key string, token string, fn func(contex
 	}()
 	err = fn(work)
 	join()
-	return errors.Join(err, context.Cause(work))
+	err = errors.Join(err, context.Cause(work))
+	if err == nil {
+		err = g.locker.Extend(work, key, token, lockTTL)
+	}
+	return err
 }
 
 func (g *Group) wait(ctx context.Context, key string, waitTTL time.Duration) error {
 	wait, cancel := context.WithTimeout(ctx, waitTTL)
 	defer cancel()
-	sub := g.Client.Subscribe(wait, key)
+	sub := g.client.Subscribe(wait, key)
 	defer sub.Close()
 	// Acknowledge subscription, then recheck for a release that raced with it.
 	if _, err := sub.Receive(wait); err != nil {
 		return err
 	}
 	messages := sub.Channel()
-	ticker := time.NewTicker(10 * time.Millisecond)
+	ticker := time.NewTicker(g.cfg.PollInterval)
 	defer ticker.Stop()
 	check := func() (bool, error) { return g.done(wait, key) }
 	if ok, err := check(); ok || err != nil {
@@ -194,7 +232,7 @@ func (g *Group) wait(ctx context.Context, key string, waitTTL time.Duration) err
 }
 
 func (g *Group) done(ctx context.Context, key string) (bool, error) {
-	status, err := g.Client.Exists(ctx, key).Result()
+	status, err := g.client.Exists(ctx, key).Result()
 	if err != nil {
 		return false, err
 	}
@@ -203,35 +241,10 @@ func (g *Group) done(ctx context.Context, key string) (bool, error) {
 }
 
 func (g *Group) unlock(ctx context.Context, key, token string) error {
-	err := g.Locker.Unlock(ctx, key, token)
+	err := g.locker.Unlock(ctx, key, token)
 	if err != nil {
 		return err
 	}
 
-	return g.Client.Publish(ctx, key, OK).Err()
-}
-
-func (g *Group) backOffDuration(i int) time.Duration {
-	if g.BackOff != nil {
-		return g.BackOff.Duration(i)
-	}
-
-	return NewExponentialBackOff(time.Second, time.Minute).Duration(i)
-}
-
-type ExponentialBackOff struct {
-	Base time.Duration
-	Cap  time.Duration
-}
-
-func NewExponentialBackOff(base, cap time.Duration) *ExponentialBackOff {
-	return &ExponentialBackOff{
-		Base: base,
-		Cap:  cap,
-	}
-}
-
-func (b *ExponentialBackOff) Duration(i int) time.Duration {
-	sleep := min(b.Cap, b.Base*time.Duration(math.Pow(2, float64(i))))
-	return rand.N(sleep)
+	return g.client.Publish(ctx, key, OK).Err()
 }

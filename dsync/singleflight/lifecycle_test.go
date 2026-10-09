@@ -4,14 +4,14 @@ import (
 	"context"
 	"errors"
 	"github.com/alextanhongpin/core/dsync/singleflight"
-	"github.com/alextanhongpin/core/storage/redis/redistest"
+	"github.com/alextanhongpin/dbtx/testing/redistest"
 	"github.com/stretchr/testify/require"
 	"testing"
 	"time"
 )
 
 func TestLeaderJoinsCallbackAfterCancellation(t *testing.T) {
-	g := singleflight.New(redistest.New(t).Client())
+	g := singleflight.MustNew(redistest.Client(t), singleflight.Config{})
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	started := make(chan struct{})
@@ -25,7 +25,7 @@ func TestLeaderJoinsCallbackAfterCancellation(t *testing.T) {
 			<-work.Done()
 			<-release
 			return context.Cause(work)
-		}, time.Second, time.Second)
+		})
 		result <- err
 	}()
 	<-started
@@ -40,36 +40,36 @@ func TestLeaderJoinsCallbackAfterCancellation(t *testing.T) {
 	<-exited
 }
 func TestCanceledLocalFollowerReturns(t *testing.T) {
-	g := singleflight.New(redistest.New(t).Client())
+	g := singleflight.MustNew(redistest.Client(t), singleflight.Config{})
 	started := make(chan struct{})
 	release := make(chan struct{})
 	leader := make(chan error, 1)
 	go func() {
-		_, err := g.Do(context.Background(), t.Name(), func(context.Context) error { close(started); <-release; return nil }, time.Second, time.Second)
+		_, err := g.Do(context.Background(), t.Name(), func(context.Context) error { close(started); <-release; return nil })
 		leader <- err
 	}()
 	<-started
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	_, err := g.Do(ctx, t.Name(), func(context.Context) error { t.Error("follower ran"); return nil }, time.Second, time.Second)
+	_, err := g.Do(ctx, t.Name(), func(context.Context) error { t.Error("follower ran"); return nil })
 	require.ErrorIs(t, err, context.Canceled)
 	close(release)
 	require.NoError(t, <-leader)
 }
 func TestRemoteWaiterObservesRelease(t *testing.T) {
-	client := redistest.New(t).Client()
-	g := singleflight.New(client)
+	client := redistest.Client(t)
+	g := singleflight.MustNew(client, singleflight.Config{})
 	started := make(chan struct{})
 	release := make(chan struct{})
 	leader := make(chan error, 1)
 	go func() {
-		_, err := g.Do(context.Background(), t.Name(), func(context.Context) error { close(started); <-release; return errors.New("leader failed") }, time.Second, time.Second)
+		_, err := g.Do(context.Background(), t.Name(), func(context.Context) error { close(started); <-release; return errors.New("leader failed") })
 		leader <- err
 	}()
 	<-started
 	waiter := make(chan error, 1)
 	go func() {
-		did, err := singleflight.New(client).Do(context.Background(), t.Name(), func(context.Context) error { t.Error("remote follower ran"); return nil }, time.Second, time.Second)
+		did, err := singleflight.MustNew(client, singleflight.Config{}).Do(context.Background(), t.Name(), func(context.Context) error { t.Error("remote follower ran"); return nil })
 		if did {
 			t.Error("follower reported leader")
 		}

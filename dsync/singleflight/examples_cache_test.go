@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/alextanhongpin/core/dsync/singleflight"
-	"github.com/alextanhongpin/core/storage/redis/redistest"
+	"github.com/alextanhongpin/dbtx/testing/redistest"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -17,15 +17,12 @@ func ExampleCache() {
 	// When the cache is stale, only once worker will populate
 	// the cache, and the rest will wait.
 
-	stop := redistest.Init()
-	defer stop()
-
 	client := redis.NewClient(&redis.Options{
 		Addr: redistest.Addr(),
 	})
 	defer client.Close()
 
-	cache := singleflight.NewCache[string](client)
+	cache := singleflight.MustNewCache[string](client, singleflight.CacheConfig{})
 	ctx := context.Background()
 
 	hit := new(atomic.Int64)

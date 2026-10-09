@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/alextanhongpin/core/dsync/singleflight"
-	"github.com/alextanhongpin/core/storage/redis/redistest"
+	"github.com/alextanhongpin/dbtx/testing/redistest"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -16,24 +16,22 @@ var ctx = context.Background()
 
 func TestSingleflight(t *testing.T) {
 	var (
-		client  = redistest.New(t).Client()
-		g       = singleflight.New(client)
-		lockTTL = 10 * time.Second
-		waitTTL = 10 * time.Second
+		client = redistest.Client(t)
+		g      = singleflight.MustNew(client, singleflight.Config{})
 	)
 
 	t.Run("sync", func(t *testing.T) {
 		key := t.Name()
 		doOrWait, err := g.Do(ctx, key, func(ctx context.Context) error {
 			return nil
-		}, lockTTL, waitTTL)
+		})
 		is := assert.New(t)
 		is.Nil(err)
 		is.True(doOrWait)
 
 		doOrWait, err = g.Do(ctx, key, func(ctx context.Context) error {
 			return nil
-		}, lockTTL, waitTTL)
+		})
 		is.Nil(err)
 		is.True(doOrWait)
 	})
@@ -61,7 +59,7 @@ func TestSingleflight(t *testing.T) {
 					did.Add(1)
 					time.Sleep(100 * time.Millisecond)
 					return nil
-				}, lockTTL, waitTTL)
+				})
 				is.Nil(err)
 				if !doOrWait {
 					waited.Add(1)
@@ -75,12 +73,12 @@ func TestSingleflight(t *testing.T) {
 				defer wg.Done()
 				<-ch
 
-				g := singleflight.New(client)
+				g := singleflight.MustNew(client, singleflight.Config{})
 				doOrWait, err := g.Do(ctx, key, func(ctx context.Context) error {
 					did.Add(1)
 					time.Sleep(100 * time.Millisecond)
 					return nil
-				}, lockTTL, waitTTL)
+				})
 				is.Nil(err)
 				if !doOrWait {
 					waited.Add(1)
