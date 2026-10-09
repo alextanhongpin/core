@@ -9,7 +9,7 @@ import (
 
 func TestBacklogTimeoutDoesNotCancelExecution(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		th := New(&Config{Limit: 1, BacklogTimeout: time.Second})
+		th := MustNew(Config{Limit: 1, BacklogTimeout: time.Second})
 		err := th.Do(context.Background(), func(ctx context.Context) error {
 			time.Sleep(2 * time.Second)
 			return ctx.Err()
@@ -20,7 +20,7 @@ func TestBacklogTimeoutDoesNotCancelExecution(t *testing.T) {
 	})
 }
 func TestZeroTimeoutAndCanceledAdmission(t *testing.T) {
-	th := New(&Config{Limit: 1})
+	th := MustNew(Config{Limit: 1})
 	if err := th.Do(context.Background(), func(context.Context) error { return nil }); err != nil {
 		t.Fatal(err)
 	}
@@ -34,7 +34,7 @@ func TestZeroTimeoutAndCanceledAdmission(t *testing.T) {
 }
 func TestQueuedTimeoutReturnsTokens(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		th := New(&Config{Limit: 1, BacklogLimit: 1, BacklogTimeout: time.Second})
+		th := MustNew(Config{Limit: 1, BacklogLimit: 1, BacklogTimeout: time.Second})
 		started, release, done := make(chan struct{}), make(chan struct{}), make(chan struct{})
 		go func() {
 			defer close(done)

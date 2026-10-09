@@ -1,9 +1,9 @@
 package throttle
 
 import (
-	"cmp"
 	"context"
 	"errors"
+	"math"
 	"time"
 )
 
@@ -20,16 +20,25 @@ type Config struct {
 }
 
 // DefaultConfig creates a default, valid Config.
-func DefaultConfig() *Config {
-	return &Config{
+func DefaultConfig() Config {
+	return Config{
 		Limit:          1000,
 		BacklogLimit:   100,
 		BacklogTimeout: 10 * time.Second,
 	}
 }
 
+// WithDefaults fills the concurrency limit. Zero backlog disables queueing and
+// zero timeout disables waiting; use DefaultConfig for a queued configuration.
+func (c Config) WithDefaults() Config {
+	if c.Limit == 0 {
+		c.Limit = DefaultConfig().Limit
+	}
+	return c
+}
+
 // Validate checks if the Config settings are valid.
-func (c *Config) Validate() error {
+func (c Config) Validate() error {
 	if c.Limit <= 0 {
 		return errors.New("throttle: limit must be greater than 0")
 	}
@@ -41,6 +50,9 @@ func (c *Config) Validate() error {
 	if c.BacklogTimeout < 0 {
 		return errors.New("throttle: backlog timeout must be greater or equal to 0")
 	}
+	if c.BacklogLimit > math.MaxInt-c.Limit {
+		return errors.New("throttle: total capacity overflows int")
+	}
 	return nil
 }
 
@@ -48,14 +60,14 @@ func (c *Config) Validate() error {
 type Throttler struct {
 	ch        chan struct{}
 	backlogCh chan struct{}
-	*Config
+	cfg       Config
 }
 
 // New creates and initializes a new Throttler.
-func New(cfg *Config) *Throttler {
-	cfg = cmp.Or(cfg, DefaultConfig())
+func New(cfg Config) (*Throttler, error) {
+	cfg = cfg.WithDefaults()
 	if err := cfg.Validate(); err != nil {
-		panic(err)
+		return nil, err
 	}
 
 	limit := cfg.Limit
@@ -75,14 +87,23 @@ func New(cfg *Config) *Throttler {
 	return &Throttler{
 		ch:        ch,
 		backlogCh: backlogCh,
-		Config:    cfg,
+		cfg:       cfg,
+	}, nil
+}
+
+// MustNew is New for startup wiring that must panic on invalid configuration.
+func MustNew(cfg Config) *Throttler {
+	t, err := New(cfg)
+	if err != nil {
+		panic(err)
 	}
+	return t
 }
 
 // Do executes fn with concurrency throttling. BacklogTimeout only limits
 // admission waiting; fn receives the original caller context. A zero timeout
 // allows immediate admission but does not wait for a busy slot.
-// Config fields must not be changed concurrently with Do.
+// Configuration is privately owned. Callbacks may run concurrently.
 func (t *Throttler) Do(ctx context.Context, fn func(context.Context) error) error {
 	if ctx.Err() != nil {
 		return context.Cause(ctx)
@@ -97,7 +118,7 @@ func (t *Throttler) Do(ctx context.Context, fn func(context.Context) error) erro
 	select {
 	case <-t.ch:
 	default:
-		waitCtx, cancel := context.WithTimeoutCause(ctx, t.BacklogTimeout, ErrTimeout)
+		waitCtx, cancel := context.WithTimeoutCause(ctx, t.cfg.BacklogTimeout, ErrTimeout)
 		defer cancel()
 		select {
 		case <-waitCtx.Done():

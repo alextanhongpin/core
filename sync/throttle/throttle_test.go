@@ -16,7 +16,7 @@ func TestThrottle(t *testing.T) {
 	evaltest.Run(t, func(t *testing.T, ctx context.Context, cfg *Config) (any, error) {
 		synctest.Test(t, func(t *testing.T) {
 			cfg.BacklogTimeout = 10 * time.Millisecond
-			th := New(cfg)
+			th := MustNew(*cfg)
 
 			fn := Func(func(ctx context.Context, req any) (any, error) {
 				time.Sleep(20 * time.Millisecond)
