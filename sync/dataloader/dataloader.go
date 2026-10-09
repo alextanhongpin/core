@@ -1,7 +1,6 @@
 package dataloader
 
 import (
-	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -19,12 +18,21 @@ var (
 
 type batchFn[K comparable, V any] = func(ctx context.Context, keys []K) (map[K]V, error)
 
+// DataLoader batches concurrent loads. Cached results are weakly held and may
+// be loaded again after garbage collection.
 type DataLoader[K comparable, V any] struct {
+	// Config is a snapshot; changing it does not reconfigure the loader.
 	*Config
 	batchFn batchFn[K, V]
-	ch      chan K
+	ch      chan request[K, V]
+	cfg     Config
 	ctx     context.Context
 	cache   *cache.Cache[K, future[V]]
+}
+
+type request[K comparable, V any] struct {
+	key    K
+	future *future[V]
 }
 
 type Config struct {
@@ -40,13 +48,35 @@ func DefaultConfig() *Config {
 	}
 }
 
+// New starts a batch worker. Zero batch size and interval use defaults.
+// Invalid configuration or a nil function panics before work starts.
+// The returned idempotent stop function cancels pending loads and waits for
+// the worker; the batch function must honor cancellation for prompt shutdown.
 func New[K comparable, V any](ctx context.Context, fn batchFn[K, V], cfg *Config) (*DataLoader[K, V], func()) {
-	cfg = cmp.Or(cfg, DefaultConfig())
+	effective := *DefaultConfig()
+	if cfg != nil {
+		effective = *cfg
+		if effective.BatchInterval == 0 {
+			effective.BatchInterval = DefaultConfig().BatchInterval
+		}
+		if effective.BatchSize == 0 {
+			effective.BatchSize = DefaultConfig().BatchSize
+		}
+	}
+	if effective.BatchInterval < 0 || effective.BatchSize < 0 || effective.BufferSize < 0 {
+		panic("dataloader: invalid configuration")
+	}
+	if fn == nil {
+		panic("dataloader: nil batch function")
+	}
+	// Keep the public configuration snapshot separate from operational state.
+	snapshot := effective
 	ctx, cancel := context.WithCancelCause(ctx)
 	dl := &DataLoader[K, V]{
-		Config:  cfg,
+		Config:  &snapshot,
+		cfg:     effective,
 		batchFn: fn,
-		ch:      make(chan K, cfg.BufferSize),
+		ch:      make(chan request[K, V], effective.BufferSize),
 		ctx:     ctx,
 		cache: cache.New(func(key K) (*future[V], error) {
 			return newFuture[V](ctx), nil
@@ -73,30 +103,23 @@ type Result[K comparable, V any] struct {
 
 func (d *DataLoader[K, V]) background(ctx context.Context) {
 	p1 := pipeline.SourceChan(ctx, d.ch)
-	p2 := pipeline.Batch(p1, d.BatchSize, d.BatchInterval)
-	pipeline.Sink(p2, func(keys []K) {
-		res, err := d.batchFn(ctx, keys)
-		if err != nil {
-			// All keys becomes error.
-			for _, key := range keys {
-				f, loaded, _ := d.cache.LoadOrCreate(key)
-				if !loaded {
-					panic("lost reference to strong pointer")
-				}
-				f.Reject(err)
-			}
+	p2 := pipeline.Batch(p1, d.cfg.BatchSize, d.cfg.BatchInterval)
+	pipeline.Sink(p2, func(requests []request[K, V]) {
+		if ctx.Err() != nil {
 			return
 		}
-		for _, k := range keys {
-			f, loaded, _ := d.cache.LoadOrCreate(k)
-			if !loaded {
-				panic("lost reference to strong pointer")
-			}
-			if v, ok := res[k]; ok {
-				f.Resolve(v)
+		keys := make([]K, len(requests))
+		for i, req := range requests {
+			keys[i] = req.key
+		}
+		res, err := d.batchFn(ctx, keys)
+		for _, req := range requests {
+			if err != nil {
+				req.future.Reject(err)
+			} else if v, ok := res[req.key]; ok {
+				req.future.Resolve(v)
 			} else {
-				// Key not found
-				f.Reject(fmt.Errorf("%w: %v", ErrNotFound, k))
+				req.future.Reject(fmt.Errorf("%w: %v", ErrNotFound, req.key))
 			}
 		}
 	})
@@ -116,7 +139,7 @@ func (d *DataLoader[K, V]) load(key K) (*future[V], error) {
 		select {
 		case <-d.ctx.Done():
 			fut.Reject(context.Cause(d.ctx))
-		case d.ch <- key:
+		case d.ch <- request[K, V]{key: key, future: fut}:
 		}
 
 		return fut, nil

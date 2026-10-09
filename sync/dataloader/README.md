@@ -44,7 +44,7 @@ func main() {
             m[k] = n
         }
         return m, nil
-    }, dataloader.Config{
+    }, &dataloader.Config{
         BatchInterval: 16 * time.Millisecond,
         BatchSize:     25,
     })
@@ -71,18 +71,13 @@ type Config struct {
 }
 ```
 
-Pass `Config` by value or pointer — both are accepted. Pass `nil` to use defaults:
+Pass a configuration pointer, or `nil` to use defaults. Zero batch size and interval select the defaults; zero buffer size keeps the input channel unbuffered.
 
 ```go
-// by value
-dl, stop := dataloader.New(ctx, batchFn, dataloader.Config{BatchSize: 50})
-
-// by pointer
 dl, stop := dataloader.New(ctx, batchFn, &dataloader.Config{BatchSize: 50})
-
-// nil → uses DefaultConfig (BatchInterval: 16ms, BatchSize: 25)
-dl, stop := dataloader.New(ctx, batchFn, nil)
 ```
+
+`New` copies configuration before starting work. Later mutations of the input or the public configuration snapshot do not affect batching. Negative sizes or intervals and a nil batch function panic synchronously because the constructor has no error return.
 
 ### `New`
 
