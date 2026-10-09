@@ -88,13 +88,15 @@ func DefaultConfig() *Config {
 
 var _ circuitbreaker = (*CircuitBreaker)(nil)
 
-// CircuitBreaker ...
+// CircuitBreaker is safe for concurrent calls. Configure the exported Config
+// fields before use; callbacks may execute concurrently.
 type CircuitBreaker struct {
 	*Config
 	mu            sync.RWMutex
 	counter       int
 	counterExpiry time.Time
 	status        Status
+	generation    uint64
 	timeout       time.Time
 }
 
@@ -107,16 +109,36 @@ func New(cfg *Config) *CircuitBreaker {
 
 func (cb *CircuitBreaker) Do(fn func() error) error {
 	cb.mu.Lock()
-	defer cb.mu.Unlock()
-
 	status := cb.begin()
+	generation := cb.generation
+	cb.mu.Unlock()
+
 	switch status {
 	case Closed, HalfOpen:
 		start := time.Now()
 		err := fn()
-		if err != nil || status == HalfOpen {
-			cb.commit(err, time.Since(start))
+		failureCount, successCount := 0, 0
+		if err != nil {
+			failureCount = 1
+			if cb.FailureCount != nil {
+				failureCount += cb.FailureCount(err)
+			}
+			if cb.SlowCallCount != nil {
+				failureCount += cb.SlowCallCount(time.Since(start))
+			}
+		} else {
+			successCount = 1
 		}
+		cb.mu.Lock()
+		// Results admitted by an older state must not change the current state.
+		if cb.generation == generation {
+			if status == HalfOpen {
+				cb.halfOpen(failureCount, successCount)
+			} else if err != nil {
+				cb.close(failureCount)
+			}
+		}
+		cb.mu.Unlock()
 		return err
 	case Opened, ForcedOpen:
 		return ErrOpened
@@ -129,7 +151,13 @@ func (cb *CircuitBreaker) Do(fn func() error) error {
 
 func (cb *CircuitBreaker) SetStatus(status Status) {
 	cb.mu.Lock()
+	cb.generation++
+	cb.counter = 0
+	cb.counterExpiry = time.Time{}
 	cb.status = status
+	if status == Opened {
+		cb.timeout = time.Now().Add(cb.OpenTimeout)
+	}
 	cb.mu.Unlock()
 }
 
@@ -148,33 +176,15 @@ func (cb *CircuitBreaker) begin() Status {
 	return cb.status
 }
 
-func (cb *CircuitBreaker) commit(cause error, duration time.Duration) Status {
-	var failureCount int
-	var successCount int
-	if cause != nil {
-		failureCount = 1 + cb.FailureCount(cause) + cb.SlowCallCount(duration)
-	} else {
-		successCount = 1
-	}
-
-	status := cb.status
-	switch status {
-	case Closed:
-		return cb.close(failureCount)
-	case HalfOpen:
-		return cb.halfOpen(failureCount, successCount)
-	default:
-		return Unknown
-	}
-}
-
 func (cb *CircuitBreaker) onOpened() Status {
+	cb.generation++
 	cb.status = Opened
 	cb.timeout = time.Now().Add(cb.OpenTimeout)
 	return Opened
 }
 
 func (cb *CircuitBreaker) onClosed() Status {
+	cb.generation++
 	cb.status = Closed
 	cb.counter = 0
 	cb.counterExpiry = time.Time{}
@@ -182,6 +192,7 @@ func (cb *CircuitBreaker) onClosed() Status {
 }
 
 func (cb *CircuitBreaker) onHalfOpened() Status {
+	cb.generation++
 	cb.status = HalfOpen
 	cb.counter = 0
 	cb.counterExpiry = time.Time{}

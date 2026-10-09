@@ -11,6 +11,9 @@ type Transporter struct {
 }
 
 func NewTransporter(rt http.RoundTripper, cb circuitbreaker) *Transporter {
+	if rt == nil {
+		rt = http.DefaultTransport
+	}
 	return &Transporter{
 		rt: rt,
 		cb: cb,
@@ -29,6 +32,9 @@ func (t *Transporter) RoundTrip(r *http.Request) (resp *http.Response, err error
 		return nil
 	})
 	if err != nil {
+		if resp != nil && resp.Body != nil {
+			resp.Body.Close()
+		}
 		return nil, err
 	}
 

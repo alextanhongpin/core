@@ -16,7 +16,7 @@ evaltest.T[github.com/alextanhongpin/core/sync/circuitbreaker_test.Input,string]
         Status: "opened",
       },
       Error: &errors.errorString{},
-      ErrorString: "unsupported operation",
+      ErrorString: "circuitbreaker: opened",
       Logs: []interface {}{},
     },
     &evaltest.T[interface {},interface {}]{

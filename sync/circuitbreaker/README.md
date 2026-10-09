@@ -125,7 +125,7 @@ cb := circuitbreaker.New(opts)
 cb := circuitbreaker.New(nil)
 ```
 
-Config fields are public and can be mutated directly after construction:
+Config fields are public and can be configured directly after construction, before concurrent use. Operation callbacks and failure-weight hooks run without the state mutex and may execute concurrently. Results from an earlier state are ignored after a state transition.
 
 ```go
 cb := circuitbreaker.New(nil)
@@ -136,6 +136,8 @@ cb.FailureThreshold = 10
 ### How counters work
 
 Each failure increments the failure counter by `1 + FailureCount(err) + SlowCallCount(duration)`, allowing high-severity errors (e.g. timeouts, slow calls) to count for more than one failure. Counters use a sliding TTL window that resets after `FailurePeriod` (or `SuccessPeriod` in Half-Open).
+
+Setting `Opened` starts a fresh `OpenTimeout`; setting any status resets its counters.
 
 ### State control
 
@@ -156,7 +158,7 @@ Statuses:
 |--------------|-----------------|--------------------------------------------------|
 | `Unknown`    | `"unknown"`     | Zero value; not normally used at runtime         |
 | `Closed`     | `"closed"`      | Normal operation — all calls pass through        |
-| `HalfOpen`   | `"half-open"`   | Probe mode — allows limited calls after timeout  |
+| `HalfOpen`   | `"half-open"`   | Probe mode — counts successes after timeout  |
 | `Opened`     | `"opened"`      | Tripped — calls rejected with `ErrOpened`        |
 | `Disabled`   | `"disabled"`    | Bypass mode — breaker logic is skipped entirely  |
 | `ForcedOpen` | `"forced-open"` | Permanently open until manually changed          |
@@ -183,7 +185,7 @@ Statuses:
 
 ## HTTP Transport Integration
 
-Use the provided `Transporter` to wrap any HTTP client. It treats HTTP 5xx responses as failures in addition to transport-level errors:
+Use the provided `Transporter` to wrap any HTTP client. It treats HTTP 5xx responses as failures in addition to transport-level errors, closing discarded response bodies. A nil underlying transport selects `http.DefaultTransport`:
 
 ```go
 import "net/http"
@@ -205,7 +207,7 @@ if err == circuitbreaker.ErrOpened {
 
 ## Testing
 
-The breaker uses real time via `time.Now` for timeouts and TTL expiry. In tests, use short thresholds. For deterministic time control, wrap tests in `synctest.Test` from the standard library's `testing/synctest` package (Go 1.24+):
+The breaker uses real time via `time.Now` for timeouts and TTL expiry. In tests, use short thresholds. For deterministic time control, wrap tests in `synctest.Test` from the standard library's `testing/synctest` package (Go 1.25+):
 
 ```go
 import "testing/synctest"

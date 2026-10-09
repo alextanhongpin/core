@@ -61,8 +61,8 @@ input:
   status: opened
   n: 4
 evals:
-  - name: status closed
-    expr: output == "closed"
+  - name: status opened
+    expr: output == "opened"
 ---
 name: opened error
 input:
