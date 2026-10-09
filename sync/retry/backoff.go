@@ -83,5 +83,8 @@ func (b *LinearBackoff) At(attempts int) time.Duration {
 	if b.Period <= 0 || attempts <= 0 {
 		return 0
 	}
+	if time.Duration(attempts) > time.Duration(math.MaxInt64)/b.Period {
+		return time.Duration(math.MaxInt64)
+	}
 	return b.Period * time.Duration(attempts)
 }
