@@ -2,6 +2,7 @@ package rate
 
 import (
 	"errors"
+	"math"
 	"sync"
 )
 
@@ -26,9 +27,9 @@ type Limiter struct {
 
 // NewLimiter creates a new rate limiter with the specified token limit.
 // The default configuration adds 1.0 tokens per failure and subtracts 0.5 tokens per success.
-// Panics if limit is not positive.
+// Panics if limit is not positive and finite.
 func NewLimiter(limit float64) *Limiter {
-	if limit <= 0 {
+	if limit <= 0 || math.IsNaN(limit) || math.IsInf(limit, 0) {
 		panic("rate: limit must be positive")
 	}
 	return &Limiter{

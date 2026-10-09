@@ -100,7 +100,7 @@ func (r *Rate) reset() {
 }
 
 func (r *Rate) add(n float64) float64 {
-	now := r.Now().UnixNano()
+	now := max(r.Now().UnixNano(), r.last)
 	delta := now - r.last
 	if delta < 0 {
 		delta = 0
