@@ -45,8 +45,7 @@ Cache publication checks ownership atomically on a single Redis primary. Leases
 are not fencing tokens for external writes and cannot promise exactly-once work
 under pauses, failover, or network partitions. The two-key publication script is
 not Redis Cluster compatible. `UseStream` is deprecated and ignored; admission
-uses polling. This changes the lease-key scheme: do not mix old and new fill
-workers during migration. Redis conditional operations require SETIFDEQ/DELEX.
+uses polling. Redis conditional operations require SETIFDEQ/DELEX.
 
 `Func` and `Idempotent` return `(function, error)` and accept a value
 `FuncConfig[K]` with required `KeyFn` and `Lock`, and default JSON `Codec`.
@@ -54,16 +53,11 @@ workers during migration. Redis conditional operations require SETIFDEQ/DELEX.
 errors remain inspectable. An idempotent request mismatch returns `ErrConflict`.
 
 File snapshots use atomic rename while a stable sidecar `.lock` file holds the
-lifetime advisory lock. Preserve that file and avoid older writers that lock the
-data file. File clones bytes and persists expiry changes. FS requires a sole
-directory owner; it does not coordinate independent processes. FS value and TTL
+lifetime advisory lock. All cooperating writers must lock the same sidecar file.
+File clones bytes and persists expiry changes. FS requires a sole directory owner; it does not coordinate independent processes. FS value and TTL
 index writes are separate, so storage errors may leave partial changes.
 
 Zero storage TTL means permanent. Redis TTL and Expire retain millisecond
 precision. File/FS calls after close return `ErrClosed`.
-
-Migration from v0.0.x: use `New[T](Config{Storage: ...})` instead of setting public
-fields, handle constructor errors (or use Must helpers), and pass lease/function
-configs by value.
 
 Run `go test -race -timeout 120s ./...` and `go vet ./...`; Redis tests use Docker.

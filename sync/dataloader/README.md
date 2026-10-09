@@ -16,7 +16,3 @@ Load blocks through admission and completion using the loader context. LoadMany 
 Admission for new futures created by LoadContext is loader-owned. BufferSize does not bound the number of pending keys or callers. Callers should bound concurrency when key cardinality is unbounded.
 
 Stop is concurrent-safe and idempotent. It cancels pending loads with ErrCanceled and waits for the worker and admission goroutines. The batch function must cooperate with cancellation for prompt shutdown and must not invoke stop itself. Loads after stop return the lifetime cancellation cause.
-
-## Migration from v0.1.x
-
-Pass configuration values instead of pointers/nil and handle the additional New error result. DefaultConfig returns a value. Public embedded configuration has been removed; configure before construction.

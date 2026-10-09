@@ -9,7 +9,3 @@ GCRA spaces emissions by Period/Limit and admits batches atomically against Burs
 State is retained per key until Clear removes expired entries. Call Clear periodically when cardinality is unbounded; neither limiter starts a cleanup goroutine.
 
 Func obtains a key and admits once before invoking its operation. HTTP emits Retry-After rounded up to whole seconds when rejected. Key functions and downstream operations are caller-owned and may execute concurrently. With retry outside the decorator, each attempt consumes admission; inside, one admission covers the logical operation.
-
-## Migration from v0.0.x
-
-Pass configuration values instead of pointers/nil, and handle constructor errors. Configure before construction. DefaultConfig now returns a value.

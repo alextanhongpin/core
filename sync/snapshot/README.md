@@ -7,7 +7,3 @@ Nil Policies selects defaults; an explicit empty slice is invalid. Policy Change
 Add and Inc record changes. A notification is triggered when a policy's elapsed-time and change-count requirements both hold. Policies are checked in ascending After order. Notification resets the accumulated count and elapsed-time origin. Time checks use the smallest nonzero policy duration as their tick interval.
 
 Subscribe with Chan or Go before expecting notifications. Broadcast acceptance does not confirm delivery. Slow subscribers apply backpressure to notifications and subsequent changes. Stop is idempotent and concurrent-safe, interrupts pending delivery, and waits for callbacks. Callbacks must finish and must not call stop or blocking operations on this snapshot. Chan after stop returns nil. Add after stop returns without work. Accepted notifications may be discarded during shutdown.
-
-## Migration from v0.0.x
-
-Pass configuration values instead of pointers and handle New's additional error result. DefaultConfig returns a value. Public embedded configuration was removed; configure before construction.

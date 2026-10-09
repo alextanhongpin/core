@@ -7,7 +7,3 @@ Do admits same-instance callers by key with cancelable local admission, acquires
 Callbacks, retry runners, and Redis clients remain shared dependencies and must support concurrent use. Func returns the final callback value and error; resource-bearing callback results remain caller-owned. No instance owns the Redis client's lifetime.
 
 NewClient uses token-checked SET NX acquisition and SETIFDEQ/DELEX renewal/release, requiring a Redis release that supports these commands. These are single-primary leases, not fencing: expiration, failover, or paused processes can permit overlapping external work. Use fencing at the protected resource when required.
-
-## Migration from v0.0.x
-
-Pass value configurations, handle New's error, and configure before construction. Public embedded Config, cache, and Logger fields were removed. Put Logger in Config. DefaultConfig returns a value. DefaultRetry uses sync/retry v0.1.0's MaxRetries semantics and retries lock contention only.

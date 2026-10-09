@@ -7,7 +7,3 @@ A handler coordinates local same-key callers with cancelable admission and uses 
 Tasks execute synchronously and may run concurrently for different keys. Renewal loss cancels the task context and prevents publishing a successful response. Renewal is stopped and joined before replacing the in-flight entry with the completed result. Tasks must cooperate with cancellation and must not reenter the same key. Panics propagate after cleanup. Cleanup uses a five-second timeout detached from the caller and joins failures with operation errors.
 
 This is a single-primary Redis lease and result cache, not an exactly-once guarantee for external effects. A task may run again after TTL expiry, failure, or data loss. Protect external effects through application idempotency or fencing when required. Request equality uses JSON serialization; use stable request representations. Clients require SETIFDEQ and DELEX support.
-
-## Migration from v0.0.x
-
-Pass HandlerConfig values instead of pointers/nil and handle construction errors. DefaultConfig returns a value. Use Must variants only for startup wiring.

@@ -7,7 +7,3 @@ Configuration is passed by value and stored privately. WithDefaults preserves ze
 Do executes the callback synchronously after admission, or rejects without calling it. It returns ErrCapacityExceeded when all running and backlog slots are occupied. BacklogTimeout limits admission waiting only; the callback receives the original caller context. Callbacks may execute concurrently and must cooperate with cancellation. Admission order is not FIFO. Permits are returned even if the callback panics.
 
 Func preserves the context/request/result signature. Outside retry, one permit covers attempts and backoff; inside retry, each attempt obtains its own permit.
-
-## Migration from v0.0.x
-
-Pass configuration values instead of pointers/nil, handle New's error, and configure before construction. DefaultConfig returns a value; public embedded configuration fields have been removed.

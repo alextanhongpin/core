@@ -47,11 +47,6 @@ permanent; positive TTL must be at least one millisecond.
 
 The reserved `singleflight:lease:` namespace separates tokens from values. Cache
 publication uses two keys on a single primary and is not Redis Cluster compatible.
-Redis must support SETIFDEQ/DELEX. Do not mix older key-scheme workers with v0.1
-workers during migration.
-
-Migration: construct with value Config/CacheConfig and handle errors (or use Must
-helpers). Public mutable fields and obsolete BackOff helpers were removed. Lease
-and wait durations now belong to Config rather than each Do call.
+Redis must support SETIFDEQ/DELEX.
 
 Run `go test -race -timeout 120s ./...` and `go vet ./...`; tests use Redis Docker.

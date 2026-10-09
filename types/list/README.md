@@ -369,23 +369,17 @@ for _, config := range devConfigs {
 
 Functions in this package are not thread-safe. For concurrent access to shared slices, use appropriate synchronization mechanisms like `sync.RWMutex`.
 
-## Migration from Index-Based Functions
+## Mapping Values and Indices
 
-If upgrading from index-based function signatures:
+Use `Map` to transform each element, or `MapIndex` when the transformation also
+needs its position:
 
 ```go
-// Old (index-based)
-result := list.Map(slice, func(i int) string {
-    return fmt.Sprintf("%d", slice[i])
-})
-
-// New (element-based)
-result := list.Map(slice, func(item int) string {
+values := list.Map(slice, func(item int) string {
     return fmt.Sprintf("%d", item)
 })
 
-// Use MapIndex if you need the index
-result := list.MapIndex(slice, func(i int, item int) string {
+indexed := list.MapIndex(slice, func(i int, item int) string {
     return fmt.Sprintf("%d:%d", i, item)
 })
 ```

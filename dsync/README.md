@@ -26,7 +26,7 @@ using separate lease/data keys target one Redis primary, not Redis Cluster.
 
 Circuit breaker and rate limiter deployments must install their Lua functions
 using the package Setup method. Updating client code alone does not update Redis
-functions. Mixed old/new lease-key schemes require coordinated worker migration.
+functions.
 
 Run tests and vet from each module. Integration tests use Docker-backed Redis;
 probabilistic structure tests use Redis Stack. Race tests cover local lifecycle

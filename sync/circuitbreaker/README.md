@@ -15,7 +15,3 @@ Instances support concurrent operations. Hooks and operations may run concurrent
 Failure weighting is `1 + FailureCount(err) + SlowCallCount(duration)` for failed calls only. Successful slow calls do not add failures. Hooks must return nonnegative weights. The counter expires after an idle FailurePeriod or SuccessPeriod. Half-open does not impose a concurrency limit; combine with throttle when probes need bounded concurrency.
 
 `Func` preserves the operation signature and caller context. With retry outside the breaker, each attempt is counted separately; with the breaker outside retry, the entire logical operation is counted once. `NewTransporter` defaults a nil transport to http.DefaultTransport, classifies 5xx as failures, and closes discarded response bodies. The breaker dependency must be non-nil.
-
-## Migration from v0.0.x
-
-Replace pointer/nil constructor arguments with configuration values and handle New's error. Configure before construction; exported operational configuration fields were removed. DefaultConfig now returns a value.

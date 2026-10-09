@@ -23,8 +23,5 @@ backend structures. Automatic creation on a missing structure retries the comman
 once, so missing merge sources or unsupported commands return errors rather than
 retrying indefinitely. A failed command may have backend-specific partial effects.
 
-Migration from v0.0.x: handle the constructor's second return value or use its
-Must helper. Public Client fields were removed; supply the client at construction.
-
 Tests use Redis Stack via Docker. Run `go test -race -timeout 120s ./...` and
 `go vet ./...`.

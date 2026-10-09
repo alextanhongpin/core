@@ -9,7 +9,3 @@ Do admits once, executes the callback synchronously, and rejects opened states w
 State transitions advance a Redis generation. Results admitted in an earlier generation cannot change a newer state. SetStatus(Opened) starts its timeout. Failed-operation commits use a five-second context detached from caller cancellation, preserving both operation and Redis errors. State keys remain until externally removed; deleting a key destroys generation history. Single-primary state does not promise continuity through Redis failover or data loss.
 
 Func preserves the operation signature and caller context. With retry outside the breaker, each attempt contributes separately; outside retry, the breaker observes the logical operation once.
-
-## Migration from v0.0.x
-
-Pass value configurations and handle New's error. DefaultConfig returns a value; Options remains a naming alias for Config. Reinstall the Redis functions when migrating from pre-v0.0.5 callers.

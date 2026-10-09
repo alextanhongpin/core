@@ -121,15 +121,4 @@ Discarded response bodies are closed before another attempt. When status retries
 
 A nil transport uses `http.DefaultTransport`; a nil runner creates a retrier with `DefaultConfig()`. Options apply at construction. Supplied transports, runners, and policy callbacks must support concurrent calls.
 
-## Migration
-
-This revision changes the configuration API:
-
-- `New(*Config) *Retry` becomes `New(Config) (*Retry, error)`.
-- `Attempts` becomes `MaxRetries`, still excluding the initial call.
-- `DefaultConfig()` returns a value. Configure it before calling `New`; retrier fields are private.
-- `NewThrottler(*ThrottlerConfig)` becomes `NewThrottler(ThrottlerConfig) (*Throttler, error)`; its default config also returns a value.
-- Set status policy through `WithStatusCodeHandler`, replacing mutation of `RoundTripper.StatusCodeHandler`.
-- HTTP mutations now require opt-in, and exhausted HTTP status retries return a response for the caller to inspect.
-
 Runnable examples and behavioral tests live alongside the implementation.

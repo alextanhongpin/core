@@ -466,22 +466,6 @@ func TestUserWorkflow(t *testing.T) {
 - **Plugin Systems**: Pluggable handler architectures
 - **Command Processing**: Command pattern implementations
 
-## Migration from HTTP
-
-Converting from HTTP handlers is straightforward:
-
-```go
-// HTTP handler
-func httpHandler(w http.ResponseWriter, r *http.Request) {
-    // HTTP-specific code
-}
-
-// Handlers equivalent
-func internalHandler(w handlers.ResponseWriter, r *handlers.Request) error {
-    // Same logic, different interfaces
-    return nil
-}
-```
 
 ## Performance Considerations
 
