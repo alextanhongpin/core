@@ -80,74 +80,80 @@ type Result[T any] struct {
 	Error  error
 }
 
-// Promise.race() settles as soon as the first promise finishes
-// (whether it succeeds or fails)
+type indexedResult[T any] struct {
+	index int
+	result[T]
+}
+
+// observe owns only combinator waiters, never the promises or their work.
+// Stop joins the waiters even when some inputs remain unresolved indefinitely.
+func observe[T any](promises []*Promise[T]) (<-chan indexedResult[T], func()) {
+	out := make(chan indexedResult[T], len(promises))
+	done := make(chan struct{})
+	var wg sync.WaitGroup
+	for i, p := range promises {
+		wg.Go(func() {
+			select {
+			case <-done:
+				return
+			case <-p.ch.ctx.Done():
+				v, err := p.Await()
+				out <- indexedResult[T]{index: i, result: result[T]{Data: v, Error: err}}
+			}
+		})
+	}
+	go func() { wg.Wait(); close(out) }()
+	return out, sync.OnceFunc(func() { close(done); wg.Wait() })
+}
+
+// Race returns the first observed settlement and releases its own waiters.
+// It does not abort losing promises. Empty input panics.
 func Race[T any](promises ...*Promise[T]) (T, error) {
 	if len(promises) == 0 {
 		panic("no promises")
 	}
-	ch := make(chan result[T], len(promises))
-	go func() {
-		var wg sync.WaitGroup
-		for _, p := range promises {
-			wg.Go(func() {
-				res, err := p.Await()
-				ch <- result[T]{Data: res, Error: err}
-			})
-		}
-		wg.Wait()
-		close(ch)
-	}()
+	ch, stop := observe(promises)
+	defer stop()
 	res := <-ch
 	return res.Data, res.Error
 }
 
-// Promise.any() settles as soon as the first promise succeeds
-// (ignoring failures unless they all fail)
+// Any returns the first observed success, or joined errors if all inputs fail.
+// Its waiters are joined before return; losing promises continue independently.
 func Any[T any](promises ...*Promise[T]) (T, error) {
 	if len(promises) == 0 {
 		panic("no promises")
 	}
-	ch := make(chan result[T], len(promises))
-	go func() {
-		var wg sync.WaitGroup
-		for _, p := range promises {
-			wg.Go(func() {
-				res, err := p.Await()
-				ch <- result[T]{Data: res, Error: err}
-			})
-		}
-		wg.Wait()
-		close(ch)
-	}()
-
+	ch, stop := observe(promises)
+	defer stop()
 	var errs []error
-	for v := range ch {
-		if v.Error != nil {
-			errs = append(errs, v.Error)
+	for res := range ch {
+		if res.Error != nil {
+			errs = append(errs, res.Error)
 			continue
 		}
-		return v.Data, nil
+		return res.Data, nil
 	}
-
 	var zero T
 	return zero, errors.Join(errs...)
 }
 
+// All returns ordered results once every input succeeds, or returns immediately
+// on the first observed failure. It releases waiters without aborting inputs.
 func All[T any](promises ...*Promise[T]) ([]T, error) {
 	if len(promises) == 0 {
 		panic("no promises")
 	}
-	ps := AllSettled(promises...)
-	res := make([]T, len(ps))
-	for i, v := range ps {
-		if v.Error != nil {
-			return nil, v.Error
+	ch, stop := observe(promises)
+	defer stop()
+	results := make([]T, len(promises))
+	for res := range ch {
+		if res.Error != nil {
+			return nil, res.Error
 		}
-		res[i] = v.Data
+		results[res.index] = res.Data
 	}
-
-	return res, nil
+	return results, nil
 }
 
 func AllSettled[T any](promises ...*Promise[T]) []*Result[T] {
