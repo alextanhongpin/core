@@ -9,7 +9,7 @@ import (
 
 func TestCallerCancellationPreservesSharedLoad(t *testing.T) {
 	started, release := make(chan struct{}), make(chan struct{})
-	dl, stop := dataloader.New(context.Background(), func(ctx context.Context, keys []int) (map[int]int, error) {
+	dl, stop := dataloader.MustNew(context.Background(), func(ctx context.Context, keys []int) (map[int]int, error) {
 		close(started)
 		select {
 		case <-release:
@@ -17,7 +17,7 @@ func TestCallerCancellationPreservesSharedLoad(t *testing.T) {
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		}
-	}, &dataloader.Config{BatchSize: 1})
+	}, dataloader.Config{BatchSize: 1})
 	defer stop()
 	ctx, cancel := context.WithCancel(context.Background())
 	canceled := make(chan error, 1)
@@ -34,7 +34,7 @@ func TestCallerCancellationPreservesSharedLoad(t *testing.T) {
 	}
 }
 func TestCanceledCallerDoesNotStartLoad(t *testing.T) {
-	dl, stop := dataloader.New(context.Background(), func(context.Context, []int) (map[int]int, error) { t.Error("canceled load invoked"); return nil, nil }, nil)
+	dl, stop := dataloader.MustNew(context.Background(), func(context.Context, []int) (map[int]int, error) { t.Error("canceled load invoked"); return nil, nil }, dataloader.Config{})
 	defer stop()
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()

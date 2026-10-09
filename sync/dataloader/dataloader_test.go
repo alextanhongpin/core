@@ -47,7 +47,7 @@ func TestDataLoader(t *testing.T) {
 		return m, nil
 	}
 	evaltest.Run(t, func(t *testing.T, ctx context.Context, input []string) (any, error) {
-		dl, stop := dataloader.New(ctx, batchFn, &dataloader.Config{
+		dl, stop := dataloader.MustNew(ctx, batchFn, dataloader.Config{
 			BatchInterval: 16 * time.Millisecond,
 			BatchSize:     5,
 		})
@@ -97,7 +97,7 @@ func TestDataloader_Func(t *testing.T) {
 		return fmt.Sprintf("hi, %s", u.Name), nil
 	}
 
-	dl, stop := dataloader.New(ctx, batchFn, &dataloader.Config{
+	dl, stop := dataloader.MustNew(ctx, batchFn, dataloader.Config{
 		BatchInterval: 16 * time.Millisecond,
 		BatchSize:     5,
 	})
@@ -169,7 +169,7 @@ func TestDataloader_Error(t *testing.T) {
 }
 
 func newDataloader(ctx context.Context, batchFn func(context.Context, []string) (map[string]int, error)) (*dataloader.DataLoader[string, int], func()) {
-	return dataloader.New(ctx, batchFn, &dataloader.Config{
+	return dataloader.MustNew(ctx, batchFn, dataloader.Config{
 		BatchInterval: 16 * time.Millisecond,
 		BatchSize:     5,
 	})

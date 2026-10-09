@@ -21,8 +21,6 @@ type batchFn[K comparable, V any] = func(ctx context.Context, keys []K) (map[K]V
 // DataLoader batches concurrent loads. Cached results are weakly held and may
 // be loaded again after garbage collection.
 type DataLoader[K comparable, V any] struct {
-	// Config is a snapshot; changing it does not reconfigure the loader.
-	*Config
 	batchFn batchFn[K, V]
 	ch      chan request[K, V]
 	cfg     Config
@@ -44,39 +42,46 @@ type Config struct {
 	BufferSize    int
 }
 
-func DefaultConfig() *Config {
-	return &Config{
+func DefaultConfig() Config {
+	return Config{
 		BatchInterval: 16 * time.Millisecond,
 		BatchSize:     25,
 	}
 }
 
-// New starts a batch worker. Zero batch size and interval use defaults.
-// Invalid configuration or a nil function panics before work starts.
-// The returned idempotent stop function cancels pending loads and waits for
-// the worker; the batch function must honor cancellation for prompt shutdown.
-func New[K comparable, V any](ctx context.Context, fn batchFn[K, V], cfg *Config) (*DataLoader[K, V], func()) {
-	effective := *DefaultConfig()
-	if cfg != nil {
-		effective = *cfg
-		if effective.BatchInterval == 0 {
-			effective.BatchInterval = DefaultConfig().BatchInterval
-		}
-		if effective.BatchSize == 0 {
-			effective.BatchSize = DefaultConfig().BatchSize
-		}
+// WithDefaults fills the batch size and interval; zero BufferSize is unbuffered.
+func (c Config) WithDefaults() Config {
+	d := DefaultConfig()
+	if c.BatchInterval == 0 {
+		c.BatchInterval = d.BatchInterval
 	}
-	if effective.BatchInterval < 0 || effective.BatchSize < 0 || effective.BufferSize < 0 {
-		panic("dataloader: invalid configuration")
+	if c.BatchSize == 0 {
+		c.BatchSize = d.BatchSize
+	}
+	return c
+}
+
+// Validate checks effective configuration without mutation.
+func (c Config) Validate() error {
+	if c.BatchInterval <= 0 || c.BatchSize <= 0 || c.BufferSize < 0 {
+		return errors.New("dataloader: invalid configuration")
+	}
+	return nil
+}
+
+// New defaults and validates a configuration copy before starting a batch worker.
+// Stop is idempotent, cancels pending loads, and waits for all owned work. The
+// batch function must honor cancellation and must not call stop itself.
+func New[K comparable, V any](ctx context.Context, fn batchFn[K, V], cfg Config) (*DataLoader[K, V], func(), error) {
+	effective := cfg.WithDefaults()
+	if err := effective.Validate(); err != nil {
+		return nil, nil, err
 	}
 	if fn == nil {
-		panic("dataloader: nil batch function")
+		return nil, nil, errors.New("dataloader: nil batch function")
 	}
-	// Keep the public configuration snapshot separate from operational state.
-	snapshot := effective
 	ctx, cancel := context.WithCancelCause(ctx)
 	dl := &DataLoader[K, V]{
-		Config:  &snapshot,
 		cfg:     effective,
 		batchFn: fn,
 		ch:      make(chan request[K, V], effective.BufferSize),
@@ -96,7 +101,16 @@ func New[K comparable, V any](ctx context.Context, fn batchFn[K, V], cfg *Config
 		cancel(ErrCanceled)
 		dl.mu.Unlock()
 		dl.wg.Wait()
-	})
+	}), nil
+}
+
+// MustNew is New for startup wiring that must panic on invalid configuration.
+func MustNew[K comparable, V any](ctx context.Context, fn batchFn[K, V], cfg Config) (*DataLoader[K, V], func()) {
+	dl, stop, err := New(ctx, fn, cfg)
+	if err != nil {
+		panic(err)
+	}
+	return dl, stop
 }
 
 type Result[K comparable, V any] struct {
