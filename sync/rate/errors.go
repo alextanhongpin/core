@@ -32,8 +32,8 @@ func (e *Errors) Reset() {
 func (e *Errors) SetNow(now func() time.Time) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	e.success.Now = now
-	e.failure.Now = now
+	e.success.SetNow(now)
+	e.failure.SetNow(now)
 }
 
 func (e *Errors) Success() counter {

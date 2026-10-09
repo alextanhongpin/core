@@ -34,7 +34,7 @@ var _ counter = (*Rate)(nil)
 // It tracks the rate of events over a specified time period using
 // exponential smoothing to automatically decay old measurements.
 type Rate struct {
-	Now    func() time.Time // Injectable time function for testing
+	Now    func() time.Time // Configure before use; use SetNow for concurrent updates.
 	count  float64          // Current smoothed count
 	last   int64            // Last update timestamp in nanoseconds
 	mu     sync.Mutex       // Protects count and last fields
@@ -57,6 +57,18 @@ func Per(period time.Duration) *Rate {
 		Now:    time.Now,
 		period: period.Nanoseconds(),
 	}
+}
+
+// SetNow changes the clock safely during concurrent counter operations.
+// A nil clock restores time.Now. The clock runs under the counter lock and
+// must not call methods on this counter.
+func (r *Rate) SetNow(now func() time.Time) {
+	if now == nil {
+		now = time.Now
+	}
+	r.mu.Lock()
+	r.Now = now
+	r.mu.Unlock()
 }
 
 // Reset resets the rate counter to zero.
