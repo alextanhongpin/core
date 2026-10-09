@@ -21,9 +21,6 @@ func Func[K, V any](fn fun[K, V], l locker, keyFn func(context.Context, K) (stri
 			res, fnErr = fn(ctx, req)
 			return fnErr
 		})
-		if err != nil {
-			return zero, err
-		}
-		return res, nil
+		return res, err
 	}
 }

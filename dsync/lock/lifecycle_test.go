@@ -28,7 +28,7 @@ func TestLeaseLossJoinsCallbackBeforeUnlock(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		failure := errors.New("lease lost")
 		client := &leaseClient{failure: failure}
-		l := New(client, &Config{LockTTL: time.Second, RefreshRatio: 0.5, Retry: onceRetry{}})
+		l := MustNew(client, Config{LockTTL: time.Second, RefreshRatio: 0.5, Retry: onceRetry{}})
 		finished := false
 		err := l.Do(context.Background(), "key", func(ctx context.Context) error {
 			<-ctx.Done()
@@ -46,11 +46,45 @@ func TestLeaseLossJoinsCallbackBeforeUnlock(t *testing.T) {
 }
 func TestCallbackPanicPropagatesAndUnlocks(t *testing.T) {
 	client := &leaseClient{}
-	l := New(client, &Config{LockTTL: time.Second, Retry: onceRetry{}})
+	l := MustNew(client, Config{LockTTL: time.Second, Retry: onceRetry{}})
 	defer func() {
 		if recover() != "callback panic" || !client.released.Load() {
 			t.Fatal("panic swallowed or lease retained")
 		}
 	}()
 	l.Do(context.Background(), "key", func(context.Context) error { panic("callback panic") })
+}
+func TestCanceledLocalAdmissionReturnsPromptly(t *testing.T) {
+	l := MustNew(&leaseClient{}, Config{LockTTL: time.Hour, Retry: onceRetry{}})
+	started, release, done := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	go func() {
+		defer close(done)
+		l.Do(context.Background(), "key", func(context.Context) error { close(started); <-release; return nil })
+	}()
+	<-started
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	err := l.Do(ctx, "key", func(context.Context) error { t.Error("canceled callback ran"); return nil })
+	close(release)
+	<-done
+	if !errors.Is(err, context.Canceled) {
+		t.Fatal(err)
+	}
+}
+func TestValueConfigOwnership(t *testing.T) {
+	cfg := Config{LockTTL: time.Second, RefreshRatio: 0.5, Retry: onceRetry{}}
+	l, err := New(&leaseClient{}, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.LockTTL = -time.Second
+	if l.cfg.LockTTL != time.Second {
+		t.Fatal("caller changed effective configuration")
+	}
+	if _, err := New(nil, Config{}); err == nil {
+		t.Fatal("nil client accepted")
+	}
+	if _, err := New(&leaseClient{}, Config{LockTTL: -time.Second}); err == nil {
+		t.Fatal("invalid TTL accepted")
+	}
 }
