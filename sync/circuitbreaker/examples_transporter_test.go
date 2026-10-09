@@ -11,10 +11,11 @@ import (
 )
 
 func ExampleTransporter() {
-	cb := circuitbreaker.New(nil)
-	cb.OpenTimeout = 100 * time.Millisecond
-	cb.FailureThreshold = 10
-	cb.FailurePeriod = 1 * time.Second
+	cfg := circuitbreaker.DefaultConfig()
+	cfg.OpenTimeout = 100 * time.Millisecond
+	cfg.FailureThreshold = 10
+	cfg.FailurePeriod = time.Second
+	cb := circuitbreaker.MustNew(cfg)
 
 	fmt.Println("initial status:")
 	fmt.Println(cb.Status())
@@ -30,7 +31,7 @@ func ExampleTransporter() {
 	re := regexp.MustCompile(`\d{5}`)
 
 	// Opens after failure ratio exceeded.
-	for range cb.FailureThreshold + 1 {
+	for range cfg.FailureThreshold + 1 {
 		_, err := client.Get(ts.URL)
 		msg := re.ReplaceAllString(err.Error(), "8080")
 		fmt.Println(msg)

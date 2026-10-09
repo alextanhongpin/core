@@ -39,7 +39,7 @@ func TestCircuitBreaker(t *testing.T) {
 				evaltest.Log(ctx, evaltest.NewT[any, any]("do", nil, &Output{Result: res, Status: cb.Status().String()}, err))
 			}
 			if strings.Contains(name, "sleep") {
-				time.Sleep(cb.OpenTimeout)
+				time.Sleep(100 * time.Millisecond)
 
 				for range input.N {
 					err := cb.Do(func() error {
@@ -59,5 +59,5 @@ func newCircuitbreaker() *circuitbreaker.CircuitBreaker {
 	cfg.SuccessThreshold = 3
 	cfg.OpenTimeout = 100 * time.Millisecond
 
-	return circuitbreaker.New(cfg)
+	return circuitbreaker.MustNew(cfg)
 }

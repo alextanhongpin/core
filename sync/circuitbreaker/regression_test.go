@@ -12,7 +12,7 @@ import (
 
 func TestDoAllowsConcurrentAndReentrantCalls(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		cb := New(nil)
+		cb := MustNew(Config{})
 		started, release, done := make(chan struct{}), make(chan struct{}), make(chan struct{})
 		go func() { defer close(done); cb.Do(func() error { close(started); <-release; return nil }) }()
 		<-started
@@ -30,7 +30,7 @@ func TestDoAllowsConcurrentAndReentrantCalls(t *testing.T) {
 }
 
 func TestOldResultDoesNotChangeNewState(t *testing.T) {
-	cb := New(nil)
+	cb := MustNew(Config{})
 	started, release, done := make(chan struct{}), make(chan struct{}), make(chan struct{})
 	go func() {
 		defer close(done)
@@ -47,12 +47,12 @@ func TestOldResultDoesNotChangeNewState(t *testing.T) {
 
 func TestSetOpenedStartsTimeout(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		cb := New(nil)
+		cb := MustNew(Config{})
 		cb.SetStatus(Opened)
 		if err := cb.Do(func() error { t.Fatal("opened callback ran"); return nil }); err != ErrOpened {
 			t.Fatal(err)
 		}
-		time.Sleep(cb.OpenTimeout)
+		time.Sleep(time.Minute)
 		if err := cb.Do(func() error { return nil }); err != nil {
 			t.Fatal(err)
 		}
@@ -73,7 +73,7 @@ func TestTransportClosesDiscardedResponse(t *testing.T) {
 	body := &closeBody{Reader: strings.NewReader("server error")}
 	tr := NewTransporter(transportFunc(func(*http.Request) (*http.Response, error) {
 		return &http.Response{StatusCode: 500, Status: "500 Internal Server Error", Body: body}, nil
-	}), New(nil))
+	}), MustNew(Config{}))
 	if resp, err := tr.RoundTrip(&http.Request{}); err == nil || resp != nil {
 		t.Fatal("expected discarded response and error")
 	}
@@ -83,7 +83,7 @@ func TestTransportClosesDiscardedResponse(t *testing.T) {
 }
 
 func TestTransportUsesDefaultWhenNil(t *testing.T) {
-	tr := NewTransporter(nil, New(nil))
+	tr := NewTransporter(nil, MustNew(Config{}))
 	if tr.rt != http.DefaultTransport {
 		t.Fatal("nil transport did not select default")
 	}

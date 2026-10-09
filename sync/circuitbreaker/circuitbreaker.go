@@ -1,9 +1,9 @@
 package circuitbreaker
 
 import (
-	"cmp"
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 )
@@ -57,8 +57,8 @@ type Config struct {
 	SlowCallCount    func(duration time.Duration) int
 }
 
-func DefaultConfig() *Config {
-	return &Config{
+func DefaultConfig() Config {
+	return Config{
 		FailureThreshold: 100,
 		FailurePeriod:    time.Second,
 		SuccessThreshold: 20,
@@ -88,10 +88,51 @@ func DefaultConfig() *Config {
 
 var _ circuitbreaker = (*CircuitBreaker)(nil)
 
-// CircuitBreaker is safe for concurrent calls. Configure the exported Config
-// fields before use; callbacks may execute concurrently.
+// WithDefaults returns an effective copy. Zero thresholds and durations select
+// defaults. Nil hooks select default weighting; use a zero-returning hook to
+// disable extra weighting. Hook functions remain shared dependencies.
+func (c Config) WithDefaults() Config {
+	d := DefaultConfig()
+	if c.FailureThreshold == 0 {
+		c.FailureThreshold = d.FailureThreshold
+	}
+	if c.FailurePeriod == 0 {
+		c.FailurePeriod = d.FailurePeriod
+	}
+	if c.SuccessThreshold == 0 {
+		c.SuccessThreshold = d.SuccessThreshold
+	}
+	if c.SuccessPeriod == 0 {
+		c.SuccessPeriod = d.SuccessPeriod
+	}
+	if c.OpenTimeout == 0 {
+		c.OpenTimeout = d.OpenTimeout
+	}
+	if c.FailureCount == nil {
+		c.FailureCount = d.FailureCount
+	}
+	if c.SlowCallCount == nil {
+		c.SlowCallCount = d.SlowCallCount
+	}
+	return c
+}
+
+// Validate checks effective configuration without mutating it.
+func (c Config) Validate() error {
+	if c.FailureThreshold <= 0 || c.SuccessThreshold <= 0 {
+		return fmt.Errorf("circuitbreaker: thresholds must be positive")
+	}
+	if c.FailurePeriod <= 0 || c.SuccessPeriod <= 0 || c.OpenTimeout <= 0 {
+		return fmt.Errorf("circuitbreaker: durations must be positive")
+	}
+	return nil
+}
+
+// CircuitBreaker is safe for concurrent calls. Its configuration is privately
+// owned; callbacks remain shared and may execute concurrently. Construct with
+// New; the zero value is not usable.
 type CircuitBreaker struct {
-	*Config
+	cfg           Config
 	mu            sync.RWMutex
 	counter       int
 	counterExpiry time.Time
@@ -100,11 +141,22 @@ type CircuitBreaker struct {
 	timeout       time.Time
 }
 
-func New(cfg *Config) *CircuitBreaker {
-	return &CircuitBreaker{
-		Config: cmp.Or(cfg, DefaultConfig()),
-		status: Closed,
+// New defaults and validates a configuration copy without starting work.
+func New(cfg Config) (*CircuitBreaker, error) {
+	cfg = cfg.WithDefaults()
+	if err := cfg.Validate(); err != nil {
+		return nil, err
 	}
+	return &CircuitBreaker{cfg: cfg, status: Closed}, nil
+}
+
+// MustNew is New for startup wiring that must panic on invalid configuration.
+func MustNew(cfg Config) *CircuitBreaker {
+	cb, err := New(cfg)
+	if err != nil {
+		panic(err)
+	}
+	return cb
 }
 
 func (cb *CircuitBreaker) Do(fn func() error) error {
@@ -120,11 +172,11 @@ func (cb *CircuitBreaker) Do(fn func() error) error {
 		failureCount, successCount := 0, 0
 		if err != nil {
 			failureCount = 1
-			if cb.FailureCount != nil {
-				failureCount += cb.FailureCount(err)
+			if cb.cfg.FailureCount != nil {
+				failureCount += cb.cfg.FailureCount(err)
 			}
-			if cb.SlowCallCount != nil {
-				failureCount += cb.SlowCallCount(time.Since(start))
+			if cb.cfg.SlowCallCount != nil {
+				failureCount += cb.cfg.SlowCallCount(time.Since(start))
 			}
 		} else {
 			successCount = 1
@@ -156,7 +208,7 @@ func (cb *CircuitBreaker) SetStatus(status Status) {
 	cb.counterExpiry = time.Time{}
 	cb.status = status
 	if status == Opened {
-		cb.timeout = time.Now().Add(cb.OpenTimeout)
+		cb.timeout = time.Now().Add(cb.cfg.OpenTimeout)
 	}
 	cb.mu.Unlock()
 }
@@ -179,7 +231,7 @@ func (cb *CircuitBreaker) begin() Status {
 func (cb *CircuitBreaker) onOpened() Status {
 	cb.generation++
 	cb.status = Opened
-	cb.timeout = time.Now().Add(cb.OpenTimeout)
+	cb.timeout = time.Now().Add(cb.cfg.OpenTimeout)
 	return Opened
 }
 
@@ -204,10 +256,10 @@ func (cb *CircuitBreaker) halfOpen(failureCount, successCount int) Status {
 	// If success.
 	if failureCount == 0 {
 		// Increment success counter.
-		totalCount := cb.inc(successCount, cb.SuccessPeriod)
+		totalCount := cb.inc(successCount, cb.cfg.SuccessPeriod)
 
 		// If success count threshold reached.
-		if totalCount >= cb.SuccessThreshold {
+		if totalCount >= cb.cfg.SuccessThreshold {
 			return cb.onClosed()
 		}
 
@@ -219,10 +271,10 @@ func (cb *CircuitBreaker) halfOpen(failureCount, successCount int) Status {
 
 func (cb *CircuitBreaker) close(failureCount int) Status {
 	// Increment failure counter.
-	totalCount := cb.inc(failureCount, cb.FailurePeriod)
+	totalCount := cb.inc(failureCount, cb.cfg.FailurePeriod)
 
 	// If failure threshold exceeded
-	if totalCount >= cb.FailureThreshold {
+	if totalCount >= cb.cfg.FailureThreshold {
 		return cb.onOpened()
 	}
 
