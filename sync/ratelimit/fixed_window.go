@@ -1,7 +1,6 @@
 package ratelimit
 
 import (
-	"cmp"
 	"sync"
 	"time"
 )
@@ -25,10 +24,11 @@ type FixedWindow struct {
 	nowFunc func() time.Time
 }
 
-func NewFixedWindow(cfg *Config) *FixedWindow {
-	cfg = cmp.Or(cfg, DefaultConfig())
+// NewFixedWindow defaults and validates a value copy. Burst is unused by this algorithm.
+func NewFixedWindow(cfg Config) (*FixedWindow, error) {
+	cfg = cfg.WithDefaults()
 	if err := cfg.Validate(); err != nil {
-		panic(err)
+		return nil, err
 	}
 
 	return &FixedWindow{
@@ -36,7 +36,16 @@ func NewFixedWindow(cfg *Config) *FixedWindow {
 		nowFunc: time.Now,
 		period:  cfg.Period.Nanoseconds(),
 		state:   make(map[string]fixedWindowState),
+	}, nil
+}
+
+// MustNewFixedWindow panics on invalid configuration for startup wiring.
+func MustNewFixedWindow(cfg Config) *FixedWindow {
+	r, err := NewFixedWindow(cfg)
+	if err != nil {
+		panic(err)
 	}
+	return r
 }
 
 // Allow checks if a request is allowed. Special case of AllowN that consumes

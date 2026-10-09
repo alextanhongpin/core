@@ -18,7 +18,7 @@ func TestFixedWindow(t *testing.T) {
 		if err := cfg.Validate(); err != nil {
 			return FixedWindowOutput{}, err
 		}
-		r := NewFixedWindow(cfg)
+		r := MustNewFixedWindow(*cfg)
 		switch input.Action {
 		case "Allow":
 			res := r.Limit(input.Key)
@@ -56,7 +56,7 @@ func TestGCRA(t *testing.T) {
 		if err := cfg.Validate(); err != nil {
 			return GCRAOutput{}, err
 		}
-		r := NewGCRA(&cfg)
+		r := MustNewGCRA(cfg)
 		switch input.Action {
 		case "Allow":
 			res := r.Limit(input.Key)

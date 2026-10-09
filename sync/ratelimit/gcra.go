@@ -1,7 +1,7 @@
 package ratelimit
 
 import (
-	"cmp"
+	"errors"
 	"math"
 	"sync"
 	"time"
@@ -20,19 +20,20 @@ type GCRA struct {
 	period int64
 }
 
-func NewGCRA(cfg *Config) *GCRA {
-	cfg = cmp.Or(cfg, DefaultConfig())
+// NewGCRA defaults and validates a value copy, including duration arithmetic.
+func NewGCRA(cfg Config) (*GCRA, error) {
+	cfg = cfg.WithDefaults()
 	if err := cfg.Validate(); err != nil {
-		panic(err)
+		return nil, err
 	}
 
 	if cfg.Period.Nanoseconds()/int64(cfg.Limit) == 0 {
-		panic("ratelimit: emission interval must be at least one nanosecond")
+		return nil, errors.New("ratelimit: emission interval must be at least one nanosecond")
 	}
 
 	interval := cfg.Period.Nanoseconds() / int64(cfg.Limit)
 	if int64(cfg.Burst) >= math.MaxInt64/interval {
-		panic("ratelimit: burst allowance overflows duration")
+		return nil, errors.New("ratelimit: burst allowance overflows duration")
 	}
 
 	return &GCRA{
@@ -40,7 +41,16 @@ func NewGCRA(cfg *Config) *GCRA {
 		limit:  int64(cfg.Limit),
 		period: cfg.Period.Nanoseconds(),
 		state:  make(map[string]int64),
+	}, nil
+}
+
+// MustNewGCRA panics on invalid configuration for startup wiring.
+func MustNewGCRA(cfg Config) *GCRA {
+	r, err := NewGCRA(cfg)
+	if err != nil {
+		panic(err)
 	}
+	return r
 }
 
 func (r *GCRA) Allow(key string) bool {

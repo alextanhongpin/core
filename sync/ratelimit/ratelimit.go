@@ -21,15 +21,27 @@ type Config struct {
 	Burst  int
 }
 
-func DefaultConfig() *Config {
-	return &Config{
+func DefaultConfig() Config {
+	return Config{
 		Limit:  100,
 		Period: time.Minute,
 		Burst:  0,
 	}
 }
 
-func (cfg *Config) Validate() error {
+// WithDefaults fills omitted limit and period; zero burst disables extra burst.
+func (cfg Config) WithDefaults() Config {
+	d := DefaultConfig()
+	if cfg.Limit == 0 {
+		cfg.Limit = d.Limit
+	}
+	if cfg.Period == 0 {
+		cfg.Period = d.Period
+	}
+	return cfg
+}
+
+func (cfg Config) Validate() error {
 	if cfg.Limit <= 0 {
 		return errors.New("limit must be greater than 0")
 	}

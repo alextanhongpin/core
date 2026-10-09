@@ -12,7 +12,7 @@ import (
 
 func TestFixedWindowClearAndOverflow(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		r := NewFixedWindow(&Config{Limit: math.MaxInt, Period: time.Second})
+		r := MustNewFixedWindow(Config{Limit: math.MaxInt, Period: time.Second})
 		if !r.AllowN("key", math.MaxInt) {
 			t.Fatal("initial allowance denied")
 		}
@@ -27,7 +27,7 @@ func TestFixedWindowClearAndOverflow(t *testing.T) {
 	})
 }
 func TestGCRABatchAdmission(t *testing.T) {
-	r := NewGCRA(&Config{Limit: 1, Period: time.Hour, Burst: 2})
+	r := MustNewGCRA(Config{Limit: 1, Period: time.Hour, Burst: 2})
 	if r.AllowN("oversize", 4) {
 		t.Fatal("oversized batch admitted")
 	}
@@ -47,10 +47,10 @@ func TestGCRARejectsSubNanosecondInterval(t *testing.T) {
 			t.Fatal("expected invalid interval panic")
 		}
 	}()
-	NewGCRA(&Config{Limit: 2, Period: time.Nanosecond})
+	MustNewGCRA(Config{Limit: 2, Period: time.Nanosecond})
 }
 func TestHTTPRetryAfterSeconds(t *testing.T) {
-	r := NewFixedWindow(&Config{Limit: 1, Period: 1500 * time.Millisecond})
+	r := MustNewFixedWindow(Config{Limit: 1, Period: 1500 * time.Millisecond})
 	h := HTTP(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}), FuncConfig[*http.Request]{RateLimiter: r, KeyFn: func(_ context.Context, _ *http.Request) (string, error) { return "key", nil }})
 	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "/", nil))
 	rec := httptest.NewRecorder()
