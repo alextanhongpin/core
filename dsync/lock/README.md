@@ -277,3 +277,5 @@ go test -v -race ./...
 ## License
 
 MIT License
+
+Do invokes callbacks synchronously and waits for completion on cancellation or lease loss before releasing local ownership. Lease loss cancels the callback context; callbacks must cooperate and must not reenter the same key. Panics propagate after cleanup. Cleanup errors are joined with callback/cancellation errors. These leases coordinate one Redis primary only: expiration, failover, or a paused process can permit overlapping external work, so fencing is required when the protected resource needs that stronger guarantee.

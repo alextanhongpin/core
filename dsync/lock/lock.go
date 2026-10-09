@@ -114,107 +114,63 @@ func New(c client, cfg *Config) *Locker {
 	}
 }
 
-func (l *Locker) Do(ctx context.Context, key string, fn func(ctx context.Context) error) error {
+// Do executes fn synchronously. Cancellation and lease loss cancel the callback
+// context, but Do waits for fn to finish before releasing ownership. Callbacks
+// must cooperate with cancellation and must not reenter the same key.
+func (l *Locker) Do(ctx context.Context, key string, fn func(context.Context) error) (err error) {
+	if ctx.Err() != nil {
+		return context.Cause(ctx)
+	}
 	mu, _, _ := l.Cache.LoadOrCreate(key)
 	mu.Lock()
 	defer mu.Unlock()
-
+	if ctx.Err() != nil {
+		return context.Cause(ctx)
+	}
 	token := uuid.NewV7().String()
-
-	// Try to acquire the lock.
-	if err := l.Config.Retry.Do(ctx, func(ctx context.Context) error {
-		return l.Lock(ctx, key, token, l.LockTTL)
-	}); err != nil {
+	if err := l.Config.Retry.Do(ctx, func(ctx context.Context) error { return l.Lock(ctx, key, token, l.LockTTL) }); err != nil {
 		return err
 	}
-
-	unlock := sync.OnceValue(func() error {
-		unlockCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-		defer cancel()
-		return l.Unlock(unlockCtx, key, token)
-	})
-	// Lock acquired. Remember to unlock.
-	defer func() {
-		if err := unlock(); err != nil && !errors.Is(err, ErrExpired) {
-			l.Logger.Error("unlocking", "key", key, "token", token, "err", err)
-		}
-	}()
-
-	// No refresh.
+	workCtx, cancel := context.WithCancelCause(ctx)
+	defer cancel(nil)
 	refresh := time.Duration(float64(l.LockTTL) * l.RefreshRatio)
 	if refresh <= 0 {
-		// Strictly no refresh, the operation will timeout with error.
-		ctx, cancel := context.WithTimeoutCause(ctx, l.LockTTL, ErrLockTimeout)
-		defer cancel()
-
-		ch := make(chan error, 1)
-		panicVal := make(chan any, 1)
-
-		go func() {
-			defer close(ch)
-			defer func() {
-				if r := recover(); r != nil {
-					panicVal <- r
-				}
-			}()
-			ch <- fn(ctx)
-		}()
-
-		select {
-		case p := <-panicVal:
-			_ = unlock()
-			panic(p)
-
-		case <-ctx.Done():
-			return errors.Join(context.Cause(ctx), unlock())
-
-		case err := <-ch:
-			if ctx.Err() != nil {
-				return errors.Join(context.Cause(ctx), err, unlock())
-			}
-			return errors.Join(err, unlock())
-		}
+		timeoutCtx, timeoutCancel := context.WithTimeoutCause(workCtx, l.LockTTL, ErrLockTimeout)
+		defer timeoutCancel()
+		workCtx = timeoutCtx
 	}
-
-	ctx, cancel := context.WithCancelCause(ctx)
-	defer cancel(nil)
-
-	ch := make(chan error, 1)
-	panicVal := make(chan any, 1)
-
+	stop, stopped := make(chan struct{}), make(chan struct{})
 	go func() {
-		defer close(ch)
-		defer func() {
-			if r := recover(); r != nil {
-				panicVal <- r
-			}
-		}()
-		ch <- fn(ctx)
-	}()
-
-	t := time.NewTicker(refresh)
-	defer t.Stop()
-
-	for {
-		select {
-		case p := <-panicVal:
-			_ = unlock()
-			panic(p)
-
-		case <-ctx.Done():
-			return errors.Join(context.Cause(ctx), unlock())
-
-		case err := <-ch:
-			if ctx.Err() != nil {
-				return errors.Join(context.Cause(ctx), err, unlock())
-			}
-			return errors.Join(err, unlock())
-
-		case <-t.C:
-			if err := l.Extend(ctx, key, token, l.LockTTL); err != nil {
-				cancel(err)
-				return errors.Join(err, unlock())
+		defer close(stopped)
+		if refresh <= 0 {
+			return
+		}
+		ticker := time.NewTicker(refresh)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-stop:
+				return
+			case <-workCtx.Done():
+				return
+			case <-ticker.C:
+				if err := l.Extend(workCtx, key, token, l.LockTTL); err != nil {
+					cancel(err)
+					return
+				}
 			}
 		}
+	}()
+	defer func() {
+		close(stop)
+		<-stopped
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cleanupCancel()
+		err = errors.Join(err, l.Unlock(cleanupCtx, key, token))
+	}()
+	err = fn(workCtx)
+	if workCtx.Err() != nil {
+		err = errors.Join(err, context.Cause(workCtx))
 	}
+	return err
 }
