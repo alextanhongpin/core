@@ -6,6 +6,7 @@ import (
 	"slices"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/alextanhongpin/core/sync/pipeline"
@@ -37,23 +38,25 @@ func TestBatch(t *testing.T) {
 }
 
 func TestDebounce(t *testing.T) {
-	in := make(chan int)
-	out := pipeline.Debounce(in, 10*time.Millisecond)
+	synctest.Test(t, func(t *testing.T) {
+		in := make(chan int)
+		out := pipeline.Debounce(in, 10*time.Millisecond)
 
-	go func() {
-		defer close(in)
+		go func() {
+			defer close(in)
 
-		for i := range 5 {
-			in <- i
-			time.Sleep(3 * time.Millisecond)
+			for i := range 5 {
+				in <- i
+				time.Sleep(4 * time.Millisecond)
+			}
+		}()
+		res := pipeline.Collect(out)
+		want := []int{0, 3}
+		got := res
+		if !reflect.DeepEqual(want, got) {
+			t.Fatalf("want %v, got %v", want, got)
 		}
-	}()
-	res := pipeline.Collect(out)
-	want := []int{0, 3}
-	got := res
-	if !reflect.DeepEqual(want, got) {
-		t.Fatalf("want %v, got %v", want, got)
-	}
+	})
 }
 
 func TestDedup(t *testing.T) {
@@ -153,31 +156,33 @@ func TestFanOut(t *testing.T) {
 }
 
 func TestRateLimit(t *testing.T) {
-	in := make(chan int)
-	out := pipeline.RateLimit(in, 2, 50*time.Millisecond)
+	synctest.Test(t, func(t *testing.T) {
+		in := make(chan int)
+		out := pipeline.RateLimit(in, 2, 50*time.Millisecond)
 
-	start := time.Now()
-	go func() {
-		defer close(in)
-		for i := range 4 {
-			in <- i
+		start := time.Now()
+		go func() {
+			defer close(in)
+			for i := range 4 {
+				in <- i
+			}
+		}()
+
+		res := pipeline.Collect(out)
+		elapsed := time.Since(start)
+		t.Log(elapsed)
+
+		// Four items at 25ms per item must take 100ms.
+		if elapsed != 100*time.Millisecond {
+			t.Error("not rate limited")
 		}
-	}()
 
-	res := pipeline.Collect(out)
-	elapsed := time.Since(start)
-	t.Log(elapsed)
-
-	// Should take at least 150ms for 3 items with 50ms throttle
-	if elapsed > 110*time.Millisecond {
-		t.Error("not rate limited")
-	}
-
-	want := 4
-	got := len(res)
-	if want != got {
-		t.Errorf("want %d, got %d", want, got)
-	}
+		want := 4
+		got := len(res)
+		if want != got {
+			t.Errorf("want %d, got %d", want, got)
+		}
+	})
 }
 
 func TestTee(t *testing.T) {

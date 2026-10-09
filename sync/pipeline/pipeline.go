@@ -9,7 +9,7 @@ import (
 )
 
 // Batch collects items into batches when the size or
-// timeout exceeds the specied threshold.
+// timeout exceeds the specified threshold.
 func Batch[T any](in <-chan T, size int, timeout time.Duration) <-chan []T {
 	if size <= 0 {
 		panic("pipeline: invalid n")
@@ -21,8 +21,19 @@ func Batch[T any](in <-chan T, size int, timeout time.Duration) <-chan []T {
 		defer close(out)
 
 		var batch []T
+		var timer *time.Timer
+		var tick <-chan time.Time
+		defer func() {
+			if timer != nil {
+				timer.Stop()
+			}
+		}()
 		flush := func() {
 			if len(batch) > 0 {
+				if timer != nil {
+					timer.Stop()
+				}
+				tick = nil
 				out <- batch
 				batch = nil
 			}
@@ -35,13 +46,19 @@ func Batch[T any](in <-chan T, size int, timeout time.Duration) <-chan []T {
 					flush()
 					return
 				}
-
+				if len(batch) == 0 {
+					if timer == nil {
+						timer = time.NewTimer(timeout)
+					} else {
+						timer.Reset(timeout)
+					}
+					tick = timer.C
+				}
 				batch = append(batch, v)
 				if len(batch) >= size {
 					flush()
 				}
-
-			case <-time.After(timeout):
+			case <-tick:
 				flush()
 			}
 		}
@@ -256,7 +273,7 @@ func Pipe[T, V any](in <-chan T, fn func(T) (V, bool)) <-chan V {
 
 // PipeN is like Pipe, but runs multiple workers.
 func PipeN[T, V any](in <-chan T, fn func(T) (V, bool), n int) <-chan V {
-	if n == 0 {
+	if n <= 0 {
 		panic("min 1 running goroutine")
 	}
 
@@ -284,6 +301,9 @@ func PipeN[T, V any](in <-chan T, fn func(T) (V, bool), n int) <-chan V {
 
 // RateLimit limits the rate of items passing through
 func RateLimit[T any](in <-chan T, every int, interval time.Duration) <-chan T {
+	if every <= 0 || interval <= 0 || interval/time.Duration(every) <= 0 {
+		panic("pipeline: invalid rate limit")
+	}
 	out := make(chan T)
 
 	go func() {
@@ -327,8 +347,8 @@ func Semaphore[T, V any](in <-chan T, fn func(T) V, n int) <-chan V {
 
 		var wg sync.WaitGroup
 		for v := range in {
+			_ = sem.Acquire(ctx, 1)
 			wg.Go(func() {
-				_ = sem.Acquire(ctx, 1)
 				defer sem.Release(1)
 
 				out <- fn(v)

@@ -19,7 +19,7 @@ func SourceChan[T any](ctx context.Context, in <-chan T) <-chan T {
 				return
 			case v, ok := <-in:
 				if !ok {
-					break
+					return
 				}
 
 				select {
