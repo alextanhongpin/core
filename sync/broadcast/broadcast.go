@@ -9,6 +9,7 @@ type Broadcast[T any] struct {
 	done     chan struct{}
 	register chan chan T
 	wg       sync.WaitGroup
+	mu       sync.Mutex
 }
 
 func New[T any]() (*Broadcast[T], func()) {
@@ -37,14 +38,20 @@ func New[T any]() (*Broadcast[T], func()) {
 
 			case v := <-mu.ch:
 				for _, ch := range chans {
-					ch <- v
+					select {
+					case ch <- v:
+					case <-mu.done:
+						return
+					}
 				}
 			}
 		}
 	})
 
 	return mu, sync.OnceFunc(func() {
+		mu.mu.Lock()
 		close(mu.done)
+		mu.mu.Unlock()
 		mu.wg.Wait()
 	})
 }
@@ -78,6 +85,13 @@ func (b *Broadcast[T]) Go(fn func(T)) {
 		return
 
 	case b.register <- ch:
+		b.mu.Lock()
+		defer b.mu.Unlock()
+		select {
+		case <-b.done:
+			return
+		default:
+		}
 		b.wg.Go(func() {
 			for {
 				select {
