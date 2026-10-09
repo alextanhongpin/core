@@ -7,7 +7,7 @@ import (
 )
 
 func TestFixedWindowInvalidZeroAndRejectedBatch(t *testing.T) {
-	rl := ratelimit.NewFixedWindow(newClient(t), 5, 1500*time.Millisecond)
+	rl := ratelimit.MustNewFixedWindow(newClient(t), ratelimit.Config{Limit: 5, Period: 1500 * time.Millisecond})
 	if _, err := rl.LimitN(t.Context(), t.Name(), -1); err != ratelimit.ErrNegative {
 		t.Fatal(err)
 	}
@@ -27,7 +27,7 @@ func TestFixedWindowInvalidZeroAndRejectedBatch(t *testing.T) {
 	}
 }
 func TestGCRABatchesAreAtomic(t *testing.T) {
-	rl := ratelimit.NewGCRA(newClient(t), 1, time.Hour, 2)
+	rl := ratelimit.MustNewGCRA(newClient(t), ratelimit.Config{Limit: 1, Period: time.Hour, Burst: 2})
 	if ok, err := rl.AllowN(t.Context(), t.Name(), 4); err != nil || ok {
 		t.Fatal("oversize admitted", err)
 	}

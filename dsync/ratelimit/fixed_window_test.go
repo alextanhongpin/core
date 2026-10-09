@@ -13,7 +13,7 @@ func TestFixedWindow(t *testing.T) {
 	ctx := context.Background()
 
 	client := newClient(t)
-	rl := ratelimit.NewFixedWindow(client, 5, time.Second)
+	rl := ratelimit.MustNewFixedWindow(client, ratelimit.Config{Limit: 5, Period: time.Second})
 	key := t.Name()
 	is := assert.New(t)
 	var count int
@@ -33,7 +33,7 @@ func TestFixedWindow_Interval(t *testing.T) {
 	ctx := context.Background()
 
 	client := newClient(t)
-	rl := ratelimit.NewFixedWindow(client, 5, time.Second)
+	rl := ratelimit.MustNewFixedWindow(client, ratelimit.Config{Limit: 5, Period: time.Second})
 
 	is := assert.New(t)
 	key := t.Name()
@@ -52,7 +52,7 @@ func TestFixedWindow_AllowN(t *testing.T) {
 	ctx := context.Background()
 
 	client := newClient(t)
-	rl := ratelimit.NewFixedWindow(client, 5, time.Second)
+	rl := ratelimit.MustNewFixedWindow(client, ratelimit.Config{Limit: 5, Period: time.Second})
 
 	key := t.Name()
 
@@ -78,7 +78,7 @@ func TestFixedWindow_Expiry(t *testing.T) {
 			client.FlushAll(ctx)
 		})
 
-		rl := ratelimit.NewFixedWindow(client, 5, 10*time.Second)
+		rl := ratelimit.MustNewFixedWindow(client, ratelimit.Config{Limit: 5, Period: 10 * time.Second})
 
 		key := t.Name()
 		result, err := rl.Limit(ctx, key)
@@ -95,7 +95,7 @@ func TestFixedWindow_Expiry(t *testing.T) {
 			client.FlushAll(ctx)
 		})
 
-		rl := ratelimit.NewFixedWindow(client, 5, 10*time.Second)
+		rl := ratelimit.MustNewFixedWindow(client, ratelimit.Config{Limit: 5, Period: 10 * time.Second})
 		key := t.Name()
 		result, err := rl.LimitN(ctx, key, 5)
 

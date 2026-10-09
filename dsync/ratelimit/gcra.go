@@ -3,6 +3,7 @@ package ratelimit
 import (
 	"context"
 	_ "embed"
+	"errors"
 	"time"
 
 	redis "github.com/redis/go-redis/v9"
@@ -18,24 +19,26 @@ type GCRA struct {
 	period time.Duration
 }
 
-// NewGCRA creates a new GCRA rate limiter.
-//
-// Parameters:
-//   - client: Redis client for distributed coordination
-//   - limit: Maximum number of requests per period
-//   - period: Time period for the rate limit
-//   - burst: Additional burst capacity (0 = no burst allow)
-//
-// Example:
-//
-//	rl := NewGCRA(client, 100, time.Second, 10)  // 100 req/sec with 10 burst
-func NewGCRA(client *redis.Client, limit int, period time.Duration, burst int) *GCRA {
-	return &GCRA{
-		limit:  limit,
-		client: client,
-		burst:  burst,
-		period: period,
+// NewGCRA defaults and validates a configuration value; client remains borrowed.
+func NewGCRA(client *redis.Client, cfg Config) (*GCRA, error) {
+	if client == nil {
+		return nil, errors.New("ratelimit: nil client")
 	}
+	cfg = cfg.WithDefaults()
+	if err := cfg.Validate(); err != nil {
+		return nil, err
+	}
+	if err := cfg.validateGCRA(); err != nil {
+		return nil, err
+	}
+	return &GCRA{client: client, limit: cfg.Limit, period: cfg.Period, burst: cfg.Burst}, nil
+}
+func MustNewGCRA(client *redis.Client, cfg Config) *GCRA {
+	r, err := NewGCRA(client, cfg)
+	if err != nil {
+		panic(err)
+	}
+	return r
 }
 
 // Allow checks if a single request is allow for the given key.
@@ -55,8 +58,8 @@ func (g *GCRA) AllowN(ctx context.Context, key string, n int) (bool, error) {
 
 // LimitN performs a rate limit check for N requests and returns detailed information.
 func (g *GCRA) LimitN(ctx context.Context, key string, n int) (*Result, error) {
-	if n < 0 {
-		return nil, ErrNegative
+	if err := validateRequest(key, n); err != nil {
+		return nil, err
 	}
 	values, err := g.client.FCall(ctx, "rl_gcra", []string{key}, g.burst, g.limit, g.period.Milliseconds(), n).Int64Slice()
 	if err != nil {

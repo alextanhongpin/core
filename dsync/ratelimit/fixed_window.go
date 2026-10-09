@@ -3,6 +3,7 @@ package ratelimit
 import (
 	"context"
 	_ "embed"
+	"errors"
 	"time"
 
 	redis "github.com/redis/go-redis/v9"
@@ -17,22 +18,23 @@ type FixedWindow struct {
 	period time.Duration
 }
 
-// NewFixedWindow creates a new Fixed Window rate limiter.
-//
-// Parameters:
-//   - client: Redis client for distributed coordination
-//   - limit: Maximum number of requests per window
-//   - period: Duration of each window
-//
-// Example:
-//
-//	rl := NewFixedWindow(client, 1000, time.Hour)  // 1000 requests per hour
-func NewFixedWindow(client *redis.Client, limit int, period time.Duration) *FixedWindow {
-	return &FixedWindow{
-		client: client,
-		limit:  limit,
-		period: period,
+// NewFixedWindow defaults and validates a configuration value; client remains borrowed.
+func NewFixedWindow(client *redis.Client, cfg Config) (*FixedWindow, error) {
+	if client == nil {
+		return nil, errors.New("ratelimit: nil client")
 	}
+	cfg = cfg.WithDefaults()
+	if err := cfg.Validate(); err != nil {
+		return nil, err
+	}
+	return &FixedWindow{client: client, limit: cfg.Limit, period: cfg.Period}, nil
+}
+func MustNewFixedWindow(client *redis.Client, cfg Config) *FixedWindow {
+	r, err := NewFixedWindow(client, cfg)
+	if err != nil {
+		panic(err)
+	}
+	return r
 }
 
 // AllowN checks if N requests are allowed for the given key.
@@ -50,8 +52,8 @@ func (r *FixedWindow) Allow(ctx context.Context, key string) (bool, error) {
 }
 
 func (r *FixedWindow) LimitN(ctx context.Context, key string, n int) (*Result, error) {
-	if n < 0 {
-		return nil, ErrNegative
+	if err := validateRequest(key, n); err != nil {
+		return nil, err
 	}
 	values, err := r.client.FCall(ctx, "rl_fixed_window", []string{key}, r.limit, r.period.Milliseconds(), n).Int64Slice()
 	if err != nil {

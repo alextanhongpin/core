@@ -16,7 +16,7 @@ func TestGCRA_Limit(t *testing.T) {
 
 	is := assert.New(t)
 	// 5 requests per second.
-	rl := ratelimit.NewGCRA(client, 5, time.Second, 0)
+	rl := ratelimit.MustNewGCRA(client, ratelimit.Config{Limit: 5, Period: time.Second, Burst: 0})
 
 	key := t.Name()
 	var total int
@@ -38,7 +38,7 @@ func TestGCRA_LimitN(t *testing.T) {
 	client := newClient(t)
 
 	is := assert.New(t)
-	rl := ratelimit.NewGCRA(client, 5, time.Second, 3)
+	rl := ratelimit.MustNewGCRA(client, ratelimit.Config{Limit: 5, Period: time.Second, Burst: 3})
 
 	key := t.Name()
 	var total int
@@ -62,7 +62,7 @@ func TestGCRA_withBurst(t *testing.T) {
 
 	is := assert.New(t)
 	// 5 request per second, each request takes 200ms.
-	rl := ratelimit.NewGCRA(client, 5, time.Second, 1)
+	rl := ratelimit.MustNewGCRA(client, ratelimit.Config{Limit: 5, Period: time.Second, Burst: 1})
 
 	var total int
 	key := t.Name()
@@ -79,7 +79,7 @@ func TestGCRA_withBurst(t *testing.T) {
 }
 
 func TestGCRA_retryAfter(t *testing.T) {
-	rl := ratelimit.NewGCRA(newClient(t), 1, time.Hour, 0)
+	rl := ratelimit.MustNewGCRA(newClient(t), ratelimit.Config{Limit: 1, Period: time.Hour, Burst: 0})
 	first, err := rl.Limit(t.Context(), t.Name())
 	if err != nil || !first.Allow {
 		t.Fatalf("initial admission: %+v %v", first, err)
@@ -96,7 +96,7 @@ func TestGCRA_zero(t *testing.T) {
 	client := newClient(t)
 	is := assert.New(t)
 	// 5 request per second, each request takes 200ms.
-	rl := ratelimit.NewGCRA(client, 5, time.Second, 1)
+	rl := ratelimit.MustNewGCRA(client, ratelimit.Config{Limit: 5, Period: time.Second, Burst: 1})
 
 	key := t.Name()
 
