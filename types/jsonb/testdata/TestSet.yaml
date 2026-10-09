@@ -1,0 +1,17 @@
+name: dict
+input:
+  data: {foo: {bar: {baz: value}}}
+  key: "foo.bar.baz"
+  value: "edited value"
+assert:
+  - name: exact
+    value: output.foo.bar.baz == "edited value"
+---
+name: array
+input:
+  data: [{foo: {bar: {baz: value}}}]
+  key: "[].foo.bar.baz"
+  value: "edited value"
+assert:
+  - name: exact
+    value: output[0].foo.bar.baz == "edited value"

@@ -139,7 +139,7 @@ func ExampleGroupBy_usersByRole() {
 	for role, roleUsers := range grouped {
 		fmt.Printf("%s: %d users\n", role, len(roleUsers))
 	}
-	// Output: admin: 2 users
+	// Unordered output: admin: 2 users
 	// user: 2 users
 }
 
