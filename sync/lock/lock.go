@@ -23,6 +23,9 @@ type entry struct {
 	mu sync.Mutex
 }
 
+// KeyLock coordinates callers by key. Its zero value is ready to use.
+// Different keys can be acquired independently. Keep the returned unlocker
+// alive until Unlock is called; entries are reclaimed after garbage collection.
 type KeyLock struct {
 	mu    sync.Mutex
 	locks map[string]weak.Pointer[entry]
@@ -55,10 +58,13 @@ func (l *KeyLock) Has(key string) bool {
 
 func (l *KeyLock) Lock(key string) unlocker {
 	l.mu.Lock()
-	defer l.mu.Unlock()
+	if l.locks == nil {
+		l.locks = make(map[string]weak.Pointer[entry])
+	}
 
 	if wp, exists := l.locks[key]; exists {
 		if e := wp.Value(); e != nil {
+			l.mu.Unlock()
 			e.mu.Lock()
 			return &e.mu
 		}
@@ -76,6 +82,7 @@ func (l *KeyLock) Lock(key string) unlocker {
 		}
 	}, key)
 
+	l.mu.Unlock()
 	e.mu.Lock()
 	return &e.mu
 }

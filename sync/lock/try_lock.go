@@ -20,6 +20,9 @@ func NewTryLock() *TryLock {
 
 func (l *TryLock) TryLock(key string) bool {
 	l.mu.Lock()
+	if l.locks == nil {
+		l.locks = make(map[string]struct{})
+	}
 	_, ok := l.locks[key]
 	if !ok {
 		l.locks[key] = struct{}{}
