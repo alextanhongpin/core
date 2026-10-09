@@ -5,6 +5,10 @@ import (
 	"sync"
 )
 
+// Goroutine owns cancelable work. Its zero value is ready to use.
+// Start cancels previous work without waiting; callbacks may overlap.
+// Stop waits for all callbacks, which must cooperate with cancellation and
+// must not call Start or Stop on this instance while Stop is waiting.
 type Goroutine struct {
 	mu     sync.Mutex
 	cancel func()
@@ -35,6 +39,7 @@ func (g *Goroutine) start(ctx context.Context, fn func(context.Context)) {
 	ctx, cancel := context.WithCancel(ctx)
 	g.cancel = cancel
 	g.wg.Go(func() {
+		defer cancel()
 		fn(ctx)
 	})
 }

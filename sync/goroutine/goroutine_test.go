@@ -48,3 +48,19 @@ func TestGoroutine(t *testing.T) {
 		t.Errorf("want %d, got %d", want, got)
 	}
 }
+
+func TestCompletedCallbackReleasesContext(t *testing.T) {
+	g := goroutine.New()
+	contexts := make(chan context.Context, 1)
+	g.Start(t.Context(), func(ctx context.Context) { contexts <- ctx })
+	ctx := <-contexts
+	defer g.Stop()
+	select {
+	case <-ctx.Done():
+	case <-time.After(time.Second):
+		t.Fatal("completed callback retained its context")
+	}
+	if ctx.Err() != context.Canceled {
+		t.Fatal("callback context was not canceled")
+	}
+}
