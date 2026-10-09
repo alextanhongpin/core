@@ -4,6 +4,9 @@ import (
 	"sync"
 )
 
+// Broadcast delivers values serially to registered subscribers. Slow subscribers
+// apply backpressure. Construct it with New; the zero value is not usable.
+// Values are shared without copying; callers own their synchronization.
 type Broadcast[T any] struct {
 	ch       chan T
 	done     chan struct{}
@@ -12,6 +15,10 @@ type Broadcast[T any] struct {
 	mu       sync.Mutex
 }
 
+// New starts a dispatcher. The returned stop function is concurrent-safe and
+// idempotent, interrupts pending delivery, closes subscriber channels, and waits
+// for worker callbacks. Callbacks must not call stop, Send, Chan, or Go on this
+// instance: those operations can wait for the callback itself to finish.
 func New[T any]() (*Broadcast[T], func()) {
 	mu := &Broadcast[T]{
 		ch:       make(chan T),
@@ -56,6 +63,8 @@ func New[T any]() (*Broadcast[T], func()) {
 	})
 }
 
+// Send blocks until the dispatcher accepts n or shutdown begins. Acceptance
+// does not guarantee delivery: stop may interrupt delivery to any subscriber.
 func (b *Broadcast[T]) Send(n T) {
 	select {
 	case <-b.done:
