@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/sync/singleflight"
 	"golang.org/x/sys/unix"
 )
 
@@ -39,6 +40,7 @@ func NewEvent(key string, val []byte, ttl time.Duration) *Event {
 }
 
 type File struct {
+	group  singleflight.Group
 	path   string
 	closed bool
 	file   *os.File
@@ -141,29 +143,47 @@ func (f *File) LoadOrStore(ctx context.Context, key string, value []byte, ttl ti
 	return value, false, nil
 }
 
-func (f *File) LoadOrCreate(ctx context.Context, key string, create func(context.Context, string) ([]byte, time.Duration, error)) (curr []byte, loaded bool, err error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-
-	v, err := f.load(key)
-	if err == nil {
-		return slices.Clone(v.Val), true, nil
+// LoadOrCreate coalesces local fills per key without holding the storage
+// mutex during create. Factories may access other keys, but must not recursively
+// fill the same key. Followers share the leader's context and wait for it.
+func (f *File) LoadOrCreate(ctx context.Context, key string, create func(context.Context, string) ([]byte, time.Duration, error)) ([]byte, bool, error) {
+	if err := context.Cause(ctx); err != nil {
+		return nil, false, err
 	}
-
+	curr, err := f.Load(ctx, key)
+	if err == nil {
+		return curr, true, nil
+	}
 	if !errors.Is(err, ErrNotExist) {
 		return nil, false, err
 	}
-
-	value, ttl, err := create(ctx, key)
+	if create == nil {
+		return nil, false, errors.New("cache: create is required")
+	}
+	created := false
+	result, err, _ := f.group.Do(key, func() (any, error) {
+		curr, err := f.Load(ctx, key)
+		if err == nil {
+			return curr, nil
+		}
+		if !errors.Is(err, ErrNotExist) {
+			return nil, err
+		}
+		value, ttl, err := create(ctx, key)
+		if err != nil {
+			return nil, err
+		}
+		if err := context.Cause(ctx); err != nil {
+			return nil, err
+		}
+		curr, loaded, err := f.LoadOrStore(ctx, key, value, ttl)
+		created = err == nil && !loaded
+		return curr, err
+	})
 	if err != nil {
 		return nil, false, err
 	}
-
-	err = f.save(key, value, ttl)
-	if err != nil {
-		return nil, false, err
-	}
-	return value, false, nil
+	return slices.Clone(result.([]byte)), !created, nil
 }
 
 // LoadAndDelete deletes the value for a key, returning the previous value if

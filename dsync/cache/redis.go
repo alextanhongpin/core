@@ -180,13 +180,13 @@ func (r *Redis) Exists(ctx context.Context, key string) (bool, error) {
 // Returns -1 if the key exists but has no expiration.
 // Returns -2 if the key does not exist.
 func (r *Redis) TTL(ctx context.Context, key string) (time.Duration, error) {
-	return r.client.TTL(ctx, key).Result()
+	return r.client.PTTL(ctx, key).Result()
 }
 
 // Expire sets a timeout on a key. After the timeout has expired, the key will automatically be deleted.
 func (r *Redis) Expire(ctx context.Context, key string, ttl time.Duration) error {
-	err := r.client.Expire(ctx, key, ttl).Err()
-	if errors.Is(err, redis.Nil) {
+	ok, err := r.client.PExpire(ctx, key, ttl).Result()
+	if err == nil && !ok {
 		return ErrNotExist
 	}
 	return err
