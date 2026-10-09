@@ -3,8 +3,10 @@ package singleflight
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"math/rand/v2"
+	"sync"
 	"time"
 
 	"github.com/alextanhongpin/core/dsync/lock"
@@ -23,7 +25,14 @@ type BackOff interface {
 	Duration(i int) time.Duration
 }
 
+type flight struct {
+	done chan struct{}
+	err  error
+}
+
 type Group struct {
+	mu      sync.Mutex
+	flights map[string]*flight
 	BackOff BackOff
 	Client  *redis.Client
 	Locker  *lock.Locker
@@ -38,15 +47,44 @@ func New(client *redis.Client) *Group {
 	}
 }
 
-func (g *Group) Do(ctx context.Context, key string, fn func(context.Context) error, lockTTL, waitTTL time.Duration) (doOrWait bool, err error) {
-	did, shared, err := g.Group.Do(ctx, key, func(ctx context.Context) (bool, error) {
-		return g.doOrWait(ctx, key, fn, lockTTL, waitTTL)
-	})
-	if err != nil {
+func (g *Group) Do(ctx context.Context, key string, fn func(context.Context) error, lockTTL, waitTTL time.Duration) (did bool, err error) {
+	if key == "" || fn == nil || lockTTL < time.Millisecond || waitTTL <= 0 {
+		return false, fmt.Errorf("singleflight: key, callback, and positive lease/wait durations are required")
+	}
+	if err := context.Cause(ctx); err != nil {
 		return false, err
 	}
-
-	return did && !shared, nil
+	g.mu.Lock()
+	if g.flights == nil {
+		g.flights = make(map[string]*flight)
+	}
+	if f, ok := g.flights[key]; ok {
+		g.mu.Unlock()
+		select {
+		case <-ctx.Done():
+			return false, context.Cause(ctx)
+		case <-f.done:
+			return false, f.err
+		}
+	}
+	f := &flight{done: make(chan struct{})}
+	g.flights[key] = f
+	g.mu.Unlock()
+	completed := false
+	defer func() {
+		g.mu.Lock()
+		defer g.mu.Unlock()
+		if !completed {
+			f.err = errors.New("singleflight: leader panicked")
+		} else {
+			f.err = err
+		}
+		delete(g.flights, key)
+		close(f.done)
+	}()
+	did, err = g.doOrWait(ctx, key, fn, lockTTL, waitTTL)
+	completed = true
+	return did, err
 }
 
 func (g *Group) doOrWait(ctx context.Context, key string, fn func(context.Context) error, lockTTL, waitTTL time.Duration) (doOrWait bool, err error) {
@@ -73,70 +111,84 @@ func (g *Group) doOrWait(ctx context.Context, key string, fn func(context.Contex
 	return err == nil, err
 }
 
-func (g *Group) do(ctx context.Context, key string, token string, fn func(context.Context) error, lockTTL time.Duration) error {
-	ch := make(chan error, 1)
+func (g *Group) do(ctx context.Context, key string, token string, fn func(context.Context) error, lockTTL time.Duration) (err error) {
+	work, cancel := context.WithCancelCause(ctx)
+	defer cancel(nil)
+	stop := make(chan struct{})
+	done := make(chan struct{})
 	go func() {
-		defer close(ch)
-
-		ch <- fn(ctx)
-	}()
-
-	t := time.NewTicker(lockTTL * 3 / 4)
-	defer t.Stop()
-
-	defer g.unlock(context.WithoutCancel(ctx), key, token)
-
-	for {
-		select {
-		case <-ctx.Done():
-			return context.Cause(ctx)
-		case <-t.C:
-			if err := g.Locker.Extend(ctx, key, token, lockTTL); err != nil {
-				return err
+		defer close(done)
+		ticker := time.NewTicker(lockTTL * 3 / 4)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-stop:
+				return
+			case <-work.Done():
+				return
+			case <-ticker.C:
+				if e := g.Locker.Extend(work, key, token, lockTTL); e != nil {
+					cancel(e)
+					return
+				}
 			}
-		case err := <-ch:
-			return err
+		}
+	}()
+	joined := false
+	join := func() {
+		if !joined {
+			close(stop)
+			<-done
+			joined = true
 		}
 	}
+	defer func() {
+		join()
+		cleanup, c := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer c()
+		err = errors.Join(err, g.unlock(cleanup, key, token))
+	}()
+	err = fn(work)
+	join()
+	return errors.Join(err, context.Cause(work))
 }
 
 func (g *Group) wait(ctx context.Context, key string, waitTTL time.Duration) error {
-	// Listen to done subscription.
-	sub := g.Client.Subscribe(ctx, key)
+	wait, cancel := context.WithTimeout(ctx, waitTTL)
+	defer cancel()
+	sub := g.Client.Subscribe(wait, key)
 	defer sub.Close()
-
-	// NOTE: This is left here for reminder.
-	// Using the expiry is not reliable, because
-	// 1) the key might be deleted before the expiry
-	// 2) the key might be extended before the expiry
-	//
-	// expiry, err := g.Client.PTTL(ctx, key).Result()
-
-	// Timeout after expiry.
-	timeout := time.After(waitTTL)
-
-	var i int
+	// Acknowledge subscription, then recheck for a release that raced with it.
+	if _, err := sub.Receive(wait); err != nil {
+		return err
+	}
+	messages := sub.Channel()
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	check := func() (bool, error) { return g.done(wait, key) }
+	if ok, err := check(); ok || err != nil {
+		return err
+	}
 	for {
 		select {
-		case <-time.After(g.backOffDuration(i)):
-			ok, err := g.done(ctx, key)
-			if err != nil {
+		case <-ticker.C:
+			if ok, err := check(); ok || err != nil {
 				return err
 			}
-			if ok {
-				return nil
+		case msg, ok := <-messages:
+			if !ok {
+				return ErrSubscriptionClosed
 			}
-			i++
-		case msg := <-sub.Channel():
-			if msg.Channel != OK {
-				continue
+			if msg.Payload == OK {
+				if ok, err := check(); ok || err != nil {
+					return err
+				}
 			}
-
-			return ErrSubscriptionClosed
-		case <-timeout:
+		case <-wait.Done():
+			if ctx.Err() != nil {
+				return context.Cause(ctx)
+			}
 			return ErrTimeout
-		case <-ctx.Done():
-			return context.Cause(ctx)
 		}
 	}
 }

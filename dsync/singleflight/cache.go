@@ -38,13 +38,23 @@ func (c *Cache[T]) LoadOrStore(ctx context.Context, key string, getter func(ctx 
 		return t, false, err
 	}
 
+	created := false
 	did, err := c.Group.Do(ctx, fmt.Sprintf("%s:%s", key, c.Suffix), func(ctx context.Context) error {
+		if _, err := c.load(ctx, key); err == nil {
+			return nil
+		} else if !errors.Is(err, redis.Nil) {
+			return err
+		}
 		v, err := getter(ctx)
 		if err != nil {
 			return err
 		}
 
-		return c.store(ctx, key, v, ttl)
+		if err := c.store(ctx, key, v, ttl); err != nil {
+			return err
+		}
+		created = true
+		return nil
 	}, c.LockTTL, c.WaitTTL)
 	if err != nil {
 		return t, false, err
@@ -55,7 +65,7 @@ func (c *Cache[T]) LoadOrStore(ctx context.Context, key string, getter func(ctx 
 		return t, false, err
 	}
 
-	return t, !did, nil
+	return t, !did || !created, nil
 }
 
 func (c *Cache[T]) load(ctx context.Context, key string) (t T, err error) {
