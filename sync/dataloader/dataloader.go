@@ -27,6 +27,9 @@ type DataLoader[K comparable, V any] struct {
 	ch      chan request[K, V]
 	cfg     Config
 	ctx     context.Context
+	mu      sync.Mutex
+	wg      sync.WaitGroup
+	stopped bool
 	cache   *cache.Cache[K, future[V]]
 }
 
@@ -83,15 +86,16 @@ func New[K comparable, V any](ctx context.Context, fn batchFn[K, V], cfg *Config
 		}),
 	}
 
-	var wg sync.WaitGroup
-	wg.Go(func() {
+	dl.wg.Go(func() {
 		dl.background(ctx)
 	})
 
 	return dl, sync.OnceFunc(func() {
+		dl.mu.Lock()
+		dl.stopped = true
 		cancel(ErrCanceled)
-
-		wg.Wait()
+		dl.mu.Unlock()
+		dl.wg.Wait()
 	})
 }
 
@@ -125,7 +129,7 @@ func (d *DataLoader[K, V]) background(ctx context.Context) {
 	})
 }
 
-func (d *DataLoader[K, V]) load(key K) (*future[V], error) {
+func (d *DataLoader[K, V]) load(key K, async bool) (*future[V], error) {
 	select {
 	case <-d.ctx.Done():
 		return nil, context.Cause(d.ctx)
@@ -136,23 +140,54 @@ func (d *DataLoader[K, V]) load(key K) (*future[V], error) {
 			return fut, nil
 		}
 
-		select {
-		case <-d.ctx.Done():
-			fut.Reject(context.Cause(d.ctx))
-		case d.ch <- request[K, V]{key: key, future: fut}:
+		if !async {
+			select {
+			case <-d.ctx.Done():
+				fut.Reject(context.Cause(d.ctx))
+			case d.ch <- request[K, V]{key: key, future: fut}:
+			}
+			return fut, nil
 		}
+		d.mu.Lock()
+		if !d.stopped {
+			// Admission belongs to the loader, not to any individual waiter.
+			d.wg.Go(func() {
+				select {
+				case <-d.ctx.Done():
+					fut.Reject(context.Cause(d.ctx))
+				case d.ch <- request[K, V]{key: key, future: fut}:
+				}
+			})
+		}
+		d.mu.Unlock()
 
 		return fut, nil
 	}
 }
 
 func (d *DataLoader[K, V]) Load(key K) (V, error) {
-	fut, err := d.load(key)
+	fut, err := d.load(key, false)
 	if err != nil {
 		var zero V
 		return zero, err
 	}
 	return fut.Wait()
+}
+
+// LoadContext cancels only this caller's result wait. Shared admission and
+// loading continue under the loader lifetime context. Cancellation racing with
+// a completed result may return either outcome.
+func (d *DataLoader[K, V]) LoadContext(ctx context.Context, key K) (V, error) {
+	if ctx.Err() != nil {
+		var zero V
+		return zero, context.Cause(ctx)
+	}
+	fut, err := d.load(key, true)
+	if err != nil {
+		var zero V
+		return zero, err
+	}
+	return fut.WaitContext(ctx)
 }
 
 func (d *DataLoader[K, V]) LoadMany(keys ...K) ([]*Result[K, V], error) {
@@ -163,7 +198,7 @@ func (d *DataLoader[K, V]) LoadMany(keys ...K) ([]*Result[K, V], error) {
 	default:
 		fs := make([]*future[V], len(keys))
 		for i, key := range keys {
-			f, err := d.load(key)
+			f, err := d.load(key, false)
 			if err != nil {
 				return nil, err
 			}
@@ -206,6 +241,20 @@ func (f *future[T]) Resolve(val T) {
 
 func (f *future[T]) Wait() (T, error) {
 	<-f.ctx.Done()
+	return f.result()
+}
+
+func (f *future[T]) WaitContext(ctx context.Context) (T, error) {
+	select {
+	case <-ctx.Done():
+		var zero T
+		return zero, context.Cause(ctx)
+	case <-f.ctx.Done():
+		return f.result()
+	}
+}
+
+func (f *future[T]) result() (T, error) {
 	err := context.Cause(f.ctx)
 	if e, ok := errors.AsType[*errVal[T]](err); ok {
 		return e.val, nil

@@ -304,3 +304,5 @@ func TestDataloader_ErrCanceled(t *testing.T) {
 ## License
 
 MIT License. See [LICENSE](../../LICENSE) for details.
+
+`LoadContext(ctx, key)` cancels an individual caller's wait without canceling the shared load. `Func` uses this method and therefore requires a loader with `LoadContext`. Admission for each newly created future runs in a loader-owned goroutine; these goroutines and the batch worker stop and are joined by the returned stop function. Pending keys remain bounded by caller workload, not by BufferSize alone.
