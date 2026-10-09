@@ -97,14 +97,15 @@ func (t *Throttler) Do(ctx context.Context, fn func(context.Context) error) erro
 Attempts to acquire a token within `t.BacklogTimeout`.
 
 * Returns `nil` on success, `fn` is executed.
-* Returns `ErrTimeout` if the context is cancelled or the configured timeout expires.
+* Returns the caller context cause if it is cancelled, or `ErrTimeout` if admission waiting expires.
+* The callback receives the original caller context; the backlog timeout does not cancel admitted work. A zero backlog timeout allows immediate admission without waiting.
 * Returns `ErrCapacityExceeded` if `backlogCh` is empty at call time.
 
 Acquisition order:
 1. non-blocking take from `backlogCh`; if empty return `ErrCapacityExceeded`
 2. take from `ch` with timeout derived from `BacklogTimeout` and the incoming context
 3. run `fn`
-4. return tokens to both channels on exit via deferred `select` with default to avoid deadlock
+4. return tokens to both channels on exit via deferred sends
 
 ### Errors
 
@@ -134,7 +135,7 @@ See `README_TESTS.md` for details.
 ## Notes
 
 * The throttler has no `Close` method; channels are left for GC when the throttler is discarded.
-* Tokens are returned via `select` with default to avoid dead-lock on shutdown.
+* Tokens are returned on success, error, cancellation, timeout, and panic. Configure exported fields before concurrent use.
 * For production use consider adding metrics around `ErrCapacityExceeded` and `ErrTimeout` rates.
 
 ## Func Helper

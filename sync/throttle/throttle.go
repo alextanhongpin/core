@@ -79,40 +79,35 @@ func New(cfg *Config) *Throttler {
 	}
 }
 
-// Do executes fn with concurrency throttling.
-// It returns nil on success, ErrTimeout on context expiration, ErrCapacityExceeded when the limit is hit.
+// Do executes fn with concurrency throttling. BacklogTimeout only limits
+// admission waiting; fn receives the original caller context. A zero timeout
+// allows immediate admission but does not wait for a busy slot.
+// Config fields must not be changed concurrently with Do.
 func (t *Throttler) Do(ctx context.Context, fn func(context.Context) error) error {
-	// Set timeout context based on configuration
-	ctx, cancel := context.WithTimeoutCause(ctx, t.BacklogTimeout, ErrTimeout)
-	defer cancel()
-
-	select {
-	case <-ctx.Done():
+	if ctx.Err() != nil {
 		return context.Cause(ctx)
-
+	}
+	select {
 	case <-t.backlogCh:
-		// Try to acquire from backlog
-		defer func() {
-			select {
-			case t.backlogCh <- struct{}{}:
-			default:
-			}
-		}()
-
-		select {
-		case <-ctx.Done():
-			return context.Cause(ctx)
-		case <-t.ch:
-			// Acquired from primary channel
-			defer func() {
-				select {
-				case t.ch <- struct{}{}:
-				default:
-				}
-			}()
-			return fn(ctx)
-		}
+		defer func() { t.backlogCh <- struct{}{} }()
 	default:
 		return ErrCapacityExceeded
 	}
+
+	select {
+	case <-t.ch:
+	default:
+		waitCtx, cancel := context.WithTimeoutCause(ctx, t.BacklogTimeout, ErrTimeout)
+		defer cancel()
+		select {
+		case <-waitCtx.Done():
+			return context.Cause(waitCtx)
+		case <-t.ch:
+		}
+	}
+	defer func() { t.ch <- struct{}{} }()
+	if ctx.Err() != nil {
+		return context.Cause(ctx)
+	}
+	return fn(ctx)
 }
