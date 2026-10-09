@@ -9,11 +9,10 @@ import (
 )
 
 func TestZeroDurationAndConfigOwnership(t *testing.T) {
-	cfg := &snapshot.Config{Policies: []snapshot.Policy{{Changes: 1, After: 0}}}
-	s, stop := snapshot.New(cfg)
+	cfg := snapshot.Config{Policies: []snapshot.Policy{{Changes: 1, After: 0}}}
+	s, stop := snapshot.MustNew(cfg)
 	defer stop()
 	cfg.Policies[0].Changes = 100
-	s.Policies[0].Changes = 200
 	ch := s.Chan()
 	s.Inc()
 	select {
@@ -27,7 +26,7 @@ func TestZeroDurationAndConfigOwnership(t *testing.T) {
 }
 
 func TestStopWithUnreadSubscriber(t *testing.T) {
-	s, stop := snapshot.New(&snapshot.Config{Policies: []snapshot.Policy{{Changes: 1}}})
+	s, stop := snapshot.MustNew(snapshot.Config{Policies: []snapshot.Policy{{Changes: 1}}})
 	s.Chan()
 	s.Inc()
 	done := make(chan struct{})
@@ -41,7 +40,7 @@ func TestStopWithUnreadSubscriber(t *testing.T) {
 
 func TestConcurrentAddAndStop(t *testing.T) {
 	for range 100 {
-		s, stop := snapshot.New(snapshot.DefaultConfig())
+		s, stop := snapshot.MustNew(snapshot.DefaultConfig())
 		var wg sync.WaitGroup
 		wg.Go(func() {
 			for range 100 {
@@ -55,7 +54,7 @@ func TestConcurrentAddAndStop(t *testing.T) {
 
 func TestPolicyTimerSurvivesContinuousChanges(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		s, stop := snapshot.New(&snapshot.Config{Policies: []snapshot.Policy{{Changes: 1, After: time.Second}}})
+		s, stop := snapshot.MustNew(snapshot.Config{Policies: []snapshot.Policy{{Changes: 1, After: time.Second}}})
 		defer stop()
 		ch := s.Chan()
 		for range 9 {

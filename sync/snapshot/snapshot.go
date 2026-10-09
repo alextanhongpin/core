@@ -27,11 +27,10 @@ func DefaultPolicies() []Policy {
 }
 
 type Snapshot struct {
-	*Config
 	*broadcast.Broadcast[Policy]
-	ch       chan int
-	policies []Policy
-	done     chan struct{}
+	ch   chan int
+	cfg  Config
+	done chan struct{}
 }
 
 type Config struct {
@@ -39,17 +38,23 @@ type Config struct {
 	Policies   []Policy
 }
 
-func DefaultConfig() *Config {
-	return &Config{
+func DefaultConfig() Config {
+	return Config{
 		BufferSize: 0,
 		Policies:   DefaultPolicies(),
 	}
 }
 
-func (cfg *Config) Validate() error {
-	if cfg == nil {
-		return errors.New("snapshot: nil config")
+// WithDefaults selects default policies only when Policies is nil. An explicit
+// empty policy slice is invalid. Zero BufferSize keeps admission unbuffered.
+func (cfg Config) WithDefaults() Config {
+	if cfg.Policies == nil {
+		cfg.Policies = DefaultPolicies()
 	}
+	return cfg
+}
+
+func (cfg Config) Validate() error {
 	if cfg.BufferSize < 0 {
 		return errors.New("snapshot: negative buffer size")
 	}
@@ -64,21 +69,19 @@ func (cfg *Config) Validate() error {
 	return nil
 }
 
-func New(cfg *Config) (*Snapshot, func()) {
+// New owns a configuration copy including the policy slice. It validates before
+// starting work. Stop interrupts pending notifications and waits for workers.
+func New(cfg Config) (*Snapshot, func(), error) {
+	cfg = cfg.WithDefaults()
 	if err := cfg.Validate(); err != nil {
-		panic(err)
+		return nil, nil, err
 	}
-	owned := *cfg
-	owned.Policies = slices.Clone(cfg.Policies)
-	cfg = &owned
-	slices.SortFunc(cfg.Policies, func(a, b Policy) int {
-		return cmp.Compare(a.After, b.After)
-	})
+	cfg.Policies = slices.Clone(cfg.Policies)
+	slices.SortFunc(cfg.Policies, func(a, b Policy) int { return cmp.Compare(a.After, b.After) })
 	b, stop := broadcast.New[Policy]()
 	bg := &Snapshot{
 		Broadcast: b,
-		Config:    cfg,
-		policies:  slices.Clone(cfg.Policies),
+		cfg:       cfg,
 		ch:        make(chan int, cfg.BufferSize),
 		done:      make(chan struct{}),
 	}
@@ -90,7 +93,16 @@ func New(cfg *Config) (*Snapshot, func()) {
 		close(bg.done)
 		stop()
 		wg.Wait()
-	})
+	}), nil
+}
+
+// MustNew is New for startup wiring that must panic on invalid configuration.
+func MustNew(cfg Config) (*Snapshot, func()) {
+	s, stop, err := New(cfg)
+	if err != nil {
+		panic(err)
+	}
+	return s, stop
 }
 
 // Inc increments the counter by 1. Calls Add(1).
@@ -111,12 +123,12 @@ func (b *Snapshot) loop() {
 
 	var count int
 	last := time.Now()
-	interval := minInterval(b.policies)
+	interval := minInterval(b.cfg.Policies)
 
 	flush := func(n int) {
 		count += n
 		elapsed := time.Since(last)
-		for _, p := range b.policies {
+		for _, p := range b.cfg.Policies {
 			if elapsed < p.After {
 				return
 			}
