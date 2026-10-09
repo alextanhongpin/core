@@ -32,9 +32,10 @@ func NewFixedWindow(cfg *Config) *FixedWindow {
 	}
 
 	return &FixedWindow{
-		limit:  int64(cfg.Limit),
-		period: cfg.Period.Nanoseconds(),
-		state:  make(map[string]fixedWindowState),
+		limit:   int64(cfg.Limit),
+		nowFunc: time.Now,
+		period:  cfg.Period.Nanoseconds(),
+		state:   make(map[string]fixedWindowState),
 	}
 }
 
@@ -63,7 +64,7 @@ func (r *FixedWindow) LimitN(key string, n int) *Result {
 	defer r.mu.Unlock()
 
 	curr := r.state[key]
-	now := time.Now().UnixNano()
+	now := r.nowFunc().UnixNano()
 	quantity := int64(n)
 
 	if curr.last+r.period <= now {
@@ -71,7 +72,7 @@ func (r *FixedWindow) LimitN(key string, n int) *Result {
 		curr.count = 0
 	}
 
-	allow := curr.count+quantity <= r.limit
+	allow := quantity <= r.limit-curr.count
 	if allow {
 		curr.count += quantity
 	}

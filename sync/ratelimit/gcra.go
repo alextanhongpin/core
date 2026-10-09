@@ -2,6 +2,7 @@ package ratelimit
 
 import (
 	"cmp"
+	"math"
 	"sync"
 	"time"
 )
@@ -23,6 +24,15 @@ func NewGCRA(cfg *Config) *GCRA {
 	cfg = cmp.Or(cfg, DefaultConfig())
 	if err := cfg.Validate(); err != nil {
 		panic(err)
+	}
+
+	if cfg.Period.Nanoseconds()/int64(cfg.Limit) == 0 {
+		panic("ratelimit: emission interval must be at least one nanosecond")
+	}
+
+	interval := cfg.Period.Nanoseconds() / int64(cfg.Limit)
+	if int64(cfg.Burst) >= math.MaxInt64/interval {
+		panic("ratelimit: burst allowance overflows duration")
 	}
 
 	return &GCRA{
@@ -56,11 +66,16 @@ func (r *GCRA) LimitN(key string, n int) *Result {
 	defer r.mu.Unlock()
 
 	quantity := int64(n)
+	if quantity > r.burst+1 {
+		// This batch can never fit, regardless of how long the caller waits.
+		return &Result{Limit: int(r.limit)}
+	}
 	delta := r.period / r.limit
 	now := time.Now().UnixNano()
 
 	last := max(r.state[key], now)
-	allow := last-r.burst*delta <= now
+	// A batch must fit in the available burst allowance as a whole.
+	allow := last-now <= (r.burst+1-quantity)*delta
 	if allow {
 		last += quantity * delta
 	}
@@ -68,7 +83,7 @@ func (r *GCRA) LimitN(key string, n int) *Result {
 
 	var retryAfter int64
 	if !allow {
-		retryAfter = last - r.burst*delta - now
+		retryAfter = max(last-now-(r.burst+1-quantity)*delta, 0)
 	}
 	remaining := int64(0)
 	if allow {

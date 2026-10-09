@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strconv"
+	"time"
 )
 
 type fun[K, V any] func(context.Context, K) (V, error)
@@ -37,7 +39,11 @@ func HTTP(next http.Handler, cfg FuncConfig[*http.Request]) http.Handler {
 		}
 		res := cfg.RateLimiter.Limit(key)
 		if !res.Allow {
-			w.Header().Set("Retry-After", res.ResetAfter.String())
+			seconds := int64(res.RetryAfter / time.Second)
+			if res.RetryAfter%time.Second != 0 {
+				seconds++
+			}
+			w.Header().Set("Retry-After", strconv.FormatInt(seconds, 10))
 			http.Error(w, "too many requests", http.StatusTooManyRequests)
 			return
 		}

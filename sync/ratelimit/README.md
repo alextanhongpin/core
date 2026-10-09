@@ -36,7 +36,7 @@ func main() {
         Burst:  0,
     }
     // Fixed Window
-    fw := ratelimit.NewFixedWindow(cfg)
+    fw := ratelimit.NewFixedWindow(&cfg)
     if fw.Allow("user-1") {
         fmt.Println("allowed")
     }
@@ -47,7 +47,7 @@ func main() {
         Period: time.Second,
         Burst:  2,
     }
-    gcra := ratelimit.NewGCRA(cfgGCRA)
+    gcra := ratelimit.NewGCRA(&cfgGCRA)
     res := gcra.Limit("user-1")
     fmt.Printf("allow=%v remaining=%d reset_after=%v\n", res.Allow, res.Remaining, res.ResetAfter)
 }
@@ -63,7 +63,7 @@ type Config struct {
     Period time.Duration // >0
     Burst  int           // >=0, used by GCRA only
 }
-func (cfg Config) Validate() error
+func (cfg *Config) Validate() error
 ```
 
 `Validate` checks `Limit > 0`, `Period > 0`, `Burst >= 0`.
@@ -71,8 +71,8 @@ func (cfg Config) Validate() error
 ### Constructors
 
 ```go
-func NewFixedWindow(cfg Config) *FixedWindow
-func NewGCRA(cfg Config) *GCRA
+func NewFixedWindow(cfg *Config) *FixedWindow
+func NewGCRA(cfg *Config) *GCRA
 ```
 
 Both validate via `cfg.Validate()` and panic on error. See *Improvements* for error-return variants.
@@ -108,7 +108,7 @@ Simple counter per key that resets at period boundaries.
 
 ```go
 cfg := ratelimit.Config{Limit: 100, Period: time.Minute}
-fw := ratelimit.NewFixedWindow(cfg)
+fw := ratelimit.NewFixedWindow(&cfg)
 
 allowed := fw.Allow("api-key-123")
 res := fw.Limit("api-key-123")
@@ -179,7 +179,7 @@ evals:
 
 The current implementation is functional but has several areas for improvement:
 
-1. **Error handling** – constructors panic on invalid config. Prefer `NewFixedWindow(cfg) (*FixedWindow, error)` and `MustNewFixedWindow` for panicking variant.
+1. **Error handling** – constructors panic on invalid config. Prefer `NewFixedWindow(&cfg) (*FixedWindow, error)` and `MustNewFixedWindow` for panicking variant.
 
 2. **Fixed Window off-by-one** – current `LimitN` allows `limit+1` requests due to `<= limit+1` check and increments before checking allowance. Fix to check `count + n <= limit` before increment, and return `Allow = false` without mutating state when denied.
 
@@ -202,3 +202,5 @@ The current implementation is functional but has several areas for improvement:
 ## License
 
 MIT – part of [alextanhongpin/core](https://github.com/alextanhongpin/core)
+
+GCRA admits each batch atomically against its `Burst + 1` instantaneous capacity. An oversized batch is rejected without consuming tokens. `NewGCRA` panics if the emission interval is below one nanosecond or the burst allowance would overflow a duration. The HTTP wrapper emits `Retry-After` as whole seconds rounded up.
