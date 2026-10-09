@@ -1,21 +1,33 @@
 # dsync
 
-Package `dsync` stands for *distributed sync*, and contains a collection of packages that is useful for managing concurrent read/writes across different services.
+Redis-backed coordination and storage packages. Each directory is an independent
+Go module with its own release tag.
 
-Most packages are built based on the concept of distributed lock, acquiring exclusive locks to a given resource, typically to perform some operation such as idempotent creation, or atomic state transition.
+| Package | Purpose |
+| --- | --- |
+| [cache](cache/) | Typed storage, file persistence, and cache-fill leases |
+| [channel](channel/) | Redis stream broadcast reads with caller-owned cursors |
+| [circuitbreaker](circuitbreaker/) | Atomic breaker transitions and generation-aware accounting |
+| [idempotent](idempotent/) | Retained request/results and renewable in-flight leases |
+| [lock](lock/) | Token-checked single-primary leases with synchronous callbacks |
+| [probs](probs/) | Redis probabilistic structure wrappers |
+| [ratelimit](ratelimit/) | Atomic fixed-window and GCRA admission |
+| [singleflight](singleflight/) | Local coalescing and Redis-coordinated cache fills |
 
-There are several options, such as
+Configuration is passed by value, defaulted and validated before use, and held
+privately. Redis clients and callback dependencies are shared; callers retain
+client cleanup ownership. See package documentation for constructor errors, Must
+helpers, zero semantics, and lifecycle contracts.
 
-- redis lock
-- etcd
-- zookeeper
-- dynamodb
-- s3 or minio lock
+Redis coordination does not promise exactly-once external effects across lease
+expiry, failover, partitions, or data loss. A local fallback would coordinate only
+one process and cannot preserve a distributed guarantee. Cache publication scripts
+using separate lease/data keys target one Redis primary, not Redis Cluster.
 
+Circuit breaker and rate limiter deployments must install their Lua functions
+using the package Setup method. Updating client code alone does not update Redis
+functions. Mixed old/new lease-key schemes require coordinated worker migration.
 
-The issue with distributed implementation is that it requires a distributed store.
-In case of failures, we can just fallback to the in-memory implementation that has the same interface.
-
-## Metrics & Observability
-
-All distributed primitives in `dsync` support pluggable metrics collectors for observability. See each subpackage's README for details and Prometheus integration examples.
+Run tests and vet from each module. Integration tests use Docker-backed Redis;
+probabilistic structure tests use Redis Stack. Race tests cover local lifecycle
+and concurrent behavior, while Redis supplies atomic backend operations.
