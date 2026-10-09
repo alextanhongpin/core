@@ -60,3 +60,16 @@ func TestLoad(t *testing.T) {
 		})
 	}
 }
+
+func TestLoadSample(t *testing.T) {
+	var got struct {
+		Name   string            `yaml:"name"`
+		Config map[string]string `yaml:"config"`
+	}
+	if err := codec.LoadExtendedYAML("testdata/main.yaml", &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Name != "bar" || !reflect.DeepEqual(got.Config, map[string]string{"foo": "bar", "bar": "baz"}) {
+		t.Fatalf("unexpected sample configuration: %#v", got)
+	}
+}

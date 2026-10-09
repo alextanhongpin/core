@@ -1,0 +1,2 @@
+"!merge": [foo.yaml, bar.yaml]
+config: !include config.yaml

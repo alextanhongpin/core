@@ -26,5 +26,8 @@ Missing files, invalid directives, cycles, nesting beyond 100 files, and multipl
 documents return errors. Filesystem errors remain inspectable with `errors.Is`.
 Load trusted configuration only: includes may access paths outside the root directory.
 
+Sample YAML files live in `testdata/`; `main.yaml` demonstrates includes and merges
+and is verified by the test suite.
+
 Run `make test` for race-enabled regression tests. `cmd/comments` preserves the
 original standalone comment-anchor experiment; it is not part of the loader API.
