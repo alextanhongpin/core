@@ -36,8 +36,8 @@ func TestHandlerFunc(t *testing.T) {
 		scanAll(client)
 		return "world", nil
 	}
-	idb := idempotent.NewWithRedis(client)
-	idp := idb.HandlerFunc(fn, nil)
+	idb := idempotent.MustNewWithRedis(client)
+	idp := idb.MustHandlerFunc(fn, idempotent.HandlerConfig{})
 
 	res, shared, err := idp.Do(ctx, t.Name(), "hello")
 	is := assert.New(t)
@@ -78,8 +78,8 @@ func TestConcurrent(t *testing.T) {
 	t.Cleanup(func() {
 		scanAll(client)
 	})
-	idb := idempotent.NewWithRedis(client)
-	idp := idb.HandlerFunc(fn, nil)
+	idb := idempotent.MustNewWithRedis(client)
+	idp := idb.MustHandlerFunc(fn, idempotent.HandlerConfig{})
 	n := 10
 
 	is := assert.New(t)
@@ -108,7 +108,7 @@ func TestConcurrent(t *testing.T) {
 			defer wg.Done()
 
 			time.Sleep(50 * time.Millisecond)
-			idp := idempotent.NewWithRedis(client).HandlerFunc(fn, nil)
+			idp := idempotent.MustNewWithRedis(client).MustHandlerFunc(fn, idempotent.HandlerConfig{})
 			res, shared, err := idp.Do(ctx, t.Name(), Request{Msg: "hello"})
 			if errors.Is(err, idempotent.ErrRequestInFlight) {
 				inFlight.Add(1)
@@ -127,7 +127,7 @@ func TestConcurrent(t *testing.T) {
 			defer wg.Done()
 			time.Sleep(300 * time.Millisecond)
 
-			idp := idempotent.NewWithRedis(client).HandlerFunc(fn, nil)
+			idp := idempotent.MustNewWithRedis(client).MustHandlerFunc(fn, idempotent.HandlerConfig{})
 			res, shared, err := idp.Do(ctx, t.Name(), Request{Msg: "hello"})
 			if errors.Is(err, idempotent.ErrRequestInFlight) {
 				inFlight.Add(1)
@@ -163,8 +163,8 @@ func TestExtendLock(t *testing.T) {
 		return 42, nil
 	}
 
-	idb := idempotent.NewWithRedis(client)
-	idp := idb.HandlerFunc(fn, &idempotent.HandlerConfig{
+	idb := idempotent.MustNewWithRedis(client)
+	idp := idb.MustHandlerFunc(fn, idempotent.HandlerConfig{
 		LockTTL: 100 * time.Millisecond,
 		KeepTTL: 200 * time.Millisecond,
 	})
@@ -176,10 +176,10 @@ func TestExtendLock(t *testing.T) {
 
 func TestEmptyKey(t *testing.T) {
 	client := redistest.Client(t)
-	idb := idempotent.NewWithRedis(client)
-	idp := idb.HandlerFunc(func(ctx context.Context, req string) (string, error) {
+	idb := idempotent.MustNewWithRedis(client)
+	idp := idb.MustHandlerFunc(func(ctx context.Context, req string) (string, error) {
 		return "ok", nil
-	}, nil)
+	}, idempotent.HandlerConfig{})
 
 	_, _, err := idp.Do(ctx, "", "hello")
 	assert.ErrorIs(t, err, idempotent.ErrEmptyKey)
@@ -187,15 +187,15 @@ func TestEmptyKey(t *testing.T) {
 
 func TestPanicRecovery(t *testing.T) {
 	client := redistest.Client(t)
-	idb := idempotent.NewWithRedis(client)
+	idb := idempotent.MustNewWithRedis(client)
 	var attempts int
-	idp := idb.HandlerFunc(func(ctx context.Context, req string) (string, error) {
+	idp := idb.MustHandlerFunc(func(ctx context.Context, req string) (string, error) {
 		attempts++
 		if attempts == 1 {
 			panic("something went horribly wrong")
 		}
 		return "recovered", nil
-	}, nil)
+	}, idempotent.HandlerConfig{})
 
 	// First call should panic on the caller's goroutine, and release the lock in Redis.
 	assert.Panics(t, func() {
@@ -220,10 +220,10 @@ func TestUnexportedFields(t *testing.T) {
 	}
 
 	client := redistest.Client(t)
-	idb := idempotent.NewWithRedis(client)
-	idp := idb.HandlerFunc(func(ctx context.Context, req RequestWithPrivate) (ResponseWithPrivate, error) {
+	idb := idempotent.MustNewWithRedis(client)
+	idp := idb.MustHandlerFunc(func(ctx context.Context, req RequestWithPrivate) (ResponseWithPrivate, error) {
 		return ResponseWithPrivate{Result: req.Public + "-done", private: 42}, nil
-	}, nil)
+	}, idempotent.HandlerConfig{})
 
 	req := RequestWithPrivate{Public: "test", private: 1}
 	res1, shared1, err := idp.Do(ctx, t.Name(), req)
@@ -240,10 +240,10 @@ func TestUnexportedFields(t *testing.T) {
 
 func TestRequestMismatch(t *testing.T) {
 	client := redistest.Client(t)
-	idb := idempotent.NewWithRedis(client)
-	idp := idb.HandlerFunc(func(ctx context.Context, req string) (string, error) {
+	idb := idempotent.MustNewWithRedis(client)
+	idp := idb.MustHandlerFunc(func(ctx context.Context, req string) (string, error) {
 		return "ok", nil
-	}, nil)
+	}, idempotent.HandlerConfig{})
 
 	res, shared, err := idp.Do(ctx, t.Name(), "first")
 	assert.NoError(t, err)
@@ -257,11 +257,11 @@ func TestRequestMismatch(t *testing.T) {
 
 func TestZeroConfig(t *testing.T) {
 	client := redistest.Client(t)
-	idb := idempotent.NewWithRedis(client)
+	idb := idempotent.MustNewWithRedis(client)
 	// Zero-valued config should not panic with time.NewTicker(0).
-	idp := idb.HandlerFunc(func(ctx context.Context, req string) (string, error) {
+	idp := idb.MustHandlerFunc(func(ctx context.Context, req string) (string, error) {
 		return "ok", nil
-	}, &idempotent.HandlerConfig{})
+	}, idempotent.HandlerConfig{})
 
 	res, shared, err := idp.Do(ctx, t.Name(), "test")
 	assert.NoError(t, err)
@@ -271,11 +271,11 @@ func TestZeroConfig(t *testing.T) {
 
 func TestContextCancellation(t *testing.T) {
 	client := redistest.Client(t)
-	idb := idempotent.NewWithRedis(client)
+	idb := idempotent.MustNewWithRedis(client)
 
 	var once sync.Once
 	started := make(chan struct{})
-	idp := idb.HandlerFunc(func(ctx context.Context, req string) (string, error) {
+	idp := idb.MustHandlerFunc(func(ctx context.Context, req string) (string, error) {
 		once.Do(func() { close(started) })
 		select {
 		case <-ctx.Done():
@@ -283,7 +283,7 @@ func TestContextCancellation(t *testing.T) {
 		case <-time.After(500 * time.Millisecond):
 			return "done", nil
 		}
-	}, nil)
+	}, idempotent.HandlerConfig{})
 
 	ctxCancel, cancel := context.WithCancel(ctx)
 	errCh := make(chan error, 1)

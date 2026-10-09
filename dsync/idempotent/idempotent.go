@@ -1,14 +1,12 @@
 // Package idempotent provides Redis-backed idempotent request execution.
 //
-// A request identified by a key is guaranteed to run at most once; subsequent
-// calls with the same key return the cached result without re-executing the
-// function. This guarantee holds across multiple processes via Redis and within
-// a single process via an in-memory key-level mutex.
+// Completed results are reused while retained in Redis. In-flight leases and
+// cancelable local admission coordinate callers, without promising exactly-once
+// external effects across lease expiry, failures, or data loss.
 package idempotent
 
 import (
 	"bytes"
-	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -71,7 +69,7 @@ type client interface {
 
 type Idempotent struct {
 	client client
-	cache  *cache.Cache[string, sync.Mutex]
+	cache  *cache.Cache[string, permit]
 }
 
 type HandlerConfig struct {
@@ -85,38 +83,84 @@ type HandlerConfig struct {
 	KeepTTL time.Duration
 }
 
-func DefaultConfig() *HandlerConfig {
-	return &HandlerConfig{
+func DefaultConfig() HandlerConfig {
+	return HandlerConfig{
 		LockTTL: defaultLockTTL,
 		KeepTTL: defaultKeepTTL,
 	}
 }
 
-func NewWithRedis(client *redis.Client) *Idempotent {
+type permit struct{ ch chan struct{} }
+
+func (c HandlerConfig) WithDefaults() HandlerConfig {
+	if c.LockTTL == 0 {
+		c.LockTTL = defaultLockTTL
+	}
+	if c.KeepTTL == 0 {
+		c.KeepTTL = defaultKeepTTL
+	}
+	return c
+}
+func (c HandlerConfig) Validate() error {
+	if c.LockTTL < time.Millisecond || c.KeepTTL < time.Millisecond {
+		return errors.New("idempotent: TTLs must be at least one millisecond")
+	}
+	return nil
+}
+func NewWithRedis(client *redis.Client) (*Idempotent, error) {
+	if client == nil {
+		return nil, errors.New("idempotent: nil Redis client")
+	}
 	return New(NewClient(client))
 }
-
-func New(client client) *Idempotent {
-	return &Idempotent{
-		client: client,
-		cache: cache.New(func(string) (*sync.Mutex, error) {
-			return new(sync.Mutex), nil
-		}),
+func New(client client) (*Idempotent, error) {
+	if client == nil {
+		return nil, errors.New("idempotent: nil client")
 	}
+	return &Idempotent{client: client, cache: cache.New(func(string) (*permit, error) { return &permit{ch: make(chan struct{}, 1)}, nil })}, nil
 }
-
-func (i *Idempotent) HandlerFunc[K, V any](fn HandlerFunc[K, V], cfg *HandlerConfig) Handler[K, V] {
+func MustNew(client client) *Idempotent {
+	i, err := New(client)
+	if err != nil {
+		panic(err)
+	}
+	return i
+}
+func MustNewWithRedis(client *redis.Client) *Idempotent {
+	i, err := NewWithRedis(client)
+	if err != nil {
+		panic(err)
+	}
+	return i
+}
+func (i *Idempotent) HandlerFunc[K, V any](fn HandlerFunc[K, V], cfg HandlerConfig) (Handler[K, V], error) {
+	if fn == nil {
+		return nil, errors.New("idempotent: nil task")
+	}
 	return i.Handler(fn, cfg)
 }
-
-func (i *Idempotent) Handler[K, V any](fn Task[K, V], cfg *HandlerConfig) Handler[K, V] {
-	cfg = cmp.Or(cfg, DefaultConfig())
-	lockTTL := cmp.Or(cfg.LockTTL, defaultLockTTL)
-	keepTTL := cmp.Or(cfg.KeepTTL, defaultKeepTTL)
-	if lockTTL < time.Millisecond || keepTTL < 0 {
-		panic("idempotent: invalid TTL")
+func (i *Idempotent) MustHandlerFunc[K, V any](fn HandlerFunc[K, V], cfg HandlerConfig) Handler[K, V] {
+	h, err := i.HandlerFunc(fn, cfg)
+	if err != nil {
+		panic(err)
 	}
-
+	return h
+}
+func (i *Idempotent) MustHandler[K, V any](fn Task[K, V], cfg HandlerConfig) Handler[K, V] {
+	h, err := i.Handler(fn, cfg)
+	if err != nil {
+		panic(err)
+	}
+	return h
+}
+func (i *Idempotent) Handler[K, V any](fn Task[K, V], cfg HandlerConfig) (Handler[K, V], error) {
+	if fn == nil {
+		return nil, errors.New("idempotent: nil task")
+	}
+	cfg = cfg.WithDefaults()
+	if err := cfg.Validate(); err != nil {
+		return nil, err
+	}
 	return idempotentHandlerFunc[K, V](func(ctx context.Context, key string, req K) (V, bool, error) {
 		var zero V
 		if key == "" {
@@ -126,12 +170,19 @@ func (i *Idempotent) Handler[K, V any](fn Task[K, V], cfg *HandlerConfig) Handle
 			return zero, false, context.Cause(ctx)
 		}
 
-		mu := i.getMutex(key)
-		mu.Lock()
-		defer mu.Unlock()
+		p := i.getMutex(key)
+		select {
+		case p.ch <- struct{}{}:
+		case <-ctx.Done():
+			return zero, false, context.Cause(ctx)
+		}
+		defer func() { <-p.ch }()
+		if ctx.Err() != nil {
+			return zero, false, context.Cause(ctx)
+		}
 
 		token := uuid.NewV7()
-		payload, rawOldValue, loaded, err := i.loadOrStore(ctx, key, &data[K, V]{Token: token, Request: req}, lockTTL)
+		payload, rawOldValue, loaded, err := i.loadOrStore(ctx, key, &data[K, V]{Token: token, Request: req}, cfg.LockTTL)
 		if err != nil {
 			return zero, false, err
 		}
@@ -146,17 +197,14 @@ func (i *Idempotent) Handler[K, V any](fn Task[K, V], cfg *HandlerConfig) Handle
 		}
 
 		// Key was freshly stored — run the function under the distributed lock.
-		res, err := i.runInLock(ctx, key, rawOldValue, fn, req, lockTTL, keepTTL)
+		res, err := i.runInLock(ctx, key, rawOldValue, fn, req, cfg.LockTTL, cfg.KeepTTL)
 		return res, false, err
-	})
+	}), nil
 }
 
-func (i *Idempotent) getMutex(key string) *sync.Mutex {
-	if i.cache == nil {
-		return new(sync.Mutex)
-	}
-	mu, _, _ := i.cache.LoadOrCreate(key)
-	return mu
+func (i *Idempotent) getMutex(key string) *permit {
+	p, _, _ := i.cache.LoadOrCreate(key)
+	return p
 }
 
 // loadOrStore marshals val, stores it in Redis under key (SET NX with ttl),

@@ -24,7 +24,7 @@ func (c *failingRenewal) CompareAndDelete(context.Context, string, string) error
 func TestRenewalLossCancelsAndJoinsTask(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		client := &failingRenewal{}
-		i := New(client)
+		i := MustNew(client)
 		finished := false
 		_, err := i.runInLock(context.Background(), "k", "token", HandlerFunc[int, int](func(ctx context.Context, _ int) (int, error) {
 			<-ctx.Done()

@@ -52,8 +52,8 @@ func ExampleNewWithRedis() {
 		}
 
 		// Execute the idempotent operation and handle the response
-		idb := idempotent.NewWithRedis(client)
-		idp := idb.HandlerFunc(fn, nil)
+		idb := idempotent.MustNewWithRedis(client)
+		idp := idb.MustHandlerFunc(fn, idempotent.HandlerConfig{})
 
 		v, shared, err := idp.Do(ctx, "get-user", req)
 		if err != nil {
@@ -77,8 +77,8 @@ func ExampleNewWithRedis() {
 		}
 
 		// Execute the idempotent operation and handle the response.
-		idb := idempotent.NewWithRedis(client)
-		idp := idb.HandlerFunc(fn, nil)
+		idb := idempotent.MustNewWithRedis(client)
+		idp := idb.MustHandlerFunc(fn, idempotent.HandlerConfig{})
 		_, _, err := idp.Do(ctx, "get-user", req)
 		if err == nil {
 			fmt.Println(err)
@@ -105,8 +105,8 @@ func ExampleNewWithRedis() {
 		}
 
 		// Execute the idempotent operation and handle the response.
-		idb := idempotent.NewWithRedis(client)
-		idp := idb.HandlerFunc(fn, nil)
+		idb := idempotent.MustNewWithRedis(client)
+		idp := idb.MustHandlerFunc(fn, idempotent.HandlerConfig{})
 		v, shared, err := idp.Do(ctx, "get-user", req)
 		if err != nil {
 			panic(err)
