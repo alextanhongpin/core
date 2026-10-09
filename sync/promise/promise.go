@@ -30,7 +30,7 @@ type handler[T any] = func(ctx context.Context) (T, error)
 func New[T any](ctx context.Context, fn handler[T]) *Promise[T] {
 	p := Deferred[T](ctx)
 	go func() {
-		res, err := fn(ctx)
+		res, err := fn(p.ch.ctx)
 		if err != nil {
 			p.Reject(err)
 		} else {
@@ -62,7 +62,9 @@ func (p *Promise[T]) Await() (T, error) {
 }
 
 func (p *Promise[T]) Status() Status {
-	if !p.ch.Done() {
+	select {
+	case <-p.ch.ctx.Done():
+	default:
 		return StatusPending
 	}
 	_, err := p.Await()
@@ -96,11 +98,6 @@ func Race[T any](promises ...*Promise[T]) (T, error) {
 		wg.Wait()
 		close(ch)
 	}()
-	defer func() {
-		// Flush all
-		for range ch {
-		}
-	}()
 	res := <-ch
 	return res.Data, res.Error
 }
@@ -122,11 +119,6 @@ func Any[T any](promises ...*Promise[T]) (T, error) {
 		}
 		wg.Wait()
 		close(ch)
-	}()
-	defer func() {
-		// Flush all
-		for range ch {
-		}
 	}()
 
 	var errs []error

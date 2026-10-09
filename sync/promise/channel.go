@@ -3,6 +3,7 @@ package promise
 import (
 	"context"
 	"errors"
+	"sync"
 	"sync/atomic"
 )
 
@@ -19,6 +20,7 @@ type Channel[T any] struct {
 	ctx    context.Context
 	p      atomic.Pointer[T]
 	zero   *T
+	mu     sync.Mutex
 }
 
 // NewChannel creates a new Channel[T] bound to ctx. The returned channel will
@@ -36,6 +38,11 @@ func NewChannel[T any](ctx context.Context) *Channel[T] {
 // Send publishes v to the channel. It may be called only once; subsequent
 // calls are no-ops due to atomic CompareAndSwap.
 func (c *Channel[T]) Send(v T) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.ctx.Err() != nil {
+		return
+	}
 	if c.p.CompareAndSwap(c.zero, &v) {
 		c.cancel(errDone)
 	}
@@ -60,6 +67,8 @@ func (c *Channel[T]) Recv() (T, error) {
 // cause error if no value was sent. Subsequent calls are no-ops because
 // context cancellation is idempotent.
 func (c *Channel[T]) Close(cause error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.cancel(cause)
 }
 
