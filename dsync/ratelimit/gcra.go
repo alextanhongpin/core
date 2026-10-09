@@ -58,35 +58,11 @@ func (g *GCRA) LimitN(ctx context.Context, key string, n int) (*Result, error) {
 	if n < 0 {
 		return nil, ErrNegative
 	}
-	keys := []string{key}
-	args := []any{
-		g.burst,
-		g.limit,
-		g.period.Milliseconds(),
-		n,
-	}
-	res, err := g.client.FCall(ctx, "gcra", keys, args...).Int64Slice()
+	values, err := g.client.FCall(ctx, "rl_gcra", []string{key}, g.burst, g.limit, g.period.Milliseconds(), n).Int64Slice()
 	if err != nil {
 		return nil, err
 	}
-
-	value := time.UnixMilli(res[0])
-	interval := g.period / time.Duration(g.limit)
-	remaining := max(0, time.Since(value)/interval)
-	var resetAfter, retryAfter time.Duration
-	if res[1] == 0 {
-		resetAfter = max(0, time.Until(value)+interval)
-		retryAfter = resetAfter
-	}
-	if remaining > 0 {
-		retryAfter = 0
-	}
-	return &Result{
-		Allow:      res[1] > 0,
-		Remaining:  int(remaining),
-		RetryAfter: retryAfter,
-		ResetAfter: resetAfter,
-	}, nil
+	return parseResult(values)
 }
 
 // Limit performs a rate limit check and returns detailed information.

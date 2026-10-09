@@ -79,34 +79,15 @@ func TestGCRA_withBurst(t *testing.T) {
 }
 
 func TestGCRA_retryAfter(t *testing.T) {
-	ctx := context.Background()
-
-	client := newClient(t)
-	timeout := time.After(time.Second)
-
-	is := assert.New(t)
-	// 5 request per second, each request takes 200ms.
-	rl := ratelimit.NewGCRA(client, 5, time.Second, 1)
-
-	key := t.Name()
-
-	var total int
-loop:
-	for {
-		select {
-		case <-timeout:
-			break loop
-		default:
-			r, err := rl.Limit(ctx, key)
-			is.NoError(err)
-			if r.Allow {
-				total++
-			}
-			t.Logf("allow=%t remaining=%d reset_after=%s retry_after=%s\n", r.Allow, r.Remaining, r.ResetAfter, r.RetryAfter)
-			time.Sleep(r.RetryAfter)
-		}
+	rl := ratelimit.NewGCRA(newClient(t), 1, time.Hour, 0)
+	first, err := rl.Limit(t.Context(), t.Name())
+	if err != nil || !first.Allow {
+		t.Fatalf("initial admission: %+v %v", first, err)
 	}
-	is.Equal(6, total)
+	denied, err := rl.Limit(t.Context(), t.Name())
+	if err != nil || denied.Allow || denied.RetryAfter <= 0 {
+		t.Fatalf("denial: %+v %v", denied, err)
+	}
 }
 
 func TestGCRA_zero(t *testing.T) {

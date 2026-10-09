@@ -28,22 +28,23 @@ package ratelimit
 
 import (
 	"context"
+	"errors"
 	"time"
 )
 
 // RateLimiter defines the common interface for all rate limiting algorithms.
 type RateLimiter interface {
-    // Allow returns true if a single request for `key` is permitted.
-    Allow(ctx context.Context, key string) (bool, error)
+	// Allow returns true if a single request for `key` is permitted.
+	Allow(ctx context.Context, key string) (bool, error)
 
-    // AllowN returns true if `n` requests for `key` are permitted.
-    AllowN(ctx context.Context, key string, n int) (bool, error)
+	// AllowN returns true if `n` requests for `key` are permitted.
+	AllowN(ctx context.Context, key string, n int) (bool, error)
 
-    // Limit returns a detailed Result for a single request.
-    Limit(ctx context.Context, key string) (*Result, error)
+	// Limit returns a detailed Result for a single request.
+	Limit(ctx context.Context, key string) (*Result, error)
 
-    // LimitN returns a detailed Result for `n` requests.
-    LimitN(ctx context.Context, key string, n int) (*Result, error)
+	// LimitN returns a detailed Result for `n` requests.
+	LimitN(ctx context.Context, key string, n int) (*Result, error)
 }
 
 // Result contains detailed information about a rate limit check.
@@ -59,4 +60,11 @@ type Result struct {
 
 	// RetryAfter suggests when to retry if the request was denied.
 	RetryAfter time.Duration
+}
+
+func parseResult(values []int64) (*Result, error) {
+	if len(values) != 4 {
+		return nil, errors.New("ratelimit: invalid Redis response")
+	}
+	return &Result{Allow: values[0] == 1, Remaining: int(values[1]), RetryAfter: time.Duration(values[2]) * time.Millisecond, ResetAfter: time.Duration(values[3]) * time.Millisecond}, nil
 }

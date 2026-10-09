@@ -510,3 +510,5 @@ rl := ratelimit.NewGCRA(client, 100, time.Second, 0)  // No burst
 ## License
 
 MIT License
+
+Admission and all result metadata are now calculated atomically by Redis functions rl_fixed_window and rl_gcra using the server clock. Setup must be rerun when migrating. Negative requests are rejected, zero requests inspect without consuming, rejected batches consume nothing, and oversized GCRA batches are impossible admissions. Fixed-window TTLs preserve millisecond precision. GCRA stores theoretical arrival time until debt is replenished; ResetAfter is time to full replenishment and RetryAfter applies to the requested batch.
