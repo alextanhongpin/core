@@ -1,5 +1,37 @@
 # singleflight
 
+Coalesce local calls and coordinate work across processes with Redis leases.
+
+## Installation and documentation
+
+```sh
+go get github.com/alextanhongpin/core/dsync/singleflight
+go doc github.com/alextanhongpin/core/dsync/singleflight
+```
+
+[Go API reference](https://pkg.go.dev/github.com/alextanhongpin/core/dsync/singleflight) · [Module requirements](go.mod)
+
+## Typical use
+
+Use to reduce duplicate refresh work or cache stampedes. Use NewCache when callers need a stored typed value.
+
+Examples assume a caller-owned Redis client and a context. Create the client once
+and close it after all operations finish:
+
+```go
+client := redis.NewClient(&redis.Options{Addr: "localhost:6379"})
+defer client.Close()
+ctx := context.Background()
+```
+
+Import `context`, `github.com/redis/go-redis/v9`, and this package's import path.
+
+The usage example below shows the main operation. Application types and
+callbacks such as `User` and `fetchUsers` belong to your application; import this
+package and the standard packages referenced in the snippet.
+
+## Behavior and configuration
+
 Coalesce concurrent operations locally and coordinate them with renewable leases
 on one Redis primary.
 
@@ -50,3 +82,11 @@ publication uses two keys on a single primary and is not Redis Cluster compatibl
 Redis must support SETIFDEQ/DELEX.
 
 Run `go test -race -timeout 120s ./...` and `go vet ./...`; tests use Redis Docker.
+
+## Expected errors
+
+`ErrTimeout` means a remote follower exceeded its wait budget. `ErrSubscriptionClosed` means its subscription ended. A cache miss after a failed remote fill returns `redis.Nil`. Callback, lease, context, and Redis errors also propagate.
+
+## Pitfalls
+
+Remote followers observe completion, not the leader result or success. Use the cache wrapper to exchange values; do not reenter the same key from its leader.

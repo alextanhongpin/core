@@ -2,6 +2,14 @@
 
 The `list` package provides comprehensive slice utilities that complement Go's standard library `slices` package. Built with generics, it offers functional programming patterns, mathematical operations, and advanced slice manipulations for modern Go development.
 
+[Go API reference](https://pkg.go.dev/github.com/alextanhongpin/core/types/list)
+
+## Typical use
+
+Transform API records into response values, filter a slice before processing, or
+group records by a business key. Use index variants when position is part of the
+transformation.
+
 ## Features
 
 - **Functional Programming**: Map, Filter, Reduce, FlatMap operations
@@ -383,3 +391,12 @@ indexed := list.MapIndex(slice, func(i int, item int) string {
     return fmt.Sprintf("%d:%d", i, item)
 })
 ```
+
+## Pitfalls and errors
+
+Most transformations return values directly, without an error result. Use the
+error-returning mapping helpers when a callback can fail, and inspect that error.
+Callbacks execute synchronously; shared mutable elements need caller-owned
+synchronization. Check each operation's empty-input behavior in the Go reference.
+
+Run `go doc github.com/alextanhongpin/core/types/list` for local documentation.

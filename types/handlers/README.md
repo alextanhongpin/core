@@ -477,3 +477,14 @@ func TestUserWorkflow(t *testing.T) {
 ## License
 
 MIT License - see LICENSE file for details.
+
+## Expected errors and pitfalls
+
+Use `errors.Is(err, handlers.ErrPatternNotFound)` for an unregistered route and
+`errors.Is(err, handlers.ErrRequestTimeout)` for a router timeout. JSON decoding
+and handler errors propagate. Register routes and middleware before serving
+concurrent requests; callbacks must synchronize their own shared state. A timeout
+can return while a handler is still running, so handlers must honor the request
+context.
+
+Run `go doc github.com/alextanhongpin/core/types/handlers` for local documentation.

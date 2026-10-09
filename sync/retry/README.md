@@ -8,6 +8,14 @@ Retry synchronous operations with configurable backoff, cancellation, and a shar
 go get github.com/alextanhongpin/core/sync/retry
 ```
 
+## Typical use
+
+Use for transient network failures, reads from an occasionally unavailable service,
+or writes protected by an application idempotency key. Set a deadline for the whole
+operation and classify validation or authorization failures as permanent.
+
+Use `go doc github.com/alextanhongpin/core/sync/retry` for local API documentation.
+
 ## Basic usage
 
 ```go

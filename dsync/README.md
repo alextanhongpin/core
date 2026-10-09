@@ -31,3 +31,22 @@ functions.
 Run tests and vet from each module. Integration tests use Docker-backed Redis;
 probabilistic structure tests use Redis Stack. Race tests cover local lifecycle
 and concurrent behavior, while Redis supplies atomic backend operations.
+
+## Installation and documentation
+
+Install the individual module you need, for example:
+
+```sh
+go get github.com/alextanhongpin/core/dsync/cache
+go doc github.com/alextanhongpin/core/dsync/cache
+```
+
+Each package link above includes its Go API reference, usage examples, expected
+errors, and pitfalls. Check that module's `go.mod` for the required Go version.
+
+## Typical scenarios
+
+Use `cache` and `singleflight` to reduce duplicate cache fills, `ratelimit` to share
+API quotas between replicas, `lock` to coordinate maintenance, and `idempotent` to
+reuse results for repeated requests. Use `channel` when subscribers need their own
+replay cursor; its stream is not a consuming job queue.

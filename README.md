@@ -2,25 +2,95 @@
 
 [![](https://godoc.org/github.com/alextanhongpin/core?status.svg)](http://godoc.org/github.com/alextanhongpin/core)
 
-Useful collection of dependencies required to build microservices.
+Go packages for HTTP services, concurrency control, Redis coordination, and typed utilities.
+
+## Installation and documentation
+
+Install the package you need. Modules are released independently, so check the
+selected module's `go.mod` for its required Go version.
+
+```sh
+go get github.com/alextanhongpin/core/sync/throttle
+go doc github.com/alextanhongpin/core/sync/throttle
+```
+
+Browse the [Go package reference](https://pkg.go.dev/github.com/alextanhongpin/core)
+and the package READMEs below for examples, defaults, errors, and lifecycle rules.
+
+## Quick start: limit concurrent work
+
+Use a throttle to protect a downstream service or connection pool. This program
+admits an operation through a limiter; concurrent callers share the same instance.
+
+```go
+package main
+
+import (
+	"context"
+	"log"
+
+	"github.com/alextanhongpin/core/sync/throttle"
+)
+
+func main() {
+	limiter, err := throttle.New(throttle.Config{Limit: 8})
+	if err != nil {
+		log.Fatal(err)
+	}
+	err = limiter.Do(context.Background(), func(ctx context.Context) error {
+		log.Println("work admitted")
+		return nil
+	})
+	if err != nil {
+		log.Print(err)
+	}
+}
+```
+
+## Choose a package
+
+| Scenario | Package |
+| --- | --- |
+| Bound concurrent calls and optional backlog | [sync/throttle](sync/throttle/) |
+| Retry transient failures with backoff | [sync/retry](sync/retry/) |
+| Batch key lookups and share in-flight results | [sync/dataloader](sync/dataloader/) |
+| Protect a failing dependency | [sync/circuitbreaker](sync/circuitbreaker/) |
+| Enforce per-key quotas within one process | [sync/ratelimit](sync/ratelimit/) |
+| Coordinate replicas using Redis | [dsync](dsync/) |
+| Transform, filter, or group slices | [types/list](types/list/) |
+| Compose internal request handlers | [types/handlers](types/handlers/) |
+
+## Errors and pitfalls
+
+Handle constructor errors before using an instance. `Must` constructors panic on
+invalid inputs and are intended for startup wiring. Use `errors.Is` for documented
+sentinel errors, since an operation may wrap or join them with backend errors.
+
+In-memory limiters apply to one process. Redis coordination requires a compatible
+Redis server and caller-owned client cleanup; circuit breakers and rate limiters
+also require `Setup`. Lease-based coordination can allow overlapping work after
+expiry or failover. Consult the chosen package's README for these requirements.
+
+Callbacks must honor cancellation. Stop background workers and close owned file
+handles when their lifetime ends. Configure retry policies around operations that
+are safe to repeat.
 
 ---
 
 ## Packages Overview
 
 ### sync/ratelimit
-- **GCRA, FixedWindow, SlidingWindow**: High-performance rate limiters with unified metrics collection.
-- **MetricsCollector**: Shared interface for atomic and Prometheus-based metrics.
-- **Prometheus Integration**: See `sync/ratelimit/examples/` for usage.
+- **GCRA and FixedWindow**: Concurrent per-key admission with allowance and retry metadata.
+- **Adapters**: Function decorators and HTTP middleware for enforcing quotas.
 
-### sync/singleflight
-- Duplicate suppression for concurrent function calls (like Go's `sync/singleflight`).
+### dsync/singleflight
+- Coalesce local calls and coordinate cross-process work with Redis leases.
 
-### sync/lock
-- Distributed and in-memory locking utilities.
+### dsync/lock
+- Token-checked Redis leases with optional renewal.
 
 ### dsync/cache
-- Simple in-memory cache with optional expiration and metrics.
+- Typed storage wrappers, file persistence, and Redis cache-fill leases.
 
 ### http/auth
 - HTTP authentication middlewares (Basic, Bearer, JWT, etc.).
@@ -94,4 +164,3 @@ Other packages
 - ~https://github.com/alextanhongpin/set~
 - ~https://github.com/alextanhongpin/transition~
 - ~https://github.com/alextanhongpin/typeahead~
-```

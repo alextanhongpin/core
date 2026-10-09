@@ -1,5 +1,37 @@
 # cache
 
+Store typed values using JSON codecs and coordinate cache fills locally or through Redis.
+
+## Installation and documentation
+
+```sh
+go get github.com/alextanhongpin/core/dsync/cache
+go doc github.com/alextanhongpin/core/dsync/cache
+```
+
+[Go API reference](https://pkg.go.dev/github.com/alextanhongpin/core/dsync/cache) · [Module requirements](go.mod)
+
+## Typical use
+
+Use Redis for shared cached data, File for a persisted snapshot, and FS for a directory owned by one process.
+
+Examples assume a caller-owned Redis client and a context. Create the client once
+and close it after all operations finish:
+
+```go
+client := redis.NewClient(&redis.Options{Addr: "localhost:6379"})
+defer client.Close()
+ctx := context.Background()
+```
+
+Import `context`, `github.com/redis/go-redis/v9`, and this package's import path.
+
+The usage example below shows the main operation. Application types and
+callbacks such as `User` and `fetchUsers` belong to your application; import this
+package and the standard packages referenced in the snippet.
+
+## Behavior and configuration
+
 Typed storage wrappers, file storage, and Redis cache-fill leases.
 
 ```go
@@ -61,3 +93,11 @@ Zero storage TTL means permanent. Redis TTL and Expire retain millisecond
 precision. File/FS calls after close return `ErrClosed`.
 
 Run `go test -race -timeout 120s ./...` and `go vet ./...`; Redis tests use Docker.
+
+## Expected errors
+
+`ErrNotExist` means a storage miss, `ErrExists` a StoreOnce conflict, `ErrLocked` immediate fill contention, `ErrConflict` an idempotent request mismatch, and `ErrClosed` a closed file store. The Redis storage wrapper also maps missing values to `ErrNotExist`. Codec, factory, and storage errors propagate.
+
+## Pitfalls
+
+Close owned file handles. Redis clients are borrowed. Zero TTL means permanent storage; lease-backed fills target a single Redis primary.
