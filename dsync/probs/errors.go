@@ -1,6 +1,9 @@
 package probs
 
-import "strings"
+import (
+	"errors"
+	"strings"
+)
 
 func KeyAlreadyExistsError(err error) bool {
 	if err == nil {
@@ -17,3 +20,5 @@ func KeyDoesNotExistError(err error) bool {
 
 	return strings.HasSuffix(err.Error(), "key does not exist")
 }
+
+var errNilClient = errors.New("probs: Redis client is required")

@@ -1,6 +1,6 @@
 module github.com/alextanhongpin/core/dsync/probs
 
-go 1.23.2
+go 1.25.0
 
 require (
 	github.com/alextanhongpin/core/storage/redis v0.0.0-20241028033631-6d88609c62b1

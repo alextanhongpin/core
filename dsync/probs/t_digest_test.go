@@ -12,7 +12,7 @@ func TestTDigest(t *testing.T) {
 	key := t.Name()
 
 	t.Run("add", func(t *testing.T) {
-		td := probs.NewTDigest(redistest.Client(t))
+		td := probs.MustNewTDigest(redistest.Client(t))
 
 		is := assert.New(t)
 		status, err := td.Add(ctx, key, 10, 20, 30)
@@ -21,7 +21,7 @@ func TestTDigest(t *testing.T) {
 	})
 
 	t.Run("cdf", func(t *testing.T) {
-		td := probs.NewTDigest(redistest.Client(t))
+		td := probs.MustNewTDigest(redistest.Client(t))
 
 		is := assert.New(t)
 		cdf, err := td.CDF(ctx, key, 10, 20, 30)
@@ -33,7 +33,7 @@ func TestTDigest(t *testing.T) {
 	// TODO: Test quantile
 
 	t.Run("min", func(t *testing.T) {
-		td := probs.NewTDigest(redistest.Client(t))
+		td := probs.MustNewTDigest(redistest.Client(t))
 
 		is := assert.New(t)
 		f, err := td.Min(ctx, key)
@@ -42,7 +42,7 @@ func TestTDigest(t *testing.T) {
 	})
 
 	t.Run("max", func(t *testing.T) {
-		td := probs.NewTDigest(redistest.Client(t))
+		td := probs.MustNewTDigest(redistest.Client(t))
 
 		is := assert.New(t)
 		f, err := td.Max(ctx, key)
@@ -51,7 +51,7 @@ func TestTDigest(t *testing.T) {
 	})
 
 	t.Run("rank", func(t *testing.T) {
-		td := probs.NewTDigest(redistest.Client(t))
+		td := probs.MustNewTDigest(redistest.Client(t))
 
 		is := assert.New(t)
 		ranks, err := td.Rank(ctx, key, 10, 30)
@@ -60,7 +60,7 @@ func TestTDigest(t *testing.T) {
 	})
 
 	t.Run("rev rank", func(t *testing.T) {
-		td := probs.NewTDigest(redistest.Client(t))
+		td := probs.MustNewTDigest(redistest.Client(t))
 
 		is := assert.New(t)
 		ranks, err := td.RevRank(ctx, key, 10, 30)
@@ -69,7 +69,7 @@ func TestTDigest(t *testing.T) {
 	})
 
 	t.Run("by rank", func(t *testing.T) {
-		td := probs.NewTDigest(redistest.Client(t))
+		td := probs.MustNewTDigest(redistest.Client(t))
 
 		is := assert.New(t)
 		ranks, err := td.ByRank(ctx, key, 0, 2)
@@ -78,7 +78,7 @@ func TestTDigest(t *testing.T) {
 	})
 
 	t.Run("by rev rank", func(t *testing.T) {
-		td := probs.NewTDigest(redistest.Client(t))
+		td := probs.MustNewTDigest(redistest.Client(t))
 
 		is := assert.New(t)
 		ranks, err := td.ByRevRank(ctx, key, 0, 2)
@@ -87,7 +87,7 @@ func TestTDigest(t *testing.T) {
 	})
 
 	t.Run("trimmed mean", func(t *testing.T) {
-		td := probs.NewTDigest(redistest.Client(t))
+		td := probs.MustNewTDigest(redistest.Client(t))
 
 		is := assert.New(t)
 		mean, err := td.TrimmedMean(ctx, key, 0.1, 0.9)

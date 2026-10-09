@@ -11,14 +11,23 @@ import (
 // Use this to count the stream of events. Prefer this over counter (?).
 // Does not track uniqueness.
 type CountMinSketch struct {
-	Client *redis.Client
+	client *redis.Client
 	group  singleflight.Group
 }
 
-func NewCountMinSketch(client *redis.Client) *CountMinSketch {
-	return &CountMinSketch{
-		Client: client,
+// NewCountMinSketch borrows client; the caller owns its lifetime.
+func NewCountMinSketch(client *redis.Client) (*CountMinSketch, error) {
+	if client == nil {
+		return nil, errNilClient
 	}
+	return &CountMinSketch{client: client}, nil
+}
+func MustNewCountMinSketch(client *redis.Client) *CountMinSketch {
+	v, err := NewCountMinSketch(client)
+	if err != nil {
+		panic(err)
+	}
+	return v
 }
 
 func (cms *CountMinSketch) Init(ctx context.Context, key string) (status string, exists bool, err error) {
@@ -32,7 +41,7 @@ func (cms *CountMinSketch) InitByProb(ctx context.Context, key string, errorRate
 	// E.g.
 	// error rate of 0.1%, errorRate = 0.001
 	// probability of 99.8%, error probability of 0.02%, errorProbability = 0.002
-	status, err = cms.Client.CMSInitByProb(ctx, key, errorRate, errorProbability).Result()
+	status, err = cms.client.CMSInitByProb(ctx, key, errorRate, errorProbability).Result()
 	if KeyAlreadyExistsError(err) {
 		return OK, true, nil
 	}
@@ -41,7 +50,7 @@ func (cms *CountMinSketch) InitByProb(ctx context.Context, key string, errorRate
 }
 
 func (cms *CountMinSketch) InitByDim(ctx context.Context, key string, width, depth int64) (status string, exists bool, err error) {
-	status, err = cms.Client.CMSInitByDim(ctx, key, width, depth).Result()
+	status, err = cms.client.CMSInitByDim(ctx, key, width, depth).Result()
 	if KeyAlreadyExistsError(err) {
 		return OK, true, nil
 	}
@@ -62,7 +71,7 @@ func (cms *CountMinSketch) IncrBy(ctx context.Context, key string, kvs map[strin
 		args[i*2+1] = kvs[k]
 	}
 
-	counts, err := cms.Client.CMSIncrBy(ctx, key, args...).Result()
+	counts, err := cms.client.CMSIncrBy(ctx, key, args...).Result()
 	if err == nil {
 		return counts, false, nil
 	}
@@ -72,12 +81,12 @@ func (cms *CountMinSketch) IncrBy(ctx context.Context, key string, kvs map[strin
 		return nil, false, err
 	}
 
-	counts, err = cms.Client.CMSIncrBy(ctx, key, args...).Result()
+	counts, err = cms.client.CMSIncrBy(ctx, key, args...).Result()
 	return counts, created, err
 }
 
 func (cms *CountMinSketch) Merge(ctx context.Context, destKey string, sourceKeys ...string) (string, error) {
-	status, err := cms.Client.CMSMerge(ctx, destKey, sourceKeys...).Result()
+	status, err := cms.client.CMSMerge(ctx, destKey, sourceKeys...).Result()
 	if err == nil {
 		return status, nil
 	}
@@ -86,11 +95,11 @@ func (cms *CountMinSketch) Merge(ctx context.Context, destKey string, sourceKeys
 		return "", err
 	}
 
-	return cms.Client.CMSMerge(ctx, destKey, sourceKeys...).Result()
+	return cms.client.CMSMerge(ctx, destKey, sourceKeys...).Result()
 }
 
 func (cms *CountMinSketch) MergeWithWeight(ctx context.Context, destKey string, sourceKeys map[string]int64) (string, error) {
-	status, err := cms.Client.CMSMergeWithWeight(ctx, destKey, sourceKeys).Result()
+	status, err := cms.client.CMSMergeWithWeight(ctx, destKey, sourceKeys).Result()
 	if err == nil {
 		return status, nil
 	}
@@ -98,11 +107,11 @@ func (cms *CountMinSketch) MergeWithWeight(ctx context.Context, destKey string, 
 		return "", err
 	}
 
-	return cms.Client.CMSMergeWithWeight(ctx, destKey, sourceKeys).Result()
+	return cms.client.CMSMergeWithWeight(ctx, destKey, sourceKeys).Result()
 }
 
 func (cms *CountMinSketch) Query(ctx context.Context, key string, values ...any) ([]int64, error) {
-	return cms.Client.CMSQuery(ctx, key, values...).Result()
+	return cms.client.CMSQuery(ctx, key, values...).Result()
 }
 
 func (cms *CountMinSketch) create(ctx context.Context, key string, err error) (bool, error) {

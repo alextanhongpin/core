@@ -10,7 +10,7 @@ import (
 
 func TestCuckooFilter(t *testing.T) {
 	t.Run("add multiple times", func(t *testing.T) {
-		cf := probs.NewCuckooFilter(redistest.Client(t))
+		cf := probs.MustNewCuckooFilter(redistest.Client(t))
 		key := t.Name()
 
 		is := assert.New(t)
@@ -24,7 +24,7 @@ func TestCuckooFilter(t *testing.T) {
 	})
 
 	t.Run("add once", func(t *testing.T) {
-		cf := probs.NewCuckooFilter(redistest.Client(t))
+		cf := probs.MustNewCuckooFilter(redistest.Client(t))
 		key := t.Name()
 
 		is := assert.New(t)
@@ -38,7 +38,7 @@ func TestCuckooFilter(t *testing.T) {
 	})
 
 	t.Run("count", func(t *testing.T) {
-		cf := probs.NewCuckooFilter(redistest.Client(t))
+		cf := probs.MustNewCuckooFilter(redistest.Client(t))
 		key := t.Name()
 
 		is := assert.New(t)
@@ -56,7 +56,7 @@ func TestCuckooFilter(t *testing.T) {
 	})
 
 	t.Run("delete", func(t *testing.T) {
-		cf := probs.NewCuckooFilter(redistest.Client(t))
+		cf := probs.MustNewCuckooFilter(redistest.Client(t))
 		key := t.Name()
 
 		is := assert.New(t)
@@ -82,7 +82,7 @@ func TestCuckooFilter(t *testing.T) {
 	})
 
 	t.Run("exists", func(t *testing.T) {
-		cf := probs.NewCuckooFilter(redistest.Client(t))
+		cf := probs.MustNewCuckooFilter(redistest.Client(t))
 		key := t.Name()
 
 		is := assert.New(t)
@@ -100,7 +100,7 @@ func TestCuckooFilter(t *testing.T) {
 	})
 
 	t.Run("mexists", func(t *testing.T) {
-		cf := probs.NewCuckooFilter(redistest.Client(t))
+		cf := probs.MustNewCuckooFilter(redistest.Client(t))
 		key := t.Name()
 
 		is := assert.New(t)

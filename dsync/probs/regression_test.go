@@ -7,7 +7,7 @@ import (
 )
 
 func TestHyperLogLogVariadicValues(t *testing.T) {
-	hll := probs.NewHyperLogLog(redistest.Client(t))
+	hll := probs.MustNewHyperLogLog(redistest.Client(t))
 	if _, err := hll.Add(ctx, t.Name(), "a", "b", "c"); err != nil {
 		t.Fatal(err)
 	}
@@ -16,13 +16,13 @@ func TestHyperLogLogVariadicValues(t *testing.T) {
 	}
 }
 func TestMissingSketchSourceReturnsWithoutRecursiveRetry(t *testing.T) {
-	cms := probs.NewCountMinSketch(redistest.Client(t))
+	cms := probs.MustNewCountMinSketch(redistest.Client(t))
 	if _, err := cms.Merge(ctx, t.Name(), "missing-source"); err == nil {
 		t.Fatal("missing source accepted")
 	}
 }
 func TestTopKSingleSlot(t *testing.T) {
-	top := probs.NewTopK(redistest.Client(t))
+	top := probs.MustNewTopK(redistest.Client(t))
 	if _, err := top.Create(ctx, t.Name(), 1); err != nil {
 		t.Fatal(err)
 	}

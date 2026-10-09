@@ -15,18 +15,27 @@ import (
 // app:hll:pageviews:2024-05-01 page
 
 type TopK struct {
-	Client *redis.Client
+	client *redis.Client
 	group  singleflight.Group
 }
 
-func NewTopK(client *redis.Client) *TopK {
-	return &TopK{
-		Client: client,
+// NewTopK borrows client; the caller owns its lifetime.
+func NewTopK(client *redis.Client) (*TopK, error) {
+	if client == nil {
+		return nil, errNilClient
 	}
+	return &TopK{client: client}, nil
+}
+func MustNewTopK(client *redis.Client) *TopK {
+	v, err := NewTopK(client)
+	if err != nil {
+		panic(err)
+	}
+	return v
 }
 
 func (t *TopK) Add(ctx context.Context, key string, values ...any) ([]string, error) {
-	vals, err := t.Client.TopKAdd(ctx, key, values...).Result()
+	vals, err := t.client.TopKAdd(ctx, key, values...).Result()
 	if err == nil {
 		return vals, nil
 	}
@@ -35,11 +44,11 @@ func (t *TopK) Add(ctx context.Context, key string, values ...any) ([]string, er
 		return nil, err
 	}
 
-	return t.Client.TopKAdd(ctx, key, values...).Result()
+	return t.client.TopKAdd(ctx, key, values...).Result()
 }
 
 func (t *TopK) Count(ctx context.Context, key string, values ...any) ([]int64, error) {
-	return t.Client.TopKCount(ctx, key, values...).Result()
+	return t.client.TopKCount(ctx, key, values...).Result()
 }
 
 func (t *TopK) IncrBy(ctx context.Context, key string, kvs map[string]int64) ([]string, error) {
@@ -54,7 +63,7 @@ func (t *TopK) IncrBy(ctx context.Context, key string, kvs map[string]int64) ([]
 		args[i*2+1] = kvs[k]
 	}
 
-	vals, err := t.Client.TopKIncrBy(ctx, key, args...).Result()
+	vals, err := t.client.TopKIncrBy(ctx, key, args...).Result()
 	if err == nil {
 		return vals, nil
 	}
@@ -62,28 +71,28 @@ func (t *TopK) IncrBy(ctx context.Context, key string, kvs map[string]int64) ([]
 		return nil, err
 	}
 
-	return t.Client.TopKIncrBy(ctx, key, args...).Result()
+	return t.client.TopKIncrBy(ctx, key, args...).Result()
 }
 
 func (t *TopK) List(ctx context.Context, key string) ([]string, error) {
-	return t.Client.TopKList(ctx, key).Result()
+	return t.client.TopKList(ctx, key).Result()
 }
 
 func (t *TopK) ListWithCount(ctx context.Context, key string) (map[string]int64, error) {
-	return t.Client.TopKListWithCount(ctx, key).Result()
+	return t.client.TopKListWithCount(ctx, key).Result()
 }
 
 // Query returns if the values exists in the top list.
 func (t *TopK) Query(ctx context.Context, key string, values ...any) ([]bool, error) {
-	return t.Client.TopKQuery(ctx, key, values...).Result()
+	return t.client.TopKQuery(ctx, key, values...).Result()
 }
 
 func (t *TopK) Reserve(ctx context.Context, key string, k int64) (string, error) {
-	return t.Client.TopKReserve(ctx, key, k).Result()
+	return t.client.TopKReserve(ctx, key, k).Result()
 }
 
 func (t *TopK) ReserveWithOptions(ctx context.Context, key string, k, width, depth int64, decay float64) (string, error) {
-	return t.Client.TopKReserveWithOptions(ctx, key, k, width, depth, decay).Result()
+	return t.client.TopKReserveWithOptions(ctx, key, k, width, depth, decay).Result()
 }
 
 func (t *TopK) Create(ctx context.Context, key string, k int64) (string, error) {
@@ -94,7 +103,7 @@ func (t *TopK) Create(ctx context.Context, key string, k int64) (string, error) 
 	width := max(int64(float64(k)*logK), 1)
 	depth := int64(max(logK, 5))
 	decay := 0.9
-	status, err := t.Client.TopKReserveWithOptions(ctx, key, k, width, depth, decay).Result()
+	status, err := t.client.TopKReserveWithOptions(ctx, key, k, width, depth, decay).Result()
 	if KeyAlreadyExistsError(err) {
 		return OK, nil
 	}

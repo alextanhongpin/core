@@ -10,19 +10,28 @@ import (
 // Use this to track latency of the server for sql operations, api requests etc.
 // We use this together with top-k to see the top performing api requests.
 type TDigest struct {
-	Client *redis.Client
+	client *redis.Client
 	group  singleflight.Group
 }
 
-func NewTDigest(client *redis.Client) *TDigest {
-	return &TDigest{
-		Client: client,
+// NewTDigest borrows client; the caller owns its lifetime.
+func NewTDigest(client *redis.Client) (*TDigest, error) {
+	if client == nil {
+		return nil, errNilClient
 	}
+	return &TDigest{client: client}, nil
+}
+func MustNewTDigest(client *redis.Client) *TDigest {
+	v, err := NewTDigest(client)
+	if err != nil {
+		panic(err)
+	}
+	return v
 }
 
 // Create needs to be called.
 func (t *TDigest) CreateWithCompression(ctx context.Context, key string, compression int64) (status string, exists bool, err error) {
-	status, err = t.Client.TDigestCreateWithCompression(ctx, key, compression).Result()
+	status, err = t.client.TDigestCreateWithCompression(ctx, key, compression).Result()
 	if KeyAlreadyExistsError(err) {
 		return OK, true, nil
 	}
@@ -31,7 +40,7 @@ func (t *TDigest) CreateWithCompression(ctx context.Context, key string, compres
 }
 
 func (t *TDigest) Create(ctx context.Context, key string) (status string, exists bool, err error) {
-	status, err = t.Client.TDigestCreate(ctx, key).Result()
+	status, err = t.client.TDigestCreate(ctx, key).Result()
 	if KeyAlreadyExistsError(err) {
 		return OK, true, nil
 	}
@@ -40,7 +49,7 @@ func (t *TDigest) Create(ctx context.Context, key string) (status string, exists
 }
 
 func (t *TDigest) Add(ctx context.Context, key string, values ...float64) (string, error) {
-	status, err := t.Client.TDigestAdd(ctx, key, values...).Result()
+	status, err := t.client.TDigestAdd(ctx, key, values...).Result()
 	if err == nil {
 		return status, nil
 	}
@@ -57,41 +66,41 @@ func (t *TDigest) Add(ctx context.Context, key string, values ...float64) (strin
 		return "", err
 	}
 
-	return t.Client.TDigestAdd(ctx, key, values...).Result()
+	return t.client.TDigestAdd(ctx, key, values...).Result()
 }
 
 func (t *TDigest) CDF(ctx context.Context, key string, values ...float64) ([]float64, error) {
-	return t.Client.TDigestCDF(ctx, key, values...).Result()
+	return t.client.TDigestCDF(ctx, key, values...).Result()
 }
 
 func (t *TDigest) Quantile(ctx context.Context, key string, values ...float64) ([]float64, error) {
-	return t.Client.TDigestQuantile(ctx, key, values...).Result()
+	return t.client.TDigestQuantile(ctx, key, values...).Result()
 }
 
 func (t *TDigest) Min(ctx context.Context, key string) (float64, error) {
-	return t.Client.TDigestMin(ctx, key).Result()
+	return t.client.TDigestMin(ctx, key).Result()
 }
 
 func (t *TDigest) Max(ctx context.Context, key string) (float64, error) {
-	return t.Client.TDigestMax(ctx, key).Result()
+	return t.client.TDigestMax(ctx, key).Result()
 }
 
 func (t *TDigest) Rank(ctx context.Context, key string, values ...float64) ([]int64, error) {
-	return t.Client.TDigestRank(ctx, key, values...).Result()
+	return t.client.TDigestRank(ctx, key, values...).Result()
 }
 
 func (t *TDigest) RevRank(ctx context.Context, key string, values ...float64) ([]int64, error) {
-	return t.Client.TDigestRevRank(ctx, key, values...).Result()
+	return t.client.TDigestRevRank(ctx, key, values...).Result()
 }
 
 func (t *TDigest) ByRank(ctx context.Context, key string, values ...uint64) ([]float64, error) {
-	return t.Client.TDigestByRank(ctx, key, values...).Result()
+	return t.client.TDigestByRank(ctx, key, values...).Result()
 }
 
 func (t *TDigest) ByRevRank(ctx context.Context, key string, values ...uint64) ([]float64, error) {
-	return t.Client.TDigestByRevRank(ctx, key, values...).Result()
+	return t.client.TDigestByRevRank(ctx, key, values...).Result()
 }
 
 func (t *TDigest) TrimmedMean(ctx context.Context, key string, lo, hi float64) (float64, error) {
-	return t.Client.TDigestTrimmedMean(ctx, key, lo, hi).Result()
+	return t.client.TDigestTrimmedMean(ctx, key, lo, hi).Result()
 }

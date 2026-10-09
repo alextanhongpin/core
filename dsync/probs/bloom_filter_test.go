@@ -9,7 +9,7 @@ import (
 )
 
 func TestBloomFilter(t *testing.T) {
-	bf := probs.NewBloomFilter(redistest.Client(t))
+	bf := probs.MustNewBloomFilter(redistest.Client(t))
 	key := t.Name() + ":bf:users"
 
 	t.Run("add", func(t *testing.T) {

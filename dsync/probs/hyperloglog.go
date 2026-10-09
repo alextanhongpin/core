@@ -10,23 +10,32 @@ import (
 // If we want to track the non-unique occurences (e.g. number of API calls),
 // use count-min-sketch instead.
 type HyperLogLog struct {
-	Client *redis.Client
+	client *redis.Client
 }
 
-func NewHyperLogLog(client *redis.Client) *HyperLogLog {
-	return &HyperLogLog{
-		Client: client,
+// NewHyperLogLog borrows client; the caller owns its lifetime.
+func NewHyperLogLog(client *redis.Client) (*HyperLogLog, error) {
+	if client == nil {
+		return nil, errNilClient
 	}
+	return &HyperLogLog{client: client}, nil
+}
+func MustNewHyperLogLog(client *redis.Client) *HyperLogLog {
+	v, err := NewHyperLogLog(client)
+	if err != nil {
+		panic(err)
+	}
+	return v
 }
 
 func (c *HyperLogLog) Add(ctx context.Context, key string, values ...any) (int64, error) {
-	return c.Client.PFAdd(ctx, key, values...).Result()
+	return c.client.PFAdd(ctx, key, values...).Result()
 }
 
 func (c *HyperLogLog) Count(ctx context.Context, keys ...string) (int64, error) {
-	return c.Client.PFCount(ctx, keys...).Result()
+	return c.client.PFCount(ctx, keys...).Result()
 }
 
 func (c *HyperLogLog) Merge(ctx context.Context, destKey string, srcKeys ...string) (string, error) {
-	return c.Client.PFMerge(ctx, destKey, srcKeys...).Result()
+	return c.client.PFMerge(ctx, destKey, srcKeys...).Result()
 }

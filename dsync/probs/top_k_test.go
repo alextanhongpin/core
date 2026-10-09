@@ -11,7 +11,7 @@ import (
 func TestTopK(t *testing.T) {
 	client := redistest.Client(t)
 	// Find top k hashtag
-	topK := probs.NewTopK(client)
+	topK := probs.MustNewTopK(client)
 	key := t.Name() + ":top_k:hashtag"
 
 	t.Run("create", func(t *testing.T) {

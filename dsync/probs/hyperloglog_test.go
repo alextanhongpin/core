@@ -10,7 +10,7 @@ import (
 
 func TestHyperLogLog(t *testing.T) {
 	t.Run("count", func(t *testing.T) {
-		hll := probs.NewHyperLogLog(redistest.Client(t))
+		hll := probs.MustNewHyperLogLog(redistest.Client(t))
 		key := t.Name() + ":hll:page_views"
 		is := assert.New(t)
 		n, err := hll.Add(ctx, key, "a", "a", 1, 1, true, false)
@@ -22,7 +22,7 @@ func TestHyperLogLog(t *testing.T) {
 	})
 
 	t.Run("merge", func(t *testing.T) {
-		hll := probs.NewHyperLogLog(redistest.Client(t))
+		hll := probs.MustNewHyperLogLog(redistest.Client(t))
 
 		today := t.Name() + ":hll:page_views:today"
 		yesterday := t.Name() + ":hll:page_views:yesterday"
