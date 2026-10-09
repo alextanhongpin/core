@@ -7,7 +7,7 @@ import (
 )
 
 func TestOldFailureCannotChangeNewState(t *testing.T) {
-	cb := circuitbreaker.New(newClient(t), nil)
+	cb := circuitbreaker.MustNew(newClient(t), circuitbreaker.Config{})
 	started, release, done := make(chan struct{}), make(chan struct{}), make(chan struct{})
 	go func() {
 		defer close(done)
@@ -27,7 +27,7 @@ func TestOldFailureCannotChangeNewState(t *testing.T) {
 func TestHalfOpenClosesAtExactThreshold(t *testing.T) {
 	cfg := circuitbreaker.DefaultConfig()
 	cfg.SuccessThreshold = 2
-	cb := circuitbreaker.New(newClient(t), cfg)
+	cb := circuitbreaker.MustNew(newClient(t), cfg)
 	if err := cb.SetStatus(t.Context(), t.Name(), circuitbreaker.HalfOpen); err != nil {
 		t.Fatal(err)
 	}
@@ -42,7 +42,7 @@ func TestHalfOpenClosesAtExactThreshold(t *testing.T) {
 	}
 }
 func TestSetOpenedRejectsImmediately(t *testing.T) {
-	cb := circuitbreaker.New(newClient(t), nil)
+	cb := circuitbreaker.MustNew(newClient(t), circuitbreaker.Config{})
 	if err := cb.SetStatus(t.Context(), t.Name(), circuitbreaker.Opened); err != nil {
 		t.Fatal(err)
 	}

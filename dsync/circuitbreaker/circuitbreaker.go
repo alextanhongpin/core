@@ -3,7 +3,6 @@ package circuitbreaker
 import (
 	_ "embed"
 
-	"cmp"
 	"context"
 	"errors"
 	"time"
@@ -41,8 +40,8 @@ const (
 
 var ErrOpened = errors.New("cb: opened")
 
-func DefaultConfig() *Options {
-	return &Options{
+func DefaultConfig() Config {
+	return Config{
 		FailureThreshold: 100,
 		FailurePeriod:    time.Second,
 		SuccessThreshold: 20,
@@ -70,7 +69,7 @@ func DefaultConfig() *Options {
 	}
 }
 
-type Options struct {
+type Config struct {
 	FailureThreshold int
 	FailurePeriod    time.Duration
 	SuccessThreshold int
@@ -82,15 +81,63 @@ type Options struct {
 
 // CircuitBreaker ...
 type CircuitBreaker struct {
-	client  *redis.Client
-	options *Options
+	client *redis.Client
+	cfg    Config
 }
 
-func New(client *redis.Client, opts *Options) *CircuitBreaker {
-	return &CircuitBreaker{
-		client:  client,
-		options: cmp.Or(opts, DefaultConfig()),
+// Options is retained as a naming alias; constructors accept values.
+type Options = Config
+
+func (c Config) WithDefaults() Config {
+	d := DefaultConfig()
+	if c.FailureThreshold == 0 {
+		c.FailureThreshold = d.FailureThreshold
 	}
+	if c.SuccessThreshold == 0 {
+		c.SuccessThreshold = d.SuccessThreshold
+	}
+	if c.FailurePeriod == 0 {
+		c.FailurePeriod = d.FailurePeriod
+	}
+	if c.SuccessPeriod == 0 {
+		c.SuccessPeriod = d.SuccessPeriod
+	}
+	if c.OpenTimeout == 0 {
+		c.OpenTimeout = d.OpenTimeout
+	}
+	if c.FailureCount == nil {
+		c.FailureCount = d.FailureCount
+	}
+	if c.SlowCallCount == nil {
+		c.SlowCallCount = d.SlowCallCount
+	}
+	return c
+}
+func (c Config) Validate() error {
+	if c.FailureThreshold <= 0 || c.SuccessThreshold <= 0 {
+		return errors.New("circuitbreaker: thresholds must be positive")
+	}
+	if c.FailurePeriod < time.Millisecond || c.SuccessPeriod < time.Millisecond || c.OpenTimeout < time.Millisecond {
+		return errors.New("circuitbreaker: durations must be at least one millisecond")
+	}
+	return nil
+}
+func New(client *redis.Client, cfg Config) (*CircuitBreaker, error) {
+	if client == nil {
+		return nil, errors.New("circuitbreaker: nil client")
+	}
+	cfg = cfg.WithDefaults()
+	if err := cfg.Validate(); err != nil {
+		return nil, err
+	}
+	return &CircuitBreaker{client: client, cfg: cfg}, nil
+}
+func MustNew(client *redis.Client, cfg Config) *CircuitBreaker {
+	cb, err := New(client, cfg)
+	if err != nil {
+		panic(err)
+	}
+	return cb
 }
 
 func (cb *CircuitBreaker) Do(ctx context.Context, key string, fn func() error) error {
@@ -129,11 +176,11 @@ func (cb *CircuitBreaker) call(ctx context.Context, method, key string, cause er
 	failureCount, successCount := 0, 0
 	if cause != nil {
 		failureCount = 1
-		if cb.options.FailureCount != nil {
-			failureCount += cb.options.FailureCount(cause)
+		if cb.cfg.FailureCount != nil {
+			failureCount += cb.cfg.FailureCount(cause)
 		}
-		if cb.options.SlowCallCount != nil {
-			failureCount += cb.options.SlowCallCount(duration)
+		if cb.cfg.SlowCallCount != nil {
+			failureCount += cb.cfg.SlowCallCount(duration)
 		}
 	} else {
 		successCount = 1
@@ -141,7 +188,7 @@ func (cb *CircuitBreaker) call(ctx context.Context, method, key string, cause er
 	if failureCount < 0 {
 		return Unknown, errors.New("circuitbreaker: negative failure weighting")
 	}
-	args := []any{failureCount, cb.options.FailureThreshold, cb.options.FailurePeriod.Milliseconds(), successCount, cb.options.SuccessThreshold, cb.options.SuccessPeriod.Milliseconds(), cb.options.OpenTimeout.Milliseconds(), generation}
+	args := []any{failureCount, cb.cfg.FailureThreshold, cb.cfg.FailurePeriod.Milliseconds(), successCount, cb.cfg.SuccessThreshold, cb.cfg.SuccessPeriod.Milliseconds(), cb.cfg.OpenTimeout.Milliseconds(), generation}
 	status, err := cb.client.FCall(ctx, method, []string{key}, args...).Int()
 	return Status(status), err
 }
@@ -150,7 +197,7 @@ func (cb *CircuitBreaker) SetStatus(ctx context.Context, key string, status Stat
 	if status < Closed || status > ForcedOpen {
 		return errors.New("circuitbreaker: invalid status")
 	}
-	return cb.client.FCall(ctx, "cb_set_status", []string{key}, status.Int(), cb.options.OpenTimeout.Milliseconds()).Err()
+	return cb.client.FCall(ctx, "cb_set_status", []string{key}, status.Int(), cb.cfg.OpenTimeout.Milliseconds()).Err()
 }
 
 func (cb *CircuitBreaker) Status(ctx context.Context, key string) (Status, error) {

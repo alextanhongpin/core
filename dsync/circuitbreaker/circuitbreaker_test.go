@@ -40,7 +40,7 @@ type CircuitBreakerSuite struct {
 	suite.Suite
 
 	client  *redis.Client
-	options *circuitbreaker.Options
+	options circuitbreaker.Config
 	cb      *circuitbreaker.CircuitBreaker
 }
 
@@ -52,7 +52,7 @@ func (s *CircuitBreakerSuite) SetupTest() {
 
 	s.client = newClient(s.T())
 	s.options = options
-	s.cb = circuitbreaker.New(s.client, options)
+	s.cb = circuitbreaker.MustNew(s.client, options)
 }
 
 func (s *CircuitBreakerSuite) statusIs(status circuitbreaker.Status) {
