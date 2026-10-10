@@ -362,7 +362,7 @@ func (e *ExperimentEngine) calculateZTest(control, treatment VariantResults) (fl
 	z := (p2 - p1) / se
 
 	// Two-tailed p-value (approximation)
-	pValue := 2 * (1 - math.Abs(z)/2.0) // Simplified approximation
+	pValue := math.Erfc(math.Abs(z) / math.Sqrt2)
 
 	return pValue, nil
 }

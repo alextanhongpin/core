@@ -360,3 +360,50 @@ For questions and support:
 - [ ] Advanced statistical tests (Bayesian A/B testing)
 - [ ] Mobile SDK support
 - [ ] Dashboard and UI components
+
+### Fixed-split A/B conversion tests
+
+`NewFixedTest` provides conventional 50/50 control/treatment assignment, rather
+than adaptive bandit allocation. Call `Expose` when the variant is actually seen,
+then `Convert` for the binary goal (purchase, signup, click). Both calls deduplicate
+by user; conversions before exposure are rejected. The instance is concurrency
+safe and keeps its state in memory; restarting loses measurements.
+
+```go
+experiment, err := ab.NewFixedTest("checkout-v2")
+if err != nil { return err }
+variant, err := experiment.Expose(userID)
+if err != nil { return err }
+// Render variant ("control" or "treatment").
+_ = variant
+// On the goal event:
+if err := experiment.Convert(userID); err != nil { return err }
+report := experiment.Report() // JSON-serializable snapshot
+return report.WriteHTML(writer)
+```
+
+Reports include unique exposures, conversions, conversion rates, 95% Wilson
+intervals, absolute lift (rate difference), relative lift (omitted for zero control
+rate), and a two-sided pooled proportion z-test. Significance is withheld until
+each arm has at least ten conversions and ten non-conversions. Plan the experiment
+endpoint before collecting data; repeatedly checking p-values and stopping on a
+significant result invalidates the fixed-horizon interpretation. Significance
+indicates a difference, not necessarily a treatment improvement.
+
+Generate a self-contained visual demo, with no external chart dependencies:
+
+```sh
+cd ab # from the repository root
+ go run ./example/fixed > report.html
+# Open report.html in your browser.
+```
+
+The demo uses synthetic data. The HTML shows conversion bars, confidence intervals,
+counts, lift and test readiness. `Report` can also be encoded with `encoding/json`
+for your own dashboard. Statistical formulas follow the NIST references for
+[Wilson intervals](https://www.itl.nist.gov/div898/handbook/prc/section2/prc241.htm)
+and [two-proportion tests](https://www.itl.nist.gov/div898/software/dataplot/refman2/auxillar/diffprop.htm).
+
+Read [Interpreting results](INTERPRETING_RESULTS.md) for field definitions, a
+worked example, a decision table and experiment best practices. HTML reports
+also include a plain-language interpretation and an embedded guide.
