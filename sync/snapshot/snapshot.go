@@ -1,5 +1,5 @@
-// package snapshot implements redis-snapshot like mechanism - the higher the
-// frequency, the more frequent the execution.
+// Package snapshot notifies subscribers when both a change count and
+// elapsed-time threshold are reached.
 package snapshot
 
 import (

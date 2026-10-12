@@ -1,4 +1,4 @@
-// package request handles the parsing and validation for the request body.
+// Package request handles parsing and validation of HTTP request bodies.
 package request
 
 import (
