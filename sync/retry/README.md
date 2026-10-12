@@ -21,7 +21,7 @@ Use `go doc github.com/alextanhongpin/core/sync/retry` for local API documentati
 ```go
 r, err := retry.New(retry.Config{
     MaxRetries: 3, // Four calls at most: one initial call and three retries.
-    Backoff: retry.NewExponentialBackoff(100*time.Millisecond, 2*time.Second),
+    Backoff: backoff.NewExponential(100*time.Millisecond, 2*time.Second),
 })
 if err != nil {
     return err
@@ -72,11 +72,13 @@ Decorator order affects behavior. A limiter inside retry applies to every attemp
 
 ## Backoff and throttling
 
+Import `github.com/alextanhongpin/core/sync/backoff` for delay strategies. The old retry strategy names remain available as deprecated aliases and forwarding constructors.
+
 `Backoff.At(1)` specifies the first retry delay. Built-in strategies are:
 
-- `NewConstantBackoff(period)`: constant delay; nonpositive periods produce zero.
-- `NewLinearBackoff(period)`: `period * retryNumber`, saturated at the maximum duration.
-- `NewExponentialBackoff(base, cap)`: full jitter in `[0, min(base * 2^retryNumber, cap))`. The first retry has an upper bound of `2 * base`. Nonpositive base or cap produces zero.
+- `backoff.NewConstant(period)`: constant delay; nonpositive periods produce zero.
+- `backoff.NewLinear(period)`: `period * retryNumber`, saturated at the maximum duration.
+- `backoff.NewExponential(base, cap)`: full jitter in `[0, min(base * 2^retryNumber, cap))`. The first retry has an upper bound of `2 * base`. Nonpositive base or cap produces zero.
 
 Backoff and callbacks run outside the throttler lock.
 
@@ -97,7 +99,7 @@ cfg.Throttler = retry.NewNoopThrottler()
 ```go
 r, err := retry.New(retry.Config{
     MaxRetries: 3,
-    Backoff: retry.NewExponentialBackoff(50*time.Millisecond, 500*time.Millisecond),
+    Backoff: backoff.NewExponential(50*time.Millisecond, 500*time.Millisecond),
 })
 if err != nil {
     return err

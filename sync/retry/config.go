@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"slices"
 	"time"
+
+	"github.com/alextanhongpin/core/sync/backoff"
 )
 
 // Config controls a logical operation. Dependencies and callbacks are shared;
@@ -47,7 +49,7 @@ func DefaultConfig() Config {
 // WithDefaults fills omitted dependencies without changing MaxRetries.
 func (c Config) WithDefaults() Config {
 	if c.Backoff == nil {
-		c.Backoff = NewExponentialBackoff(time.Second, time.Minute)
+		c.Backoff = backoff.NewExponential(time.Second, time.Minute)
 	}
 	if c.Throttler == nil {
 		c.Throttler, _ = NewThrottler(DefaultThrottlerConfig())

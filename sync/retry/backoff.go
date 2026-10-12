@@ -1,90 +1,40 @@
 package retry
 
 import (
-	"math"
-	"math/rand/v2"
+	"github.com/alextanhongpin/core/sync/backoff"
 	"time"
 )
 
-type Backoff interface {
-	At(attempts int) time.Duration
-}
+// Backoff is an alias for backoff.Backoff.
+// Deprecated: use backoff.Backoff.
+type Backoff = backoff.Backoff
 
-type backoff = Backoff
+// ConstantBackoff is an alias for backoff.Constant.
+// Deprecated: use backoff.Constant.
+type ConstantBackoff = backoff.Constant
 
-var (
-	_ Backoff = (*ConstantBackoff)(nil)
-	_ Backoff = (*ExponentialBackoff)(nil)
-	_ Backoff = (*LinearBackoff)(nil)
-)
+// LinearBackoff is an alias for backoff.Linear.
+// Deprecated: use backoff.Linear.
+type LinearBackoff = backoff.Linear
 
-type ConstantBackoff struct {
-	Period time.Duration
-}
+// ExponentialBackoff is an alias for backoff.Exponential.
+// Deprecated: use backoff.Exponential.
+type ExponentialBackoff = backoff.Exponential
 
+// NewConstantBackoff forwards to backoff.NewConstant.
+// Deprecated: use backoff.NewConstant.
 func NewConstantBackoff(period time.Duration) *ConstantBackoff {
-	return &ConstantBackoff{
-		Period: period,
-	}
+	return backoff.NewConstant(period)
 }
 
-func (b *ConstantBackoff) At(attempts int) time.Duration {
-	if b.Period <= 0 {
-		return 0
-	}
-	return b.Period
-}
-
-type ExponentialBackoff struct {
-	Base time.Duration
-	Cap  time.Duration
-}
-
-func NewExponentialBackoff(base, cap time.Duration) *ExponentialBackoff {
-	return &ExponentialBackoff{
-		Base: base,
-		Cap:  cap,
-	}
-}
-
-func (b *ExponentialBackoff) At(attempts int) time.Duration {
-	if b.Base <= 0 || b.Cap <= 0 {
-		return 0
-	}
-	if attempts < 0 {
-		attempts = 0
-	}
-	if attempts > 62 {
-		attempts = 62
-	}
-
-	multiplier := math.Pow(2, float64(attempts))
-	delay := time.Duration(float64(b.Base) * multiplier)
-	if delay > b.Cap || delay <= 0 {
-		delay = b.Cap
-	}
-	if delay <= 0 {
-		return 0
-	}
-	return rand.N(delay)
-}
-
-type LinearBackoff struct {
-	Period time.Duration
-}
-
+// NewLinearBackoff forwards to backoff.NewLinear.
+// Deprecated: use backoff.NewLinear.
 func NewLinearBackoff(period time.Duration) *LinearBackoff {
-	return &LinearBackoff{
-		Period: period,
-	}
+	return backoff.NewLinear(period)
 }
 
-func (b *LinearBackoff) At(attempts int) time.Duration {
-	if b.Period <= 0 || attempts <= 0 {
-		return 0
-	}
-	if time.Duration(attempts) > time.Duration(math.MaxInt64)/b.Period {
-		return time.Duration(math.MaxInt64)
-	}
-	return b.Period * time.Duration(attempts)
+// NewExponentialBackoff forwards to backoff.NewExponential.
+// Deprecated: use backoff.NewExponential.
+func NewExponentialBackoff(base, cap time.Duration) *ExponentialBackoff {
+	return backoff.NewExponential(base, cap)
 }

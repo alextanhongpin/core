@@ -162,23 +162,6 @@ func TestThrottleBudgetAndConcurrency(t *testing.T) {
 	}
 }
 
-func TestBackoff(t *testing.T) {
-	if got := retry.NewConstantBackoff(time.Second).At(0); got != time.Second {
-		t.Fatal(got)
-	}
-	if got := retry.NewLinearBackoff(time.Second).At(3); got != 3*time.Second {
-		t.Fatal(got)
-	}
-	for range 100 {
-		if got := retry.NewExponentialBackoff(time.Second, 3*time.Second).At(1); got < 0 || got >= 2*time.Second {
-			t.Fatal(got)
-		}
-		if got := retry.NewExponentialBackoff(time.Second, 3*time.Second).At(100); got < 0 || got >= 3*time.Second {
-			t.Fatal(got)
-		}
-	}
-}
-
 func TestPolicyCannotRetryCancellation(t *testing.T) {
 	r, err := retry.New(retry.Config{MaxRetries: 1, Retryable: func(error) (error, bool) {
 		t.Fatal("context error reached policy")

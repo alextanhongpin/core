@@ -6,11 +6,12 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/alextanhongpin/core/sync/backoff"
 	"github.com/alextanhongpin/core/sync/retry"
 )
 
 func ExampleRetry_Do() {
-	r, err := retry.New(retry.Config{MaxRetries: 2, Backoff: retry.NewConstantBackoff(0), Throttler: retry.NewNoopThrottler()})
+	r, err := retry.New(retry.Config{MaxRetries: 2, Backoff: backoff.NewConstant(0), Throttler: retry.NewNoopThrottler()})
 	if err != nil {
 		panic(err)
 	}
@@ -38,7 +39,7 @@ func ExampleFunc() {
 }
 
 func ExampleNewRoundTripper() {
-	r, err := retry.New(retry.Config{MaxRetries: 1, Backoff: retry.NewConstantBackoff(0), Throttler: retry.NewNoopThrottler()})
+	r, err := retry.New(retry.Config{MaxRetries: 1, Backoff: backoff.NewConstant(0), Throttler: retry.NewNoopThrottler()})
 	if err != nil {
 		panic(err)
 	}

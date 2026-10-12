@@ -57,6 +57,7 @@ func main() {
 | Scenario | Package |
 | --- | --- |
 | Bound concurrent calls and optional backlog | [sync/throttle](sync/throttle/) |
+| Calculate delays for retries, polling, or reconnects | [sync/backoff](sync/backoff/) |
 | Retry transient failures with backoff | [sync/retry](sync/retry/) |
 | Batch key lookups and share in-flight results | [sync/dataloader](sync/dataloader/) |
 | Protect a failing dependency | [sync/circuitbreaker](sync/circuitbreaker/) |
