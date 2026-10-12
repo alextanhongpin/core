@@ -1,6 +1,6 @@
 # core
 
-[![](https://godoc.org/github.com/alextanhongpin/core?status.svg)](http://godoc.org/github.com/alextanhongpin/core)
+[![Go Reference](https://pkg.go.dev/badge/github.com/alextanhongpin/core.svg)](https://pkg.go.dev/github.com/alextanhongpin/core)
 
 Go packages for HTTP services, concurrency control, Redis coordination, and typed utilities.
 
@@ -8,6 +8,11 @@ Go packages for HTTP services, concurrency control, Redis coordination, and type
 
 Install the package you need. Modules are released independently, so check the
 selected module's `go.mod` for its required Go version.
+
+The root `core` package is a documentation overview with links to the modules.
+Install individual modules to use their APIs; installing the root does not install
+the libraries. Root release tags version the overview, while each module's tags
+version its own API and documentation.
 
 ```sh
 go get github.com/alextanhongpin/core/sync/throttle
