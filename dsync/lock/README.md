@@ -1,61 +1,144 @@
-# Redis leases
+# lock
 
-Coordinate keyed operations across processes with renewable Redis leases.
+Run a function while holding a Redis lease on a key, so only one process at a
+time does the work for that key.
 
-## Installation and documentation
+**Use it for:** cron jobs running on several replicas, cache rebuilds,
+migrations, "only one worker processes order 42 at a time".
+
+**Don't use it for:** strict mutual exclusion where an overlap would corrupt
+data (a lease is not a fencing token, see [Caveats](#guarantees-and-caveats)),
+or for coalescing callers that all need the *result* (use
+[`dsync/singleflight`](../singleflight)).
 
 ```sh
 go get github.com/alextanhongpin/core/dsync/lock
-go doc github.com/alextanhongpin/core/dsync/lock
 ```
 
-[Go API reference](https://pkg.go.dev/github.com/alextanhongpin/core/dsync/lock) · [Module requirements](go.mod)
-
-## Typical use
-
-Use to coordinate scheduled refreshes or maintenance jobs sharing one Redis primary.
-
-Examples assume a caller-owned Redis client and a context. Create the client once
-and close it after all operations finish:
-
-```go
-client := redis.NewClient(&redis.Options{Addr: "localhost:6379"})
-defer client.Close()
-ctx := context.Background()
-```
-
-Import `context`, `github.com/redis/go-redis/v9`, and this package's import path.
+Requires **Redis 8.4+** (uses `DELEX` and `SET ... IFDEQ`).
+[API reference](https://pkg.go.dev/github.com/alextanhongpin/core/dsync/lock)
 
 ## Quick start
 
-The snippet belongs inside a function returning `error`; application functions
-such as `handleRequest` represent your own work. Import the package above and
-the standard packages used in the snippet (`context`, `errors`, `fmt`, or `time`).
-
 ```go
-locker, err := lock.New(lock.NewClient(client), lock.DefaultConfig())
-if err != nil {
-	return err
+package main
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log"
+
+	"github.com/alextanhongpin/core/dsync/lock"
+	"github.com/redis/go-redis/v9"
+)
+
+func main() {
+	rdb := redis.NewClient(&redis.Options{Addr: "localhost:6379"})
+	defer rdb.Close()
+
+	locker, err := lock.New(lock.NewClient(rdb), lock.DefaultConfig())
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	err = locker.Do(context.Background(), "reports:daily", func(ctx context.Context) error {
+		// Only one process runs this at a time.
+		// Stop when ctx is canceled: the lease was lost or the caller gave up.
+		fmt.Println("rebuilding report")
+		return nil
+	})
+	if errors.Is(err, lock.ErrLocked) {
+		log.Println("another process is still running it; skipping")
+		return
+	}
+	if err != nil {
+		log.Fatal(err)
+	}
 }
-return locker.Do(ctx, "reports:daily", func(ctx context.Context) error {
-	return rebuildReport(ctx) // Stop promptly if ctx is canceled.
-})
 ```
 
-## Behavior and configuration
+Other entry points:
 
-New(client, Config{}) returns a Locker and error. Configuration is passed by value, defaulted, validated, and stored privately. Zero LockTTL selects 30 seconds; zero RefreshRatio disables renewal. DefaultConfig explicitly enables renewal at ratio 0.8. Nil Retry selects a contention-only retry policy; nil Logger selects slog.Default. MustNew is the panicking startup helper.
+- `cfg.Retry = lock.NoRetry()` – fail immediately with `ErrLocked` instead of waiting.
+- `lock.Func(fn, locker, keyFn)` – wrap a `func(ctx, req) (res, error)` so each call runs under the key `keyFn(req)`.
+- `locker.Lock / Extend / Unlock` – the raw lease operations, if you need to manage a lease by hand.
 
-Do admits same-instance callers by key with cancelable local admission, acquires a unique Redis token, and invokes the callback synchronously. On caller cancellation or lease loss it cancels the callback context and waits for callback completion before cleanup. Callbacks must cooperate with cancellation and must not reenter the same key. Panics propagate after cleanup; cleanup errors are joined with operation errors. Cleanup has a five-second timeout detached from caller cancellation.
+## How it works
 
-Callbacks, retry runners, and Redis clients remain shared dependencies and must support concurrent use. Func returns the final callback value and error; resource-bearing callback results remain caller-owned. No instance owns the Redis client's lifetime.
+The lease is a single Redis string: key = your key, value = a random token
+(UUIDv7) unique to this `Do` call, with a TTL.
 
-NewClient uses token-checked SET NX acquisition and SETIFDEQ/DELEX renewal/release, requiring a Redis release that supports these commands. These are single-primary leases, not fencing: expiration, failover, or paused processes can permit overlapping external work. Use fencing at the protected resource when required.
+```
+Do(ctx, key, fn)
+ │
+ ├─ wait for other Do calls on the same key in this process (local queue)
+ │
+ ├─ acquire:  SET key token NX PX LockTTL      ── busy? retry via Config.Retry
+ │
+ ├─ run fn(ctx') ───────────────────────────────┐
+ │    every LockTTL*RefreshRatio:               │ ctx' is canceled if:
+ │    SET key token IFDEQ digest(token) PX TTL  │  - ctx is canceled
+ │    (renew only if we still own it)           │  - renewal fails
+ │                                              │  - LockTTL passes (no renewal)
+ ├─ wait for fn to return ◄─────────────────────┘
+ │
+ └─ release:  DELEX key IFDEQ digest(token)    (delete only if we still own it)
+```
 
-## Expected errors
+- Renew and release compare the stored token, so a process can never extend
+  or delete a lease that someone else now holds.
+- Release runs even if `fn` panics or `ctx` is canceled (with its own 5 s timeout).
+- If acquiring fails ambiguously (e.g. a timeout after `SET` was sent), `Do`
+  deletes its own token so the key does not stay blocked until it expires.
 
-`ErrLocked` means acquisition or token ownership conflicted. `ErrExpired` means the lease disappeared. `ErrLockTimeout` limits work when renewal is disabled. The default contention retry can return `retry.ErrLimitExceeded`; use `errors.Is` for wrapped errors.
+## Configuration
 
-## Pitfalls
+`lock.DefaultConfig()` is the recommended starting point. With a `Config{}`
+literal, zero fields get the defaults below; note that **`Config{}` has renewal
+off**.
 
-A lease can expire while external work continues. Callbacks must honor cancellation; use resource-side fencing when overlapping writes would be unsafe.
+| Field          | `DefaultConfig()` | Zero value means | Meaning |
+|----------------|-------------------|------------------|---------|
+| `LockTTL`      | 30s               | 30s              | Lifetime of the Redis key. Minimum 1ms. |
+| `RefreshRatio` | 0.8 (renew every 24s) | renewal off  | Renew every `LockTTL × RefreshRatio`. Must be in `[0, 1)`. With 0, `fn`'s context is canceled with `ErrLockTimeout` after `LockTTL`. |
+| `Retry`        | `DefaultRetry()`  | `DefaultRetry()` | How to wait for a busy key. `DefaultRetry` retries up to 10 times, backoff 50ms→2s (≈11s total). `NoRetry()` tries once. Any `*retry.Retry` from `core/sync/retry` works. |
+| `Logger`       | –                 | –                | Deprecated, ignored. |
+
+## Errors
+
+Errors from `Do` may be joined (e.g. your error plus a release error); always
+check with `errors.Is`.
+
+| Error | When | What to do |
+|-------|------|------------|
+| `ErrLocked` | Key is held by someone else (after retries), or the key was deleted/taken over during renewal. | Skip, or try later. With `DefaultRetry` the error also matches `retry.ErrLimitExceeded`. |
+| `ErrExpired` | The lease was gone at release time, or renewal could not finish before the lease expired. | Your work may have overlapped with another holder; make it idempotent or verify it. |
+| `ErrLockTimeout` | Renewal is off and `fn` ran longer than `LockTTL`. | Raise `LockTTL` or enable `RefreshRatio`. |
+| `context.Canceled` / `DeadlineExceeded` | Your `ctx` ended. | Normal shutdown path. |
+| anything else | Error returned by `fn`, or a Redis error. | Handle as usual. |
+
+## Guarantees and caveats
+
+- **Not fencing.** If your process pauses (GC, VM freeze) longer than the
+  TTL, or Redis fails over before replicating the key, two holders can
+  overlap. If that would be harmful, also guard the resource itself (e.g. a
+  version column or unique constraint).
+- **Cancellation is cooperative.** `Do` cancels `fn`'s context but waits for
+  `fn` to return. A callback that ignores `ctx` keeps running after the lease is lost.
+- **No reentrancy.** Calling `Do` with the same key from inside `fn` deadlocks.
+- **One renewal failure stops the work.** A single failed renew (including a
+  transient network error) cancels `fn`; choose a TTL that tolerates your
+  Redis latency.
+- **Single Redis primary.** `NewClient` takes a `*redis.Client`. Each lease
+  is one key, so other topologies work if you implement `Backend` yourself.
+- Same-process callers on the same key queue locally on one `Locker`, so they
+  don't all poll Redis. Use one `Locker` per process.
+
+## Running the tests
+
+Tests start a throwaway Redis in Docker (via `dockertest`), so Docker must be running:
+
+```sh
+go test -race ./...
+```
