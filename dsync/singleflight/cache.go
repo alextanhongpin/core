@@ -11,13 +11,17 @@ import (
 	redis "github.com/redis/go-redis/v9"
 )
 
-// CacheConfig controls cache-fill coordination. Zero durations and suffix use
-// defaults. Redis is borrowed; Cache has no Close method.
+// CacheConfig configures a Cache. Zero fields select the defaults.
 type CacheConfig struct {
+	// LockTTL, WaitTTL and PollInterval have the same meaning and defaults as
+	// in Config: 10s, 10s and 10ms.
 	LockTTL, WaitTTL, PollInterval time.Duration
-	Suffix                         string
+	// Suffix is appended to the cache key ("<key>:<suffix>") to name the fill
+	// lease, so the lease never collides with the cached value. Default "fetch".
+	Suffix string
 }
 
+// WithDefaults returns c with zero fields replaced by their defaults.
 func (c CacheConfig) WithDefaults() CacheConfig {
 	g := (Config{LockTTL: c.LockTTL, WaitTTL: c.WaitTTL, PollInterval: c.PollInterval}).WithDefaults()
 	c.LockTTL, c.WaitTTL, c.PollInterval = g.LockTTL, g.WaitTTL, g.PollInterval
@@ -26,16 +30,25 @@ func (c CacheConfig) WithDefaults() CacheConfig {
 	}
 	return c
 }
+
+// Validate reports whether the durations are valid; see Config.Validate.
 func (c CacheConfig) Validate() error {
 	return (Config{LockTTL: c.LockTTL, WaitTTL: c.WaitTTL, PollInterval: c.PollInterval}).Validate()
 }
 
+// Cache is a read-through cache stored in Redis as JSON. On a miss, exactly one
+// caller across all processes runs the getter and stores the result; the others
+// wait and then read it. It is safe for concurrent use. Construct it with
+// NewCache.
 type Cache[T any] struct {
 	client *redis.Client
 	group  *Group
 	cfg    CacheConfig
 }
 
+// NewCache returns a Cache for values of type T stored through client. The
+// caller keeps ownership of client and must close it after all calls finish.
+// T must round-trip through encoding/json.
 func NewCache[T any](client *redis.Client, cfg CacheConfig) (*Cache[T], error) {
 	cfg = cfg.WithDefaults()
 	if err := cfg.Validate(); err != nil {
@@ -47,6 +60,8 @@ func NewCache[T any](client *redis.Client, cfg CacheConfig) (*Cache[T], error) {
 	}
 	return &Cache[T]{client: client, group: g, cfg: cfg}, nil
 }
+
+// MustNewCache is like NewCache but panics on error.
 func MustNewCache[T any](client *redis.Client, cfg CacheConfig) *Cache[T] {
 	c, err := NewCache[T](client, cfg)
 	if err != nil {
@@ -55,6 +70,18 @@ func MustNewCache[T any](client *redis.Client, cfg CacheConfig) *Cache[T] {
 	return c
 }
 
+// LoadOrStore returns the value cached at key. On a miss it calls getter (in
+// one caller only, across all processes), stores the result at key for ttl and
+// returns it. A zero ttl stores the value without expiry; a positive ttl must be
+// at least one millisecond.
+//
+// loaded is false only for the caller whose getter produced the value, and
+// true for everyone who read an existing value.
+//
+// If the leader's getter fails, callers on the same Cache get its error, while
+// callers in other processes find no value and get redis.Nil. If the fill lease
+// was lost before the value was stored, nothing is stored and the error matches
+// lock.ErrExpired.
 func (c *Cache[T]) LoadOrStore(ctx context.Context, key string, getter func(ctx context.Context) (T, error), ttl time.Duration) (T, bool, error) {
 	var zero T
 	if key == "" || getter == nil || ttl < 0 || (ttl > 0 && ttl < time.Millisecond) {
