@@ -2,13 +2,16 @@ package lock
 
 import "context"
 
-type fun[K, V any] = func(ctx context.Context, req K) (V, error)
-
-type locker interface {
+// Doer is anything with Locker's Do method, such as *Locker.
+type Doer interface {
 	Do(ctx context.Context, key string, fn func(ctx context.Context) error) error
 }
 
-func Func[K, V any](fn fun[K, V], l locker, keyFn func(context.Context, K) (string, error)) fun[K, V] {
+// Func wraps fn so that every call runs inside l.Do, under the key returned by
+// keyFn for that request. The wrapped function returns fn's result even when
+// the error is non-nil (for example, fn succeeded but the release failed). If
+// keyFn fails, fn is not called.
+func Func[K, V any](fn func(ctx context.Context, req K) (V, error), l Doer, keyFn func(context.Context, K) (string, error)) func(ctx context.Context, req K) (V, error) {
 	return func(ctx context.Context, req K) (V, error) {
 		var zero V
 		key, err := keyFn(ctx, req)

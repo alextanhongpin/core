@@ -9,15 +9,19 @@ import (
 	"github.com/redis/go-redis/v9/helper"
 )
 
-var _ client = (*Client)(nil)
+var _ Store = (*Client)(nil)
 
+// Client is the Redis implementation of [Store]. It uses SET NX GET,
+// SET IFDEQ and DELEX IFDEQ, which require Redis 8.4 or newer.
+//
 // Client wraps a Redis client to provide atomic compare-and-swap,
 // compare-and-delete, and load-or-store operations.
 type Client struct {
 	client *redis.Client
 }
 
-// NewClient returns a new Client wrapping the provided Redis client.
+// NewClient returns a new Client wrapping the provided Redis client. The
+// client is borrowed: closing it remains the caller's responsibility.
 func NewClient(client *redis.Client) *Client {
 	return &Client{
 		client: client,

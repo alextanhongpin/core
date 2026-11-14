@@ -17,16 +17,21 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+// Event is one entry as persisted by [File]: the key, its value and its
+// expiry time (zero means no expiry).
 type Event struct {
 	Key       string    `json:"key,omitzero"`
 	Val       []byte    `json:"val,omitzero"`
 	ExpiresAt time.Time `json:"expiresAt,omitzero"`
 }
 
+// IsExpired reports whether the entry has an expiry that has passed.
 func (e *Event) IsExpired() bool {
 	return !e.ExpiresAt.IsZero() && time.Since(e.ExpiresAt) > 0
 }
 
+// NewEvent returns an Event holding a copy of val that expires after ttl
+// (ttl <= 0 means never).
 func NewEvent(key string, val []byte, ttl time.Duration) *Event {
 	var expiresAt time.Time
 	if ttl > 0 {
@@ -39,6 +44,14 @@ func NewEvent(key string, val []byte, ttl time.Duration) *Event {
 	}
 }
 
+// File is a [Storage] that keeps all entries in memory and persists them as a
+// single JSON file. Every write rewrites the whole file atomically (write to
+// a temp file, fsync, rename), so it suits small caches such as local
+// snapshots or CLI tools, not high write rates.
+//
+// While open, File holds an exclusive flock(2) on a sidecar "<path>.lock"
+// file. A second NewFile for the same path, in this or another process,
+// blocks until the first is closed. Always call Close.
 type File struct {
 	group  singleflight.Group
 	path   string
@@ -53,7 +66,9 @@ type File struct {
 
 var _ cache[[]byte] = (*File)(nil)
 
-// NewFile creates a new File instance with the provided File client.
+// NewFile opens (or creates) the JSON cache file at path, creating parent
+// directories as needed, and loads its entries. It blocks until it can take
+// the exclusive lock on "<path>.lock".
 func NewFile(path string) (*File, error) {
 	f, close, err := lockFile(path)
 	if err != nil {
@@ -76,6 +91,8 @@ func NewFile(path string) (*File, error) {
 	}, nil
 }
 
+// Close releases the file lock. Calls after Close return [ErrClosed].
+// Close is idempotent.
 func (f *File) Close() error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -86,6 +103,7 @@ func (f *File) Close() error {
 	return f.close()
 }
 
+// Load returns a copy of the value for key, or [ErrNotExist].
 func (f *File) Load(ctx context.Context, key string) ([]byte, error) {
 	f.mu.Lock()
 	val, err := f.load(key)
@@ -97,6 +115,7 @@ func (f *File) Load(ctx context.Context, key string) ([]byte, error) {
 	return slices.Clone(val.Val), nil
 }
 
+// Store sets key's value and persists the file. ttl <= 0 means no expiry.
 func (f *File) Store(ctx context.Context, key string, value []byte, ttl time.Duration) error {
 	f.mu.Lock()
 	err := f.save(key, value, ttl)
@@ -104,6 +123,8 @@ func (f *File) Store(ctx context.Context, key string, value []byte, ttl time.Dur
 	return err
 }
 
+// StoreOnce stores value only if key does not exist; otherwise it returns
+// [ErrExists].
 func (f *File) StoreOnce(ctx context.Context, key string, value []byte, ttl time.Duration) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -186,9 +207,8 @@ func (f *File) LoadOrCreate(ctx context.Context, key string, create func(context
 	return slices.Clone(result.([]byte)), !created, nil
 }
 
-// LoadAndDelete deletes the value for a key, returning the previous value if
-// any. The loaded result reports whether the key was present.
-// Also see usecase here: https://github.com/golang/go/issues/33762#issuecomment-523757434
+// LoadAndDelete atomically returns and deletes the value for key, or returns
+// [ErrNotExist].
 func (f *File) LoadAndDelete(ctx context.Context, key string) (value []byte, err error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -205,10 +225,8 @@ func (f *File) LoadAndDelete(ctx context.Context, key string) (value []byte, err
 	return v.Val, nil
 }
 
-// CompareAndDelete deletes the entry for key if its value is equal to old. The
-// old value must be of a comparable type.
-// If there is no current value for key in the map, CompareAndDelete returns
-// false (even if the old value is the nil interface value).
+// CompareAndDelete deletes key only if its value equals old. It returns
+// [ErrNotExist] if the key is missing or the value differs.
 func (f *File) CompareAndDelete(ctx context.Context, key string, old []byte) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -225,8 +243,8 @@ func (f *File) CompareAndDelete(ctx context.Context, key string, old []byte) err
 	return f.delete(key)
 }
 
-// CompareAndSwap swaps the old and new values for key if the value stored in
-// the map is equal to old. The old value must be of a comparable type.
+// CompareAndSwap sets key to value only if its current value equals old. It
+// returns [ErrNotExist] if the key is missing or the value differs.
 func (f *File) CompareAndSwap(ctx context.Context, key string, old, value []byte, ttl time.Duration) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -247,7 +265,7 @@ func (f *File) CompareAndSwap(ctx context.Context, key string, old, value []byte
 	return f.save(key, value, ttl)
 }
 
-// Exists checks if a key exists in the cache.
+// Exists reports whether key exists and has not expired.
 func (f *File) Exists(ctx context.Context, key string) (bool, error) {
 	_, err := f.Load(ctx, key)
 	if errors.Is(err, ErrNotExist) {
@@ -256,9 +274,8 @@ func (f *File) Exists(ctx context.Context, key string) (bool, error) {
 	return err == nil, err
 }
 
-// TTL returns the remaining time to live for a key.
-// Returns -1 if the key exists but has no expiration.
-// Returns -2 if the key does not exist.
+// TTL returns the remaining time to live for key: -1 if it has no expiry, -2
+// if it does not exist.
 func (f *File) TTL(ctx context.Context, key string) (time.Duration, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -276,7 +293,8 @@ func (f *File) TTL(ctx context.Context, key string) (time.Duration, error) {
 	return time.Until(v.ExpiresAt), nil
 }
 
-// Expire sets a timeout on a key. After the timeout has expired, the key will automatically be deleted.
+// Expire sets a new TTL on an existing key; ttl <= 0 deletes it. It returns
+// [ErrNotExist] if the key does not exist.
 func (f *File) Expire(ctx context.Context, key string, ttl time.Duration) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -291,7 +309,7 @@ func (f *File) Expire(ctx context.Context, key string, ttl time.Duration) error 
 	return f.save(key, v.Val, ttl)
 }
 
-// Delete removes one or more keys from the cache.
+// Delete removes keys and returns how many were present.
 func (f *File) Delete(ctx context.Context, keys ...string) (int64, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -308,6 +326,8 @@ func (f *File) Delete(ctx context.Context, keys ...string) (int64, error) {
 	return count, nil
 }
 
+// Size returns the number of stored entries, including expired entries that
+// have not been read (and thus removed) yet.
 func (f *File) Size(ctx context.Context) (int, error) {
 	f.mu.Lock()
 	count := len(f.data)
@@ -369,7 +389,10 @@ func (f *File) flush() error {
 	defer os.Remove(file.Name())
 	encodeErr := json.NewEncoder(file).Encode(f.data)
 	chmodErr := file.Chmod(0o644)
-	if err := errors.Join(encodeErr, chmodErr, file.Close()); err != nil {
+	// Sync before rename so a crash cannot leave an empty or partial file
+	// behind the final name.
+	syncErr := file.Sync()
+	if err := errors.Join(encodeErr, chmodErr, syncErr, file.Close()); err != nil {
 		return err
 	}
 	return os.Rename(file.Name(), f.path)

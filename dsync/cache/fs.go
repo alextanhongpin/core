@@ -17,6 +17,15 @@ import (
 
 const indexFile = ".index"
 
+// FS is a [Storage] that stores each value as its own file in a directory.
+// File names are a 64-bit hash of the key; expiry times are kept in an
+// ".index" JSON file in the same directory. It suits larger values (such as
+// memoized results with [GoFunc]) that should survive restarts.
+//
+// FS is safe for concurrent use within one process but does no
+// cross-process locking: only one FS may use a directory at a time. A value
+// file and the index are written separately, so a failed write can leave a
+// value without its expiry.
 type FS struct {
 	group  singleflight.Group
 	root   *os.Root
@@ -27,8 +36,11 @@ type FS struct {
 
 var _ cache[[]byte] = (*FS)(nil)
 
-// NewFile creates a new FS instance with the provided FS client.
+// NewFS opens dir (creating it if needed) as an FS store.
 func NewFS(dir string) (*FS, error) {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return nil, err
+	}
 	root, err := os.OpenRoot(dir)
 	if err != nil {
 		return nil, err
@@ -55,6 +67,8 @@ func NewFS(dir string) (*FS, error) {
 	}, nil
 }
 
+// Close closes the directory. Calls after Close return [ErrClosed]. Close is
+// idempotent.
 func (f *FS) Close() error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -65,6 +79,7 @@ func (f *FS) Close() error {
 	return f.root.Close()
 }
 
+// Load returns the value for key, or [ErrNotExist].
 func (f *FS) Load(ctx context.Context, key string) ([]byte, error) {
 	f.mu.Lock()
 	val, err := f.load(key)
@@ -76,6 +91,7 @@ func (f *FS) Load(ctx context.Context, key string) ([]byte, error) {
 	return val.Val, nil
 }
 
+// Store writes key's value. ttl <= 0 means no expiry.
 func (f *FS) Store(ctx context.Context, key string, value []byte, ttl time.Duration) error {
 	f.mu.Lock()
 	err := f.save(key, value, ttl)
@@ -83,6 +99,8 @@ func (f *FS) Store(ctx context.Context, key string, value []byte, ttl time.Durat
 	return err
 }
 
+// StoreOnce stores value only if key does not exist; otherwise it returns
+// [ErrExists].
 func (f *FS) StoreOnce(ctx context.Context, key string, value []byte, ttl time.Duration) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -166,9 +184,8 @@ func (f *FS) LoadOrCreate(ctx context.Context, key string, create func(context.C
 	return slices.Clone(result.([]byte)), !created, nil
 }
 
-// LoadAndDelete deletes the value for a key, returning the previous value if
-// any. The loaded result reports whether the key was present.
-// Also see usecase here: https://github.com/golang/go/issues/33762#issuecomment-523757434
+// LoadAndDelete returns and deletes the value for key, or returns
+// [ErrNotExist].
 func (f *FS) LoadAndDelete(ctx context.Context, key string) (value []byte, err error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -185,10 +202,8 @@ func (f *FS) LoadAndDelete(ctx context.Context, key string) (value []byte, err e
 	return v.Val, nil
 }
 
-// CompareAndDelete deletes the entry for key if its value is equal to old. The
-// old value must be of a comparable type.
-// If there is no current value for key in the map, CompareAndDelete returns
-// false (even if the old value is the nil interface value).
+// CompareAndDelete deletes key only if its value equals old. It returns
+// [ErrNotExist] if the key is missing or the value differs.
 func (f *FS) CompareAndDelete(ctx context.Context, key string, old []byte) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -205,8 +220,8 @@ func (f *FS) CompareAndDelete(ctx context.Context, key string, old []byte) error
 	return f.delete(key)
 }
 
-// CompareAndSwap swaps the old and new values for key if the value stored in
-// the map is equal to old. The old value must be of a comparable type.
+// CompareAndSwap sets key to value only if its current value equals old. It
+// returns [ErrNotExist] if the key is missing or the value differs.
 func (f *FS) CompareAndSwap(ctx context.Context, key string, old, value []byte, ttl time.Duration) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -227,7 +242,7 @@ func (f *FS) CompareAndSwap(ctx context.Context, key string, old, value []byte, 
 	return f.save(key, value, ttl)
 }
 
-// Exists checks if a key exists in the cache.
+// Exists reports whether key exists and has not expired.
 func (f *FS) Exists(ctx context.Context, key string) (bool, error) {
 	_, err := f.Load(ctx, key)
 	if errors.Is(err, ErrNotExist) {
@@ -236,9 +251,8 @@ func (f *FS) Exists(ctx context.Context, key string) (bool, error) {
 	return err == nil, err
 }
 
-// TTL returns the remaining time to live for a key.
-// Returns -1 if the key exists but has no expiration.
-// Returns -2 if the key does not exist.
+// TTL returns the remaining time to live for key: -1 if it has no expiry, -2
+// if it does not exist.
 func (f *FS) TTL(ctx context.Context, key string) (time.Duration, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -256,7 +270,8 @@ func (f *FS) TTL(ctx context.Context, key string) (time.Duration, error) {
 	return time.Until(v.ExpiresAt), nil
 }
 
-// Expire sets a timeout on a key. After the timeout has expired, the key will automatically be deleted.
+// Expire sets a new TTL on an existing key; ttl <= 0 deletes it. It returns
+// [ErrNotExist] if the key does not exist.
 func (f *FS) Expire(ctx context.Context, key string, ttl time.Duration) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -272,7 +287,7 @@ func (f *FS) Expire(ctx context.Context, key string, ttl time.Duration) error {
 	return f.saveIndex()
 }
 
-// Delete removes one or more keys from the cache.
+// Delete removes keys and returns how many value files existed.
 func (f *FS) Delete(ctx context.Context, keys ...string) (int64, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -291,6 +306,8 @@ func (f *FS) Delete(ctx context.Context, keys ...string) (int64, error) {
 	return count, nil
 }
 
+// Size returns the number of value files, including expired ones that have
+// not been read (and thus removed) yet.
 func (f *FS) Size(ctx context.Context) (int, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

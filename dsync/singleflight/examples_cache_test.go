@@ -14,7 +14,7 @@ import (
 
 func ExampleCache() {
 	// Cache example.
-	// When the cache is stale, only once worker will populate
+	// When the cache is stale, only one worker will populate
 	// the cache, and the rest will wait.
 
 	client := redis.NewClient(&redis.Options{
@@ -35,7 +35,7 @@ func ExampleCache() {
 	for range n {
 		go func() {
 			defer wg.Done()
-			v, hitOrMiss, err := cache.LoadOrStore(ctx, "foo", func(context.Context) (string, error) {
+			v, loaded, err := cache.LoadOrStore(ctx, "foo", func(context.Context) (string, error) {
 				exec.Add(1)
 				return "bar", nil
 			}, 10*time.Second)
@@ -45,7 +45,7 @@ func ExampleCache() {
 			if v != "bar" {
 				panic("unexpected value: " + v)
 			}
-			if hitOrMiss {
+			if loaded {
 				hit.Add(1)
 			}
 

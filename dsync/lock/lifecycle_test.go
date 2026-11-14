@@ -88,3 +88,85 @@ func TestValueConfigOwnership(t *testing.T) {
 		t.Fatal("invalid TTL accepted")
 	}
 }
+
+// ambiguousClient creates the key but reports a failure, as happens when the
+// caller's context expires after Redis has executed SET.
+type ambiguousClient struct {
+	leaseClient
+	unlockedToken atomic.Value
+}
+
+func (c *ambiguousClient) Lock(context.Context, string, string, time.Duration) error {
+	return context.DeadlineExceeded
+}
+
+func (c *ambiguousClient) Unlock(_ context.Context, _, token string) error {
+	c.unlockedToken.Store(token)
+	return nil
+}
+
+func TestAmbiguousAcquireFailureReleasesToken(t *testing.T) {
+	client := &ambiguousClient{}
+	l := MustNew(client, Config{LockTTL: time.Second, Retry: onceRetry{}})
+	err := l.Do(context.Background(), "key", func(context.Context) error {
+		t.Error("callback ran without a lease")
+		return nil
+	})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatal(err)
+	}
+	if tok, _ := client.unlockedToken.Load().(string); tok == "" {
+		t.Fatal("possibly acquired lease was not released")
+	}
+}
+
+// busyClient always reports contention; Unlock must not be called for it.
+type busyClient struct{ leaseClient }
+
+func (*busyClient) Lock(context.Context, string, string, time.Duration) error { return ErrLocked }
+
+func TestBusyKeyDoesNotUnlock(t *testing.T) {
+	client := &busyClient{}
+	l := MustNew(client, Config{LockTTL: time.Second, Retry: onceRetry{}})
+	err := l.Do(context.Background(), "key", func(context.Context) error { return nil })
+	if !errors.Is(err, ErrLocked) || client.released.Load() {
+		t.Fatalf("err=%v released=%v", err, client.released.Load())
+	}
+}
+
+// hangingClient's Extend blocks until its context ends, like a stalled Redis.
+type hangingClient struct{ leaseClient }
+
+func (*hangingClient) Extend(ctx context.Context, _, _ string, _ time.Duration) error {
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+func TestStalledRenewalCancelsBeforeLeaseExpires(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		client := &hangingClient{}
+		l := MustNew(client, Config{LockTTL: time.Second, RefreshRatio: 0.5, Retry: onceRetry{}})
+		start := time.Now()
+		var canceledAfter time.Duration
+		err := l.Do(context.Background(), "key", func(ctx context.Context) error {
+			<-ctx.Done()
+			canceledAfter = time.Since(start)
+			return nil
+		})
+		if !errors.Is(err, ErrExpired) {
+			t.Fatalf("want ErrExpired, got %v", err)
+		}
+		if canceledAfter > time.Second {
+			t.Fatalf("callback kept running %v, past the 1s lease", canceledAfter)
+		}
+	})
+}
+
+func TestNoRetryHonorsCanceledContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	err := NoRetry().Do(ctx, func(context.Context) error { t.Error("called"); return nil })
+	if !errors.Is(err, context.Canceled) {
+		t.Fatal(err)
+	}
+}

@@ -14,18 +14,45 @@ import (
 	"github.com/zeebo/xxh3"
 )
 
-type fun[K, V any] = func(ctx context.Context, req K) (V, time.Duration, error)
-type ifun[K, V any] = func(ctx context.Context, req K) (V, bool, error)
-type gofun[K, V any] = func(context.Context, K) (V, error)
-type keyfun[K any] = func(ctx context.Context, req K) (string, error)
-
+// FuncConfig configures [Func] and [Idempotent].
 type FuncConfig[K any] struct {
+	// Codec encodes cached results. Optional; defaults to [JSONCodec].
 	Codec Codec
-	KeyFn keyfun[K]
-	Lock  *Lock
+
+	// KeyFn derives the Redis key from the request. Required. Include a
+	// prefix, e.g. "user:" + id, to keep keys unique per function.
+	KeyFn func(ctx context.Context, req K) (string, error)
+
+	// Lock coordinates fills across processes. Required.
+	Lock *Lock
+
+	// Wait is how long a caller waits while another process runs fn for the
+	// same key. Default 0: return ErrLocked immediately. See
+	// [LoadOrCreateConfig].Wait.
+	Wait time.Duration
+
+	// LeaseTTL is the lease TTL while fn runs. Default 10s.
+	LeaseTTL time.Duration
+
+	// RefreshRatio enables lease renewal for long-running fn. Default 0 (off).
+	RefreshRatio float32
 }
 
-func Func[K, V any](fn fun[K, V], cfg FuncConfig[K]) (ifun[K, V], error) {
+func (c FuncConfig[K]) lease(create func(context.Context, string) ([]byte, time.Duration, error)) LoadOrCreateConfig[[]byte] {
+	return LoadOrCreateConfig[[]byte]{
+		Create:       create,
+		Lock:         c.LeaseTTL,
+		Wait:         c.Wait,
+		RefreshRatio: c.RefreshRatio,
+	}
+}
+
+// Func wraps fn with a Redis-backed read-through cache. The returned function
+// computes the key with cfg.KeyFn and returns the cached result if present
+// (loaded=true). Otherwise it calls fn under a [Lock] lease, caches the result
+// with the TTL fn returns and returns it (loaded=false). Errors from fn are
+// returned unchanged and are not cached.
+func Func[K, V any](fn func(ctx context.Context, req K) (V, time.Duration, error), cfg FuncConfig[K]) (func(ctx context.Context, req K) (V, bool, error), error) {
 	cfg = cfg.WithDefaults()
 	if err := cfg.Validate(); err != nil {
 		return nil, err
@@ -40,20 +67,18 @@ func Func[K, V any](fn fun[K, V], cfg FuncConfig[K]) (ifun[K, V], error) {
 			return zero, false, err
 		}
 
-		curr, loaded, err := cfg.Lock.LoadOrCreate(ctx, key, LoadOrCreateConfig[[]byte]{
-			Create: func(ctx context.Context, key string) ([]byte, time.Duration, error) {
-				v, ttl, err := fn(ctx, args)
-				if err != nil {
-					return nil, 0, err
-				}
-				bb := new(bytes.Buffer)
-				err = cfg.Codec.NewEncoder(bb).Encode(v)
-				if err != nil {
-					return nil, 0, err
-				}
-				return bb.Bytes(), ttl, nil
-			},
-		})
+		curr, loaded, err := cfg.Lock.LoadOrCreate(ctx, key, cfg.lease(func(ctx context.Context, key string) ([]byte, time.Duration, error) {
+			v, ttl, err := fn(ctx, args)
+			if err != nil {
+				return nil, 0, err
+			}
+			bb := new(bytes.Buffer)
+			err = cfg.Codec.NewEncoder(bb).Encode(v)
+			if err != nil {
+				return nil, 0, err
+			}
+			return bb.Bytes(), ttl, nil
+		}))
 		if err != nil {
 			return zero, false, err
 		}
@@ -67,7 +92,12 @@ func Func[K, V any](fn fun[K, V], cfg FuncConfig[K]) (ifun[K, V], error) {
 	}, nil
 }
 
-func Idempotent[K, V any](fn fun[K, V], cfg FuncConfig[K]) (ifun[K, V], error) {
+// Idempotent is like [Func] but also stores the request next to the response.
+// A later call with the same key but a different request (compared by its
+// canonical JSON form) returns [ErrConflict] instead of the cached response.
+// Use it for idempotency keys: repeat requests get the first response, and a
+// key reused for a different request is rejected.
+func Idempotent[K, V any](fn func(ctx context.Context, req K) (V, time.Duration, error), cfg FuncConfig[K]) (func(ctx context.Context, req K) (V, bool, error), error) {
 	cfg = cfg.WithDefaults()
 	if err := cfg.Validate(); err != nil {
 		return nil, err
@@ -86,23 +116,21 @@ func Idempotent[K, V any](fn fun[K, V], cfg FuncConfig[K]) (ifun[K, V], error) {
 		if err != nil {
 			return zero, false, err
 		}
-		b, loaded, err := cfg.Lock.LoadOrCreate(ctx, key, LoadOrCreateConfig[[]byte]{
-			Create: func(ctx context.Context, key string) ([]byte, time.Duration, error) {
-				v, ttl, err := fn(ctx, req)
-				if err != nil {
-					return nil, 0, err
-				}
-				bb := new(bytes.Buffer)
-				err = cfg.Codec.NewEncoder(bb).Encode(&dto{
-					Request:  req,
-					Response: v,
-				})
-				if err != nil {
-					return nil, 0, err
-				}
-				return bb.Bytes(), ttl, nil
-			},
-		})
+		b, loaded, err := cfg.Lock.LoadOrCreate(ctx, key, cfg.lease(func(ctx context.Context, key string) ([]byte, time.Duration, error) {
+			v, ttl, err := fn(ctx, req)
+			if err != nil {
+				return nil, 0, err
+			}
+			bb := new(bytes.Buffer)
+			err = cfg.Codec.NewEncoder(bb).Encode(&dto{
+				Request:  req,
+				Response: v,
+			})
+			if err != nil {
+				return nil, 0, err
+			}
+			return bb.Bytes(), ttl, nil
+		}))
 		if err != nil {
 			return zero, false, err
 		}
@@ -122,11 +150,23 @@ func Idempotent[K, V any](fn fun[K, V], cfg FuncConfig[K]) (ifun[K, V], error) {
 			return zero, false, fmt.Errorf("%w: request", ErrConflict)
 		}
 
-		return res.Response, loaded, err
+		return res.Response, loaded, nil
 	}, nil
 }
 
-func GoFunc[K, V any](fn gofun[K, V], c cache[[]byte], codec Codec) gofun[K, V] {
+// GoFunc memoizes fn in any byte [Storage] (typically [FS] or [File]) without
+// expiry. The key is derived from fn's name and the JSON form of the
+// argument, so calls with equal arguments share one result, also across
+// program runs when the storage is persistent. A nil codec defaults to
+// [JSONCodec]. Errors are not cached.
+//
+// Because the key uses the function's name, two different closures created
+// at the same source location share keys; wrap only named functions or
+// closures that capture no varying state.
+func GoFunc[K, V any](fn func(context.Context, K) (V, error), c Storage[[]byte], codec Codec) func(context.Context, K) (V, error) {
+	if codec == nil {
+		codec = NewJSONCodec()
+	}
 	return func(ctx context.Context, args K) (V, error) {
 		var zero V
 		b, err := orderedJSON(args)
@@ -188,26 +228,34 @@ func hash(v any) (string, error) {
 	return fmt.Sprint(xxh3.Hash(b)), nil
 }
 
+// WithDefaults returns a copy of c with Codec defaulted to JSON.
 func (c FuncConfig[K]) WithDefaults() FuncConfig[K] {
 	if c.Codec == nil {
 		c.Codec = NewJSONCodec()
 	}
 	return c
 }
+
+// Validate reports whether c has all required fields.
 func (c FuncConfig[K]) Validate() error {
 	if c.KeyFn == nil || c.Lock == nil || c.Codec == nil {
 		return errors.New("cache: key function, lock, and codec are required")
 	}
-	return nil
+	_, err := leaseConfig(c.LeaseTTL, c.Wait, c.RefreshRatio)
+	return err
 }
-func MustFunc[K, V any](fn fun[K, V], cfg FuncConfig[K]) ifun[K, V] {
+
+// MustFunc is like [Func] but panics on error.
+func MustFunc[K, V any](fn func(ctx context.Context, req K) (V, time.Duration, error), cfg FuncConfig[K]) func(ctx context.Context, req K) (V, bool, error) {
 	f, err := Func(fn, cfg)
 	if err != nil {
 		panic(err)
 	}
 	return f
 }
-func MustIdempotent[K, V any](fn fun[K, V], cfg FuncConfig[K]) ifun[K, V] {
+
+// MustIdempotent is like [Idempotent] but panics on error.
+func MustIdempotent[K, V any](fn func(ctx context.Context, req K) (V, time.Duration, error), cfg FuncConfig[K]) func(ctx context.Context, req K) (V, bool, error) {
 	f, err := Idempotent(fn, cfg)
 	if err != nil {
 		panic(err)

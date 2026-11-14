@@ -13,13 +13,27 @@ import (
 	redis "github.com/redis/go-redis/v9"
 )
 
-// Lock coordinates cache fills using leases on a single Redis primary. The
-// client is borrowed. Callbacks must observe cancellation when a lease is lost.
+// Lock runs work for a key in at most one process at a time, using a Redis
+// lease (a key with a TTL set by SET NX). It is meant for cache fills
+// ([Lock.LoadOrCreate]) and short critical sections ([Lock.AdvisoryLock]).
+//
+// Lease keys are named "cache:lease:<sha256(key)>" and never clash with your
+// data keys. The lease is released when the callback returns, and expires on
+// its own if the process dies.
+//
+// A lease is not a fencing token: after a GC pause or network partition two
+// processes can briefly both believe they hold it. Callbacks receive a context
+// that is cancelled when the lease is lost and must stop promptly.
+//
+// The client stays owned by the caller. Lock requires a single Redis primary
+// (not Cluster) running Redis 8.4 or newer.
 type Lock struct {
 	client *redis.Client
 	cache  *Redis
 }
 
+// NewLock returns a Lock that uses client. It returns an error if client is
+// nil.
 func NewLock(client *redis.Client) (*Lock, error) {
 	r, err := NewRedis(client)
 	if err != nil {
@@ -27,6 +41,8 @@ func NewLock(client *redis.Client) (*Lock, error) {
 	}
 	return &Lock{client: client, cache: r}, nil
 }
+
+// MustNewLock is like [NewLock] but panics on error.
 func MustNewLock(client *redis.Client) *Lock {
 	l, err := NewLock(client)
 	if err != nil {
@@ -35,20 +51,50 @@ func MustNewLock(client *redis.Client) *Lock {
 	return l
 }
 
+// AdvisoryLockConfig configures [Lock.AdvisoryLock].
 type AdvisoryLockConfig struct {
-	Do           func(context.Context, string, []byte) error
-	Wait         time.Duration // Maximum total admission wait; zero fails immediately.
-	Lock         time.Duration // Zero selects ten seconds.
-	RefreshRatio float32       // Zero disables renewal; otherwise strictly between zero and one.
-	UseStream    bool          // Deprecated: admission uses bounded polling.
+	// Do is the work to run while holding the lease. Required. It receives
+	// the original key and the lease token. Its context is cancelled when the
+	// lease is lost, so long-running work must check ctx.
+	Do func(ctx context.Context, key string, token []byte) error
+
+	// Wait is how long to wait for another holder to release the lease.
+	// Zero (the default) returns ErrLocked immediately if the lease is taken.
+	Wait time.Duration
+
+	// Lock is the lease TTL. Default 10s. Without renewal (RefreshRatio 0)
+	// Do must finish within it, or its context is cancelled with ErrLocked.
+	Lock time.Duration
+
+	// RefreshRatio enables lease renewal: every Lock*RefreshRatio the lease
+	// is extended back to Lock. Zero (default) disables renewal; otherwise it
+	// must be in (0, 1). 0.5 is a good choice for work of unknown length.
+	RefreshRatio float32
+
+	// Deprecated: ignored; admission always polls.
+	UseStream bool
 }
 
+// LoadOrCreateConfig configures [Lock.LoadOrCreate] and [Lock.LoadOrCreateT].
+// Wait, Lock and RefreshRatio behave as in [AdvisoryLockConfig].
 type LoadOrCreateConfig[T any] struct {
-	Create       func(context.Context, string) (T, time.Duration, error)
-	Lock         time.Duration
+	// Create builds the value on a miss and returns it with its TTL (0 means
+	// no expiry). Required. Its context is cancelled if the lease is lost.
+	Create func(ctx context.Context, key string) (T, time.Duration, error)
+
+	// Lock is the lease TTL. Default 10s.
+	Lock time.Duration
+
+	// RefreshRatio enables lease renewal. Default 0 (off).
 	RefreshRatio float32
-	UseStream    bool // Deprecated: admission uses bounded polling.
-	Wait         time.Duration
+
+	// Deprecated: ignored; admission always polls.
+	UseStream bool
+
+	// Wait is how long to wait for another process's fill. Default 0: return
+	// ErrLocked immediately. Set it so concurrent callers receive the value
+	// the first caller creates instead of an error.
+	Wait time.Duration
 }
 
 func leaseConfig(ttl, wait time.Duration, ratio float32) (time.Duration, error) {
@@ -68,7 +114,7 @@ func (l *Lock) acquire(ctx context.Context, key string, ttl, wait time.Duration)
 	token := fmt.Appendf(nil, "%s", uuid.NewV7())
 	if wait > 0 {
 		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, wait)
+		ctx, cancel = context.WithTimeoutCause(ctx, wait, errWaitTimeout)
 		defer cancel()
 	}
 	for {
@@ -77,6 +123,9 @@ func (l *Lock) acquire(ctx context.Context, key string, ttl, wait time.Duration)
 		}
 		ok, err := l.client.SetNX(ctx, key, token, ttl).Result()
 		if err != nil {
+			if cause := context.Cause(ctx); cause != nil {
+				return nil, cause
+			}
 			return nil, err
 		}
 		if ok {
@@ -118,10 +167,10 @@ func (l *Lock) run(ctx context.Context, key string, token []byte, ttl time.Durat
 				return
 			case <-timer.C:
 				if ratio == 0 {
-					cancel(ErrLocked)
+					cancel(errLeaseExpired)
 					return
 				}
-				if e := l.cache.CompareAndSwap(work, key, token, token, ttl); e != nil {
+				if e := l.renew(work, key, token, ttl); e != nil {
 					cancel(e)
 					return
 				}
@@ -156,6 +205,27 @@ func (l *Lock) run(ctx context.Context, key string, token []byte, ttl time.Durat
 	return err
 }
 
+// renew extends the lease if this process still owns it.
+func (l *Lock) renew(ctx context.Context, key string, token []byte, ttl time.Duration) error {
+	err := l.cache.CompareAndSwap(ctx, key, token, token, ttl)
+	if errors.Is(err, ErrNotExist) {
+		return fmt.Errorf("%w: lease lost: %w", ErrLocked, err)
+	}
+	return err
+}
+
+var (
+	errWaitTimeout  = fmt.Errorf("%w: wait timed out: %w", ErrLocked, context.DeadlineExceeded)
+	errLeaseExpired = fmt.Errorf("%w: lease expired before the callback returned", ErrLocked)
+)
+
+// AdvisoryLock runs cfg.Do while holding the lease for key, so at most one
+// process runs it at a time. The lease is released when Do returns or panics.
+//
+// It returns ErrLocked if the lease is held elsewhere and cfg.Wait is zero or
+// elapses (the latter also matches context.DeadlineExceeded), and an error
+// matching ErrLocked if the lease was lost while Do ran. Otherwise it returns
+// Do's error.
 func (l *Lock) AdvisoryLock(ctx context.Context, key string, cfg AdvisoryLockConfig) error {
 	cfg = cfg.WithDefaults()
 	if err := cfg.Validate(); err != nil {
@@ -173,9 +243,11 @@ func (l *Lock) AdvisoryLock(ctx context.Context, key string, cfg AdvisoryLockCon
 	if err != nil {
 		return err
 	}
-	return l.run(ctx, lk, token, ttl, cfg.RefreshRatio, func(ctx context.Context) error { return cfg.Do(ctx, key, token) }, func(ctx context.Context) error { return l.cache.CompareAndSwap(ctx, lk, token, token, ttl) })
+	return l.run(ctx, lk, token, ttl, cfg.RefreshRatio, func(ctx context.Context) error { return cfg.Do(ctx, key, token) }, func(ctx context.Context) error { return l.renew(ctx, lk, token, ttl) })
 }
 
+// LoadOrCreateT is the typed form of [Lock.LoadOrCreate]: values are stored
+// as JSON.
 func (l *Lock) LoadOrCreateT[T any](ctx context.Context, key string, cfg LoadOrCreateConfig[T]) (curr T, loaded bool, err error) {
 	if cfg.Create == nil {
 		return curr, false, errors.New("cache: create is required")
@@ -198,10 +270,24 @@ func (l *Lock) LoadOrCreateT[T any](ctx context.Context, key string, cfg LoadOrC
 	return curr, loaded, err
 }
 
-const publishValue = `if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end
+// publishValue stores the value (KEYS[2]) only if this process still owns the
+// lease (KEYS[1] == token), so a process that lost its lease cannot overwrite
+// a newer fill.
+var publishValue = redis.NewScript(`if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end
 if tonumber(ARGV[3]) > 0 then redis.call('SET', KEYS[2], ARGV[2], 'PX', ARGV[3]) else redis.call('SET', KEYS[2], ARGV[2]) end
-return 1`
+return 1`)
 
+// LoadOrCreate returns the value stored at key (loaded=true). On a miss it
+// takes the lease for key, checks again, calls cfg.Create and stores the
+// result, so Create runs in one process at a time across the whole fleet.
+//
+// Callers that find the lease taken wait up to cfg.Wait, polling every 10ms;
+// they then return the value the winner stored (loaded=true), or ErrLocked if
+// Wait is zero or elapsed. The value is only stored if this process still
+// owns the lease; otherwise LoadOrCreate returns an error matching ErrLocked.
+//
+// The value key and lease key are separate Redis keys, so this does not work
+// on Redis Cluster.
 func (l *Lock) LoadOrCreate(ctx context.Context, key string, cfg LoadOrCreateConfig[[]byte]) (curr []byte, loaded bool, err error) {
 	cfg = cfg.WithDefaults()
 	if err := cfg.Validate(); err != nil {
@@ -248,12 +334,12 @@ func (l *Lock) LoadOrCreate(ctx context.Context, key string, cfg LoadOrCreateCon
 		if loaded {
 			return nil
 		}
-		n, e := l.client.Eval(work, publishValue, []string{lk, key}, token, curr, valueTTL.Milliseconds()).Int64()
+		n, e := publishValue.Run(work, l.client, []string{lk, key}, token, curr, valueTTL.Milliseconds()).Int64()
 		if e != nil {
 			return e
 		}
 		if n != 1 {
-			return ErrLocked
+			return fmt.Errorf("%w: lease lost before the value was stored", ErrLocked)
 		}
 		return nil
 	})
@@ -263,12 +349,15 @@ func (l *Lock) LoadOrCreate(ctx context.Context, key string, cfg LoadOrCreateCon
 	return curr, loaded, nil
 }
 
+// WithDefaults returns a copy of c with Lock defaulted to 10s.
 func (c AdvisoryLockConfig) WithDefaults() AdvisoryLockConfig {
 	if c.Lock == 0 {
 		c.Lock = 10 * time.Second
 	}
 	return c
 }
+
+// Validate reports whether c is usable.
 func (c AdvisoryLockConfig) Validate() error {
 	if c.Do == nil {
 		return errors.New("cache: callback is required")
@@ -276,12 +365,16 @@ func (c AdvisoryLockConfig) Validate() error {
 	_, err := leaseConfig(c.Lock, c.Wait, c.RefreshRatio)
 	return err
 }
+
+// WithDefaults returns a copy of c with Lock defaulted to 10s.
 func (c LoadOrCreateConfig[T]) WithDefaults() LoadOrCreateConfig[T] {
 	if c.Lock == 0 {
 		c.Lock = 10 * time.Second
 	}
 	return c
 }
+
+// Validate reports whether c is usable.
 func (c LoadOrCreateConfig[T]) Validate() error {
 	if c.Create == nil {
 		return errors.New("cache: create is required")
