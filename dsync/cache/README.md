@@ -1,103 +1,242 @@
 # cache
 
-Store typed values using JSON codecs and coordinate cache fills locally or through Redis.
+Typed key/value caching on Redis or local disk, plus Redis leases so that only
+one process at a time fills a missing cache entry.
 
-## Installation and documentation
+**Use it when** you want a small, typed cache API over Redis; you need to stop a
+"thundering herd" of processes all recomputing the same expensive value; you
+want idempotency keys for API requests; or you want to memoize function
+results on disk.
+
+**Don't use it when** you need an in-memory LRU (use a dedicated library), Redis
+Cluster support for the lease-based helpers, or a lock that is safe for
+correctness-critical work such as payments to an external system (leases are
+not fencing tokens, see [Caveats](#guarantees-and-caveats)).
 
 ```sh
 go get github.com/alextanhongpin/core/dsync/cache
-go doc github.com/alextanhongpin/core/dsync/cache
 ```
 
-[Go API reference](https://pkg.go.dev/github.com/alextanhongpin/core/dsync/cache) · [Module requirements](go.mod)
+Requires Go 1.27+ and, for the Redis features, **Redis 8.4+**.
+API reference: [pkg.go.dev](https://pkg.go.dev/github.com/alextanhongpin/core/dsync/cache).
 
-## Typical use
-
-Use Redis for shared cached data, File for a persisted snapshot, and FS for a directory owned by one process.
-
-Examples assume a caller-owned Redis client and a context. Create the client once
-and close it after all operations finish:
+## Quick start
 
 ```go
-client := redis.NewClient(&redis.Options{Addr: "localhost:6379"})
-defer client.Close()
-ctx := context.Background()
+package main
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log"
+	"time"
+
+	"github.com/alextanhongpin/core/dsync/cache"
+	"github.com/redis/go-redis/v9"
+)
+
+type User struct {
+	ID   int    `json:"id"`
+	Name string `json:"name"`
+}
+
+func main() {
+	ctx := context.Background()
+
+	client := redis.NewClient(&redis.Options{Addr: "localhost:6379"})
+	defer client.Close() // you own the client; the cache never closes it
+
+	// 1. A typed cache over Redis. Values are stored as JSON.
+	users, err := cache.New[User](cache.Config{Storage: cache.MustNewRedis(client)})
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	if err := users.Store(ctx, "user:1", User{ID: 1, Name: "Ada"}, time.Hour); err != nil {
+		log.Fatal(err)
+	}
+	u, err := users.Load(ctx, "user:1")
+	if errors.Is(err, cache.ErrNotExist) {
+		fmt.Println("cache miss")
+	} else if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println(u.Name)
+
+	// 2. Fill a missing entry once across ALL processes.
+	lock := cache.MustNewLock(client)
+	report, loaded, err := lock.LoadOrCreate(ctx, "report:daily", cache.LoadOrCreateConfig[[]byte]{
+		Wait: 5 * time.Second, // wait for another process's fill instead of failing
+		Create: func(ctx context.Context, key string) ([]byte, time.Duration, error) {
+			return []byte("expensive result"), 10 * time.Minute, nil // value + its TTL
+		},
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Printf("%s (from cache: %v)\n", report, loaded)
+}
 ```
 
-Import `context`, `github.com/redis/go-redis/v9`, and this package's import path.
+More runnable examples (`Func`, `Idempotent`, `AdvisoryLock`, `File`, `GoFunc`)
+are in [example_test.go](example_test.go) and on pkg.go.dev.
 
-The usage example below shows the main operation. Application types and
-callbacks such as `User` and `fetchUsers` belong to your application; import this
-package and the standard packages referenced in the snippet.
+## What's in the package
 
-## Behavior and configuration
+| Type / func | What it does |
+|---|---|
+| `NewRedis(client)` | Byte storage on Redis. Every call is one atomic Redis command. |
+| `NewFile(path)` | Byte storage in one JSON file, rewritten on every write. For small local caches. |
+| `NewFS(dir)` | Byte storage with one file per key. For larger values that must survive restarts. |
+| `New[T](Config)` | Typed `Cache[T]` on top of any of the above, using a `Codec` (JSON default, Gob available). |
+| `NewLock(client)` | Redis leases: `LoadOrCreate`, `LoadOrCreateT`, `AdvisoryLock`. |
+| `Func` | Wraps `func(ctx, req) (V, ttl, error)` with a Redis read-through cache guarded by a lease. |
+| `Idempotent` | Like `Func`, but rejects a key reused with a different request (`ErrConflict`). |
+| `GoFunc` | Memoizes `func(ctx, req) (V, error)` in any storage, forever. |
 
-Typed storage wrappers, file storage, and Redis cache-fill leases.
+All storages implement the same `Storage[[]byte]` interface: `Load`, `Store`,
+`StoreOnce`, `LoadOrStore`, `LoadOrCreate`, `LoadAndDelete`, `CompareAndSwap`,
+`CompareAndDelete`, `Exists`, `TTL`, `Expire`, `Delete`, `Close`.
 
-```go
-storage, err := cache.NewRedis(client)
-if err != nil { return err }
-c, err := cache.New[User](cache.Config{Storage: storage})
-if err != nil { return err }
-err = c.Store(ctx, "user:123", User{Name: "Ada"}, time.Hour)
-user, err := c.Load(ctx, "user:123")
+**TTL rule, everywhere:** `ttl > 0` expires the key after `ttl`; `ttl <= 0`
+stores it with no expiry.
+
+## How it works
+
+### Plain caching
+
+`Cache[T]` encodes the value with the codec and calls the storage. `Redis`
+maps each method to a single command (`GET`, `SET`, `SET NX`, `SET NX GET`,
+`GETDEL`, `SET IFDEQ`, `DELEX IFDEQ`, `PTTL`, `PEXPIRE`, `DEL`), so each call
+is atomic. Keys are used exactly as you pass them; add your own prefix.
+
+`LoadOrCreate` on a storage or `Cache` only de-duplicates calls **inside one
+process** (via `singleflight`). Two processes can both run `create`; the first
+`SET NX` wins and the other gets the winner's value.
+
+### Cross-process fills with `Lock`
+
+`Lock.LoadOrCreate(ctx, key, cfg)`:
+
+```
+GET key ──hit──────────────────────────────────────────▶ return (value, loaded=true)
+   │ miss
+   ▼
+SET cache:lease:<sha256(key)> <uuid> NX PX <Lock>
+   │ taken by someone else
+   ├──▶ Wait == 0 ─────────────────────────────────────▶ ErrLocked
+   ├──▶ poll every 10ms until free or Wait elapses ───▶ ErrLocked (+ DeadlineExceeded)
+   │ acquired
+   ▼
+GET key again ──hit (someone else just filled it) ─────▶ return (value, loaded=true)
+   │ miss
+   ▼
+cfg.Create(ctx)            ◀── renewal goroutine extends the lease every
+   │                           Lock*RefreshRatio (if RefreshRatio > 0);
+   │                           ctx is cancelled if the lease is lost
+   ▼
+Lua: if GET lease == my uuid then SET key value PX ttl  ──▶ return (value, loaded=false)
+     else fail ──────────────────────────────────────────▶ ErrLocked (lease lost)
+   │
+   ▼ always
+DELEX lease IFDEQ my uuid   (release; only deletes our own lease)
 ```
 
-Configuration is passed by value, defaulted and validated locally. JSON is the
-default codec; codecs and storage are shared dependencies and must support
-concurrent calls. `MustNew`, `MustNewRedis`, and `MustNewLock` are startup helpers.
-`Cache.Close` forwards to storage; Redis wrappers borrow the client and their
-`Close` does nothing. File and FS own their handles and require `Close`.
+- The lease is a normal Redis key with a TTL (`Lock`, default 10s), so a crashed
+  process never blocks others for longer than that.
+- With `RefreshRatio = 0` (default) there is no renewal: if `Create` runs longer
+  than `Lock`, its context is cancelled and the call fails with `ErrLocked`.
+  Set `RefreshRatio` (e.g. `0.5`) for work of unknown length.
+- The value is written by a Lua script that first checks we still own the
+  lease, so a slow process that lost its lease cannot overwrite a newer value.
 
-`LoadOrCreate` on a storage instance coalesces concurrent local fills. Followers
-wait for the leader, whose context drives the factory. Factories can access other
-keys; recursively filling the same key deadlocks. File/FS factories run outside
-the storage mutex. Separate processes require Redis lease coordination.
+`AdvisoryLock` uses the same lease around any callback (`Do`) without storing
+a value. `Func` and `Idempotent` are `Lock.LoadOrCreate` plus encoding;
+`Idempotent` stores `{request, response}` and compares the canonical JSON of the
+request on every hit.
 
-```go
-l, err := cache.NewLock(client)
-if err != nil { return err }
-value, loaded, err := l.LoadOrCreate(ctx, "report", cache.LoadOrCreateConfig[[]byte]{
-    Lock: 10*time.Second, RefreshRatio: .7, Wait: 5*time.Second,
-    Create: func(ctx context.Context, key string) ([]byte, time.Duration, error) {
-        return buildReport(ctx), time.Minute, nil
-    },
-})
+### Local storages
+
+- **File** keeps everything in memory and, on every write, writes the whole map
+  to a temp file, fsyncs it and renames it over `path`. It holds an exclusive
+  `flock` on `path + ".lock"` while open, so a second `NewFile` on the same path
+  (any process) **blocks until the first is closed**.
+- **FS** stores each value in a file named by a 64-bit hash of the key, and
+  expiry times in `dir/.index`. It does no cross-process locking: one `FS` per
+  directory.
+- Expired entries in File/FS are removed lazily when they are read.
+
+## Configuration
+
+`cache.Config` (for `New`):
+
+| Field | Default | Meaning |
+|---|---|---|
+| `Storage` | required | `*Redis`, `*File`, `*FS` or any `Storage[[]byte]`. `Cache.Close` closes it. |
+| `Codec` | `JSONCodec` | How values become bytes. `NewGobCodec()` is the alternative. |
+
+`cache.LoadOrCreateConfig[T]` / `cache.AdvisoryLockConfig`:
+
+| Field | Default | Meaning |
+|---|---|---|
+| `Create` / `Do` | required | The work. Gets a context that is cancelled if the lease is lost. `Create` returns the value and its TTL. |
+| `Wait` | `0` | How long to wait if another process holds the lease. `0` = fail immediately with `ErrLocked`. |
+| `Lock` | `10s` | Lease TTL. Without renewal, the work must finish within it. |
+| `RefreshRatio` | `0` (off) | Renew the lease every `Lock × RefreshRatio`. Must be in `(0, 1)` when set. |
+| `UseStream` | — | Deprecated, ignored. |
+
+`cache.FuncConfig[K]` (for `Func` / `Idempotent`):
+
+| Field | Default | Meaning |
+|---|---|---|
+| `Lock` | required | A `*Lock` from `NewLock`. |
+| `KeyFn` | required | Builds the Redis key from the request. Include a prefix. |
+| `Codec` | `JSONCodec` | Encoding of the cached result. |
+| `Wait` | `0` | As above. Set it if concurrent callers for one key should share the result instead of getting `ErrLocked`. |
+| `LeaseTTL` | `10s` | As `Lock` above. |
+| `RefreshRatio` | `0` | As above. |
+
+## Errors
+
+| Error | Returned when | What to do |
+|---|---|---|
+| `ErrNotExist` | Key missing or expired. Also from `CompareAndSwap`/`CompareAndDelete` when the value doesn't match. | Treat as a cache miss. |
+| `ErrExists` | `StoreOnce` on an existing key. | Key is already set; load it or ignore. |
+| `ErrLocked` | Another process holds the lease and `Wait` is 0 or ran out; or this process lost its lease mid-work. | Retry later, serve stale data, or raise `Wait`/use `RefreshRatio`. When `Wait` ran out the error also matches `context.DeadlineExceeded`. |
+| `ErrConflict` | `Idempotent` key reused with a different request. | Reject the request (HTTP 409/422). |
+| `ErrClosed` | `File`/`FS` used after `Close`. | Bug in your lifecycle code. |
+
+Errors from your callbacks, the codec and Redis are returned unchanged (use
+`errors.Is`/`errors.As`). Failed callbacks are never cached.
+
+## Guarantees and caveats
+
+- **Leases are not fencing tokens.** After a long GC pause or network partition,
+  two processes may briefly both run the callback. The value write is
+  protected (Lua check), but side effects inside your callback are not.
+- **Single Redis primary only** for `Lock` / `Func` / `Idempotent`: the publish
+  script touches two keys (value + lease), which Redis Cluster rejects unless
+  they hash to the same slot.
+- **Redis 8.4+** is required (`SET IFDEQ`, `DELEX`) for `CompareAndSwap`,
+  `CompareAndDelete` and everything built on `Lock`.
+- **You own the Redis client.** `Redis.Close` and `Cache.Close` on a Redis
+  storage do nothing to the client.
+- **Close `File` and `FS`.** `File` holds a file lock until closed.
+- `Cache.CompareAndSwap` compares *encoded bytes*; use a codec that encodes
+  equal values identically (JSON does for structs and maps).
+- `File` builds only on Unix-like systems (it uses `flock`).
+- `GoFunc` keys on the function's name: different closures created at the same
+  source line share cache entries.
+- `TTL` returns `-1` (no expiry) or `-2` (missing) as a `time.Duration`, like
+  Redis `PTTL`.
+
+## Running the tests
+
+Tests start a throwaway Redis 8.6 container with Docker
+([redistest](https://github.com/alextanhongpin/dbtx)), so Docker must be running:
+
+```sh
+go vet ./...
+go test -race -count=1 ./...
 ```
-
-Lease config values use a ten-second default `Lock`; zero `Wait` rejects immediate
-contention with `ErrLocked`. Positive `Wait` bounds the total admission wait and
-expires with `context.DeadlineExceeded`. Zero `RefreshRatio` disables renewal;
-positive ratios must be below one. Callbacks run synchronously and must cooperate
-with cancellation. Renewal loss cancels them; the call joins renewal and callback
-before bounded cleanup. Panic propagation also releases the lease.
-
-Lease keys live in the reserved `cache:lease:` namespace, separate from data.
-Cache publication checks ownership atomically on a single Redis primary. Leases
-are not fencing tokens for external writes and cannot promise exactly-once work
-under pauses, failover, or network partitions. The two-key publication script is
-not Redis Cluster compatible. `UseStream` is deprecated and ignored; admission
-uses polling. Redis conditional operations require SETIFDEQ/DELEX.
-
-`Func` and `Idempotent` return `(function, error)` and accept a value
-`FuncConfig[K]` with required `KeyFn` and `Lock`, and default JSON `Codec`.
-`MustFunc` and `MustIdempotent` are startup variants. Callback, codec, and backend
-errors remain inspectable. An idempotent request mismatch returns `ErrConflict`.
-
-File snapshots use atomic rename while a stable sidecar `.lock` file holds the
-lifetime advisory lock. All cooperating writers must lock the same sidecar file.
-File clones bytes and persists expiry changes. FS requires a sole directory owner; it does not coordinate independent processes. FS value and TTL
-index writes are separate, so storage errors may leave partial changes.
-
-Zero storage TTL means permanent. Redis TTL and Expire retain millisecond
-precision. File/FS calls after close return `ErrClosed`.
-
-Run `go test -race -timeout 120s ./...` and `go vet ./...`; Redis tests use Docker.
-
-## Expected errors
-
-`ErrNotExist` means a storage miss, `ErrExists` a StoreOnce conflict, `ErrLocked` immediate fill contention, `ErrConflict` an idempotent request mismatch, and `ErrClosed` a closed file store. The Redis storage wrapper also maps missing values to `ErrNotExist`. Codec, factory, and storage errors propagate.
-
-## Pitfalls
-
-Close owned file handles. Redis clients are borrowed. Zero TTL means permanent storage; lease-backed fills target a single Redis primary.
