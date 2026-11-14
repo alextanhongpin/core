@@ -2,25 +2,36 @@ package ratelimit
 
 import (
 	"context"
-	_ "embed"
 	"errors"
 	"time"
 
 	redis "github.com/redis/go-redis/v9"
 )
 
-// FixedWindow implements the Fixed Window algorithm for rate limiting.
-// It divides time into fixed intervals and allows a specified number
-// of requests per interval.
+// FixedWindow allows up to Limit requests per key in each window of length
+// Period. The window for a key starts at its first admitted request (it is
+// not aligned to the wall clock) and the counter resets when it ends.
+//
+// It is simple and cheap (one Redis string per key) but lets a client send up
+// to 2*Limit requests in a short time around a window boundary. Use GCRA when
+// that matters.
 type FixedWindow struct {
-	client *redis.Client
+	client redis.UniversalClient
 	limit  int
 	period time.Duration
 }
 
-// NewFixedWindow defaults and validates a configuration value; client remains borrowed.
-func NewFixedWindow(client *redis.Client, cfg Config) (*FixedWindow, error) {
-	if client == nil {
+var _ RateLimiter = (*FixedWindow)(nil)
+
+// NewFixedWindow returns a fixed-window limiter. Zero config fields take the
+// defaults from DefaultConfig; invalid values return an error. Burst is
+// ignored.
+//
+// The client may be a *redis.Client, *redis.ClusterClient or any other
+// redis.UniversalClient. It is not closed by the limiter. Run Setup once
+// before using the limiter.
+func NewFixedWindow(client redis.UniversalClient, cfg Config) (*FixedWindow, error) {
+	if isNil(client) {
 		return nil, errors.New("ratelimit: nil client")
 	}
 	cfg = cfg.WithDefaults()
@@ -29,7 +40,10 @@ func NewFixedWindow(client *redis.Client, cfg Config) (*FixedWindow, error) {
 	}
 	return &FixedWindow{client: client, limit: cfg.Limit, period: cfg.Period}, nil
 }
-func MustNewFixedWindow(client *redis.Client, cfg Config) *FixedWindow {
+
+// MustNewFixedWindow is like NewFixedWindow but panics on error. Use it for
+// package-level or startup configuration that is known to be valid.
+func MustNewFixedWindow(client redis.UniversalClient, cfg Config) *FixedWindow {
 	r, err := NewFixedWindow(client, cfg)
 	if err != nil {
 		panic(err)
@@ -37,7 +51,13 @@ func MustNewFixedWindow(client *redis.Client, cfg Config) *FixedWindow {
 	return r
 }
 
-// AllowN checks if N requests are allowed for the given key.
+// Allow reports whether one request for key is allowed, consuming it if so.
+func (r *FixedWindow) Allow(ctx context.Context, key string) (bool, error) {
+	return r.AllowN(ctx, key, 1)
+}
+
+// AllowN reports whether n requests for key are allowed, consuming all of
+// them if so. A denied batch consumes nothing.
 func (r *FixedWindow) AllowN(ctx context.Context, key string, n int) (bool, error) {
 	res, err := r.LimitN(ctx, key, n)
 	if err != nil {
@@ -46,22 +66,21 @@ func (r *FixedWindow) AllowN(ctx context.Context, key string, n int) (bool, erro
 	return res.Allow, nil
 }
 
-// Allow checks if a single request is allowed for the given key.
-func (r *FixedWindow) Allow(ctx context.Context, key string) (bool, error) {
-	return r.AllowN(ctx, key, 1)
+// Limit is like Allow but returns the full Result, including how long to
+// wait before retrying.
+func (r *FixedWindow) Limit(ctx context.Context, key string) (*Result, error) {
+	return r.LimitN(ctx, key, 1)
 }
 
+// LimitN is like AllowN but returns the full Result. n == 0 inspects the
+// current state without consuming anything.
 func (r *FixedWindow) LimitN(ctx context.Context, key string, n int) (*Result, error) {
 	if err := validateRequest(key, n); err != nil {
 		return nil, err
 	}
 	values, err := r.client.FCall(ctx, "rl_fixed_window", []string{key}, r.limit, r.period.Milliseconds(), n).Int64Slice()
 	if err != nil {
-		return nil, err
+		return nil, wrapErr(err)
 	}
 	return parseResult(values)
-}
-
-func (r *FixedWindow) Limit(ctx context.Context, key string) (*Result, error) {
-	return r.LimitN(ctx, key, 1)
 }
