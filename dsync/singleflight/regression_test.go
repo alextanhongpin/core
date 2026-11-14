@@ -3,6 +3,7 @@ package singleflight_test
 import (
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"sync/atomic"
 	"testing"
@@ -68,4 +69,45 @@ func TestRemoteWaitTimeoutReturnsErrTimeout(t *testing.T) {
 		require.False(t, did)
 		require.ErrorIs(t, err, singleflight.ErrTimeout, "WaitTTL=%v", wait)
 	}
+}
+
+func TestLoadOrStoreRejectsSubMillisecondTTL(t *testing.T) {
+	c := singleflight.MustNewCache[string](redistest.Client(t), singleflight.CacheConfig{})
+	getter := func(context.Context) (string, error) { return "v", nil }
+	for _, ttl := range []time.Duration{-time.Second, 500 * time.Microsecond} {
+		_, loaded, err := c.LoadOrStore(t.Context(), t.Name(), getter, ttl)
+		require.False(t, loaded)
+		require.ErrorContains(t, err, "ttl must be 0 (no expiry) or at least 1ms")
+	}
+	_, _, err := c.LoadOrStore(t.Context(), "", getter, time.Second)
+	require.ErrorContains(t, err, "key and getter are required")
+}
+
+func TestDoDidIsFalseForFailingLeaderAndLocalWaiters(t *testing.T) {
+	g := singleflight.MustNew(redistest.Client(t), singleflight.Config{})
+	boom := errors.New("boom")
+	started := make(chan struct{})
+	release := make(chan struct{})
+	type result struct {
+		did bool
+		err error
+	}
+	leader := make(chan result, 1)
+	go func() {
+		did, err := g.Do(t.Context(), t.Name(), func(context.Context) error { close(started); <-release; return boom })
+		leader <- result{did, err}
+	}()
+	<-started
+	waiter := make(chan result, 1)
+	go func() {
+		did, err := g.Do(t.Context(), t.Name(), func(context.Context) error { t.Error("waiter ran"); return nil })
+		waiter <- result{did, err}
+	}()
+	time.Sleep(20 * time.Millisecond)
+	close(release)
+	l, w := <-leader, <-waiter
+	require.False(t, l.did)
+	require.ErrorIs(t, l.err, boom)
+	require.False(t, w.did)
+	require.ErrorIs(t, w.err, boom)
 }

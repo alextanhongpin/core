@@ -75,8 +75,10 @@ func MustNewCache[T any](client *redis.Client, cfg CacheConfig) *Cache[T] {
 // returns it. A zero ttl stores the value without expiry; a positive ttl must be
 // at least one millisecond.
 //
-// loaded is false only for the caller whose getter produced the value, and
-// true for everyone who read an existing value.
+// loaded is false only for the one caller whose getter produced and stored the
+// value. It is true for every other successful caller: cache hits, local and
+// remote waiters that read the value the leader stored, and a leader that found
+// the value already stored when it rechecked. On error, loaded is false.
 //
 // If the leader's getter fails, callers on the same Cache get its error, while
 // callers in other processes find no value and get redis.Nil. If the fill lease
@@ -84,8 +86,11 @@ func MustNewCache[T any](client *redis.Client, cfg CacheConfig) *Cache[T] {
 // lock.ErrExpired.
 func (c *Cache[T]) LoadOrStore(ctx context.Context, key string, getter func(ctx context.Context) (T, error), ttl time.Duration) (T, bool, error) {
 	var zero T
-	if key == "" || getter == nil || ttl < 0 || (ttl > 0 && ttl < time.Millisecond) {
-		return zero, false, errors.New("singleflight: key, getter, and valid TTL are required")
+	if key == "" || getter == nil {
+		return zero, false, errors.New("singleflight: key and getter are required")
+	}
+	if ttl < 0 || (ttl > 0 && ttl < time.Millisecond) {
+		return zero, false, fmt.Errorf("singleflight: ttl must be 0 (no expiry) or at least 1ms, got %v", ttl)
 	}
 	t, err := c.load(ctx, key)
 	if err == nil {
