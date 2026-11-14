@@ -13,8 +13,10 @@ import (
 const dataKey = "data"
 
 // pollInterval caps each XREAD BLOCK so a blocked read notices context
-// cancellation within this interval, even if the Redis client does not
-// close the connection on cancellation.
+// cancellation between reads, even if the Redis client does not close the
+// connection on cancellation. Redis only fires blocking timeouts on its
+// server tick (every 100 ms at the default hz 10), so one read lasts 100 to
+// 200 ms and cancellation is noticed up to about 200 ms late.
 const pollInterval = 100 * time.Millisecond
 
 var (

@@ -2,6 +2,7 @@ package ratelimit_test
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -87,6 +88,9 @@ func TestMissingSetupErrorHint(t *testing.T) {
 	_, err := ratelimit.MustNewGCRA(client, ratelimit.Config{}).Allow(t.Context(), t.Name())
 	if err == nil || !strings.Contains(err.Error(), "ratelimit.Setup") {
 		t.Fatalf("want setup hint, got %v", err)
+	}
+	if !errors.Is(err, ratelimit.ErrNotSetup) {
+		t.Fatalf("want errors.Is(err, ErrNotSetup), got %v", err)
 	}
 }
 

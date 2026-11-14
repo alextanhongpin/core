@@ -11,9 +11,11 @@ A circuit breaker whose state is stored in Redis. When a dependency starts faili
 go get github.com/alextanhongpin/core/dsync/circuitbreaker
 ```
 
-Requires **Redis 7.4 or newer**. It uses Redis Functions and hash-field expiration (`HPEXPIRE`).
+Requires **Go 1.26+** and **Redis 7.4+** (it uses Redis Functions and hash-field expiration, `HPEXPIRE`).
 
 ## Quick start
+
+The dependency here is a local function that always fails, so you can see the breaker open.
 
 ```go
 package main
@@ -23,7 +25,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"net/http"
 	"time"
 
 	"github.com/alextanhongpin/core/dsync/circuitbreaker"
@@ -33,45 +34,58 @@ import (
 func main() {
 	ctx := context.Background()
 
-	client := redis.NewClient(&redis.Options{Addr: "localhost:6379"})
+	client := redis.NewClient(&redis.Options{Addr: "localhost:6379"}) // your Redis address
 	defer client.Close()
 
-	// Install the Lua functions. This is safe to call on every start.
+	// Install the Lua functions. Safe to call on every start.
 	if err := circuitbreaker.Setup(ctx, client); err != nil {
 		log.Fatal(err)
 	}
 
 	cb, err := circuitbreaker.New(client, circuitbreaker.Config{
-		FailureThreshold: 5,                // open after 5 failures...
+		FailureThreshold: 3,                // open after 3 failures...
 		FailurePeriod:    10 * time.Second, // ...with no gap longer than 10s between them
 		OpenTimeout:      30 * time.Second, // stay open for 30s, then probe
-		SuccessThreshold: 3,                // close again after 3 successful probes
+		SuccessThreshold: 2,                // close again after 2 successful probes
 	})
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	err = cb.Do(ctx, "cb:example-api", func() error {
-		resp, err := http.Get("https://example.com/health")
-		if err != nil {
-			return err
+	// Stand-in for a real outbound call (HTTP, gRPC, database...).
+	callPayments := func() error { return errors.New("payments api unavailable") }
+
+	for i := 1; i <= 4; i++ {
+		err := cb.Do(ctx, "cb:quickstart", callPayments)
+		switch {
+		case errors.Is(err, circuitbreaker.ErrOpened):
+			fmt.Printf("call %d: rejected, serving fallback\n", i)
+		case err != nil:
+			fmt.Printf("call %d: failed: %v\n", i, err)
+		default:
+			fmt.Printf("call %d: ok\n", i)
 		}
-		defer resp.Body.Close()
-		if resp.StatusCode >= 500 {
-			return fmt.Errorf("example api: %s", resp.Status)
-		}
-		return nil
-	})
-	switch {
-	case errors.Is(err, circuitbreaker.ErrOpened):
-		fmt.Println("breaker open: skipped the call, serve a fallback")
-	case err != nil:
-		fmt.Println("call failed:", err)
-	default:
-		fmt.Println("ok")
 	}
+
+	status, err := cb.Status(ctx, "cb:quickstart")
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println("status:", status)
 }
 ```
+
+Expected output on the first run:
+
+```
+call 1: failed: payments api unavailable
+call 2: failed: payments api unavailable
+call 3: failed: payments api unavailable
+call 4: rejected, serving fallback
+status: opened
+```
+
+The state lives in Redis, so a **second run within 30s** prints `rejected` for all four calls. After 30s the first call runs as a HalfOpen probe, fails, and reopens the breaker, so you get one `failed` line then three `rejected`. Run `redis-cli DEL cb:quickstart` to start fresh.
 
 To keep a function's signature, wrap it with `circuitbreaker.Func`:
 
@@ -81,7 +95,40 @@ getUser = circuitbreaker.Func(getUser, cb, func(ctx context.Context, id string) 
 })
 ```
 
-More runnable examples are in [`example_test.go`](example_test.go) and on [pkg.go.dev](https://pkg.go.dev/github.com/alextanhongpin/core/dsync/circuitbreaker).
+More runnable examples, including one using `httptest`, are in [`example_test.go`](example_test.go).
+
+## API
+
+```go
+func Setup(ctx context.Context, client redis.UniversalClient) error
+const LibraryName = "circuitbreaker" // Redis function library loaded by Setup
+
+func New(client redis.UniversalClient, cfg Config) (*CircuitBreaker, error) // error if cfg is invalid or client is nil
+func MustNew(client redis.UniversalClient, cfg Config) *CircuitBreaker      // panics instead
+func DefaultConfig() Config
+func (Config) WithDefaults() Config // fills zero fields from DefaultConfig
+func (Config) Validate() error      // does not apply defaults
+
+func (*CircuitBreaker) Do(ctx context.Context, key string, fn func() error) error
+func (*CircuitBreaker) SetStatus(ctx context.Context, key string, status Status) error
+func (*CircuitBreaker) Status(ctx context.Context, key string) (Status, error) // missing key = Closed
+
+// Func wraps fn so every call goes through cb.Do; keyFn picks the breaker key.
+func Func[K, V any](
+	fn func(ctx context.Context, req K) (V, error),
+	cb interface{ Do(context.Context, string, func() error) error },
+	keyFn func(context.Context, K) (string, error),
+) func(ctx context.Context, req K) (V, error)
+
+type Status int // Unknown, Closed, HalfOpen, Opened, Disabled, ForcedOpen
+func (Status) String() string // "closed", "half-open", "opened", "disabled", "forced-open"
+func (Status) Int() int
+
+var ErrOpened   = errors.New("cb: opened")
+var ErrNotSetup = errors.New("circuitbreaker: Redis function missing, call circuitbreaker.Setup first")
+```
+
+`Do` returns `fn`'s error (use `errors.Is`), `ErrOpened` if `fn` was skipped, the context's error if `ctx` is already done, or a Redis error. Details in [Errors](#errors).
 
 ## How it works
 
@@ -130,10 +177,34 @@ All timing uses the Redis server clock.
 | `SuccessThreshold` | `20` | Successful probes at which HalfOpen changes to Closed |
 | `SuccessPeriod` | `1s` | Success count is forgotten after this long without a new success (at least 1ms) |
 | `OpenTimeout` | `1m` | How long to stay Opened before probing (at least 1ms) |
-| `FailureCount` | `+2` for `context.DeadlineExceeded` | Extra weight for a failure. Return `0` to count every error once |
-| `SlowCallCount` | `+1` over 1s, `+2` from 30s, `+4` from 1m | Extra weight for a slow *failed* call |
+| `FailureCount` | `+2` for `context.DeadlineExceeded`, else `0` | `func(cause error) int`. Extra weight for a failed call |
+| `SlowCallCount` | see below | `func(duration time.Duration) int`. Extra weight for a slow *failed* call |
 
-The defaults suit high-traffic dependencies. For low traffic, lower `FailureThreshold` and raise `FailurePeriod`. The hooks must be safe for concurrent use and must not return negative numbers.
+The defaults suit high-traffic dependencies. For low traffic, lower `FailureThreshold` and raise `FailurePeriod`. The hooks must be safe for concurrent use and must not return negative numbers (a negative total weight makes `Do` return an error). `duration` is how long `fn` took. The default `SlowCallCount` is:
+
+```go
+func(d time.Duration) int {
+	switch {
+	case d >= time.Minute:
+		return 4
+	case d >= 30*time.Second:
+		return 2
+	case d > time.Second: // strictly more than 1s
+		return 1
+	}
+	return 0
+}
+```
+
+To count every error exactly once, set both hooks to return 0:
+
+```go
+cfg := circuitbreaker.Config{
+	FailureThreshold: 5,
+	FailureCount:     func(error) int { return 0 },
+	SlowCallCount:    func(time.Duration) int { return 0 },
+}
+```
 
 ## Errors
 
@@ -141,7 +212,7 @@ The defaults suit high-traffic dependencies. For low traffic, lower `FailureThre
 |---|---|---|
 | `ErrOpened` | The breaker is Opened or ForcedOpen, and `fn` was **not** called | Fail fast, or serve a cached or default response |
 | The error from `fn` | `fn` ran and failed | Handle it as usual. It was counted |
-| Error mentioning `circuitbreaker.Setup` | The Lua functions are not loaded on that Redis | Call `Setup` at startup |
+| `ErrNotSetup` (wrapped) | The Lua functions are not loaded on that Redis (Setup never ran, or the server was flushed). Message starts with `circuitbreaker: Redis function missing, call circuitbreaker.Setup first:` | Call `Setup` at startup |
 | Other Redis errors | Redis is unreachable | See below |
 
 Use `errors.Is`. After a failed call, a Redis error from recording the result is joined with `fn`'s error.

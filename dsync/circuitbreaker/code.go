@@ -3,6 +3,7 @@ package circuitbreaker
 import (
 	"context"
 	_ "embed"
+	"errors"
 	"fmt"
 	"reflect"
 	"strings"
@@ -50,10 +51,15 @@ func Setup(ctx context.Context, client redis.UniversalClient) error {
 	return nil
 }
 
-// wrapErr adds a hint to the error Redis returns when Setup was not run.
+// ErrNotSetup is returned (wrapped) by Do and SetStatus when the Lua
+// functions are not loaded on the Redis server, for example because Setup was
+// never run or the server was flushed. Detect it with errors.Is and call Setup.
+var ErrNotSetup = errors.New("circuitbreaker: Redis function missing, call circuitbreaker.Setup first")
+
+// wrapErr adds ErrNotSetup to the error Redis returns when Setup was not run.
 func wrapErr(err error) error {
 	if err != nil && strings.Contains(err.Error(), "Function not found") {
-		return fmt.Errorf("circuitbreaker: Redis function missing, call circuitbreaker.Setup first: %w", err)
+		return fmt.Errorf("%w: %w", ErrNotSetup, err)
 	}
 	return err
 }

@@ -19,7 +19,9 @@ type Config struct {
 	Limit int
 
 	// Period is the length of the window. Must be at least 1ms.
-	// Default one minute.
+	// Default one minute. It is truncated to whole milliseconds before it is
+	// sent to Redis, so 1500*time.Microsecond behaves like 1ms; values below
+	// 1ms are rejected.
 	Period time.Duration
 
 	// Burst is the number of extra requests GCRA allows to arrive at once on

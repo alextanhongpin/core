@@ -74,6 +74,12 @@ func TestSuccessfulProbeIsNotReportedAsFailure(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "circuitbreaker.Setup") {
 		t.Fatalf("want setup hint, got %v", err)
 	}
+	if !errors.Is(err, circuitbreaker.ErrNotSetup) {
+		t.Fatalf("want ErrNotSetup, got %v", err)
+	}
+	if err := cb.SetStatus(t.Context(), t.Name(), circuitbreaker.Closed); !errors.Is(err, circuitbreaker.ErrNotSetup) {
+		t.Fatalf("SetStatus: want ErrNotSetup, got %v", err)
+	}
 }
 
 func TestSetupRingAndNilClient(t *testing.T) {

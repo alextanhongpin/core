@@ -71,9 +71,10 @@ func (c Config) Validate() error {
 }
 
 // DefaultRetry waits for a busy key: it retries ErrLocked up to 10 times with
-// exponential backoff from 50ms to 2s (roughly 11s in total) and gives up with
-// an error matching both ErrLocked and retry.ErrLimitExceeded. Other errors are
-// returned immediately.
+// full-jitter exponential backoff (retry n sleeps a random duration in
+// [0, min(50ms*2^n, 2s))), so it waits at most about 13.1s in total and about
+// 6.5s on average. It then gives up with an error matching both ErrLocked and
+// retry.ErrLimitExceeded. Other errors are returned immediately.
 func DefaultRetry() Retry {
 	cfg := retry.DefaultConfig()
 	cfg.MaxRetries = 10

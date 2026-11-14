@@ -24,6 +24,9 @@ nor history, plain Redis Pub/Sub is simpler.
 go get github.com/alextanhongpin/core/dsync/channel
 ```
 
+Requires Go 1.27+ and Redis 5.0+ (streams). Works with any `*redis.Client`
+from `github.com/redis/go-redis/v9`.
+
 API reference: [pkg.go.dev/github.com/alextanhongpin/core/dsync/channel](https://pkg.go.dev/github.com/alextanhongpin/core/dsync/channel)
 
 ## Quick start
@@ -43,7 +46,10 @@ import (
 
 func main() {
 	ctx := context.Background()
-	client := redis.NewClient(&redis.Options{Addr: "localhost:6379"})
+	client := redis.NewClient(&redis.Options{
+		Addr: "localhost:6379", // your Redis address
+		DB:   0,                // your Redis database
+	})
 	defer client.Close()
 
 	ch, err := channel.New(client)
@@ -66,6 +72,11 @@ func main() {
 		if errors.Is(err, redis.Nil) {
 			break // no more messages right now
 		}
+		if errors.Is(err, channel.ErrMalformedEntry) {
+			log.Printf("skipping entry %s: %v", msg.ID, err)
+			cursor = msg.ID // msg.ID is set even on this error
+			continue
+		}
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -79,6 +90,18 @@ func main() {
 	}
 }
 ```
+
+Expected output on the first run:
+
+```
+created
+paid
+shipped
+```
+
+The stream `orders` stays in Redis, so each later run appends three more
+messages and, reading from `"0-0"`, prints all of them again (6 lines on the
+second run, 9 on the third, ...). Call `ch.Close(ctx, "orders")` to delete it.
 
 For a long-running subscriber, pass `0` as the wait (block until a message
 arrives) and stop it by cancelling `ctx`.
@@ -107,8 +130,11 @@ such as `1700000000000-0`.
 - `Recv(ctx, key, wait)` is `RecvAfter` with `"$"` that returns only the
   payload. Because you don't get the ID, calling it in a loop can miss
   messages sent between calls; use `RecvAfter` when that matters.
-- Waiting is done with short `XREAD BLOCK` calls of at most 100 ms, so a
-  cancelled `ctx` stops a read within about 100 ms.
+- Waiting is done with repeated `XREAD BLOCK 100` calls, and `ctx` is checked
+  between them. Redis only expires a block on its server tick (every 100 ms at
+  the default `hz 10`), so each call lasts 100-200 ms: a cancelled `ctx` stops
+  a read up to about 200 ms later, and a positive `wait` can overrun by up to
+  about 100 ms.
 - `Trim` (`XTRIM MAXLEN`) drops the oldest entries; `Close` (`DEL`) deletes
   the whole stream.
 
@@ -120,16 +146,35 @@ such as `1700000000000-0`.
 | `0` | wait until a message arrives or `ctx` is done |
 | positive (e.g. `5*time.Second`) | wait up to that long, then return `redis.Nil` |
 
-## API at a glance
+## API
 
-| Function | What it does |
-|---|---|
-| `New(client)` / `MustNew(client)` | create a Channel; the client stays yours to close |
-| `Send(ctx, key, value)` | append a message |
-| `RecvAfter(ctx, key, cursor, wait)` | next message after `cursor`, with its ID |
-| `Recv(ctx, key, wait)` | next message sent after this call, payload only |
-| `Trim(ctx, key, maxLen)` | keep only the newest `maxLen` messages |
-| `Close(ctx, key)` | delete the stream and all its messages |
+```go
+func New(client *redis.Client) (*Channel, error) // error if client is nil; the client stays yours to close
+func MustNew(client *redis.Client) *Channel      // like New, panics on error
+
+// Append value as a new message (XADD).
+func (*Channel) Send(ctx context.Context, key string, value []byte) error
+
+// First message with ID > id ("0-0" = oldest, "$" = only new ones).
+func (*Channel) RecvAfter(ctx context.Context, key, id string, block time.Duration) (Message, error)
+
+// Next message sent after the call starts; payload only.
+func (*Channel) Recv(ctx context.Context, key string, block time.Duration) ([]byte, error)
+
+// Keep only the newest maxLen messages; returns how many were removed.
+func (*Channel) Trim(ctx context.Context, key string, maxLen int64) (int64, error)
+
+// Delete the stream and all its messages (DEL). Does not close the client.
+func (*Channel) Close(ctx context.Context, key string) error
+
+type Message struct {
+	ID    string // stream entry ID, e.g. "1700000000000-0"; use as the next cursor
+	Value []byte // the payload given to Send
+}
+
+var ErrInvalidArgument error // empty key or cursor, negative maxLen
+var ErrMalformedEntry error  // entry has no "data" field; Message.ID is still set
+```
 
 There is no configuration. A `Channel` is safe for concurrent use.
 
@@ -144,11 +189,6 @@ There is no configuration. A `Channel` is safe for concurrent use.
 | any other error | Redis/network failure or an invalid cursor string | retry or report |
 
 Check errors with `errors.Is`.
-
-## Requirements
-
-- Redis 5.0+ (streams). Works with any `*redis.Client` from
-  `github.com/redis/go-redis/v9`.
 
 ## Caveats
 

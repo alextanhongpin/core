@@ -111,8 +111,9 @@ func leaseKey(key string) string {
 }
 
 // Do runs fn for key unless another caller is already running it, in which case
-// it waits for that caller to finish instead. did reports whether this call ran
-// fn and fn succeeded.
+// it waits for that caller to finish instead. did is true only when this call
+// ran fn and fn (plus lease renewal and release) succeeded; it is false for
+// every waiter and for a leader that returns an error.
 //
 // Who runs fn:
 //   - Callers on the same Group share one call; they all get the leader's error.

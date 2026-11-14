@@ -17,7 +17,7 @@ Don't use it for:
 go get github.com/alextanhongpin/core/dsync/idempotent
 ```
 
-Requires **Redis 8.4+** (the package uses `SET ... IFDEQ` and `DELEX`). API reference: [pkg.go.dev](https://pkg.go.dev/github.com/alextanhongpin/core/dsync/idempotent).
+Requirements: **Go 1.27+** (the constructors are generic methods) and **Redis 8.4+** (the package uses `SET ... IFDEQ` and `DELEX`). API reference: [pkg.go.dev](https://pkg.go.dev/github.com/alextanhongpin/core/dsync/idempotent).
 
 ## Quick start
 
@@ -46,7 +46,9 @@ type Receipt struct {
 func main() {
 	ctx := context.Background()
 
-	rdb := redis.NewClient(&redis.Options{Addr: "localhost:6379"})
+	rdb := redis.NewClient(&redis.Options{
+		Addr: "localhost:6379", // your Redis address (8.4+)
+	})
 	defer rdb.Close()
 
 	// One Idempotent per process. It is safe for concurrent use.
@@ -86,9 +88,68 @@ func main() {
 }
 ```
 
-`Do` returns `(response, shared, err)`. `shared` is `true` when the response was replayed from Redis instead of produced by this call.
+First run prints:
 
-Need a struct instead of a function? Implement `idempotent.Task[K, V]` (a `Do(ctx, req K) (V, error)` method) and pass it to `idem.Handler`. Each constructor has a `Must...` variant that panics, for use at startup.
+```
+charging acc-1 500
+rcpt-123 shared: false
+rcpt-123 shared: true
+```
+
+The result is stored in Redis, so it survives restarts for `KeepTTL` (24h by default). Running the program again within that window prints `rcpt-123 shared: true` twice and never prints `charging`. Use a new key (or `DEL` it in Redis) to run `fn` again.
+
+## API
+
+```go
+// Constructors. One *Idempotent per process; safe for concurrent use.
+func NewWithRedis(client *redis.Client) (*Idempotent, error)
+func New(client Store) (*Idempotent, error)          // custom backend, e.g. a test fake
+func MustNewWithRedis(client *redis.Client) *Idempotent
+func MustNew(client Store) *Idempotent
+
+// Handler constructors are generic METHODS on *Idempotent (not package functions).
+// K and V are inferred from the argument. The Must variants panic on error.
+func (*Idempotent) HandlerFunc[K, V any](fn HandlerFunc[K, V], cfg HandlerConfig) (Handler[K, V], error)
+func (*Idempotent) Handler[K, V any](fn Task[K, V], cfg HandlerConfig) (Handler[K, V], error)
+func (*Idempotent) MustHandlerFunc[K, V any](fn HandlerFunc[K, V], cfg HandlerConfig) Handler[K, V]
+func (*Idempotent) MustHandler[K, V any](fn Task[K, V], cfg HandlerConfig) Handler[K, V]
+
+// What you pass in.
+type HandlerFunc[K, V any] func(ctx context.Context, req K) (V, error) // implements Task
+type Task[K, V any] interface {
+	Do(ctx context.Context, req K) (V, error)
+}
+
+// What you get back. shared is true when res was replayed from Redis.
+type Handler[K, V any] interface {
+	Do(ctx context.Context, key string, req K) (res V, shared bool, err error)
+}
+
+// Config helpers (the constructors already apply both).
+func DefaultConfig() HandlerConfig
+func (HandlerConfig) WithDefaults() HandlerConfig
+func (HandlerConfig) Validate() error
+
+// Redis Store implementation used by NewWithRedis.
+func NewClient(client *redis.Client) *Client
+type Store interface {
+	CompareAndDelete(ctx context.Context, key, oldValue string) error
+	CompareAndSwap(ctx context.Context, key string, oldValue, newValue string, ttl time.Duration) error
+	LoadOrStore(ctx context.Context, key string, value string, ttl time.Duration) (curr string, loaded bool, err error)
+}
+```
+
+`Handler` and `HandlerFunc` are both type names and method names. Call the method on your `*Idempotent` value; the package-level `idempotent.Handler` is the interface type. Wrapping a struct that implements `Task`:
+
+```go
+type chargeTask struct{ /* dependencies */ }
+
+func (t *chargeTask) Do(ctx context.Context, req ChargeRequest) (Receipt, error) {
+	return Receipt{ID: "rcpt-123"}, nil
+}
+
+charge, err := idem.Handler(&chargeTask{}, idempotent.HandlerConfig{}) // Handler[ChargeRequest, Receipt]
+```
 
 ## How it works
 
@@ -147,7 +208,7 @@ Details:
 | `ErrEmptyKey` | `key` was `""`. | `400 Bad Request`: the idempotency key is missing. |
 | `ErrRequestMismatch` | The key already has a stored result, but it was produced by a different request. | `422 Unprocessable Entity`: the client reused a key with a different body. |
 | `ErrRequestInFlight` | Another process is still running `fn` for this key. | `409 Conflict` (or `429` with `Retry-After`): retry later. |
-| `ErrLockConflict` | This caller lost the key (the lease expired or the entry changed). Nothing was stored. | `500`, or retry. Raise `LockTTL` if this happens often. |
+| `ErrLockConflict` | This caller lost the key while `fn` ran: a lease renewal or the final commit found the entry expired or replaced (e.g. something deleted or overwrote the key, or it expired because Redis stalled past `LockTTL`; to reproduce, `DEL` the key while `fn` runs). A Redis network error during renewal is returned as that error instead. `fn`'s context is canceled and nothing is stored, but `fn`'s side effect may already have happened. | `500` or `503`; a retry may run `fn` again. Raise `LockTTL` if this happens often. |
 | errors from `fn` | Passed through (wrapped, so use `errors.Is`/`errors.As`). Nothing is stored, so a retry runs `fn` again. | Your own mapping. |
 | `context.Canceled` / `DeadlineExceeded` | The caller's context ended before `fn` started or while it was waiting its turn. | Usually nothing to do. |
 | Redis / JSON errors | Wrapped and returned. | `500`. |

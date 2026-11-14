@@ -19,11 +19,11 @@ If you are unsure, use **GCRA**.
 
 ## Install
 
+Requirements: **Go 1.25.6+** (from `go.mod`) and **Redis 7.0+** (Redis Functions).
+
 ```sh
 go get github.com/alextanhongpin/core/dsync/ratelimit
 ```
-
-Requires Redis 7.0 or newer (Redis Functions).
 
 ## Quick start
 
@@ -43,7 +43,9 @@ import (
 func main() {
 	ctx := context.Background()
 
-	client := redis.NewClient(&redis.Options{Addr: "localhost:6379"})
+	client := redis.NewClient(&redis.Options{
+		Addr: "localhost:6379", // your Redis address
+	})
 	defer client.Close()
 
 	// Install the Lua functions. This is safe to call on every start.
@@ -75,26 +77,74 @@ func main() {
 }
 ```
 
-For an HTTP middleware that returns `429 Too Many Requests` with a `Retry-After` header, see the [`httpMiddleware` example](https://pkg.go.dev/github.com/alextanhongpin/core/dsync/ratelimit#example-package-HttpMiddleware) in `example_test.go`.
+Expected output: requests 1 to 3 are allowed (burst of `Burst+1`), with `2`, `1`, `0` left. Requests 4 to 10 run within a few milliseconds, so they are denied with a retry of about one interval (`Period/Limit` = 200ms), printed as `retry after 200ms` or `199ms`. The state lives in Redis and expires once the key is idle (here about 600ms after the last allowed request): a second run a second later prints the same, but a run started right away is denied from request 1 with a shorter retry such as `153ms`.
 
-## API at a glance
+### HTTP middleware
 
-| Call | Returns | Use for |
-|---|---|---|
-| `Allow(ctx, key)` | `bool` | Checking a single request |
-| `AllowN(ctx, key, n)` | `bool` | Checking `n` units at once, all or nothing |
-| `Limit(ctx, key)` / `LimitN(ctx, key, n)` | `*Result` | Getting `Remaining`, `RetryAfter` and `ResetAfter` for headers |
+```go
+// RateLimit answers 429 Too Many Requests with a Retry-After header.
+func RateLimit(limiter ratelimit.RateLimiter, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		res, err := limiter.Limit(r.Context(), "rl:api:"+r.Header.Get("X-API-Key"))
+		if err != nil {
+			// Redis is unavailable. This fails closed; you may prefer to fail open.
+			http.Error(w, "rate limiter unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		w.Header().Set("X-RateLimit-Remaining", strconv.Itoa(res.Remaining))
+		if !res.Allow {
+			// Retry-After takes whole seconds. Round up so clients don't retry early.
+			secs := int(math.Ceil(res.RetryAfter.Seconds()))
+			w.Header().Set("Retry-After", strconv.Itoa(secs))
+			http.Error(w, "too many requests", http.StatusTooManyRequests)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+```
 
-Calling `LimitN(ctx, key, 0)` inspects the current state without consuming anything. Both limiters implement the `RateLimiter` interface.
+The package does no rounding: `RetryAfter` is a `time.Duration` in whole milliseconds (for example `199ms`). Converting it to seconds is up to you; rounding up, as above, turns `199ms` into `Retry-After: 1`. A runnable version is `Example_httpMiddleware` in `example_test.go`.
 
-`Result` fields:
+## API
 
-| Field | Meaning |
-|---|---|
-| `Allow` | The requests were admitted and consumed |
-| `Remaining` | How many more requests fit right now |
-| `RetryAfter` | How long to wait before the same request can succeed (0 if allowed) |
-| `ResetAfter` | How long until the key is back to full capacity (FixedWindow: until the window ends) |
+```go
+func Setup(ctx context.Context, client redis.UniversalClient) error
+const LibraryName = "ratelimit" // Redis function library installed by Setup
+
+func NewFixedWindow(client redis.UniversalClient, cfg Config) (*FixedWindow, error)
+func MustNewFixedWindow(client redis.UniversalClient, cfg Config) *FixedWindow // panics on error
+func NewGCRA(client redis.UniversalClient, cfg Config) (*GCRA, error)
+func MustNewGCRA(client redis.UniversalClient, cfg Config) *GCRA // panics on error
+
+// Implemented by *FixedWindow and *GCRA.
+type RateLimiter interface {
+	Allow(ctx context.Context, key string) (bool, error)
+	AllowN(ctx context.Context, key string, n int) (bool, error) // all or nothing
+	Limit(ctx context.Context, key string) (*Result, error)
+	LimitN(ctx context.Context, key string, n int) (*Result, error)
+}
+
+type Result struct {
+	Allow      bool          // the requests were admitted and consumed
+	Remaining  int           // how many more requests fit right now
+	ResetAfter time.Duration // until the key is back to full capacity (FixedWindow: until the window ends)
+	RetryAfter time.Duration // wait before the same request can succeed; 0 if allowed
+}
+
+type Config struct {
+	Limit  int
+	Period time.Duration
+	Burst  int
+}
+func DefaultConfig() Config                // Config{Limit: 100, Period: time.Minute}
+func (c Config) WithDefaults() Config      // zero Limit/Period replaced by the defaults
+func (c Config) Validate() error           // does not apply defaults
+
+var ErrNegative, ErrEmptyKey, ErrNotSetup error
+```
+
+`LimitN(ctx, key, 0)` inspects the current state without consuming anything. `Allow`/`AllowN` return `Result.Allow`. All `Result` durations have millisecond precision.
 
 ## How it works
 
@@ -121,10 +171,18 @@ A denied request never consumes capacity, for either algorithm.
 | Field | Default | Meaning |
 |---|---|---|
 | `Limit` | `100` | Requests allowed per `Period` |
-| `Period` | `1m` | Window length (must be at least 1ms, millisecond precision) |
+| `Period` | `1m` | Window length. Must be at least 1ms; truncated to whole milliseconds (`1500*time.Microsecond` behaves as `1ms`, `999*time.Microsecond` is rejected) |
 | `Burst` | `0` | GCRA only: extra requests allowed at once. FixedWindow ignores it |
 
-Validation happens in `NewFixedWindow` and `NewGCRA`, which return an error. `MustNew...` panics instead. GCRA also requires `Period/Limit >= 1ms`: 1000 per second is accepted, 2000 per second is not.
+Validation happens in `NewFixedWindow` and `NewGCRA`, which return an error. `MustNewFixedWindow` and `MustNewGCRA` panic instead. GCRA also requires `Period/Limit >= 1ms`: 1000 per second is accepted, 2000 per second is not.
+
+**GCRA does not admit `Limit` requests at once.** With `Burst: 0` it admits one request immediately, then one every `Period/Limit`. So the default `Config{}` (100 per 1m) allows 1 request, then one every 600ms, and the first `Result` already shows `Remaining: 0`. Choose `Burst` as "how many requests may arrive at once, minus one":
+
+| You want | Config |
+|---|---|
+| Strict spacing, no bursts | `Limit: 10, Period: time.Second` (one per 100ms) |
+| Up to 10 at once, then 10/s sustained | `Limit: 10, Period: time.Second, Burst: 9` |
+| "100 per minute" that may all come at once | `Limit: 100, Period: time.Minute, Burst: 99`, or use `FixedWindow` |
 
 ## Errors
 
@@ -134,7 +192,7 @@ A denial is **not** an error. `Allow` returns `false, nil` and `Limit` returns `
 |---|---|---|
 | `ErrNegative` | `n < 0` | Fix the caller |
 | `ErrEmptyKey` | `key == ""` | Fix the caller |
-| Error mentioning `ratelimit.Setup` | The Lua functions are not loaded on that Redis | Call `Setup` at startup |
+| `ErrNotSetup` | The Lua functions are not loaded on that Redis. Message: `ratelimit: Redis function missing, call ratelimit.Setup first: ERR Function not found`. Check with `errors.Is(err, ratelimit.ErrNotSetup)` | Call `Setup` at startup |
 | Any other error | Redis is unreachable or a context was cancelled | Decide whether to fail open (allow) or fail closed (reject or return 503) |
 
 ## Deploying and upgrading

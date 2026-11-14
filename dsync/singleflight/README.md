@@ -15,7 +15,7 @@ only (use `golang.org/x/sync/singleflight`, no Redis needed).
 go get github.com/alextanhongpin/core/dsync/singleflight
 ```
 
-Requires **Redis 8.4+** on a single primary (not Redis Cluster).
+Requires **Go 1.27+** and **Redis 8.4+** on a single primary (not Redis Cluster).
 [API reference](https://pkg.go.dev/github.com/alextanhongpin/core/dsync/singleflight)
 
 ## Quick start
@@ -46,7 +46,7 @@ func loadUserFromDB(ctx context.Context, id int) (User, error) {
 }
 
 func main() {
-	rdb := redis.NewClient(&redis.Options{Addr: "localhost:6379"})
+	rdb := redis.NewClient(&redis.Options{Addr: "localhost:6379"}) // your Redis address
 	defer rdb.Close()
 
 	users, err := singleflight.NewCache[User](rdb, singleflight.CacheConfig{})
@@ -65,6 +65,10 @@ func main() {
 }
 ```
 
+The first run prints `Alice from cache: false` (the getter ran and stored the
+value). Runs within the next minute print `Alice from cache: true`, because the
+value is still in Redis under `user:42`.
+
 If you only need "run this once at a time" without a stored value, use `Group`:
 
 ```go
@@ -73,9 +77,48 @@ g, err := singleflight.New(rdb, singleflight.Config{})
 did, err := g.Do(ctx, "refresh:prices", func(ctx context.Context) error {
 	return refreshPrices(ctx)
 })
-// did == true: this call ran refreshPrices and it succeeded.
-// did == false, err == nil: another caller ran it and has finished.
 ```
+
+`did` is true only when **this call ran `fn` and it succeeded**:
+
+| Caller | `fn` succeeds | `fn` fails with `e` |
+|--------|---------------|---------------------|
+| Leader (ran `fn`) | `true, nil` | `false, e` |
+| Local waiter (same `Group`) | `false, nil` | `false, e` |
+| Remote waiter (other process / other `Group`) | `false, nil` | `false, nil` (failure is not visible) |
+
+Any caller can also get `false` with `ErrTimeout`, a context error, a Redis
+error, or a lease-loss error (see [Errors](#errors)). So `did == false, err == nil`
+means "someone else ran it and has finished", not "it succeeded".
+
+## API
+
+```go
+func New(client *redis.Client, cfg Config) (*Group, error)
+func MustNew(client *redis.Client, cfg Config) *Group
+func (*Group) Do(ctx context.Context, key string, fn func(context.Context) error) (did bool, err error)
+
+func NewCache[T any](client *redis.Client, cfg CacheConfig) (*Cache[T], error)
+func MustNewCache[T any](client *redis.Client, cfg CacheConfig) *Cache[T]
+func (*Cache[T]) LoadOrStore(ctx context.Context, key string, getter func(ctx context.Context) (T, error), ttl time.Duration) (T, bool, error)
+
+func (Config) WithDefaults() Config
+func (Config) Validate() error
+func (CacheConfig) WithDefaults() CacheConfig
+func (CacheConfig) Validate() error
+
+var ErrTimeout, ErrSubscriptionClosed error
+const OK = "ok" // message published on the lease channel on release
+```
+
+`LoadOrStore` returns `(value, loaded, err)`. `loaded` is `false` only for the
+one caller whose getter produced and stored the value; it is `true` for cache
+hits, for every waiter (local or remote) that read the value the leader stored,
+and for a leader that found the value already stored on its recheck. With 40
+concurrent callers on a miss, expect one `loaded=false` and 39 `loaded=true`.
+On error, `loaded` is `false`.
+
+The caller keeps ownership of `client`: close it after all calls finish.
 
 ## How it works
 
@@ -85,8 +128,8 @@ did, err := g.Do(ctx, "refresh:prices", func(ctx context.Context) error {
            same Group, same key already running?
                  │yes                      │no
                  ▼                         ▼
-     wait for it, return its    SET singleflight:lease:<sha256(key)> token NX PX LockTTL
-     error (did=false)                     │
+     wait for it, return       SET singleflight:lease:<sha256(key)> token NX PX LockTTL
+     (false, leader's error)               │
                               ┌────────────┴─────────────┐
                               │ acquired (leader)        │ busy (another process leads)
                               ▼                          ▼
@@ -95,7 +138,7 @@ did, err := g.Do(ctx, "refresh:prices", func(ctx context.Context) error {
                               │                          │
                      DELEX lease (if still ours) lease gone → return (false, nil)
                      PUBLISH channel "ok"  ───►  WaitTTL passed → ErrTimeout
-                     return (true, fn's error)
+                     return (true, nil), or (false, err) if fn/renew/release failed
 ```
 
 - The lease key is `singleflight:lease:` + SHA-256 of your key, so any key works.
@@ -123,11 +166,15 @@ Zero values select the defaults. `Config` and `CacheConfig` share the first thre
 | `Suffix` (cache only) | `"fetch"` | Fill lease is named `<key>:<Suffix>`. |
 
 `LoadOrStore`'s `ttl` argument is the cached value's lifetime: `0` = no expiry,
-otherwise at least 1ms.
+otherwise at least 1ms. A negative or sub-millisecond `ttl` (e.g. `500*time.Microsecond`)
+returns `singleflight: ttl must be 0 (no expiry) or at least 1ms, got 500µs`
+without touching Redis. An empty key or nil getter returns
+`singleflight: key and getter are required`.
 
 ## Errors
 
-Check with `errors.Is`; errors can be joined.
+Check with `errors.Is`; errors can be joined. `lock` is
+`github.com/alextanhongpin/core/dsync/lock`.
 
 | Error | When | What to do |
 |-------|------|------------|
@@ -135,7 +182,7 @@ Check with `errors.Is`; errors can be joined.
 | `ErrSubscriptionClosed` | The Pub/Sub connection closed while waiting. | Retry. |
 | `redis.Nil` (cache only) | The leader was in another process and its getter failed, so no value was stored. | Retry, or treat as a miss. |
 | `lock.ErrExpired` (cache only) | The leader lost its fill lease before storing; nothing was stored. | Retry. Raise `LockTTL` if your getter is slow. |
-| `lock.ErrLocked` | The lease was taken over or deleted while `fn` ran. | `fn`'s work may have overlapped with another caller. |
+| `lock.ErrLocked` (+ `context.Canceled`, `lock.ErrExpired`) | Lease loss in `Do`: renewal found the lease taken over, deleted or expired while `fn` ran. `fn`'s context is canceled, and `Do` returns `did=false` with a joined error, e.g. `context canceled` + `lock.ErrLocked` (renewal) + `lock.ErrExpired` (release). | `fn`'s work may have overlapped with another caller; raise `LockTTL` if `fn` stalls. |
 | `context.Canceled` / `DeadlineExceeded` | Your `ctx` ended. | Normal shutdown path. |
 | anything else | Error from `fn` / `getter`, a JSON error, or a Redis error. | Handle as usual. |
 
