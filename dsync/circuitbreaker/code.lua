@@ -1,4 +1,17 @@
 #!lua name=circuitbreaker
+-- Circuit breaker functions. Installed by circuitbreaker.Setup.
+--
+-- Compatibility: function names, argument order, return values and the hash
+-- layout (fields status, generation, counter, timeout) are a contract with
+-- every deployed version of the Go package. Only change them additively.
+--
+-- Each breaker is one hash:
+--   status      CLOSED/HALF_OPEN/OPENED/DISABLED/FORCED_OPEN (missing = CLOSED)
+--   generation  incremented on every transition; results from calls admitted
+--               in an older generation are ignored
+--   counter     failure weight (CLOSED) or successes (HALF_OPEN); the field
+--               expires after the failure/success period without updates
+--   timeout     Redis time in ms when an OPENED breaker may go HALF_OPEN
 
 local CLOSED, HALF_OPEN, OPENED, DISABLED, FORCED_OPEN = 1, 2, 3, 4, 5
 
