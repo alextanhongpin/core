@@ -15,7 +15,7 @@ or for coalescing callers that all need the *result* (use
 go get github.com/alextanhongpin/core/dsync/lock
 ```
 
-Requires **Redis 8.4+** (uses `DELEX` and `SET ... IFDEQ`).
+Requires **Go 1.27+** and **Redis 8.4+** (uses `DELEX` and `SET ... IFDEQ`).
 [API reference](https://pkg.go.dev/github.com/alextanhongpin/core/dsync/lock)
 
 ## Quick start
@@ -34,7 +34,7 @@ import (
 )
 
 func main() {
-	rdb := redis.NewClient(&redis.Options{Addr: "localhost:6379"})
+	rdb := redis.NewClient(&redis.Options{Addr: "localhost:6379"}) // your Redis address
 	defer rdb.Close()
 
 	locker, err := lock.New(lock.NewClient(rdb), lock.DefaultConfig())
@@ -58,11 +58,79 @@ func main() {
 }
 ```
 
-Other entry points:
+It prints `rebuilding report` and exits 0. Running it again prints the same:
+`Do` deletes the key when `fn` returns, so nothing persists in Redis. If a
+previous run crashed while holding the lease, the next run waits (see
+`DefaultRetry` below) until the key expires after `LockTTL`, or gives up with
+`ErrLocked`.
 
-- `cfg.Retry = lock.NoRetry()` – fail immediately with `ErrLocked` instead of waiting.
-- `lock.Func(fn, locker, keyFn)` – wrap a `func(ctx, req) (res, error)` so each call runs under the key `keyFn(req)`.
-- `locker.Lock / Extend / Unlock` – the raw lease operations, if you need to manage a lease by hand.
+## API
+
+```go
+func New(c Backend, cfg Config) (*Locker, error)
+func MustNew(c Backend, cfg Config) *Locker // panics on invalid cfg
+func NewClient(client *redis.Client) *Client // Redis Backend; you still Close client
+
+func (*Locker) Do(ctx context.Context, key string, fn func(ctx context.Context) error) error
+
+// Raw lease operations (promoted from the Backend). You choose the token.
+func (*Locker) Lock(ctx context.Context, key, token string, ttl time.Duration) error   // ErrLocked if key exists
+func (*Locker) Extend(ctx context.Context, key, token string, ttl time.Duration) error // ErrLocked if token no longer owns key
+func (*Locker) Unlock(ctx context.Context, key, token string) error                    // ErrExpired if token no longer owns key
+
+func Func[K, V any](
+	fn func(ctx context.Context, req K) (V, error),
+	l Doer,
+	keyFn func(ctx context.Context, req K) (string, error),
+) func(ctx context.Context, req K) (V, error)
+
+func DefaultConfig() Config
+func DefaultRetry() Retry
+func NoRetry() Retry // single attempt: fail fast with ErrLocked
+func (Config) WithDefaults() Config
+func (Config) Validate() error
+
+type Backend interface { // implemented by *Client; Locker embeds it
+	Lock(ctx context.Context, key, token string, ttl time.Duration) error
+	Extend(ctx context.Context, key, token string, ttl time.Duration) error
+	Unlock(ctx context.Context, key, token string) error
+}
+type Doer interface {
+	Do(ctx context.Context, key string, fn func(ctx context.Context) error) error
+}
+type Retry interface {
+	Do(ctx context.Context, fn func(context.Context) error) error
+}
+```
+
+**`Func`** runs each call under the key that `keyFn` returns for that request.
+If `keyFn` errors, `fn` is not called. The result of `fn` is returned even
+when the error is non-nil (e.g. `fn` succeeded but release failed).
+
+```go
+chargeOrder := func(ctx context.Context, orderID int) (string, error) {
+	return fmt.Sprintf("charged order %d", orderID), nil
+}
+charge := lock.Func(chargeOrder, locker, func(_ context.Context, orderID int) (string, error) {
+	return fmt.Sprintf("order:%d", orderID), nil
+})
+res, err := charge(ctx, 42) // "charged order 42", nil
+```
+
+**Raw `Lock`/`Extend`/`Unlock`** do no retry, renewal or local queueing.
+The token identifies the owner: pass a value unique to this holder (e.g.
+`uuid.NewV7().String()` from the standard library's `uuid` package) and the
+same value to `Extend` and `Unlock`. (`Do` generates its own token for you;
+that is the UUIDv7 in [How it works](#how-it-works).)
+
+```go
+tok := uuid.NewV7().String()
+if err := locker.Lock(ctx, "jobs:sync", tok, 10*time.Second); err != nil {
+	return err // lock.ErrLocked if someone else holds it
+}
+defer locker.Unlock(context.WithoutCancel(ctx), "jobs:sync", tok)
+// ... work; call locker.Extend(ctx, "jobs:sync", tok, 10*time.Second) before the TTL runs out
+```
 
 ## How it works
 
@@ -101,14 +169,28 @@ off**.
 | Field          | `DefaultConfig()` | Zero value means | Meaning |
 |----------------|-------------------|------------------|---------|
 | `LockTTL`      | 30s               | 30s              | Lifetime of the Redis key. Minimum 1ms. |
-| `RefreshRatio` | 0.8 (renew every 24s) | renewal off  | Renew every `LockTTL × RefreshRatio`. Must be in `[0, 1)`. With 0, `fn`'s context is canceled with `ErrLockTimeout` after `LockTTL`. |
-| `Retry`        | `DefaultRetry()`  | `DefaultRetry()` | How to wait for a busy key. `DefaultRetry` retries up to 10 times, backoff 50ms→2s (≈11s total). `NoRetry()` tries once. Any `*retry.Retry` from `core/sync/retry` works. |
+| `RefreshRatio` | 0.8 (renew every 24s) | renewal off  | Renew every `LockTTL × RefreshRatio`. Must be in `[0, 1)`. With 0, `fn`'s context hits its deadline after `LockTTL` (cause `ErrLockTimeout`). |
+| `Retry`        | `DefaultRetry()`  | `DefaultRetry()` | How to wait for a busy key. `DefaultRetry` retries up to 10 times; retry *n* sleeps a random time in `[0, min(50ms·2ⁿ, 2s))` (full jitter), so it gives up after **at most ~13.1s, ~6.5s on average**. `NoRetry()` tries once. Any `*retry.Retry` from `core/sync/retry` works. |
 | `Logger`       | –                 | –                | Deprecated, ignored. |
 
 ## Errors
 
 Errors from `Do` may be joined (e.g. your error plus a release error); always
 check with `errors.Is`.
+
+**Inside `fn`**, `ctx.Err()` only says *that* the context ended
+(`context.DeadlineExceeded` or `context.Canceled`); use `context.Cause(ctx)`
+to see *why*:
+
+| Reason | `ctx.Err()` | `context.Cause(ctx)` |
+|--------|-------------|----------------------|
+| Renewal off, `LockTTL` passed | `context.DeadlineExceeded` | `ErrLockTimeout` |
+| Renewal found the key gone or taken | `context.Canceled` | matches `ErrLocked` |
+| Renewal could not finish before the lease expired | `context.Canceled` | matches `ErrExpired` |
+| Your `ctx` ended | whatever your ctx reports | your ctx's cause |
+
+`Do`'s returned error includes that cause, so `errors.Is(err, lock.ErrLockTimeout)`
+etc. work on it directly.
 
 | Error | When | What to do |
 |-------|------|------------|
