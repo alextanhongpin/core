@@ -45,9 +45,10 @@ if err != nil {
   then the whole config is validated. Packages that have one also expose
   `DefaultConfig()`. `MustNew` variants panic instead of returning an error, for
   use in `main`/init code.
-- **You own the Redis client.** Constructors take a `*redis.Client`
-  ([go-redis v9](https://github.com/redis/go-redis)); share one client across
-  packages and close it yourself when you are done.
+- **You own the Redis client.** Constructors take a
+  [go-redis v9](https://github.com/redis/go-redis) client (`*redis.Client`;
+  `ratelimit` and `circuitbreaker` accept any `redis.UniversalClient`). Share
+  one client across packages and close it yourself when you are done.
 - **Errors are sentinels.** Compare with `errors.Is` (for example
   `errors.Is(err, ratelimit.ErrLimitExceeded)`); errors may be wrapped.
 - **Everything takes a `context.Context`** and stops when it is cancelled.
@@ -58,17 +59,24 @@ if err != nil {
   logic as Redis Functions. Call the package's `Setup` method on startup (or from
   a deploy step). Upgrading the Go module alone does not update the code inside
   Redis.
-- **Redis version.** Some packages rely on recent Redis commands; check the
-  "Requirements" section of each README. `probs` needs Redis Stack (or the
-  RedisBloom module).
+- **Redis version.** Minimum versions differ per package:
+
+  | Package | Minimum Redis | Why |
+  | --- | --- | --- |
+  | cache (compare-and-swap, leases), idempotent, lock, singleflight | 8.4 | token-checked `SET IFDEQ` / `DELEX` |
+  | circuitbreaker | 7.4 | Redis Functions + hash field expiry |
+  | ratelimit | 7.0 | Redis Functions |
+  | probs | 8.0 (or Redis Stack) | built-in Bloom/Cuckoo/CMS/Top-K/t-digest |
+  | channel | 5.0 | Streams |
 - **Locks are leases, not fencing tokens.** If a process pauses longer than the
   lease TTL, or Redis fails over, two processes can briefly both believe they
   hold a lock. Nothing here gives exactly-once side effects; make protected
   resources tolerate a duplicate (for example with a version check) when that
   matters.
-- **Single primary.** Scripts that touch more than one key assume all keys live
-  on the same Redis primary. Redis Cluster is only supported where a README says
-  so.
+- **Redis Cluster.** `ratelimit` and `circuitbreaker` work with a
+  `*redis.ClusterClient` (`Setup` installs the functions on every master). The
+  other packages target a single primary; operations that touch more than one
+  key need those keys in the same hash slot.
 
 ## Developing
 
@@ -81,4 +89,4 @@ go vet ./...
 go test -race ./...
 ```
 
-Docker must be running. `probs` tests start a Redis Stack image.
+Docker must be running; the first run pulls the Redis image.
