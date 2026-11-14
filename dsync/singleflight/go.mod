@@ -3,7 +3,7 @@ module github.com/alextanhongpin/core/dsync/singleflight
 go 1.27.0
 
 require (
-	github.com/alextanhongpin/core/dsync/lock v0.1.0
+	github.com/alextanhongpin/core/dsync/lock v0.2.0
 	github.com/alextanhongpin/dbtx/testing/redistest v0.0.1
 	github.com/redis/go-redis/v9 v9.22.0
 	github.com/stretchr/testify v1.12.1
