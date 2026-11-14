@@ -2,16 +2,21 @@ package probs_test
 
 import (
 	"context"
+	"os"
 	"testing"
 
-	"github.com/alextanhongpin/core/storage/redis/redistest"
+	"github.com/alextanhongpin/dbtx/testing/redistest"
 )
 
 var ctx = context.Background()
 
-func TestMain(m *testing.M) {
-	stop := redistest.Init(redistest.Image("redis/redis-stack:6.2.6-v17"))
-	defer stop()
+// redisImage ships the probabilistic data structures (Bloom, Cuckoo,
+// Count-Min Sketch, Top-K and t-digest) built in, as every Redis 8+ image does.
+const redisImage = "redis:8.6.2"
 
-	m.Run()
+func TestMain(m *testing.M) {
+	stop := redistest.Init(redistest.Options{Image: redisImage})
+	code := m.Run()
+	_ = stop()
+	os.Exit(code)
 }

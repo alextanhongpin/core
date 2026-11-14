@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/alextanhongpin/core/dsync/probs"
-	"github.com/alextanhongpin/core/storage/redis/redistest"
+	"github.com/alextanhongpin/dbtx/testing/redistest"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -87,4 +87,18 @@ func TestTopK(t *testing.T) {
 		is.Nil(err)
 	})
 
+}
+
+func TestTopKRanked(t *testing.T) {
+	topK := probs.MustNewTopK(redistest.Client(t))
+	key := t.Name()
+	_, err := topK.Add(ctx, key, "a", "b", "b", "c", "c", "c")
+	assert.Nil(t, err)
+	items, err := topK.Ranked(ctx, key)
+	assert.Nil(t, err)
+	assert.Equal(t, []probs.TopKItem{{"c", 3}, {"b", 2}, {"a", 1}}, items)
+
+	items, err = topK.Ranked(ctx, key+":missing")
+	assert.True(t, probs.KeyDoesNotExistError(err), err)
+	assert.Nil(t, items)
 }

@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/alextanhongpin/core/dsync/probs"
-	"github.com/alextanhongpin/core/storage/redis/redistest"
+	"github.com/alextanhongpin/dbtx/testing/redistest"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -113,4 +113,13 @@ func TestCuckooFilter(t *testing.T) {
 		is.True(exists[0])
 		is.False(exists[1])
 	})
+}
+
+func TestCuckooFilterReserve(t *testing.T) {
+	cf := probs.MustNewCuckooFilter(redistest.Client(t))
+	status, err := cf.Reserve(ctx, t.Name(), 10_000)
+	assert.Nil(t, err)
+	assert.Equal(t, probs.OK, status)
+	_, err = cf.Reserve(ctx, t.Name(), 10_000)
+	assert.Error(t, err, "reserving an existing key fails")
 }

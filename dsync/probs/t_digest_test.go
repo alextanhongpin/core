@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/alextanhongpin/core/dsync/probs"
-	"github.com/alextanhongpin/core/storage/redis/redistest"
+	"github.com/alextanhongpin/dbtx/testing/redistest"
 	"github.com/stretchr/testify/assert"
 )
 
