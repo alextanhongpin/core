@@ -54,7 +54,7 @@ func Setup(ctx context.Context, client redis.UniversalClient) error {
 // wrapErr adds a hint to the error Redis returns when Setup was not run.
 func wrapErr(err error) error {
 	if err != nil && strings.Contains(err.Error(), "Function not found") {
-		return fmt.Errorf("ratelimit: Redis function missing, call ratelimit.Setup first: %w", err)
+		return fmt.Errorf("%w: %w", ErrNotSetup, err)
 	}
 	return err
 }
