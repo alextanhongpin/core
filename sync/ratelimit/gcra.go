@@ -32,7 +32,8 @@ func NewGCRA(cfg Config) (*GCRA, error) {
 	}
 
 	interval := cfg.Period.Nanoseconds() / int64(cfg.Limit)
-	if int64(cfg.Burst) >= math.MaxInt64/interval {
+	// Keep (burst+1)*interval well below MaxInt64/2 so now+allowance cannot wrap.
+	if int64(cfg.Burst) >= math.MaxInt64/2/interval-1 {
 		return nil, errors.New("ratelimit: burst allowance overflows duration")
 	}
 
