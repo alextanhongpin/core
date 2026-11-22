@@ -42,6 +42,9 @@ func New() *KeyLock {
 	}
 }
 
+// Size returns the number of map entries, not the number of held locks. Idle
+// entries (released and unreferenced) are counted until the garbage collector
+// reclaims them.
 func (l *KeyLock) Size() int {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -49,6 +52,9 @@ func (l *KeyLock) Size() int {
 	return len(l.locks)
 }
 
+// Has reports whether key still has an entry. It is not "is held": an idle
+// entry stays present until the garbage collector reclaims it, so Has can
+// return true for a key that nobody holds.
 func (l *KeyLock) Has(key string) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
