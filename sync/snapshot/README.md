@@ -1,58 +1,114 @@
-# Snapshot notifications
+# snapshot
 
-Notify subscribers when both a change count and elapsed-time threshold are reached.
+Notify subscribers when enough changes have accumulated and enough time has
+passed, with stricter time requirements for smaller change counts.
 
-## Installation and documentation
+**Use it for:** triggering periodic persistence of in-memory state (write a
+snapshot after 1,000 changes and 1s, or after 1 change and 1h), flushing more
+often as write volume grows.
+
+**Don't use it for:** durable job queues (notifications are triggers, not
+jobs), or plain fan-out of events (use [`sync/broadcast`](../broadcast), which
+snapshot builds on).
+
+## Installation
 
 ```sh
 go get github.com/alextanhongpin/core/sync/snapshot
-go doc github.com/alextanhongpin/core/sync/snapshot
 ```
-
-[Go API reference](https://pkg.go.dev/github.com/alextanhongpin/core/sync/snapshot) · [Module requirements](go.mod)
-
-## Typical use
-
-Use to trigger periodic persistence of in-memory state, flushing more frequently as writes increase.
 
 ## Quick start
 
-The snippet belongs inside a function returning `error`; application functions
-such as `handleRequest` represent your own work. Import the package above and
-the standard packages used in the snippet (`context`, `errors`, `fmt`, or `time`).
-
 ```go
-s, stop, err := snapshot.New(snapshot.Config{
-	Policies: []snapshot.Policy{{Changes: 10, After: time.Second}},
-})
-if err != nil {
-	return err
-}
-defer stop()
-notifications := s.Chan() // Subscribe before recording changes.
-s.Add(10)
-select {
-case policy := <-notifications:
-	fmt.Println("persist changes after", policy.After)
-case <-ctx.Done():
-	return ctx.Err()
+package main
+
+import (
+	"fmt"
+	"log"
+
+	"github.com/alextanhongpin/core/sync/snapshot"
+)
+
+func main() {
+	s, stop, err := snapshot.New(snapshot.Config{
+		Policies: []snapshot.Policy{{Changes: 10}},
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer stop()
+
+	notifications := s.Chan() // subscribe before recording changes
+	s.Add(10)
+	p := <-notifications
+	fmt.Println("persist after", p.Changes, "changes")
 }
 ```
 
-## Behavior and configuration
+It prints `persist after 10 changes`.
 
-`New(Config{})` returns `(*Snapshot, stop, error)` and uses DefaultPolicies with an unbuffered input. MustNew panics on invalid configuration for startup wiring. Configuration is passed by value, policy slices are cloned and sorted privately, and later caller mutations do not affect behavior.
+## API
 
-Nil Policies selects defaults; an explicit empty slice is invalid. Policy Changes must be positive and After nonnegative. Zero After allows triggering as soon as enough changes arrive. Zero BufferSize is unbuffered; negative buffer sizes return errors. Validate does not mutate configuration; WithDefaults returns a defaulted copy.
+```go
+type Policy struct {
+	After   time.Duration // minimum time since the last notification
+	Changes int           // minimum accumulated changes
+}
 
-Add and Inc record changes. A notification is triggered when a policy's elapsed-time and change-count requirements both hold. Policies are checked in ascending After order. Notification resets the accumulated count and elapsed-time origin. Time checks use the smallest nonzero policy duration as their tick interval.
+type Config struct {
+	BufferSize int      // admission buffer for Add; 0 is unbuffered
+	Policies   []Policy // nil selects DefaultPolicies
+}
 
-Subscribe with Chan or Go before expecting notifications. Broadcast acceptance does not confirm delivery. Slow subscribers apply backpressure to notifications and subsequent changes. Stop is idempotent and concurrent-safe, interrupts pending delivery, and waits for callbacks. Callbacks must finish and must not call stop or blocking operations on this snapshot. Chan after stop returns nil. Add after stop returns without work. Accepted notifications may be discarded during shutdown.
+func DefaultPolicies() []Policy
+func DefaultConfig() Config
+func (Config) WithDefaults() Config // fills nil Policies
+func (Config) Validate() error
 
-## Expected errors
+func New(cfg Config) (*Snapshot, func(), error) // snapshot and idempotent stop
+func MustNew(cfg Config) (*Snapshot, func())    // panics on invalid cfg
 
-Construction rejects empty policies, nonpositive change thresholds, negative durations, and negative buffers. `Add` and `Inc` have no error return; calls after shutdown do nothing.
+func (*Snapshot) Add(n int) // record n changes; n <= 0 is ignored
+func (*Snapshot) Inc()      // Add(1)
 
-## Pitfalls
+// Promoted from the embedded *broadcast.Broadcast[Policy]:
+func (*Snapshot) Chan() <-chan Policy
+func (*Snapshot) Go(fn func(Policy))
+func (*Snapshot) Send(p Policy) // exposed, but not meant for callers
+```
 
-Notifications are triggers, not durable jobs. Slow subscribers block progress, and callbacks must finish before shutdown can complete.
+## Behavior and guarantees
+
+- **Firing rule:** policies are sorted (stably) by `After`. On each `Add` and
+  each tick, policies are checked in ascending `After` order; the first one
+  whose `After` has elapsed since the last notification and whose `Changes`
+  threshold is met fires. Firing resets the count and the time origin, and
+  restarts the tick cadence, so a time-based notification is due about one
+  smallest-`After` interval later.
+- **Ticks:** time checks run at the smallest nonzero `After`. With `After: 0`
+  a policy fires as soon as enough changes arrive.
+- **Counter:** `Add` ignores `n <= 0` and saturates at the largest `int`.
+- **Validation:** `Changes` must be positive, `After` nonnegative,
+  `BufferSize` nonnegative, and an explicit empty `Policies` is invalid (nil
+  means defaults). `New` clones and sorts the policies; later caller mutation
+  has no effect.
+- **Subscribers:** subscribe with `Chan` or `Go` before expecting
+  notifications. The embedded broadcast is exposed, so `Send`, `Chan` and `Go`
+  are callable on `*Snapshot`; do not call `Send` yourself. Slow subscribers
+  apply backpressure to notifications and to later `Add` calls.
+- **Stop:** idempotent and concurrent-safe; interrupts pending delivery and
+  waits for `Go` callbacks. Callbacks must finish and must not call stop or
+  blocking operations on the snapshot. `Add` after stop does nothing.
+  `Chan` after stop returns nil with the broadcast release this module depends
+  on (v0.0.3); do not range over it without checking.
+- Notifications may be dropped during shutdown; they are triggers, not durable.
+
+## Testing
+
+```sh
+go vet ./...
+go test -race -count=1 ./...
+go test -count=1 ./...
+```
+
+Timing tests run under `testing/synctest`, so they use a fake clock.
