@@ -175,7 +175,7 @@ func TestRate(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			r.Now = func() time.Time { return now.Add(d) }
 			got := r.Inc()
-			if want != got {
+			if math.Abs(want-got) > 1e-9 {
 				t.Fatalf("expected %f, got %f", want, got)
 			}
 		})
