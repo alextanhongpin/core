@@ -9,8 +9,16 @@ import (
 )
 
 // Batch collects items into batches when the size or
-// timeout exceeds the specified threshold.
+// timeout exceeds the specified threshold. The consumer must drain the output
+// until it is closed. Use BatchCtx to be able to cancel the stage.
 func Batch[T any](in <-chan T, size int, timeout time.Duration) <-chan []T {
+	return BatchCtx(context.Background(), in, size, timeout)
+}
+
+// BatchCtx is like Batch, but stops when ctx is canceled: it stops reading in,
+// stops sending (a partially filled batch is discarded), closes the output and
+// exits, even if nobody is receiving from the output.
+func BatchCtx[T any](ctx context.Context, in <-chan T, size int, timeout time.Duration) <-chan []T {
 	if size <= 0 {
 		panic("pipeline: invalid n")
 	}
@@ -28,19 +36,27 @@ func Batch[T any](in <-chan T, size int, timeout time.Duration) <-chan []T {
 				timer.Stop()
 			}
 		}()
-		flush := func() {
+		// flush reports false if ctx was canceled before the batch was sent.
+		flush := func() bool {
 			if len(batch) > 0 {
 				if timer != nil {
 					timer.Stop()
 				}
 				tick = nil
-				out <- batch
+				select {
+				case out <- batch:
+				case <-ctx.Done():
+					return false
+				}
 				batch = nil
 			}
+			return true
 		}
 
 		for {
 			select {
+			case <-ctx.Done():
+				return
 			case v, ok := <-in:
 				if !ok {
 					flush()
@@ -55,11 +71,13 @@ func Batch[T any](in <-chan T, size int, timeout time.Duration) <-chan []T {
 					tick = timer.C
 				}
 				batch = append(batch, v)
-				if len(batch) >= size {
-					flush()
+				if len(batch) >= size && !flush() {
+					return
 				}
 			case <-tick:
-				flush()
+				if !flush() {
+					return
+				}
 			}
 		}
 	}()
@@ -83,7 +101,9 @@ func Buffer[T any](in <-chan T, cap int) <-chan T {
 	return out
 }
 
-// Debounce ensures minimum time between emissions
+// Debounce is a leading-edge throttle, not a trailing-edge debounce: it emits
+// an item, then drops every item that arrives within duration of that
+// emission. Dropped items are lost. The consumer must drain the output.
 func Debounce[T any](in <-chan T, duration time.Duration) <-chan T {
 	out := make(chan T)
 
@@ -102,7 +122,10 @@ func Debounce[T any](in <-chan T, duration time.Duration) <-chan T {
 	return out
 }
 
-// Dedup removes duplicate items (requires comparable type)
+// Dedup removes duplicate items (requires comparable type). It remembers every
+// value it has seen for as long as the stage runs, so memory grows with the
+// number of distinct values; do not use it on unbounded streams of distinct
+// values.
 func Dedup[T comparable](in <-chan T) <-chan T {
 	out := make(chan T)
 
@@ -121,6 +144,9 @@ func Dedup[T comparable](in <-chan T) <-chan T {
 	return out
 }
 
+// DedupFunc is like Dedup, but compares items by the key fn returns and emits
+// the first item seen for each key. Like Dedup, it keeps an unbounded set of
+// seen keys for the lifetime of the stage.
 func DedupFunc[T any, V comparable](in <-chan T, fn func(T) V) <-chan T {
 	out := make(chan T)
 
@@ -161,7 +187,10 @@ func FanIn[T any](channels ...<-chan T) <-chan T {
 	return out
 }
 
-// FanOut distributes input to multiple output channels
+// FanOut distributes input round-robin to n output channels. It has
+// head-of-line blocking: it sends to one output at a time, so a slow or
+// undrained output stalls delivery to all the others. Consumers must drain
+// every output until it is closed.
 func FanOut[T any](in <-chan T, n int) []<-chan T {
 	if n <= 0 {
 		panic("pipeline: invalid n")
@@ -195,7 +224,11 @@ func FanOut[T any](in <-chan T, n int) []<-chan T {
 	return readOnlyOutputs
 }
 
-// Merge merges multiple channels using a merge function
+// Merge merges multiple channels using a merge function. mergeFn is applied
+// only opportunistically: when a value from one channel is received and a value
+// from the other is ready at that moment they are combined, otherwise values
+// are forwarded unchanged. Which values get combined, and how many, depends on
+// scheduling and is nondeterministic. Consumers must drain the output.
 func Merge[T any](mergeFn func(T, T) T, channels ...<-chan T) <-chan T {
 	if len(channels) == 0 {
 		out := make(chan T)
@@ -266,13 +299,27 @@ func Merge[T any](mergeFn func(T, T) T, channels ...<-chan T) <-chan T {
 }
 
 // Pipe transform the value received by the input channel before passing to the
-// output channel.
+// output channel. The consumer must drain the output until it is closed. Use
+// PipeCtx to be able to cancel the stage.
 func Pipe[T, V any](in <-chan T, fn func(T) (V, bool)) <-chan V {
-	return PipeN(in, fn, 1)
+	return PipeNCtx(context.Background(), in, fn, 1)
 }
 
-// PipeN is like Pipe, but runs multiple workers.
+// PipeCtx is like Pipe, but stops when ctx is canceled. See PipeNCtx.
+func PipeCtx[T, V any](ctx context.Context, in <-chan T, fn func(T) (V, bool)) <-chan V {
+	return PipeNCtx(ctx, in, fn, 1)
+}
+
+// PipeN is like Pipe, but runs multiple workers; results may arrive out of
+// order. The consumer must drain the output until it is closed.
 func PipeN[T, V any](in <-chan T, fn func(T) (V, bool), n int) <-chan V {
+	return PipeNCtx(context.Background(), in, fn, n)
+}
+
+// PipeNCtx is like PipeN, but stops when ctx is canceled: workers stop reading
+// in and stop sending, the output is closed once every worker has exited (a
+// callback already running is waited for), even if nobody is receiving.
+func PipeNCtx[T, V any](ctx context.Context, in <-chan T, fn func(T) (V, bool), n int) <-chan V {
 	if n <= 0 {
 		panic("min 1 running goroutine")
 	}
@@ -282,10 +329,23 @@ func PipeN[T, V any](in <-chan T, fn func(T) (V, bool), n int) <-chan V {
 
 	for range n {
 		wg.Go(func() {
-			for v := range in {
-				res, ok := fn(v)
-				if ok {
-					out <- res
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case v, ok := <-in:
+					if !ok {
+						return
+					}
+					res, ok := fn(v)
+					if !ok {
+						continue
+					}
+					select {
+					case out <- res:
+					case <-ctx.Done():
+						return
+					}
 				}
 			}
 		})
@@ -332,54 +392,98 @@ func SafeClose[T any](ch chan T) (closed bool) {
 	return true
 }
 
-// Semaphore limits concurrent execution using a semaphore
+// Semaphore limits concurrent execution using a semaphore. The consumer must
+// drain the output until it is closed. Use SemaphoreCtx to be able to cancel
+// the stage.
 func Semaphore[T, V any](in <-chan T, fn func(T) V, n int) <-chan V {
+	return SemaphoreCtx(context.Background(), in, fn, n)
+}
+
+// SemaphoreCtx is like Semaphore, but stops when ctx is canceled: it stops
+// reading in and starting callbacks, pending sends are abandoned, and the output
+// is closed after running callbacks return, even if nobody is receiving.
+func SemaphoreCtx[T, V any](ctx context.Context, in <-chan T, fn func(T) V, n int) <-chan V {
 	if n <= 0 {
 		panic("pipeline: invalid n")
 	}
 
 	out := make(chan V)
-	ctx := context.Background()
 	sem := semaphore.NewWeighted(int64(n))
 
 	go func() {
 		defer close(out)
 
 		var wg sync.WaitGroup
-		for v := range in {
-			_ = sem.Acquire(ctx, 1)
-			wg.Go(func() {
-				defer sem.Release(1)
+		defer wg.Wait()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case v, ok := <-in:
+				if !ok {
+					return
+				}
+				if sem.Acquire(ctx, 1) != nil {
+					return
+				}
+				wg.Go(func() {
+					defer sem.Release(1)
 
-				out <- fn(v)
-			})
+					res := fn(v)
+					select {
+					case out <- res:
+					case <-ctx.Done():
+					}
+				})
+			}
 		}
-		wg.Wait()
 	}()
 
 	return out
 }
 
-// Tee splits a channel into two identical channels
+// Tee splits a channel into two identical channels. It has head-of-line
+// blocking: each value is sent to both outputs and the next value is not read
+// until both have received it, so a slow or undrained output stalls the other.
+// Consumers must drain both outputs until they are closed. Use TeeCtx to be
+// able to cancel the stage.
 func Tee[T any](in <-chan T) (<-chan T, <-chan T) {
+	return TeeCtx(context.Background(), in)
+}
+
+// TeeCtx is like Tee, but stops when ctx is canceled: it stops reading in,
+// abandons pending sends, and closes both outputs, even if nobody is receiving.
+func TeeCtx[T any](ctx context.Context, in <-chan T) (<-chan T, <-chan T) {
 	out1, out2 := make(chan T), make(chan T)
 
 	go func() {
 		defer close(out1)
 		defer close(out2)
 
-		for v := range in {
-			// Send to both channels, blocking until both are ready
-			var wg sync.WaitGroup
-			wg.Go(func() {
-				out1 <- v
-			})
-
-			wg.Go(func() {
-				out2 <- v
-			})
-
-			wg.Wait()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case v, ok := <-in:
+				if !ok {
+					return
+				}
+				// Send to both channels, blocking until both are ready.
+				var wg sync.WaitGroup
+				wg.Go(func() {
+					select {
+					case out1 <- v:
+					case <-ctx.Done():
+					}
+				})
+				wg.Go(func() {
+					select {
+					case out2 <- v:
+					case <-ctx.Done():
+					}
+				})
+				wg.Wait()
+			}
 		}
 	}()
 
