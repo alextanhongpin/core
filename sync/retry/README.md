@@ -1,35 +1,100 @@
 # retry
 
-[Go reference](https://pkg.go.dev/github.com/alextanhongpin/core/sync/retry)
+Retry synchronous operations with configurable backoff, cancellation, and a
+shared adaptive retry budget, plus an `http.RoundTripper` adapter.
 
-Retry synchronous operations with configurable backoff, cancellation, and a shared adaptive retry budget. The module's Go version is specified in `go.mod`.
+**Use it for:** transient network failures, reads from an occasionally
+unavailable service, or writes protected by an application idempotency key.
+Set a deadline for the whole operation and classify validation or authorization
+failures as permanent.
+
+**Don't use it for:** non-idempotent side effects without an idempotency
+guarantee, or for choosing delays only (use [`sync/backoff`](../backoff)). For
+cross-process mutual exclusion see [`dsync/lock`](../../dsync/lock).
+
+## Installation
 
 ```sh
 go get github.com/alextanhongpin/core/sync/retry
 ```
 
-## Typical use
+Check the module's `go.mod` for the required Go version.
 
-Use for transient network failures, reads from an occasionally unavailable service,
-or writes protected by an application idempotency key. Set a deadline for the whole
-operation and classify validation or authorization failures as permanent.
-
-Use `go doc github.com/alextanhongpin/core/sync/retry` for local API documentation.
-
-## Basic usage
+## Quick start
 
 ```go
-r, err := retry.New(retry.Config{
-    MaxRetries: 3, // Four calls at most: one initial call and three retries.
-    Backoff: backoff.NewExponential(100*time.Millisecond, 2*time.Second),
-})
-if err != nil {
-    return err
+package main
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"time"
+
+	"github.com/alextanhongpin/core/sync/backoff"
+	"github.com/alextanhongpin/core/sync/retry"
+)
+
+func main() {
+	r, err := retry.New(retry.Config{
+		MaxRetries: 3, // four calls at most: one initial call and three retries
+		Backoff:    backoff.NewExponential(10*time.Millisecond, 100*time.Millisecond),
+	})
+	if err != nil {
+		panic(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	calls := 0
+	err = r.Do(ctx, func(context.Context) error {
+		calls++
+		if calls < 3 {
+			return errors.New("temporary")
+		}
+		return nil
+	})
+	fmt.Println(calls, err)
 }
-ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-defer cancel()
-return r.Do(ctx, performOperation)
 ```
+
+It prints `3 <nil>`.
+
+## API
+
+```go
+func New(cfg Config) (*Retry, error)
+func DefaultConfig() Config // ten retries, full-jitter exponential backoff, adaptive throttler
+func (*Retry) Do(ctx context.Context, fn func(context.Context) error) error
+func Func[K, V any](fn func(context.Context, K) (V, error), r Runner) func(context.Context, K) (V, error)
+type Runner interface{ Do(context.Context, func(context.Context) error) error }
+
+type Config struct {
+	MaxRetries int                         // excludes the initial call
+	Backoff    Backoff                     // alias of backoff.Backoff
+	Retryable  func(error) (error, bool)   // classify; nil retries all but cancellation
+	Throttler  Limiter
+}
+func NonRetryableErrors(targets ...error) func(error) (error, bool)
+
+var ErrLimitExceeded, ErrThrottled, ErrCanceled error
+
+func NewThrottler(ThrottlerConfig) (*Throttler, error)
+func NewNoopThrottler() *NoopThrottler
+
+func NewRoundTripper(transport http.RoundTripper, runner Runner, options ...RoundTripperOption) *RoundTripper
+func WithStatusCodeHandler(fn func(int) error) RoundTripperOption
+func WithRetryableRequest(fn func(*http.Request) bool) RoundTripperOption
+func WithRetryAfter(maxWait time.Duration) RoundTripperOption // opt in to Retry-After
+func DefaultStatusCodeHandler(code int) error
+```
+
+The old strategy names (`NewExponentialBackoff` and friends) remain as
+deprecated forwards to `sync/backoff`.
+
+## Behavior and guarantees
+
+Use `go doc github.com/alextanhongpin/core/sync/retry` for full API documentation.
 
 `New(Config{})` performs one call. Zero `MaxRetries` disables retries; negative values return a construction error. Omitted dependencies receive defaults. `DefaultConfig()` enables ten retries, with full-jitter exponential backoff and an adaptive throttler; throttling or cancellation may stop it earlier.
 
@@ -125,10 +190,34 @@ transport := retry.NewRoundTripper(http.DefaultTransport, r,
 
 The request policy replaces the default method policy. Generate an idempotency key once per logical operation, before retries.
 
-Eligible requests retry transport errors and responses with status 408, 425, 500, 502, 503, or 504. `WithStatusCodeHandler(func(int) error)` replaces status classification. `Retry-After` is preserved in the final response but does not schedule backoff automatically.
+Eligible requests retry transport errors and responses with status 408, 425, 500, 502, 503, or 504. `WithStatusCodeHandler(func(int) error)` replaces status classification. **429 is not retryable by default**; opt in with a handler that returns an error for it. By default `Retry-After` is preserved in the final response but does not schedule backoff.
 
-Discarded response bodies are closed before another attempt. When status retries stop, the adapter returns the final response with **nil error**, preserving its status, headers, and readable body. The caller must inspect the status and close that body. Cancellation, body-factory failures, and transport failures return errors. The original request body is closed even when the runner rejects before invocation.
+Opt in to honoring it with `WithRetryAfter(maxWait)`:
+
+```go
+transport := retry.NewRoundTripper(http.DefaultTransport, r,
+    retry.WithStatusCodeHandler(func(code int) error {
+        if code == http.StatusTooManyRequests || code == http.StatusServiceUnavailable {
+            return fmt.Errorf("status code: %d", code)
+        }
+        return nil
+    }),
+    retry.WithRetryAfter(30*time.Second), // never wait longer than this for one header
+)
+```
+
+For a response about to be retried, the header may be delta-seconds or an HTTP-date. The wait before the next attempt is `max(backoff, Retry-After)`, with the header value capped at `maxWait`. Missing, malformed, negative, or past values add no wait; a nonpositive `maxWait` leaves the option off. The extra wait happens inside the attempt after the runner's backoff, counts against the request context, and returns a cancellation error if the context ends. Exhaustion or throttling returns the last response immediately, without waiting.
+
+When a retryable response is discarded for another attempt, up to 4 KiB of its body is drained and it is then closed (so the connection can be reused). That body stays open until the next attempt starts. When status retries stop, the adapter returns the final response with **nil error**, preserving its status, headers, and readable body. This also holds when the throttler stops retries: the last response is returned with a nil error, like normal exhaustion. The caller must inspect the status and close that body. Cancellation, body-factory failures, and transport failures return errors. The original request body is closed even when the runner rejects before invocation.
 
 A nil transport uses `http.DefaultTransport`; a nil runner creates a retrier with `DefaultConfig()`. Options apply at construction. Supplied transports, runners, and policy callbacks must support concurrent calls.
 
 Runnable examples and behavioral tests live alongside the implementation.
+
+## Testing
+
+```sh
+go vet ./...
+go test -race -count=1 ./...
+go test -count=1 ./...
+```
