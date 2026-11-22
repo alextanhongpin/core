@@ -1,7 +1,9 @@
 package circuitbreaker
 
 import (
+	"context"
 	"errors"
+	"io"
 	"net/http"
 )
 
@@ -24,6 +26,10 @@ func (t *Transporter) RoundTrip(r *http.Request) (resp *http.Response, err error
 	err = t.cb.Do(func() error {
 		resp, err = t.rt.RoundTrip(r)
 		if err != nil {
+			// The caller giving up says nothing about the dependency.
+			if errors.Is(err, context.Canceled) && errors.Is(r.Context().Err(), context.Canceled) {
+				return neutralError{err}
+			}
 			return err
 		}
 		if resp != nil && resp.StatusCode >= http.StatusInternalServerError {
@@ -37,6 +43,8 @@ func (t *Transporter) RoundTrip(r *http.Request) (resp *http.Response, err error
 			r.Body.Close()
 		}
 		if resp != nil && resp.Body != nil {
+			// Drain a bounded amount so the connection can be reused.
+			io.CopyN(io.Discard, resp.Body, 4<<10)
 			resp.Body.Close()
 		}
 		return nil, err
