@@ -17,12 +17,23 @@ var ErrLocked = errors.New("flock: locked")
 type FS struct{}
 
 // ReadOrWrite returns an existing file or generates it under a nonblocking
-// exclusive lock. Contention returns ErrLocked. Readers see only completed
-// files, published through a rename in the same directory. Failed generation
-// leaves the destination absent and can be retried. The callback runs under
-// the file lock and must not reenter this method for the same path.
-// Publication is atomic but does not promise durability across power loss.
+// exclusive lock. A published file is read without taking the lock, which is
+// safe because files are published by an atomic rename in the same directory,
+// so readers see only complete files. Only an absent file takes the lock;
+// contention then returns ErrLocked. The file is read again under the lock in
+// case another writer published it meanwhile. Failed generation leaves the
+// destination absent and can be retried. The callback runs under the file lock
+// and must not reenter this method for the same path. Publication is atomic
+// but does not promise durability across power loss.
+//
+// This package builds only on Unix-like systems (darwin, linux, freebsd,
+// openbsd, netbsd, dragonfly) because it uses flock(2).
 func (f *FS) ReadOrWrite(name string, fn func() ([]byte, error)) (result []byte, err error) {
+	if b, err := os.ReadFile(name); err == nil {
+		return b, nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return nil, err
+	}
 	lock, err := os.OpenFile(name+".lock", os.O_CREATE|os.O_RDWR, 0o644)
 	if err != nil {
 		return nil, err
