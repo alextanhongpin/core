@@ -19,6 +19,7 @@
 //
 // In-process concurrency and coordination:
 //
+//   - https://pkg.go.dev/github.com/alextanhongpin/core/sync/backoff
 //   - https://pkg.go.dev/github.com/alextanhongpin/core/sync/broadcast
 //   - https://pkg.go.dev/github.com/alextanhongpin/core/sync/cache
 //   - https://pkg.go.dev/github.com/alextanhongpin/core/sync/circuitbreaker
@@ -28,12 +29,10 @@
 //   - https://pkg.go.dev/github.com/alextanhongpin/core/sync/lock
 //   - https://pkg.go.dev/github.com/alextanhongpin/core/sync/pipeline
 //   - https://pkg.go.dev/github.com/alextanhongpin/core/sync/promise
-//   - https://pkg.go.dev/github.com/alextanhongpin/core/sync/rate
 //   - https://pkg.go.dev/github.com/alextanhongpin/core/sync/ratelimit
 //   - https://pkg.go.dev/github.com/alextanhongpin/core/sync/retry
 //   - https://pkg.go.dev/github.com/alextanhongpin/core/sync/snapshot
 //   - https://pkg.go.dev/github.com/alextanhongpin/core/sync/throttle
-//   - https://pkg.go.dev/github.com/alextanhongpin/core/sync/timer
 //
 // Redis-backed coordination and probabilistic structures:
 //
