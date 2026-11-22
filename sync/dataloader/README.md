@@ -1,47 +1,106 @@
-# Dataloader
+# dataloader
 
-Batch concurrent key lookups and share in-flight results.
+Batch concurrent key lookups into fewer calls and share in-flight results
+between callers that ask for the same key.
 
-## Installation and documentation
+**Use it for:** GraphQL resolvers or request fan-out that would otherwise run one
+database query per key.
+
+**Don't use it for:** durable caching (results are weakly held), or
+parallel batch execution (batches run serially). For general promise
+composition see [`sync/promise`](../promise).
+
+## Installation
 
 ```sh
 go get github.com/alextanhongpin/core/sync/dataloader
-go doc github.com/alextanhongpin/core/sync/dataloader
 ```
 
-[Go API reference](https://pkg.go.dev/github.com/alextanhongpin/core/sync/dataloader) · [Module requirements](go.mod)
-
-## Typical use
-
-Use for GraphQL resolvers or request fan-out that would otherwise perform one database query per key.
-
-The usage example below shows the main operation. Application types and
-callbacks such as `User` and `fetchUsers` belong to your application; import this
-package and the standard packages referenced in the snippet.
-
-## Behavior and configuration
-
-`New(ctx, batchFn, Config{})` returns `(*DataLoader, stop, error)`. It copies, defaults, and validates configuration before starting work. Zero batch size and interval select 25 keys and 16 milliseconds; zero buffer size keeps admission unbuffered. Negative settings and nil batch functions return errors. MustNew returns the loader and stop function, panicking on invalid inputs for startup wiring.
+## Quick start
 
 ```go
-dl, stop, err := dataloader.New(ctx, fetchUsers, dataloader.Config{BatchSize: 50})
-if err != nil { return err }
-defer stop()
-user, err := dl.LoadContext(ctx, userID)
+package main
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/alextanhongpin/core/sync/dataloader"
+)
+
+func main() {
+	ctx := context.Background()
+	fetch := func(ctx context.Context, ids []int) (map[int]string, error) {
+		out := make(map[int]string, len(ids))
+		for _, id := range ids {
+			out[id] = fmt.Sprintf("user-%d", id)
+		}
+		return out, nil
+	}
+	dl, stop, err := dataloader.New(ctx, fetch, dataloader.Config{})
+	if err != nil {
+		panic(err)
+	}
+	defer stop()
+
+	name, err := dl.LoadContext(ctx, 7)
+	fmt.Println(name, err) // user-7 <nil>
+}
 ```
 
-The batch function receives the loader lifetime context and executes serially. It returns a map of results; missing keys return ErrNotFound. Concurrent callers with the same key share an in-flight future. Values are weakly cached and may be loaded again after garbage collection; this is not a permanent result cache. Returned mutable values remain shared.
+## API
 
-Load blocks through admission and completion using the loader context. LoadMany returns results in input order with per-key errors; its outer error can report lifetime cancellation. LoadContext cancels an individual wait without canceling shared loading. Cancellation racing with completion may return either outcome. Func requires LoadContext and passes the caller context to loading and transformation.
+```go
+func New[K comparable, V any](ctx context.Context, fn func(ctx context.Context, keys []K) (map[K]V, error), cfg Config) (*DataLoader[K, V], func(), error)
+func MustNew[K comparable, V any](ctx context.Context, fn func(context.Context, []K) (map[K]V, error), cfg Config) (*DataLoader[K, V], func()) // panics on invalid cfg
 
-Admission for new futures created by LoadContext is loader-owned. BufferSize does not bound the number of pending keys or callers. Callers should bound concurrency when key cardinality is unbounded.
+func (*DataLoader[K, V]) Load(key K) (V, error)                            // waits using the loader context
+func (*DataLoader[K, V]) LoadContext(ctx context.Context, key K) (V, error) // ctx cancels only this wait
+func (*DataLoader[K, V]) LoadMany(keys ...K) ([]*Result[K, V], error)      // results in input order
 
-Stop is concurrent-safe and idempotent. It cancels pending loads with ErrCanceled and waits for the worker and admission goroutines. The batch function must cooperate with cancellation for prompt shutdown and must not invoke stop itself. Loads after stop return the lifetime cancellation cause.
+func Func[K comparable, V, T any](fn func(context.Context, V) (T, error), dl interface {
+	LoadContext(context.Context, K) (V, error)
+}) func(context.Context, K) (T, error) // load a V by key, then transform it
 
-## Expected errors
+type Config struct{ BatchInterval time.Duration; BatchSize, BufferSize int }
+func DefaultConfig() Config // 16ms, 25 keys, unbuffered
+func (Config) WithDefaults() Config
+func (Config) Validate() error
 
-`ErrNotFound` means the batch result omitted a requested key. `ErrCanceled` means the loader stopped. Batch errors and caller cancellation also propagate. Use `errors.Is` when checking these errors.
+var ErrNotFound, ErrCanceled error
+```
 
-## Pitfalls
+## Behavior and guarantees
 
-Bound caller concurrency for unbounded key sets. Weak caching can reload values after garbage collection; use a separate cache for durable reuse.
+- **Batching.** Keys are collected until `BatchSize` or `BatchInterval`, then the
+  batch function is called once. Zero `BatchSize`/`BatchInterval` select 25 and
+  16ms; negative values and a nil batch function make `New` return an error.
+- **Batches run serially.** One worker calls the batch function; a slow batch
+  delays every other key queued behind it, including unrelated keys. Keep the
+  batch function fast or bounded by its context.
+- **Missing keys.** Keys absent from the returned map fail with `ErrNotFound`.
+  A batch error rejects every key in that batch.
+- **Sharing.** Concurrent callers for one key share a future. Results are held
+  weakly ([`sync/cache`](../cache)) and may be loaded again after GC; this is
+  not a result cache. Returned mutable values are shared.
+- **Cancellation.** `LoadContext` cancellation stops only that caller's wait;
+  the shared load continues for others. If it races with completion, either
+  outcome may be returned. `Load` and `LoadMany` wait on the loader lifetime
+  context.
+- **Admission.** `LoadContext` admits new keys through loader-owned goroutines,
+  so `BufferSize` does not bound pending keys; bound caller concurrency when key
+  cardinality is unbounded.
+- **Stop.** The returned stop function is idempotent and concurrent-safe. It
+  cancels pending loads with `ErrCanceled` and waits for the worker. The batch
+  function must honor its context and must not call stop. Loads after stop return
+  the cancellation cause.
+
+Use `errors.Is` to check `ErrNotFound`, `ErrCanceled` and context errors.
+
+## Testing
+
+The test suite depends on the private `evaltest` module.
+
+```sh
+go vet ./... && go test -race -count=1 ./...
+```

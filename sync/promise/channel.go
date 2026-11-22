@@ -72,8 +72,11 @@ func (c *Channel[T]) Close(cause error) {
 	c.cancel(cause)
 }
 
-// Done reports whether a value has been sent (i.e., the channel is settled
-// with a value). It does not indicate cancellation without a value.
+// Done reports whether a value has been published (i.e., the channel is settled
+// with a value). It does not indicate cancellation without a value. Because
+// publication and cancellation are separate steps, Recv may still report the
+// parent's cancellation cause in a narrow race where parent cancel lands
+// before the sent value is observed, even though Done is true.
 func (c *Channel[T]) Done() bool {
 	return c.p.Load() != c.zero
 }
