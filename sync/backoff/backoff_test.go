@@ -48,6 +48,9 @@ func TestExponential(t *testing.T) {
 		{time.Second, 3 * time.Second, 1, 2 * time.Second}, {time.Second, 3 * time.Second, 2, 3 * time.Second},
 		{time.Second, 3 * time.Second, 62, 3 * time.Second}, {time.Second, 3 * time.Second, 100, 3 * time.Second},
 		{time.Duration(math.MaxInt64), time.Minute, 1, time.Minute}, {1, 1, 1, 1},
+		// Float delay of exactly 2^63 and beyond must saturate at Cap, not convert.
+		{1 << 62, time.Duration(math.MaxInt64), 1, time.Duration(math.MaxInt64)},
+		{time.Duration(math.MaxInt64), time.Duration(math.MaxInt64), 62, time.Duration(math.MaxInt64)},
 	} {
 		for range 100 {
 			got := backoff.NewExponential(tc.base, tc.cap).At(tc.index)

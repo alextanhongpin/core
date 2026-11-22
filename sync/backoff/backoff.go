@@ -66,10 +66,12 @@ func (b *Exponential) At(attempts int) time.Duration {
 		attempts = 62
 	}
 
-	multiplier := math.Pow(2, float64(attempts))
-	delay := time.Duration(float64(b.Base) * multiplier)
-	if delay > b.Cap || delay <= 0 {
-		delay = b.Cap
+	// Compare in float space: converting a float outside the int64 range to
+	// Duration is implementation-defined.
+	f := float64(b.Base) * math.Pow(2, float64(attempts))
+	delay := b.Cap
+	if f < float64(b.Cap) {
+		delay = time.Duration(f)
 	}
 	if delay <= 0 {
 		return 0
