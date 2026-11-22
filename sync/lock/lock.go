@@ -19,8 +19,13 @@ type unlocker interface {
 // A raw mutex cannot be weakly referenced.
 // The standard pattern is to wrap the lock inside an allocated object.
 // This object must be allocated on the heap to be tracked by the GC.
+//
+// The padding keeps entry out of the runtime's tiny allocator (objects under
+// 16 bytes without pointers). Tiny blocks are shared, so any live neighbour
+// would otherwise keep an idle entry reachable and its map slot would leak.
 type entry struct {
 	mu sync.Mutex
+	_  [16]byte
 }
 
 // KeyLock coordinates callers by key. Its zero value is ready to use.
