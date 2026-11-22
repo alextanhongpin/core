@@ -32,6 +32,10 @@ func (t *Transporter) RoundTrip(r *http.Request) (resp *http.Response, err error
 		return nil
 	})
 	if err != nil {
+		if errors.Is(err, ErrOpened) && r.Body != nil {
+			// RoundTrip must close the request body even when it never sends.
+			r.Body.Close()
+		}
 		if resp != nil && resp.Body != nil {
 			resp.Body.Close()
 		}
