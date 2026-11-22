@@ -21,7 +21,8 @@ type FixedWindow struct {
 	// Options.
 	limit   int64
 	period  int64
-	nowFunc func() time.Time
+	nowFunc func() time.Time // injectable clock; elapsed time is measured against base
+	base    time.Time
 }
 
 // NewFixedWindow defaults and validates a value copy. Burst is unused by this algorithm.
@@ -34,6 +35,7 @@ func NewFixedWindow(cfg Config) (*FixedWindow, error) {
 	return &FixedWindow{
 		limit:   int64(cfg.Limit),
 		nowFunc: time.Now,
+		base:    time.Now(), // carries a monotonic reading
 		period:  cfg.Period.Nanoseconds(),
 		state:   make(map[string]fixedWindowState),
 	}, nil
@@ -72,11 +74,11 @@ func (r *FixedWindow) LimitN(key string, n int) *Result {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	curr := r.state[key]
-	now := r.nowFunc().UnixNano()
+	curr, ok := r.state[key]
+	now := r.elapsed()
 	quantity := int64(n)
 
-	if curr.last+r.period <= now {
+	if !ok || curr.last+r.period <= now {
 		curr.last = now
 		curr.count = 0
 	}
@@ -86,7 +88,10 @@ func (r *FixedWindow) LimitN(key string, n int) *Result {
 		curr.count += quantity
 	}
 
-	r.state[key] = curr
+	if ok || quantity > 0 {
+		// Zero-quantity inspection must not create state for unseen keys.
+		r.state[key] = curr
+	}
 	remaining := max(r.limit-curr.count, 0)
 
 	resetAfter := max(time.Duration(curr.last+r.period-now)*time.Nanosecond, 0)
@@ -104,9 +109,14 @@ func (r *FixedWindow) LimitN(key string, n int) *Result {
 	return res
 }
 
+// elapsed returns nanoseconds since construction, using the monotonic clock.
+func (r *FixedWindow) elapsed() int64 {
+	return int64(r.nowFunc().Sub(r.base))
+}
+
 func (r *FixedWindow) Clear() {
 	r.mu.Lock()
-	now := r.nowFunc().UnixNano()
+	now := r.elapsed()
 	for k, v := range r.state {
 		if v.last+r.period <= now {
 			delete(r.state, k)
