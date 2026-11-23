@@ -6,8 +6,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/rand/v2"
 	"os"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -23,9 +25,10 @@ const indexFile = ".index"
 // memoized results with [GoFunc]) that should survive restarts.
 //
 // FS is safe for concurrent use within one process but does no
-// cross-process locking: only one FS may use a directory at a time. A value
-// file and the index are written separately, so a failed write can leave a
-// value without its expiry.
+// cross-process locking: only one FS may use a directory at a time. Each file
+// is replaced atomically (temp file, fsync, rename), but a value file and the
+// index are written separately, so a crash between them can leave a value
+// without its expiry.
 type FS struct {
 	group  singleflight.Group
 	root   *os.Root
@@ -325,7 +328,9 @@ func (f *FS) Size(ctx context.Context) (int, error) {
 	}
 	count := 0
 	for _, entry := range entries {
-		if !entry.IsDir() && entry.Name() != indexFile {
+		// Value files are named by a decimal hash; skip the index and temp
+		// files, which start with a dot.
+		if !entry.IsDir() && !strings.HasPrefix(entry.Name(), ".") {
 			count++
 		}
 	}
@@ -384,7 +389,7 @@ func (f *FS) save(key string, value []byte, ttl time.Duration) error {
 	} else {
 		delete(f.data, key)
 	}
-	return errors.Join(f.root.WriteFile(key, value, 0o644), f.saveIndex())
+	return errors.Join(f.writeFile(key, value), f.saveIndex())
 }
 
 func (f *FS) saveIndex() error {
@@ -392,5 +397,25 @@ func (f *FS) saveIndex() error {
 	if err != nil {
 		return err
 	}
-	return f.root.WriteFile(indexFile, b, 0o644)
+	return f.writeFile(indexFile, b)
+}
+
+// writeFile replaces name atomically: it writes a temp file, syncs it and
+// renames it over name, so a crash never leaves a truncated value or index.
+func (f *FS) writeFile(name string, b []byte) (err error) {
+	tmp := fmt.Sprintf(".tmp-%x", rand.Uint64())
+	file, err := f.root.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err != nil {
+			_ = f.root.Remove(tmp)
+		}
+	}()
+	_, writeErr := file.Write(b)
+	if err := errors.Join(writeErr, file.Sync(), file.Close()); err != nil {
+		return err
+	}
+	return f.root.Rename(tmp, name)
 }

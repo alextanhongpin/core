@@ -168,8 +168,9 @@ processes.
   `flock` on `path + ".lock"` while open, so a second `NewFile` on the same path
   (any process) **blocks until the first is closed**.
 - **FS** stores each value in a file named by a 64-bit hash of the key, and
-  expiry times in `dir/.index`. It does no cross-process locking: one `FS`
-  per directory.
+  expiry times in `dir/.index`. Each file is replaced atomically (temp file,
+  fsync, rename), so a crash never leaves a truncated value. It does no
+  cross-process locking: one `FS` per directory.
 - Expired entries in File/FS are removed lazily when they are read.
 
 ## Errors

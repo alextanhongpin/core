@@ -211,6 +211,9 @@ func (r *Redis) Expire(ctx context.Context, key string, ttl time.Duration) error
 
 // Delete removes keys and returns how many existed.
 func (r *Redis) Delete(ctx context.Context, keys ...string) (int64, error) {
+	if len(keys) == 0 {
+		return 0, nil // DEL without keys is a Redis syntax error.
+	}
 	n, err := r.client.Del(ctx, keys...).Result()
 	if errors.Is(err, redis.Nil) {
 		return 0, ErrNotExist

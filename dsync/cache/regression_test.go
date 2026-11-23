@@ -3,7 +3,10 @@ package cache_test
 import (
 	"context"
 	"errors"
+	"io"
+	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -73,4 +76,47 @@ func TestNewFSCreatesDirectory(t *testing.T) {
 	require.NoError(t, fs.Store(t.Context(), "k", []byte("v"), 0))
 	_, err = fs.Load(t.Context(), "missing")
 	require.True(t, errors.Is(err, cache.ErrNotExist))
+}
+
+// FS must replace value files atomically: a reader holding the old file sees
+// the old bytes, never a truncated or partially rewritten file.
+func TestFSReplacesFilesAtomically(t *testing.T) {
+	dir := t.TempDir()
+	fs, err := cache.NewFS(dir)
+	require.NoError(t, err)
+	defer fs.Close()
+	ctx := t.Context()
+	require.NoError(t, fs.Store(ctx, "k", []byte("old"), 0))
+
+	entries, err := os.ReadDir(dir)
+	require.NoError(t, err)
+	var name string
+	for _, e := range entries {
+		if !strings.HasPrefix(e.Name(), ".") {
+			name = e.Name()
+		}
+	}
+	require.NotEmpty(t, name)
+	old, err := os.Open(filepath.Join(dir, name))
+	require.NoError(t, err)
+	defer old.Close()
+
+	require.NoError(t, fs.Store(ctx, "k", []byte("new and longer"), time.Hour))
+	b, err := io.ReadAll(old)
+	require.NoError(t, err)
+	require.Equal(t, "old", string(b))
+
+	v, err := fs.Load(ctx, "k")
+	require.NoError(t, err)
+	require.Equal(t, "new and longer", string(v))
+	n, err := fs.Size(ctx)
+	require.NoError(t, err)
+	require.Equal(t, 1, n)
+}
+
+// DEL with no keys is a Redis error; Delete() must report zero like File and FS.
+func TestRedisDeleteNoKeys(t *testing.T) {
+	n, err := cache.MustNewRedis(newClient(t)).Delete(t.Context())
+	require.NoError(t, err)
+	require.Zero(t, n)
 }
