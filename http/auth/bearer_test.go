@@ -1,17 +1,13 @@
 package auth_test
 
 import (
-	"context"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"testing"
 	"time"
 
 	"github.com/alextanhongpin/core/http/auth"
-	"github.com/alextanhongpin/snapshot"
 )
 
 func TestBearerHandler(t *testing.T) {
@@ -31,40 +27,54 @@ func TestBearerHandler(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ctx := context.Background()
-	ctx = auth.LoggerContext.WithValue(ctx, slog.New(slog.NewTextHandler(os.Stdout, nil)))
-
 	t.Run("success", func(t *testing.T) {
-		w := httptest.NewRecorder()
-		r := httptest.NewRequest(http.MethodGet, "/", nil)
-		r.Header.Set("Authorization", "Bearer "+token)
-		r = r.WithContext(ctx)
-
-		snapshot.HTTP(t, h, snapshot.Ignore("Authorization")).ServeHTTP(w, r)
+		wantOK(t, serve(h, "Bearer "+token))
 	})
 
 	t.Run("expired", func(t *testing.T) {
-		w := httptest.NewRecorder()
-		r := httptest.NewRequest(http.MethodGet, "/", nil)
-		r = r.WithContext(ctx)
-		r.Header.Set("Authorization", expiredToken)
-
-		snapshot.HTTP(t, h).ServeHTTP(w, r)
+		wantUnauthorized(t, serve(h, expiredToken), `Bearer error="invalid_token"`)
 	})
 
 	t.Run("no token", func(t *testing.T) {
-		w := httptest.NewRecorder()
-		r := httptest.NewRequest(http.MethodGet, "/", nil)
-		r = r.WithContext(ctx)
-
-		snapshot.HTTP(t, h).ServeHTTP(w, r)
+		wantOK(t, serve(h, ""))
 	})
 
 	t.Run("no token but required", func(t *testing.T) {
-		w := httptest.NewRecorder()
-		r := httptest.NewRequest(http.MethodGet, "/", nil)
-		r = r.WithContext(ctx)
-
-		snapshot.HTTP(t, auth.RequireBearerHandler(h)).ServeHTTP(w, r)
+		wantUnauthorized(t, serve(auth.RequireBearerHandler(h), ""), "Bearer")
 	})
+
+	t.Run("required without OnError", func(t *testing.T) {
+		// Regression: a nil OnError panicked.
+		h := auth.BearerHandlerWithConfig(h, auth.BearerAuthConfig{Secret: secret})
+		wantUnauthorized(t, serve(h, ""), "Bearer")
+		wantUnauthorized(t, serve(h, "Bearer invalid"), `Bearer error="invalid_token"`)
+		wantOK(t, serve(h, "bearer "+token))
+	})
+}
+
+func serve(h http.Handler, authz string) *httptest.ResponseRecorder {
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	if authz != "" {
+		r.Header.Set("Authorization", authz)
+	}
+	h.ServeHTTP(w, r)
+	return w
+}
+
+func wantOK(t *testing.T, w *httptest.ResponseRecorder) {
+	t.Helper()
+	if w.Code != http.StatusOK || w.Body.String() != "hello world" {
+		t.Fatalf("got %d %q, want 200 %q", w.Code, w.Body.String(), "hello world")
+	}
+}
+
+func wantUnauthorized(t *testing.T, w *httptest.ResponseRecorder, challenge string) {
+	t.Helper()
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", w.Code)
+	}
+	if got := w.Header().Get("WWW-Authenticate"); got != challenge {
+		t.Fatalf("WWW-Authenticate = %q, want %q", got, challenge)
+	}
 }

@@ -7,8 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/alextanhongpin/errors/cause"
@@ -44,18 +44,34 @@ func RawJSON(w http.ResponseWriter, data []byte, code int) {
 	}
 }
 
-// JSON sends a JSON response
+// JSON encodes data and sends it with the given status code (200 if 0).
+// data is encoded before anything is written, so an encoding failure produces
+// a clean 500 error response instead of a partial body with the wrong status.
 func JSON(w http.ResponseWriter, data any, code int) {
+	b, err := json.Marshal(data)
+	if err != nil {
+		slog.Default().Error("failed to encode JSON response", "error", err)
+		b = internalServerError
+		code = http.StatusInternalServerError
+	}
+
 	w.Header().Set("Content-Type", ContentTypeJSON)
 	w.WriteHeader(cmp.Or(code, http.StatusOK))
-
-	err := json.MarshalWrite(w, data)
-	if err != nil {
-		ErrorJSON(w, err)
-
-		return
+	if _, err := w.Write(b); err != nil {
+		slog.Default().Error("failed to write response", "error", err)
 	}
 }
+
+var internalServerError = func() []byte {
+	b, err := json.Marshal(Body[any]{Error: &Error{
+		Code:    "INTERNAL_SERVER_ERROR",
+		Message: "An unexpected error occurred. Please try again later.",
+	}})
+	if err != nil {
+		panic(err)
+	}
+	return b
+}()
 
 // Text sends a plain text response
 func Text(w http.ResponseWriter, text string, code int) {
@@ -77,7 +93,10 @@ func HTML(w http.ResponseWriter, html string, code int) {
 	}
 }
 
-// ErrorJSON sends a JSON error response with proper error handling
+// ErrorJSON sends err as a JSON error body. Validation errors (anything with a
+// Map() map[string][]string or Map() map[string]any method) give 400 with the
+// field errors, *cause.Error gives its mapped status, code and message, and
+// anything else gives a generic 500 that does not leak err.
 func ErrorJSON(w http.ResponseWriter, err error) {
 	var (
 		c  *cause.Error
@@ -85,14 +104,21 @@ func ErrorJSON(w http.ResponseWriter, err error) {
 		ve interface {
 			Map() map[string][]string
 		}
+		va interface {
+			Map() map[string]any
+		}
 		code = http.StatusInternalServerError
 	)
 
 	switch {
-	case errors.As(err, &ve):
+	case errors.As(err, &ve), errors.As(err, &va):
 		m := make(map[string]any)
-		for k, v := range ve.Map() {
-			m[k] = v
+		if ve != nil {
+			for k, v := range ve.Map() {
+				m[k] = v
+			}
+		} else {
+			maps.Copy(m, va.Map())
 		}
 
 		e = &Error{
@@ -138,80 +164,4 @@ func SetSecurityHeaders(w http.ResponseWriter) {
 	w.Header().Set("X-Frame-Options", "DENY")
 	w.Header().Set("X-XSS-Protection", "1; mode=block")
 	w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
-}
-
-// CORSOptions defines configuration options for CORS middleware
-type CORSOptions struct {
-	// AllowedOrigins is a list of allowed origins. Use ["*"] to allow any origin
-	AllowedOrigins []string
-	// AllowedMethods is a list of allowed HTTP methods
-	AllowedMethods []string
-	// AllowedHeaders is a list of allowed HTTP headers
-	AllowedHeaders []string
-	// ExposedHeaders is a list of headers that are exposed to the client
-	ExposedHeaders []string
-	// AllowCredentials indicates whether the request can include user credentials
-	AllowCredentials bool
-	// MaxAge indicates how long the results of a preflight request can be cached
-	MaxAge int
-}
-
-// CORS sets CORS headers for cross-origin requests
-func CORS(w http.ResponseWriter, allowedOrigins []string, allowedMethods []string, allowedHeaders []string) {
-	options := CORSOptions{
-		AllowedOrigins: allowedOrigins,
-		AllowedMethods: allowedMethods,
-		AllowedHeaders: allowedHeaders,
-	}
-	ApplyCORS(w, options)
-}
-
-// ApplyCORS applies CORS headers based on the provided options
-func ApplyCORS(w http.ResponseWriter, options CORSOptions) {
-	if len(options.AllowedOrigins) > 0 {
-		if len(options.AllowedOrigins) == 1 && options.AllowedOrigins[0] == "*" {
-			w.Header().Set("Access-Control-Allow-Origin", "*")
-		} else if len(options.AllowedOrigins) > 0 {
-			// In production, you'd typically check the Origin header against the allowed origins
-			// and set the specific matching origin, but for simplicity we use the first one here
-			w.Header().Set("Access-Control-Allow-Origin", options.AllowedOrigins[0])
-		}
-	}
-
-	if len(options.AllowedMethods) > 0 {
-		w.Header().Set("Access-Control-Allow-Methods", strings.Join(options.AllowedMethods, ", "))
-	}
-
-	if len(options.AllowedHeaders) > 0 {
-		w.Header().Set("Access-Control-Allow-Headers", strings.Join(options.AllowedHeaders, ", "))
-	}
-
-	if len(options.ExposedHeaders) > 0 {
-		w.Header().Set("Access-Control-Expose-Headers", strings.Join(options.ExposedHeaders, ", "))
-	}
-
-	if options.AllowCredentials {
-		w.Header().Set("Access-Control-Allow-Credentials", "true")
-	}
-
-	if options.MaxAge > 0 {
-		w.Header().Set("Access-Control-Max-Age", fmt.Sprintf("%d", options.MaxAge))
-	}
-}
-
-// CORSHandler creates a middleware handler that applies CORS headers
-func CORSHandler(h http.Handler, options CORSOptions) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Apply CORS headers to all responses
-		ApplyCORS(w, options)
-
-		// Handle preflight requests
-		if r.Method == http.MethodOptions {
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
-
-		// Continue with the request
-		h.ServeHTTP(w, r)
-	})
 }

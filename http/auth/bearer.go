@@ -3,10 +3,14 @@
 package auth
 
 import (
-	"fmt"
+	"errors"
 	"log/slog"
 	"net/http"
 )
+
+// ErrMissingToken is passed to the error handler when a request that must be
+// authenticated carries no bearer token.
+var ErrMissingToken = errors.New("auth: missing bearer token")
 
 // BearerAuthConfig holds configuration for bearer token authentication middleware.
 // This configuration allows for flexible authentication behavior including optional
@@ -23,16 +27,20 @@ type BearerAuthConfig struct {
 
 	// OnError is called when authentication fails or tokens are invalid.
 	// This allows for custom error responses and logging behavior.
-	// If nil, DefaultBearerErrorHandler will be used.
+	// If nil, DefaultBearerErrorHandler is used.
 	OnError func(w http.ResponseWriter, r *http.Request, err error)
 }
 
-// DefaultBearerErrorHandler provides a standard RFC 6750 compliant error response
-// for bearer token authentication failures. It sets the appropriate WWW-Authenticate
-// header and logs the error if a logger is available in the request context.
+// DefaultBearerErrorHandler responds with 401 Unauthorized and an RFC 6750
+// challenge: a bare "Bearer" when no token was sent (ErrMissingToken), and
+// `Bearer error="invalid_token"` otherwise. It logs the error if a logger is
+// available in the request context.
 func DefaultBearerErrorHandler(w http.ResponseWriter, r *http.Request, err error) {
-	// Set RFC 6750 compliant WWW-Authenticate header
-	w.Header().Set("WWW-Authenticate", "Bearer error=\"invalid_token\"")
+	if errors.Is(err, ErrMissingToken) {
+		w.Header().Set("WWW-Authenticate", Bearer)
+	} else {
+		w.Header().Set("WWW-Authenticate", `Bearer error="invalid_token"`)
+	}
 	w.WriteHeader(http.StatusUnauthorized)
 
 	// Log the error if a logger is available in the context
@@ -78,29 +86,29 @@ func BearerHandler(h http.Handler, secret []byte) http.Handler {
 //	}
 //	handler := auth.BearerHandlerWithConfig(myHandler, config)
 func BearerHandlerWithConfig(h http.Handler, config BearerAuthConfig) http.Handler {
-	// Create JWT handler with the provided secret
 	jwt := NewJWT(config.Secret)
+	onError := config.OnError
+	if onError == nil {
+		onError = DefaultBearerErrorHandler
+	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Extract bearer token from Authorization header
 		token, ok := BearerAuth(r)
 
-		// If no token and authentication is optional, proceed without authentication
-		if !ok && config.Optional {
-			h.ServeHTTP(w, r)
-			return
-		}
-
-		// If no token but authentication is required, return error
-		if !ok && !config.Optional {
-			config.OnError(w, r, fmt.Errorf("no bearer token provided"))
+		if !ok {
+			if config.Optional {
+				h.ServeHTTP(w, r)
+				return
+			}
+			onError(w, r, ErrMissingToken)
 			return
 		}
 
 		// Verify the JWT token and extract claims
 		claims, err := jwt.Verify(token)
 		if err != nil {
-			config.OnError(w, r, err)
+			onError(w, r, err)
 			return
 		}
 
@@ -169,15 +177,9 @@ func RequireBearerHandlerWithOptions(h http.Handler, options RequireBearerOption
 		// Check if claims are present in the request context
 		_, ok := ClaimsContext.Value(r.Context())
 		if !ok {
-			options.ErrorHandler(w, r, fmt.Errorf("missing authentication"))
+			options.ErrorHandler(w, r, ErrMissingToken)
 			return
 		}
-
-		// Claims are present, allow the request to proceed
-		// Additional validation could be performed here, such as:
-		// - Checking specific claims required for this route
-		// - Validating user permissions
-		// - Checking token expiration with custom logic
 
 		h.ServeHTTP(w, r)
 	})

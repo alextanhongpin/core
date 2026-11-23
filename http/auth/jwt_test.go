@@ -19,6 +19,14 @@ func TestBearerAuth(t *testing.T) {
 		"empty":     {"", false, ""},
 		"no bearer": {"xyz", false, ""},
 		"no token":  {"Bearer", false, ""},
+		// Regression: an empty token was reported as present, and the
+		// scheme was matched case-sensitively.
+		"empty token":    {"Bearer ", false, ""},
+		"blank token":    {"Bearer    ", false, ""},
+		"lowercase":      {"bearer xyz", true, "xyz"},
+		"other scheme":   {"Basic xyz", false, ""},
+		"extra spaces":   {"Bearer   xyz  ", true, "xyz"},
+		"prefix overlap": {"Bearerxyz", false, ""},
 	}
 
 	for name, ts := range tests {

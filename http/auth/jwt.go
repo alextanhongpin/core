@@ -42,7 +42,7 @@ type JWTConfig struct {
 	SigningMethod jwt.SigningMethod
 
 	// Issuer is the 'iss' (issuer) claim added to generated tokens.
-	// This identifies the service that issued the token and can be used for validation.
+	// When set, Verify also rejects tokens issued by anyone else.
 	Issuer string
 
 	// ExpiryLeeway is additional time added to token expiration during validation.
@@ -52,7 +52,8 @@ type JWTConfig struct {
 
 // JWT manages the signing and verification of JWT tokens with configurable options.
 // It provides a high-level interface for common JWT operations while allowing
-// fine-grained control over token behavior.
+// fine-grained control over token behavior. The fields mirror JWTConfig; a nil
+// SigningMethod means HS256.
 type JWT struct {
 	Secret        []byte
 	SigningMethod jwt.SigningMethod
@@ -142,151 +143,99 @@ func (j *JWT) Sign(claims Claims, ttl time.Duration) (string, error) {
 	}
 
 	// Create and sign the token
-	token := jwt.NewWithClaims(j.SigningMethod, claims)
+	token := jwt.NewWithClaims(j.signingMethod(), claims)
 	return token.SignedString(j.Secret)
 }
 
-// SignWithCustomClaims creates a signed JWT token with custom claims structure.
-// This allows for non-standard claims beyond the registered claims set.
-// Note: TTL parameter is not used here as custom claims should handle expiration.
+// SignWithCustomClaims signs a token with a custom claims type. Unlike Sign it
+// does not set any registered claims; set ExpiresAt yourself, because Verify
+// and VerifyWithCustomClaims reject tokens without an expiry.
 //
 // Example:
 //
 //	type CustomClaims struct {
 //	    jwt.RegisteredClaims
-//	    Role        string   `json:"role"`
-//	    Permissions []string `json:"permissions"`
+//	    Role string `json:"role"`
 //	}
 //
-//	claims := CustomClaims{
+//	token, err := j.SignWithCustomClaims(CustomClaims{
 //	    RegisteredClaims: jwt.RegisteredClaims{
 //	        Subject:   "user123",
 //	        ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
 //	    },
-//	    Role:        "admin",
-//	    Permissions: []string{"read", "write"},
-//	}
-//	token, err := jwt.SignWithCustomClaims(claims, time.Hour)
-func (j *JWT) SignWithCustomClaims(claims jwt.Claims, ttl time.Duration) (string, error) {
+//	    Role: "admin",
+//	})
+func (j *JWT) SignWithCustomClaims(claims jwt.Claims) (string, error) {
 	if len(j.Secret) == 0 {
 		return "", ErrNoSecret
 	}
 
-	// Create and sign the token with custom claims
-	token := jwt.NewWithClaims(j.SigningMethod, claims)
-	return token.SignedString(j.Secret)
+	return jwt.NewWithClaims(j.signingMethod(), claims).SignedString(j.Secret)
 }
 
 // Verify validates a JWT token string and returns the parsed registered claims.
-// It performs comprehensive validation including:
-//   - Signature verification using the configured secret
-//   - Signing method validation to prevent algorithm confusion attacks
-//   - Expiration time validation with optional leeway for clock skew
-//   - Standard claims validation (nbf, iat, etc.)
+// It checks:
+//   - the signature, using the configured secret and signing method only
+//     (other algorithms, including "none", are rejected);
+//   - that the token has an expiry ("exp") that has not passed, allowing
+//     ExpiryLeeway for clock skew, and that "nbf" and "iat" are not in the
+//     future;
+//   - the issuer ("iss"), when Issuer is configured.
 //
-// Example:
-//
-//	claims, err := jwt.Verify(tokenString)
-//	if err != nil {
-//	    // Handle invalid token
-//	    return
-//	}
-//	userID := claims.Subject
+// Errors wrap ErrTokenExpired or ErrTokenInvalid.
 func (j *JWT) Verify(bearerToken string) (*Claims, error) {
-	if len(j.Secret) == 0 {
-		return nil, ErrNoSecret
-	}
-
-	// Configure parser options for expiry leeway if specified
-	parserOptions := []jwt.ParserOption{}
-	if j.ExpiryLeeway > 0 {
-		parserOptions = append(parserOptions, jwt.WithLeeway(j.ExpiryLeeway))
-	}
-
-	// Parse and validate the token
-	token, err := jwt.ParseWithClaims(bearerToken, &Claims{}, func(token *jwt.Token) (any, error) {
-		// Verify signing method matches expected method to prevent algorithm confusion attacks
-		if token.Method.Alg() != j.SigningMethod.Alg() {
-			return nil, fmt.Errorf("%w: unexpected signing method %s", ErrTokenInvalid, token.Header["alg"])
-		}
-
-		return j.Secret, nil
-	}, parserOptions...)
-
-	// Handle common JWT parsing errors with more specific error types
-	if err != nil {
-		if errors.Is(err, jwt.ErrTokenExpired) {
-			return nil, fmt.Errorf("%w: token expired", ErrTokenExpired)
-		}
-		return nil, fmt.Errorf("%w: %v", ErrTokenInvalid, err)
-	}
-
-	// Additional validation - ensure token is marked as valid
-	if !token.Valid {
-		return nil, ErrClaimsInvalid
-	}
-
-	// Extract and type-assert the claims
-	claims, ok := token.Claims.(*Claims)
-	if !ok {
-		return nil, fmt.Errorf("%w: failed to cast claims", ErrTokenInvalid)
+	claims := new(Claims)
+	if err := j.VerifyWithCustomClaims(bearerToken, claims); err != nil {
+		return nil, err
 	}
 
 	return claims, nil
 }
 
-// VerifyWithCustomClaims validates a JWT token with custom claims structure.
-// Unlike Verify(), this method allows you to parse tokens with non-standard claims
-// while still performing all security validations. The claims parameter should be
-// a pointer to your custom claims struct.
+// VerifyWithCustomClaims is like Verify, but decodes into claims, which must
+// be a pointer to a type implementing jwt.Claims.
 //
 // Example:
 //
-//	type CustomClaims struct {
-//	    jwt.RegisteredClaims
-//	    Role        string   `json:"role"`
-//	    Permissions []string `json:"permissions"`
-//	}
-//
 //	var claims CustomClaims
-//	err := jwt.VerifyWithCustomClaims(tokenString, &claims)
-//	if err != nil {
-//	    // Handle invalid token
-//	    return
+//	if err := j.VerifyWithCustomClaims(tokenString, &claims); err != nil {
+//	    return err
 //	}
-//	userRole := claims.Role
 func (j *JWT) VerifyWithCustomClaims(bearerToken string, claims jwt.Claims) error {
 	if len(j.Secret) == 0 {
 		return ErrNoSecret
 	}
 
-	// Configure parser options for expiry leeway if specified
-	parserOptions := []jwt.ParserOption{}
+	method := j.signingMethod()
+	opts := []jwt.ParserOption{
+		jwt.WithValidMethods([]string{method.Alg()}),
+		jwt.WithExpirationRequired(),
+		jwt.WithIssuedAt(),
+	}
 	if j.ExpiryLeeway > 0 {
-		parserOptions = append(parserOptions, jwt.WithLeeway(j.ExpiryLeeway))
+		opts = append(opts, jwt.WithLeeway(j.ExpiryLeeway))
+	}
+	if j.Issuer != "" {
+		opts = append(opts, jwt.WithIssuer(j.Issuer))
 	}
 
-	// Parse and validate the token with custom claims
-	token, err := jwt.ParseWithClaims(bearerToken, claims, func(token *jwt.Token) (any, error) {
-		// Verify signing method matches expected method to prevent algorithm confusion attacks
-		if token.Method.Alg() != j.SigningMethod.Alg() {
-			return nil, fmt.Errorf("%w: unexpected signing method %s", ErrTokenInvalid, token.Header["alg"])
-		}
+	_, err := jwt.ParseWithClaims(bearerToken, claims, func(*jwt.Token) (any, error) {
 		return j.Secret, nil
-	}, parserOptions...)
-
-	// Handle common JWT parsing errors
+	}, opts...)
 	if err != nil {
 		if errors.Is(err, jwt.ErrTokenExpired) {
-			return fmt.Errorf("%w: token expired", ErrTokenExpired)
+			return fmt.Errorf("%w: %w", ErrTokenExpired, err)
 		}
-		return fmt.Errorf("%w: %v", ErrTokenInvalid, err)
-	}
-
-	// Additional validation - ensure token is marked as valid
-	if !token.Valid {
-		return ErrClaimsInvalid
+		return fmt.Errorf("%w: %w", ErrTokenInvalid, err)
 	}
 
 	return nil
+}
+
+func (j *JWT) signingMethod() jwt.SigningMethod {
+	if j.SigningMethod == nil {
+		return jwt.SigningMethodHS256
+	}
+
+	return j.SigningMethod
 }

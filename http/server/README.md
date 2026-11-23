@@ -1,67 +1,31 @@
-# HTTP Server Package
+# server
 
-The HTTP Server package provides production-ready HTTP server utilities with graceful shutdown, zero-downtime deployment support, and sensible defaults for Go web applications.
-
-## Features
-
-- **Graceful Shutdown**: Clean handling of shutdown signals (SIGTERM, SIGINT)
-- **Zero-Downtime Deployment**: Support for seamless server upgrades
-- **Connection Management**: Proper management of existing connections during shutdown
-- **Timeout Configuration**: Sensible defaults for read, write, and idle timeouts
-- **Max Request Size**: Protection against oversized payloads
-- **Wait Groups**: Built-in waitgroup support for coordinated shutdowns
-- **Cross-Package Integration**: Works with `health`, `chain`, and middleware packages
-
-## Quick Start
+`net/http` servers with timeouts and graceful shutdown.
 
 ```go
-package main
-
-import (
-    "net/http"
-    "github.com/alextanhongpin/core/http/server"
-)
-
-func main() {
-    mux := http.NewServeMux()
-    mux.HandleFunc("/ping", func(w http.ResponseWriter, r *http.Request) {
-        w.Write([]byte("pong"))
-    })
-    // Simple server with graceful shutdown
-    server.ListenAndServe(":8080", mux)
-    // OR use advanced configuration
-    srv := server.New(":8080", mux)
-    server.WaitGroup(srv)
+// One server; blocks until SIGINT/SIGTERM or a listen error.
+if err := server.ListenAndServe(":8080", mux); err != nil {
+	log.Fatal(err)
 }
+
+// Several servers sharing one lifecycle.
+err := server.WaitGroup(
+	server.New(":8080", api),
+	server.New(":9090", metrics),
+)
 ```
 
-## API Reference
-
-### Basic Server
-
-#### `ListenAndServe(addr string, handler http.Handler) error`
-Creates and starts an HTTP server with graceful shutdown support.
-
-### Advanced Configuration
-
-#### `New(addr string, handler http.Handler, options ...Option) *http.Server`
-Creates a new HTTP server with custom configuration options.
-
-#### `WaitGroup(srv *http.Server)`
-Waits for server shutdown and coordinates cleanup.
-
-## Best Practices
-
-- Always use graceful shutdown for production servers.
-- Configure timeouts and max request size for security and reliability.
-- Integrate health endpoints for orchestration and monitoring.
-
-## Related Packages
-
-- [`health`](../health/README.md): Health check endpoints
-- [`chain`](../chain/README.md): Middleware chaining
-- [`middleware`](../middleware/README.md): Middleware components
-
-## License
-
-MIT
+- `New(addr, h)` returns an `*http.Server` with 5 s read, read-header and
+  write timeouts. The write timeout cuts off long-lived responses (SSE,
+  large downloads); raise `WriteTimeout` on the returned server for those.
+- `WaitGroup(servers...)` starts every server and returns when a signal
+  arrives (nil) or any server fails to listen (the joined errors). Either
+  way it shuts all servers down, giving in-flight requests 5 s. Request
+  contexts stay valid during that grace period and are canceled afterwards
+  (unless the server sets its own `BaseContext`).
+- `ListenAndServeForever(addr, h)` (Unix only) supports binary upgrades:
+  `SIGUSR2` starts a new copy of the executable that binds the same port
+  with `SO_REUSEPORT` and sends `SIGQUIT` to the old process (found via the
+  `APP_PPID` environment variable), which then drains and exits. `SIGTERM`,
+  `SIGQUIT` and `SIGINT` shut down gracefully. Errors are fatal (it calls
+  `log.Fatal`). Prefer your orchestrator's rolling restarts when available.

@@ -35,7 +35,6 @@ type ResponseWriterRecorder struct {
 	body        []byte
 	code        int
 	writeBody   bool
-	wroteBody   bool
 	wroteHeader bool
 }
 
@@ -68,7 +67,7 @@ func NewResponseWriterRecorder(w http.ResponseWriter) *ResponseWriterRecorder {
 
 // SetWriteBody configures whether the recorder should capture the response body.
 //
-// When enabled, the recorder will store a copy of all data written to the response,
+// When enabled, the recorder stores a copy of everything written to the response,
 // which can be retrieved later using the Body() method. This is useful for logging,
 // debugging, or response transformation.
 //
@@ -102,14 +101,12 @@ func (w *ResponseWriterRecorder) Write(b []byte) (int, error) {
 		w.WriteHeader(w.code)
 	}
 
+	n, err := w.ResponseWriter.Write(b)
 	if w.writeBody {
-		if !w.wroteBody {
-			w.body = bytes.Clone(b)
-			w.wroteBody = true
-		}
+		w.body = append(w.body, b[:n]...)
 	}
 
-	return w.ResponseWriter.Write(b)
+	return n, err
 }
 
 func (w *ResponseWriterRecorder) Unwrap() http.ResponseWriter {

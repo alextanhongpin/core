@@ -1,71 +1,44 @@
-# HTTP Webhook Package
+# webhook
 
-The HTTP Webhook package provides secure webhook handling with HMAC signature verification, supporting multiple secrets for key rotation and secure payload validation.
-
-## Features
-
-- **Signature Verification**: HMAC-SHA256 signature validation
-- **Multi-Secret Support**: Key rotation with multiple verification secrets
-- **Payload Verification**: Complete request body verification
-- **Middleware Pattern**: Simple integration as HTTP middleware
-- **Manual Verification**: Direct payload verification for custom scenarios
-- **Key Rotation**: Support for seamless secret rotation
-- **Cross-Package Integration**: Works with `chain`, `handler`, and logging middleware
-
-## Quick Start
+Sign and verify webhook requests with HMAC-SHA256, with key rotation and
+replay-window checks.
 
 ```go
-package main
+// Receiver
+h := webhook.Handler(eventsHandler, newSecret, oldSecret)
 
-import (
-    "net/http"
-    "github.com/alextanhongpin/core/http/webhook"
-)
-
-func main() {
-    handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-        w.Write([]byte("Webhook received!"))
-    })
-    secret := []byte("your-webhook-secret")
-    webhookHandler := webhook.Handler(handler, secret)
-    http.ListenAndServe(":8080", webhookHandler)
-}
+// Sender
+payload := webhook.NewPayload(body)
+req, _ := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
+payload.SignRequest(req, newSecret) // one X-Webhook-Signature per secret
 ```
 
-## API Reference
+## Scheme
 
-### Middleware
+| Header | Value |
+| --- | --- |
+| `X-Webhook-Id` | Payload ID (random UUID from `NewPayload`). |
+| `X-Webhook-Timestamp` | Send time, Unix nanoseconds. |
+| `X-Webhook-Signature` | base64url HMAC-SHA256 of `<id>.<timestamp>.<body>`; may repeat. |
 
-#### `Handler(next http.Handler, secrets ...[]byte) http.Handler`
-Creates middleware that verifies webhook signatures before passing to the handler.
+This is a package-specific scheme. It does not verify GitHub
+(`X-Hub-Signature-256`) or Stripe (`Stripe-Signature`) signatures, which sign
+different content.
 
-```go
-// Single secret
-handler = webhook.Handler(handler, []byte("secret"))
-// Multiple secrets for key rotation
-handler = webhook.Handler(handler, 
-    []byte("new-secret"),
-    []byte("old-secret"),
-)
-```
+## Verification
 
-### Manual Verification
+`Verify(r, config)` (used by `Handler` / `HandlerWithConfig`):
 
-#### `Verify(r *http.Request, secrets ...[]byte) error`
-Manually verifies webhook signature and payload.
+1. requires the ID and timestamp headers (`ErrMissingHeader`,
+   `ErrInvalidTimestamp`);
+2. rejects payloads older than `MaxAge` (default 5 minutes, negative
+   disables) or more than a minute in the future (`ErrExpired`);
+3. reads at most `MaxBodySize` bytes (default 10 MiB, `ErrBodyTooLarge`) and
+   restores the body for the next handler;
+4. accepts the request if any signature matches any secret, compared in
+   constant time (`ErrInvalidSignature` otherwise).
 
-## Best Practices
-
-- Rotate secrets regularly for security.
-- Always verify payload signatures before processing.
-- Integrate with logging and error handling middleware.
-
-## Related Packages
-
-- [`chain`](../chain/README.md): Middleware chaining
-- [`handler`](../handler/README.md): Base handler utilities
-- [`server`](../server/README.md): HTTP server utilities
-
-## License
-
-MIT
+Failures go to `Config.ErrorHandler`; the default replies 413 for oversized
+bodies and 401 otherwise. Payload IDs are not remembered, so a captured
+request can be replayed within `MaxAge`: deduplicate on `X-Webhook-Id` if
+that matters.

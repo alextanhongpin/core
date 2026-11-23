@@ -5,6 +5,7 @@ import (
 	"cmp"
 	"encoding/base64"
 	"fmt"
+	"math"
 	"net/http"
 	"net/url"
 	"reflect"
@@ -367,12 +368,21 @@ func (v Value) Split(sep string) []string {
 	return strings.Split(string(v), sep)
 }
 
+// Int64 parses the value as an int64, returning 0 if it is not a valid
+// integer in range.
 func (v Value) Int64() int64 {
-	return toInt64(v.String())
+	n, _ := v.parseInt(64)
+	return n
 }
 
+// Int64Or returns the parsed int64, or n if the value is empty or invalid.
+// An explicit "0" returns 0.
 func (v Value) Int64Or(n int64) int64 {
-	return cmp.Or(v.Int64(), n)
+	i, err := v.parseInt(64)
+	if err != nil {
+		return n
+	}
+	return i
 }
 
 // Int64RangeOr returns the int64 value within a range or a default value if out of range.
@@ -386,19 +396,30 @@ func (v Value) Int64RangeOr(min, max, def int64) int64 {
 
 // Int64Range validates that the int64 value is within a range
 func (v Value) Int64Range(min, max int64) (int64, error) {
-	val := v.Int64()
+	val, err := v.parseInt(64)
+	if err != nil {
+		return 0, err
+	}
 	if val < min || val > max {
 		return 0, fmt.Errorf("value must be between %d and %d", min, max)
 	}
 	return val, nil
 }
 
+// Int32 parses the value as an int32, returning 0 if it is not a valid
+// integer in range.
 func (v Value) Int32() int32 {
-	return toInt32(v.String())
+	n, _ := v.parseInt(32)
+	return int32(n)
 }
 
+// Int32Or returns the parsed int32, or n if the value is empty or invalid.
 func (v Value) Int32Or(n int32) int32 {
-	return cmp.Or(v.Int32(), n)
+	i, err := v.parseInt(32)
+	if err != nil {
+		return n
+	}
+	return int32(i)
 }
 
 // Int32RangeOr returns the int32 value within a range or a default value if out of range.
@@ -412,19 +433,32 @@ func (v Value) Int32RangeOr(min, max, def int32) int32 {
 
 // Int32Range validates that the int32 value is within a range
 func (v Value) Int32Range(min, max int32) (int32, error) {
-	val := v.Int32()
+	n, err := v.parseInt(32)
+	if err != nil {
+		return 0, err
+	}
+	val := int32(n)
 	if val < min || val > max {
 		return 0, fmt.Errorf("value must be between %d and %d", min, max)
 	}
 	return val, nil
 }
 
+// Int parses the value as an int, returning 0 if it is not a valid integer
+// in range.
 func (v Value) Int() int {
-	return toInt(v.String())
+	n, _ := v.parseInt(strconv.IntSize)
+	return int(n)
 }
 
+// IntOr returns the parsed int, or n if the value is empty or invalid.
+// An explicit "0" returns 0.
 func (v Value) IntOr(n int) int {
-	return cmp.Or(v.Int(), n)
+	i, err := v.parseInt(strconv.IntSize)
+	if err != nil {
+		return n
+	}
+	return int(i)
 }
 
 func (v Value) IntRangeOr(min, max, def int) int {
@@ -437,7 +471,11 @@ func (v Value) IntRangeOr(min, max, def int) int {
 
 // IntRange validates that the int value is within a range
 func (v Value) IntRange(min, max int) (int, error) {
-	val := v.Int()
+	n, err := v.parseInt(strconv.IntSize)
+	if err != nil {
+		return 0, err
+	}
+	val := int(n)
 	if val < min || val > max {
 		return 0, fmt.Errorf("value must be between %d and %d", min, max)
 	}
@@ -450,12 +488,14 @@ func (v Value) Float64() float64 {
 	return f
 }
 
-// Float64Or returns the parsed float64 or a default value
+// Float64Or returns the parsed float64, or n if the value is empty, invalid,
+// NaN or infinite.
 func (v Value) Float64Or(n float64) float64 {
-	if v.IsEmpty() {
+	f, err := v.parseFloat()
+	if err != nil {
 		return n
 	}
-	return v.Float64()
+	return f
 }
 
 // Float64RangeOr returns the float64 value within a range or a default value if out of range.
@@ -469,7 +509,10 @@ func (v Value) Float64RangeOr(min, max, def float64) float64 {
 
 // Float64Range validates that the float64 value is within a range
 func (v Value) Float64Range(min, max float64) (float64, error) {
-	val := v.Float64()
+	val, err := v.parseFloat()
+	if err != nil {
+		return 0, err
+	}
 	if val < min || val > max {
 		return 0, fmt.Errorf("value must be between %f and %f", min, max)
 	}
@@ -480,12 +523,13 @@ func (v Value) Bool() bool {
 	return toBool(v.String())
 }
 
-// BoolOr returns the parsed bool or a default value
+// BoolOr returns the parsed bool, or b if the value is empty or invalid.
 func (v Value) BoolOr(b bool) bool {
-	if v.IsEmpty() {
+	parsed, err := strconv.ParseBool(v.String())
+	if err != nil {
 		return b
 	}
-	return v.Bool()
+	return parsed
 }
 
 // Time parses the value as time using the provided layout
@@ -592,19 +636,23 @@ func (v Value) CSV() []string {
 	return result
 }
 
-func toInt(s string) int {
-	i, _ := strconv.Atoi(s)
-	return i
+// parseInt parses the value strictly; out-of-range values are errors rather
+// than being clamped.
+func (v Value) parseInt(bitSize int) (int64, error) {
+	n, err := strconv.ParseInt(v.String(), 10, bitSize)
+	if err != nil {
+		return 0, fmt.Errorf("value %q is not a valid integer", v.String())
+	}
+	return n, nil
 }
 
-func toInt32(s string) int32 {
-	i, _ := strconv.ParseInt(s, 10, 32)
-	return int32(i)
-}
-
-func toInt64(s string) int64 {
-	i, _ := strconv.ParseInt(s, 10, 64)
-	return i
+// parseFloat parses the value as a finite float64.
+func (v Value) parseFloat() (float64, error) {
+	f, err := strconv.ParseFloat(v.String(), 64)
+	if err != nil || math.IsNaN(f) || math.IsInf(f, 0) {
+		return 0, fmt.Errorf("value %q is not a valid number", v.String())
+	}
+	return f, nil
 }
 
 func toBool(s string) bool {
