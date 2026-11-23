@@ -7,18 +7,34 @@ import (
 	"weak"
 )
 
-// Cache holds weak references to values. Callers must retain returned values
-// while they need them. Concurrent misses may invoke create more than once.
+// Cache holds weak references to values, keyed by K. The cache never keeps a
+// value alive: once no caller holds a strong reference, the garbage collector
+// may reclaim it and a later LoadOrCreate for the same key calls create again.
+// Callers must retain returned values for as long as they need them (or need
+// the cache to return the same instance).
+//
+// Concurrent misses for the same key may each invoke create; only one result is
+// installed and the others are discarded, so create must be safe to run more
+// than once per key and should be cheap or idempotent. Cache is safe for
+// concurrent use. It is used by sync/dataloader, sync/promise and dsync, so
+// its API is kept stable.
 // https://go.dev/blog/cleanups-and-weak
 type Cache[K comparable, V any] struct {
 	create func(K) (*V, error)
 	m      sync.Map
 }
 
+// New returns an empty Cache that calls create to build values on a miss.
 func New[K comparable, V any](create func(K) (*V, error)) *Cache[K, V] {
 	return &Cache[K, V]{create: create}
 }
 
+// LoadOrCreate returns the live value for key, calling create on a miss. The
+// bool reports whether the value was already cached (true) or is the one this
+// call just created and installed (false). If create returns an error, or a nil
+// value, the error is returned and nothing is stored. When several callers race
+// on a miss, create may run in each of them; callers that lose the race receive
+// the winner's value with loaded set to true and their own value is dropped.
 func (c *Cache[K, V]) LoadOrCreate(key K) (*V, bool, error) {
 	var newValue *V
 	for {

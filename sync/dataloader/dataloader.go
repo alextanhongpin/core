@@ -20,6 +20,10 @@ type batchFn[K comparable, V any] = func(ctx context.Context, keys []K) (map[K]V
 
 // DataLoader batches concurrent loads. Cached results are weakly held and may
 // be loaded again after garbage collection.
+//
+// Batches are executed serially by a single worker: while one batch function
+// call is running, no other batch starts, so one slow batch delays every other
+// key queued behind it. Cancelling a LoadContext call affects only that caller.
 type DataLoader[K comparable, V any] struct {
 	batchFn batchFn[K, V]
 	ch      chan request[K, V]
@@ -188,7 +192,8 @@ func (d *DataLoader[K, V]) Load(key K) (V, error) {
 	return fut.Wait()
 }
 
-// LoadContext cancels only this caller's result wait. Shared admission and
+// LoadContext cancels only this caller's result wait; other callers waiting on
+// the same key, and the batch itself, are unaffected. Shared admission and
 // loading continue under the loader lifetime context. Cancellation racing with
 // a completed result may return either outcome.
 func (d *DataLoader[K, V]) LoadContext(ctx context.Context, key K) (V, error) {

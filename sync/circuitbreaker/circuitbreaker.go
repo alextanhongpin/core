@@ -53,6 +53,9 @@ type Config struct {
 	SuccessThreshold int
 	SuccessPeriod    time.Duration
 	OpenTimeout      time.Duration
+	// HalfOpenMaxCalls bounds concurrent in-flight probes while half-open.
+	// Extra callers get ErrOpened. Zero means unlimited; negative is invalid.
+	HalfOpenMaxCalls int
 	FailureCount     func(cause error) int
 	SlowCallCount    func(duration time.Duration) int
 }
@@ -125,6 +128,9 @@ func (c Config) Validate() error {
 	if c.FailurePeriod <= 0 || c.SuccessPeriod <= 0 || c.OpenTimeout <= 0 {
 		return fmt.Errorf("circuitbreaker: durations must be positive")
 	}
+	if c.HalfOpenMaxCalls < 0 {
+		return fmt.Errorf("circuitbreaker: HalfOpenMaxCalls must not be negative")
+	}
 	return nil
 }
 
@@ -136,6 +142,7 @@ type CircuitBreaker struct {
 	mu            sync.RWMutex
 	counter       int
 	counterExpiry time.Time
+	inflight      int // admitted half-open probes not yet settled
 	status        Status
 	generation    uint64
 	timeout       time.Time
@@ -163,12 +170,44 @@ func (cb *CircuitBreaker) Do(fn func() error) error {
 	cb.mu.Lock()
 	status := cb.begin()
 	generation := cb.generation
+	if status == HalfOpen && cb.cfg.HalfOpenMaxCalls > 0 {
+		if cb.inflight >= cb.cfg.HalfOpenMaxCalls {
+			cb.mu.Unlock()
+			return ErrOpened
+		}
+		cb.inflight++
+	}
 	cb.mu.Unlock()
 
 	switch status {
 	case Closed, HalfOpen:
+		settled := false
+		if status == HalfOpen && cb.cfg.HalfOpenMaxCalls > 0 {
+			// Release the probe slot if fn panics.
+			defer func() {
+				if settled {
+					return
+				}
+				cb.mu.Lock()
+				if cb.generation == generation && cb.inflight > 0 {
+					cb.inflight--
+				}
+				cb.mu.Unlock()
+			}()
+		}
 		start := time.Now()
 		err := fn()
+		settled = true
+		var neutral neutralError
+		if errors.As(err, &neutral) {
+			// Neither a success nor a failure: only release the probe slot.
+			cb.mu.Lock()
+			if cb.generation == generation && status == HalfOpen && cb.cfg.HalfOpenMaxCalls > 0 && cb.inflight > 0 {
+				cb.inflight--
+			}
+			cb.mu.Unlock()
+			return neutral.err
+		}
 		failureCount, successCount := 0, 0
 		if err != nil {
 			failureCount = 1
@@ -185,6 +224,9 @@ func (cb *CircuitBreaker) Do(fn func() error) error {
 		// Results admitted by an older state must not change the current state.
 		if cb.generation == generation {
 			if status == HalfOpen {
+				if cb.cfg.HalfOpenMaxCalls > 0 && cb.inflight > 0 {
+					cb.inflight--
+				}
 				cb.halfOpen(failureCount, successCount)
 			} else if err != nil {
 				cb.close(failureCount)
@@ -206,6 +248,7 @@ func (cb *CircuitBreaker) SetStatus(status Status) {
 	cb.generation++
 	cb.counter = 0
 	cb.counterExpiry = time.Time{}
+	cb.inflight = 0
 	cb.status = status
 	if status == Opened {
 		cb.timeout = time.Now().Add(cb.cfg.OpenTimeout)
@@ -231,6 +274,7 @@ func (cb *CircuitBreaker) begin() Status {
 func (cb *CircuitBreaker) onOpened() Status {
 	cb.generation++
 	cb.status = Opened
+	cb.inflight = 0
 	cb.timeout = time.Now().Add(cb.cfg.OpenTimeout)
 	return Opened
 }
@@ -238,6 +282,7 @@ func (cb *CircuitBreaker) onOpened() Status {
 func (cb *CircuitBreaker) onClosed() Status {
 	cb.generation++
 	cb.status = Closed
+	cb.inflight = 0
 	cb.counter = 0
 	cb.counterExpiry = time.Time{}
 	return Closed
@@ -246,6 +291,7 @@ func (cb *CircuitBreaker) onClosed() Status {
 func (cb *CircuitBreaker) onHalfOpened() Status {
 	cb.generation++
 	cb.status = HalfOpen
+	cb.inflight = 0
 	cb.counter = 0
 	cb.counterExpiry = time.Time{}
 	cb.timeout = time.Time{}
@@ -281,11 +327,22 @@ func (cb *CircuitBreaker) close(failureCount int) Status {
 	return Closed
 }
 
+// inc adds count to a fixed window. The window expires ttl after its first
+// event and is not extended by later events.
 func (cb *CircuitBreaker) inc(count int, ttl time.Duration) int {
-	if !time.Now().Before(cb.counterExpiry) {
+	now := time.Now()
+	if !now.Before(cb.counterExpiry) {
 		cb.counter = 0
+		cb.counterExpiry = now.Add(ttl)
 	}
 	cb.counter += count
-	cb.counterExpiry = time.Now().Add(ttl)
 	return cb.counter
 }
+
+// neutralError marks a call outcome that says nothing about the dependency,
+// such as the caller canceling. Do records neither success nor failure for it
+// and returns the wrapped error.
+type neutralError struct{ err error }
+
+func (e neutralError) Error() string { return e.err.Error() }
+func (e neutralError) Unwrap() error { return e.err }

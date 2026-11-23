@@ -4,20 +4,20 @@ Each package is an independent Go module. Install and test it from its own direc
 
 | Package | Purpose |
 | --- | --- |
+| [backoff](./backoff/) | Constant, linear, and jittered exponential delay policies. |
 | [broadcast](./broadcast/) | Broadcast values to subscribers; slow subscribers apply backpressure. |
 | [cache](./cache/) | Weak-reference cache whose values may be reclaimed by garbage collection. |
 | [circuitbreaker](./circuitbreaker/) | Failure and latency based circuit breaker, function decorator, and HTTP transport. |
 | [dataloader](./dataloader/) | Batch loading and deduplication of concurrent key requests. |
+| [flock](./flock/) | Generate a file once across processes using an advisory file lock (Unix). |
 | [goroutine](./goroutine/) | Start, cancel, and wait for a managed background function. |
 | [lock](./lock/) | Keyed blocking locks and nonblocking try locks. |
 | [pipeline](./pipeline/) | Channel sources, transformations, batching, and sinks. |
 | [promise](./promise/) | Context-aware asynchronous results and promise combinators. |
-| [rate](./rate/) | Time-normalized counters, error ratios, and probabilistic admission. |
 | [ratelimit](./ratelimit/) | Per-key fixed-window and GCRA rate limiting. |
 | [retry](./retry/) | Retry policies and HTTP request retries. |
 | [snapshot](./snapshot/) | Notifications triggered by count and time policies. |
 | [throttle](./throttle/) | Limit concurrent operations and queued admission. |
-| [timer](./timer/) | Cancelable interval and timeout callbacks. |
 
 Check the individual package documentation for public APIs, configuration, cancellation, and cleanup contracts. Channel pipelines require consumers to drain their outputs; context cancellation at a source does not make every downstream stage cancelable. Weak caches do not promise permanent retention or exactly one call to a value factory.
 

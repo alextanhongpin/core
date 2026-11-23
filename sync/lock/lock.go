@@ -19,8 +19,13 @@ type unlocker interface {
 // A raw mutex cannot be weakly referenced.
 // The standard pattern is to wrap the lock inside an allocated object.
 // This object must be allocated on the heap to be tracked by the GC.
+//
+// The padding keeps entry out of the runtime's tiny allocator (objects under
+// 16 bytes without pointers). Tiny blocks are shared, so any live neighbour
+// would otherwise keep an idle entry reachable and its map slot would leak.
 type entry struct {
 	mu sync.Mutex
+	_  [16]byte
 }
 
 // KeyLock coordinates callers by key. Its zero value is ready to use.
@@ -37,6 +42,9 @@ func New() *KeyLock {
 	}
 }
 
+// Size returns the number of map entries, not the number of held locks. Idle
+// entries (released and unreferenced) are counted until the garbage collector
+// reclaims them.
 func (l *KeyLock) Size() int {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -44,6 +52,9 @@ func (l *KeyLock) Size() int {
 	return len(l.locks)
 }
 
+// Has reports whether key still has an entry. It is not "is held": an idle
+// entry stays present until the garbage collector reclaims it, so Has can
+// return true for a key that nobody holds.
 func (l *KeyLock) Has(key string) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()

@@ -12,7 +12,10 @@ var _ ratelimiter = (*GCRA)(nil)
 type GCRA struct {
 	// State.
 	mu    sync.RWMutex
-	state map[string]int64
+	state map[string]int64 // theoretical arrival time, ns since base
+
+	base    time.Time // carries a monotonic reading
+	nowFunc func() time.Time
 
 	// Option.
 	burst  int64
@@ -32,7 +35,8 @@ func NewGCRA(cfg Config) (*GCRA, error) {
 	}
 
 	interval := cfg.Period.Nanoseconds() / int64(cfg.Limit)
-	if int64(cfg.Burst) >= math.MaxInt64/interval {
+	// Keep (burst+1)*interval well below MaxInt64/2 so now+allowance cannot wrap.
+	if int64(cfg.Burst) >= math.MaxInt64/2/interval-1 {
 		return nil, errors.New("ratelimit: burst allowance overflows duration")
 	}
 
@@ -41,6 +45,9 @@ func NewGCRA(cfg Config) (*GCRA, error) {
 		limit:  int64(cfg.Limit),
 		period: cfg.Period.Nanoseconds(),
 		state:  make(map[string]int64),
+
+		base:    time.Now(),
+		nowFunc: time.Now,
 	}, nil
 }
 
@@ -81,15 +88,19 @@ func (r *GCRA) LimitN(key string, n int) *Result {
 		return &Result{Limit: int(r.limit)}
 	}
 	delta := r.period / r.limit
-	now := time.Now().UnixNano()
+	now := r.elapsed()
 
-	last := max(r.state[key], now)
+	prev, ok := r.state[key]
+	last := max(prev, now)
 	// A batch must fit in the available burst allowance as a whole.
 	allow := last-now <= (r.burst+1-quantity)*delta
 	if allow {
 		last += quantity * delta
 	}
-	r.state[key] = last
+	if ok || quantity > 0 {
+		// Zero-quantity inspection must not create state for unseen keys.
+		r.state[key] = last
+	}
 
 	var retryAfter int64
 	if !allow {
@@ -112,9 +123,14 @@ func (r *GCRA) LimitN(key string, n int) *Result {
 	}
 }
 
+// elapsed returns nanoseconds since construction, using the monotonic clock.
+func (r *GCRA) elapsed() int64 {
+	return int64(r.nowFunc().Sub(r.base))
+}
+
 func (r *GCRA) Clear() {
 	r.mu.Lock()
-	now := time.Now().UnixNano()
+	now := r.elapsed()
 	for k, v := range r.state {
 		if v+r.period <= now {
 			delete(r.state, k)

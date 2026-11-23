@@ -1,53 +1,79 @@
-# sync/cache
+# cache
 
-A concurrent, weak-reference backed cache for Go.
+A concurrent, generic cache that holds its values through weak references and
+creates missing values lazily.
 
-This package provides a generic `Cache[K comparable, V any]` that uses `sync.Map` for thread-safe storage and `weak.Pointer` (Go 1.27+) for automatic memory cleanup. Values are created lazily via a factory function and are released when no longer strongly referenced.
+**Use it for:** deduplicating shared, expensive-to-build objects (open files,
+in-flight futures) for as long as someone still uses them.
 
-Inspired by https://go.dev/blog/cleanups-and-weak
+**Don't use it for:** durable caching. Values are reclaimed by the garbage
+collector as soon as nothing else references them. Use a regular map or an LRU
+if entries must survive. For distributed caching see `dsync/cache`.
 
-## Usage
+`sync/dataloader`, `sync/promise` and `dsync/lock` are built on this package, so
+its API is kept stable.
+
+## Installation
+
+```sh
+go get github.com/alextanhongpin/core/sync/cache
+```
+
+Requires Go 1.27+ (`weak`, `runtime.AddCleanup`).
+
+## Quick start
 
 ```go
-import "github.com/alextanhongpin/core/sync/cache"
+package main
 
-c := cache.New[string, *MyValue](func(key string) (*MyValue, error) {
-    v, err := loadFromSource(key)
-    return v, err
-})
+import (
+	"fmt"
 
-v, err := c.Get("key")
-if err != nil {
-    // handle error
+	"github.com/alextanhongpin/core/sync/cache"
+)
+
+func main() {
+	c := cache.New(func(key string) (*string, error) {
+		v := "value for " + key
+		return &v, nil
+	})
+
+	v, loaded, err := c.LoadOrCreate("a")
+	fmt.Println(*v, loaded, err) // value for a false <nil>
+
+	v2, loaded, _ := c.LoadOrCreate("a")
+	fmt.Println(v == v2, loaded) // true true (v is still referenced)
 }
 ```
 
 ## API
 
-### type Cache[K comparable, V any]
-
 ```go
-type Cache[K comparable, V any] struct {
-    create func(K) (*V, error)
-    m      sync.Map
-}
+func New[K comparable, V any](create func(K) (*V, error)) *Cache[K, V]
+
+// Returns the live value for key; loaded is true if it already existed.
+func (*Cache[K, V]) LoadOrCreate(key K) (value *V, loaded bool, err error)
 ```
 
-### func New[K comparable, V any](create func(K) (*V, error)) *Cache[K, V]
+## Behavior and guarantees
 
-Creates a new cache with the given factory function.
+- **Weak references.** The cache never keeps a value alive. Retain the returned
+  pointer for as long as you need it; once unreferenced it may be reclaimed at
+  any GC cycle and the next `LoadOrCreate` calls `create` again.
+- **`create` may run more than once per key.** Concurrent misses can each call
+  `create`; one result is installed and the rest are dropped (losers receive the
+  winner with `loaded == true`). `create` must be safe to repeat, and anything it
+  allocates must tolerate being discarded. Re-creation after GC also calls it
+  again.
+- **Errors.** If `create` returns an error or a nil `*V`, nothing is stored and
+  the error is returned (`cache: create returned nil value` for nil).
+- **Concurrency.** Safe for concurrent use (`sync.Map` underneath). There is no
+  delete or size API; entries disappear only through GC.
+- **Cleanup.** A `runtime.AddCleanup` on each installed value removes its map
+  entry once reclaimed; stale entries found earlier are deleted eagerly.
 
-### func (c *Cache[K, V]) Get(key K) (*V, error)
+## Testing
 
-Returns the cached value for `key`, creating it with `create` if necessary. The value is stored via `weak.Make` and automatically removed from the map when garbage collected, thanks to `runtime.AddCleanup`.
-
-## Requirements
-
-- Go 1.27+
-
-## Module
-
-```
-module github.com/alextanhongpin/core/sync/cache
-go 1.27.0
+```sh
+go vet ./... && go test -race -count=1 ./...
 ```

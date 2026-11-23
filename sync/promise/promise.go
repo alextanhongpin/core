@@ -16,6 +16,14 @@ const (
 	StatusRejected
 )
 
+// Promise is the eventual result of an operation. It is settled at most once,
+// by Resolve, Reject or the handler passed to New; Abort ends it without a
+// value. Await may be called repeatedly and concurrently.
+//
+// Every promise owns a child context of the context it was created with, and
+// that child stays registered with the parent until the promise is settled or
+// aborted. A promise that is never settled therefore leaks that registration
+// for as long as the parent context lives.
 type Promise[T any] struct {
 	ch *Channel[*result[T]]
 }
@@ -27,6 +35,9 @@ type result[T any] struct {
 
 type handler[T any] = func(ctx context.Context) (T, error)
 
+// New runs fn in a new goroutine and settles the promise with its result. fn
+// receives the promise's child context, which is canceled by Abort or when ctx
+// ends; cancellation is cooperative.
 func New[T any](ctx context.Context, fn handler[T]) *Promise[T] {
 	p := Deferred[T](ctx)
 	go func() {
@@ -48,6 +59,9 @@ func (p *Promise[T]) Reject(err error) {
 	p.ch.Send(&result[T]{Error: err})
 }
 
+// Abort cancels the promise with cause if it is not yet settled; Await then
+// returns cause. It is a no-op after settlement and does not wait for any
+// handler started by New.
 func (p *Promise[T]) Abort(cause error) {
 	p.ch.Close(cause)
 }
@@ -107,7 +121,8 @@ func observe[T any](promises []*Promise[T]) (<-chan indexedResult[T], func()) {
 }
 
 // Race returns the first observed settlement and releases its own waiters.
-// It does not abort losing promises. Empty input panics.
+// It does not abort losing promises. Empty input panics, as it does for Any,
+// All and AllSettled.
 func Race[T any](promises ...*Promise[T]) (T, error) {
 	if len(promises) == 0 {
 		panic("no promises")
@@ -156,6 +171,8 @@ func All[T any](promises ...*Promise[T]) ([]T, error) {
 	return results, nil
 }
 
+// AllSettled waits for every input to settle or abort and returns ordered
+// results; aborted promises are reported as rejected. Empty input panics.
 func AllSettled[T any](promises ...*Promise[T]) []*Result[T] {
 	if len(promises) == 0 {
 		panic("no promises")
@@ -172,6 +189,9 @@ func AllSettled[T any](promises ...*Promise[T]) []*Result[T] {
 	return res
 }
 
+// Deferred returns a pending promise to be settled manually with Resolve,
+// Reject or Abort. It must eventually be settled or aborted, otherwise its child
+// context remains registered with ctx.
 func Deferred[T any](ctx context.Context) *Promise[T] {
 	return &Promise[T]{
 		ch: NewChannel[*result[T]](ctx),
@@ -195,8 +215,17 @@ func WithResolvers[T any](ctx context.Context) (p *Promise[T], resolve func(T), 
 	return p, p.Resolve, p.Reject
 }
 
+// Map is a weakly held cache of promises keyed by K, built on sync/cache, so
+// entries can be reclaimed and re-created once no caller references them.
+//
+// Every promise handed out by Map (including the ones losing a creation race) is
+// created by Deferred. The caller for whom LoadOrCreate reports loaded == false
+// owns the promise and must settle it (Resolve/Reject) or Abort it. An unsettled
+// promise keeps its child context registered with the parent context, which is a
+// memory leak for long-lived parents.
 type Map[K comparable, V any] = cache.Cache[K, Promise[V]]
 
+// NewMap returns a Map whose promises are Deferred children of ctx.
 func NewMap[K comparable, V any](ctx context.Context) *Map[K, V] {
 	return cache.New(func(K) (*Promise[V], error) {
 		d := Deferred[V](ctx)

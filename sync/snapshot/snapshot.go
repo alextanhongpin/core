@@ -5,6 +5,7 @@ package snapshot
 import (
 	"cmp"
 	"errors"
+	"math"
 	"slices"
 	"sync"
 	"time"
@@ -26,6 +27,10 @@ func DefaultPolicies() []Policy {
 	}
 }
 
+// Snapshot counts changes and notifies subscribers with the Policy that fired.
+// It embeds *broadcast.Broadcast[Policy], so Send, Chan and Go are promoted
+// and exposed on Snapshot. Subscribe with Chan or Go to receive notifications;
+// callers should not call Send, which would inject notifications of their own.
 type Snapshot struct {
 	*broadcast.Broadcast[Policy]
 	ch   chan int
@@ -77,7 +82,7 @@ func New(cfg Config) (*Snapshot, func(), error) {
 		return nil, nil, err
 	}
 	cfg.Policies = slices.Clone(cfg.Policies)
-	slices.SortFunc(cfg.Policies, func(a, b Policy) int { return cmp.Compare(a.After, b.After) })
+	slices.SortStableFunc(cfg.Policies, func(a, b Policy) int { return cmp.Compare(a.After, b.After) })
 	b, stop := broadcast.New[Policy]()
 	bg := &Snapshot{
 		Broadcast: b,
@@ -110,8 +115,12 @@ func (b *Snapshot) Inc() {
 	b.Add(1)
 }
 
-// Add increments the counter by n.
+// Add increments the counter by n. Values n <= 0 are ignored. The counter
+// saturates at the largest int instead of overflowing.
 func (b *Snapshot) Add(n int) {
+	if n <= 0 {
+		return
+	}
 	select {
 	case <-b.done:
 		return
@@ -125,8 +134,13 @@ func (b *Snapshot) loop() {
 	last := time.Now()
 	interval := minInterval(b.cfg.Policies)
 
+	var ticker *time.Ticker
 	flush := func(n int) {
-		count += n
+		if n > math.MaxInt-count {
+			count = math.MaxInt
+		} else {
+			count += n
+		}
 		elapsed := time.Since(last)
 		for _, p := range b.cfg.Policies {
 			if elapsed < p.After {
@@ -135,6 +149,11 @@ func (b *Snapshot) loop() {
 			if count >= p.Changes {
 				count = 0
 				last = time.Now()
+				if ticker != nil {
+					// Restart the tick cadence from the new origin so the
+					// next time-based check is not up to 2x late.
+					ticker.Reset(interval)
+				}
 				b.Send(p)
 				return
 			}
@@ -143,7 +162,7 @@ func (b *Snapshot) loop() {
 
 	var ticks <-chan time.Time
 	if interval > 0 {
-		ticker := time.NewTicker(interval)
+		ticker = time.NewTicker(interval)
 		defer ticker.Stop()
 		ticks = ticker.C
 	}

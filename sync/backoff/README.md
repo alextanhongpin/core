@@ -1,29 +1,102 @@
 # backoff
 
-[Go reference](https://pkg.go.dev/github.com/alextanhongpin/core/sync/backoff)
+Delay policies for retries, polling, and reconnect loops. A policy maps an
+attempt index to a `time.Duration`; it does not sleep, run your operation, or
+look at a context.
 
-Calculate delays for retries, polling, and reconnect loops. This package does not wait, execute operations, or manage cancellation. Its Go version is specified in `go.mod`.
+**Use it for:** choosing how long to wait between attempts. It is the delay
+source for [`sync/retry`](../retry), and works equally in a hand-written loop.
+
+**Don't use it for:** executing or cancelling work, retry budgets, or error
+classification (use [`sync/retry`](../retry)).
+
+## Installation
 
 ```sh
 go get github.com/alextanhongpin/core/sync/backoff
 ```
 
+Check the module's `go.mod` for the required Go version.
+
+## Quick start
+
 ```go
+package main
+
 import (
-    "time"
-    "github.com/alextanhongpin/core/sync/backoff"
+	"context"
+	"errors"
+	"fmt"
+	"time"
+
+	"github.com/alextanhongpin/core/sync/backoff"
 )
 
-policy := backoff.NewExponential(100*time.Millisecond, 2*time.Second)
-delay := policy.At(1) // Full jitter: 0 <= delay < 200ms.
+func main() {
+	policy := backoff.NewExponential(10*time.Millisecond, 100*time.Millisecond)
+	ctx := context.Background()
+
+	calls := 0
+	op := func() error {
+		calls++
+		if calls < 3 {
+			return errors.New("temporary")
+		}
+		return nil
+	}
+
+	for attempt := 1; ; attempt++ {
+		if err := op(); err == nil {
+			break
+		}
+		timer := time.NewTimer(policy.At(attempt)) // you own the waiting
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return
+		case <-timer.C:
+		}
+	}
+	fmt.Println("calls:", calls)
+}
 ```
 
-- `NewConstant(period)` returns the same delay for every index; nonpositive periods return zero.
-- `NewLinear(period)` returns `period * index`, saturated at the maximum duration. Nonpositive periods or indices return zero.
-- `NewExponential(base, cap)` returns full jitter in `[0, min(base * 2^index, cap))`, with overflow capped. Negative indices use zero; indices above 62 use 62. Nonpositive base or cap returns zero.
+It prints `calls: 3`.
 
-Indices are supplied by the caller. The retry package uses index 1 for its first retry, giving exponential backoff an initial upper bound of twice the base.
+## API
 
-The strategies implement `Backoff`, which requires `At(int) time.Duration`. Exported fields support struct literals and adjustment before use. Zero-valued strategies return zero. Concurrent calls are safe when fields are not mutated concurrently. Exponential calls sample a new random delay each time.
+```go
+type Backoff interface{ At(attempts int) time.Duration }
 
-Use a context-aware timer when waiting. The caller decides when to stop and whether an operation is safe to repeat. See the runnable example in `backoff_test.go`.
+func NewConstant(period time.Duration) *Constant      // always period
+func NewLinear(period time.Duration) *Linear          // period * index
+func NewExponential(base, cap time.Duration) *Exponential // full jitter below min(base * 2^index, cap)
+
+type Constant struct{ Period time.Duration }
+type Linear struct{ Period time.Duration }
+type Exponential struct{ Base, Cap time.Duration }
+```
+
+## Behavior and guarantees
+
+- `sync/retry` calls `At(1)` for its first retry, so exponential backoff's first
+  delay is below `2 * base`. Indices are chosen by the caller.
+- `Constant`: nonpositive period gives zero.
+- `Linear`: `period * index`, saturating at the maximum `time.Duration`.
+  Nonpositive period or index gives zero.
+- `Exponential`: a uniformly random delay in `[0, min(base * 2^index, cap))`
+  (full jitter), sampled anew on every call, so it can be much shorter than the
+  bound. Negative indices use 0 and indices above 62 use 62. Nonpositive `base`
+  or `cap` gives zero. The bound is computed in floating point and compared with
+  `cap` before conversion to `Duration`, so overflowing values saturate at `cap`.
+- Zero-value structs return zero delay. Exported fields may be set directly;
+  do not mutate them concurrently with calls to `At`. Otherwise all policies are
+  safe for concurrent use.
+- Nothing here waits or cancels: use a context-aware timer, as above.
+
+## Testing
+
+```sh
+go vet ./...
+go test -race -count=1 ./...
+```
