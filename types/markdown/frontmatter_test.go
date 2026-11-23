@@ -10,80 +10,50 @@ import (
 	"github.com/go-openapi/testify/assert"
 )
 
-func TestWriteString(t *testing.T) {
-	meta := map[string]any{
-		"name":        t.Name(),
-		"description": t.Name(),
-	}
-	content := t.Name()
-	err := markdown.WriteString(t.Output(), meta, content)
-	is := assert.New(t)
-	is.NoError(err)
-}
-
-func TestWrite(t *testing.T) {
-	meta := map[string]any{
-		"name":        t.Name(),
-		"description": t.Name(),
-	}
-	content := t.Name()
-	err := markdown.Write(t.Output(), meta, []byte(content))
-	is := assert.New(t)
-	is.NoError(err)
-}
-
 func TestWriteFrontmatter(t *testing.T) {
-	meta := map[string]any{
-		"name":        t.Name(),
-		"description": t.Name(),
-	}
 	var bb bytes.Buffer
-	w := io.MultiWriter(&bb, t.Output())
-	err := markdown.WriteFrontmatter(w, meta)
-	is := assert.New(t)
-	is.NoError(err)
-
-	want := `---
-description: TestWriteFrontmatter
-name: TestWriteFrontmatter
----
-`
-	is.Equal(want, bb.String())
+	err := markdown.WriteFrontmatter(&bb, map[string]any{"name": "alice", "description": "d"})
+	assert.NoError(t, err)
+	assert.Equal(t, "---\ndescription: d\nname: alice\n---\n", bb.String())
 }
 
 func TestParseFrontmatter(t *testing.T) {
-	t.Run("success", func(t *testing.T) {
-		s := `---
-name: a name
-description: a description
----
-hello world`
-		meta, r, err := markdown.ParseFrontmatter[map[string]any](strings.NewReader(s))
-		is := assert.New(t)
-		is.NoError(err)
+	type meta struct {
+		Name string `json:"name"`
+	}
+	tests := []struct {
+		name, in, body string
+		want           meta
+		err            error
+	}{
+		{name: "success", in: "---\nname: a\n---\nhello world", want: meta{"a"}, body: "hello world"},
+		{name: "crlf", in: "---\r\nname: a\r\n---\r\nbody", want: meta{"a"}, body: "body"},
+		{name: "closing delimiter at eof", in: "---\nname: a\n---", want: meta{"a"}},
+		{name: "empty frontmatter", in: "---\n---\nbody", body: "body"},
+		{name: "no frontmatter", in: "hello\nworld", body: "hello\nworld"},
+		// Regression: input shorter than the delimiter used to return io.EOF.
+		{name: "short", in: "hi", body: "hi"},
+		{name: "empty", in: ""},
+		{name: "delimiter only", in: "---", body: "---"},
+		{name: "unterminated", in: "---\nname: a\n", err: markdown.ErrUnterminated},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, r, err := markdown.ParseFrontmatter[meta](strings.NewReader(tt.in))
+			if tt.err != nil {
+				assert.ErrorIs(t, err, tt.err)
+				return
+			}
+			assert.NoError(t, err)
+			assert.Equal(t, tt.want, got)
+			b, err := io.ReadAll(r)
+			assert.NoError(t, err)
+			assert.Equal(t, tt.body, string(b))
+		})
+	}
+}
 
-		b, err := io.ReadAll(r)
-		is.NoError(err)
-		is.Equal("hello world", string(b))
-		is.Equal(map[string]any{"name": "a name", "description": "a description"}, meta)
-	})
-
-	t.Run("no frontmatter", func(t *testing.T) {
-		meta, r, err := markdown.ParseFrontmatter[map[string]any](strings.NewReader(t.Name()))
-		is := assert.New(t)
-		is.NoError(err)
-
-		b, err := io.ReadAll(r)
-		is.NoError(err)
-		is.Equal(t.Name(), string(b))
-		is.Nil(meta)
-	})
-
-	t.Run("empty", func(t *testing.T) {
-		meta, r, err := markdown.ParseFrontmatter[map[string]any](strings.NewReader(""))
-		is := assert.New(t)
-		is.ErrorIs(err, io.EOF)
-		is.Nil(r)
-		is.Nil(meta)
-	})
+func TestParseFrontmatterInvalidYAML(t *testing.T) {
+	_, _, err := markdown.ParseFrontmatter[map[string]any](strings.NewReader("---\n: : :\n---\n"))
+	assert.Error(t, err)
 }

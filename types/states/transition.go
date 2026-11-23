@@ -1,245 +1,239 @@
 package states
 
 import (
+	"errors"
 	"fmt"
+	"sync"
 )
 
-// Transition represents a state transition with a name and source/target states.
+var (
+	// ErrUnknownTransition is returned when no transition with the given
+	// name starts at the current state.
+	ErrUnknownTransition = errors.New("states: unknown transition")
+	// ErrInvalidTransition is returned when no declared transition leads
+	// from the current state to the target state.
+	ErrInvalidTransition = errors.New("states: invalid transition")
+)
+
+// Transition is a named, directed edge between two states.
 type Transition[T comparable] struct {
 	Name string
 	From T
 	To   T
 }
 
-// NewTransition creates a new transition.
+// NewTransition returns a transition named name from one state to another.
 func NewTransition[T comparable](name string, from, to T) Transition[T] {
-	return Transition[T]{
-		Name: name,
-		From: from,
-		To:   to,
-	}
+	return Transition[T]{Name: name, From: from, To: to}
 }
 
-// String returns a string representation of the transition.
+// String returns "name: from -> to".
 func (t Transition[T]) String() string {
 	return fmt.Sprintf("%s: %v -> %v", t.Name, t.From, t.To)
 }
 
-// StateMachine manages state transitions with validation.
+// Listener is called after the state machine changes state.
+type Listener[T comparable] func(t Transition[T])
+
+// StateMachine holds a current state and moves between states only along
+// declared transitions. The same name may be used for transitions from
+// several states (for example "cancel"). A self-transition is allowed only
+// when it is declared.
+//
+// A StateMachine is safe for concurrent use. Listeners run after the state
+// changes, outside the internal lock, so they may call the machine's methods;
+// listeners for concurrent transitions may run concurrently.
 type StateMachine[T comparable] struct {
-	currentState T
-	transitions  []Transition[T]
-	listeners    []StateChangeListener[T]
+	mu          sync.Mutex
+	state       T
+	transitions []Transition[T]
+	listeners   []Listener[T]
 }
 
-// StateChangeListener is called when a state transition occurs.
-type StateChangeListener[T comparable] func(from, to T, transitionName string)
-
-// NewStateMachine creates a new state machine with the given initial state and transitions.
-func NewStateMachine[T comparable](initialState T, transitions ...Transition[T]) *StateMachine[T] {
+// NewStateMachine returns a machine in the initial state with the given
+// transitions.
+func NewStateMachine[T comparable](initial T, transitions ...Transition[T]) *StateMachine[T] {
 	return &StateMachine[T]{
-		currentState: initialState,
-		transitions:  transitions,
-		listeners:    make([]StateChangeListener[T], 0),
+		state:       initial,
+		transitions: append([]Transition[T](nil), transitions...),
 	}
 }
 
 // State returns the current state.
 func (sm *StateMachine[T]) State() T {
-	return sm.currentState
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	return sm.state
 }
 
-// AddTransition adds a new transition to the state machine.
-func (sm *StateMachine[T]) AddTransition(transition Transition[T]) {
-	sm.transitions = append(sm.transitions, transition)
+// AddTransition declares more transitions.
+func (sm *StateMachine[T]) AddTransition(ts ...Transition[T]) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	sm.transitions = append(sm.transitions, ts...)
 }
 
-// AddListener adds a state change listener.
-func (sm *StateMachine[T]) AddListener(listener StateChangeListener[T]) {
-	sm.listeners = append(sm.listeners, listener)
+// AddListener registers fn to be called after every state change.
+func (sm *StateMachine[T]) AddListener(fn Listener[T]) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	sm.listeners = append(sm.listeners, fn)
 }
 
-// Execute performs a named transition if it's valid from the current state.
-// Panics if the transition name is not found.
-func (sm *StateMachine[T]) Execute(transitionName string) error {
-	transition, found := sm.findTransitionByName(transitionName)
-	if !found {
-		return fmt.Errorf("transition %q not found", transitionName)
+// Execute fires the transition with the given name from the current state.
+// It returns an error wrapping ErrUnknownTransition if there is none.
+func (sm *StateMachine[T]) Execute(name string) error {
+	return sm.ExecuteFunc(name, nil)
+}
+
+// ExecuteFunc is like Execute, but first runs fn and only changes state if fn
+// returns nil. fn runs without the lock held; if another goroutine changes
+// the state while fn runs, ExecuteFunc returns an error wrapping
+// ErrUnknownTransition (unless the transition is valid from the new state)
+// and the state is left as the other goroutine set it.
+func (sm *StateMachine[T]) ExecuteFunc(name string, fn func() error) error {
+	sm.mu.Lock()
+	_, ok := sm.byName(name)
+	from := sm.state
+	sm.mu.Unlock()
+	if !ok {
+		return fmt.Errorf("%w %q from %v", ErrUnknownTransition, name, from)
+	}
+	if fn != nil {
+		if err := fn(); err != nil {
+			return err
+		}
 	}
 
-	return sm.TransitionTo(transition.To, transitionName)
+	sm.mu.Lock()
+	t, ok := sm.byName(name)
+	if !ok {
+		from := sm.state
+		sm.mu.Unlock()
+		return fmt.Errorf("%w %q from %v", ErrUnknownTransition, name, from)
+	}
+	return sm.apply(t) // unlocks
 }
 
-// TransitionTo attempts to transition to the target state.
-// Returns an error if the transition is not valid.
-func (sm *StateMachine[T]) TransitionTo(targetState T, transitionName string) error {
-	if !sm.CanTransitionTo(targetState) {
-		return fmt.Errorf("invalid transition from %v to %v", sm.currentState, targetState)
+// TransitionTo moves to target along the first declared transition from the
+// current state to target. It returns an error wrapping ErrInvalidTransition
+// if there is none.
+func (sm *StateMachine[T]) TransitionTo(target T) error {
+	sm.mu.Lock()
+	t, ok := sm.to(target)
+	if !ok {
+		from := sm.state
+		sm.mu.Unlock()
+		return fmt.Errorf("%w from %v to %v", ErrInvalidTransition, from, target)
 	}
+	return sm.apply(t) // unlocks
+}
 
-	oldState := sm.currentState
-	sm.currentState = targetState
-
-	// Notify listeners
-	for _, listener := range sm.listeners {
-		listener(oldState, targetState, transitionName)
+// apply sets the state to t.To, releases the lock, then calls listeners.
+func (sm *StateMachine[T]) apply(t Transition[T]) error {
+	sm.state = t.To
+	listeners := sm.listeners
+	sm.mu.Unlock()
+	for _, fn := range listeners {
+		fn(t)
 	}
-
 	return nil
 }
 
-// TransitionWithFunc performs a transition with a function that can fail.
-// If the function returns an error, the transition is not performed.
-func (sm *StateMachine[T]) TransitionWithFunc(targetState T, transitionName string, fn func() error) error {
-	if !sm.CanTransitionTo(targetState) {
-		return fmt.Errorf("invalid transition from %v to %v", sm.currentState, targetState)
-	}
-
-	if err := fn(); err != nil {
-		return err
-	}
-
-	return sm.TransitionTo(targetState, transitionName)
+// CanTransitionTo reports whether a declared transition leads from the
+// current state to target.
+func (sm *StateMachine[T]) CanTransitionTo(target T) bool {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	_, ok := sm.to(target)
+	return ok
 }
 
-// CanTransitionTo checks if a transition to the target state is valid.
-func (sm *StateMachine[T]) CanTransitionTo(targetState T) bool {
-	if sm.currentState == targetState {
-		return false // No self-transitions unless explicitly defined
+// Available returns the transitions that start at the current state, in
+// declaration order.
+func (sm *StateMachine[T]) Available() []Transition[T] {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	var out []Transition[T]
+	for _, t := range sm.transitions {
+		if t.From == sm.state {
+			out = append(out, t)
+		}
 	}
-
-	return sm.IsValidTransition(sm.currentState, targetState)
+	return out
 }
 
-// IsValidTransition checks if a transition between two states is defined.
-func (sm *StateMachine[T]) IsValidTransition(from, to T) bool {
-	for _, transition := range sm.transitions {
-		if transition.From == from && transition.To == to {
+// States returns every state that appears in a transition, plus the current
+// state, in order of first appearance (current state first).
+func (sm *StateMachine[T]) States() []T {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	seen := map[T]bool{sm.state: true}
+	out := []T{sm.state}
+	for _, t := range sm.transitions {
+		for _, s := range [2]T{t.From, t.To} {
+			if !seen[s] {
+				seen[s] = true
+				out = append(out, s)
+			}
+		}
+	}
+	return out
+}
+
+// HasCycle reports whether any state can be reached again from itself,
+// including through a declared self-transition.
+func (sm *StateMachine[T]) HasCycle() bool {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	next := make(map[T][]T)
+	for _, t := range sm.transitions {
+		next[t.From] = append(next[t.From], t.To)
+	}
+	const (
+		unvisited = iota
+		active
+		done
+	)
+	mark := make(map[T]int)
+	var visit func(T) bool
+	visit = func(s T) bool {
+		mark[s] = active
+		for _, n := range next[s] {
+			switch mark[n] {
+			case active:
+				return true
+			case unvisited:
+				if visit(n) {
+					return true
+				}
+			}
+		}
+		mark[s] = done
+		return false
+	}
+	for _, t := range sm.transitions {
+		if mark[t.From] == unvisited && visit(t.From) {
 			return true
 		}
 	}
 	return false
 }
 
-// GetValidTransitions returns all valid transitions from the current state.
-func (sm *StateMachine[T]) GetValidTransitions() []Transition[T] {
-	var valid []Transition[T]
-	for _, transition := range sm.transitions {
-		if transition.From == sm.currentState {
-			valid = append(valid, transition)
+func (sm *StateMachine[T]) byName(name string) (Transition[T], bool) {
+	for _, t := range sm.transitions {
+		if t.Name == name && t.From == sm.state {
+			return t, true
 		}
 	}
-	return valid
+	return Transition[T]{}, false
 }
 
-// GetValidStates returns all states that can be transitioned to from the current state.
-func (sm *StateMachine[T]) GetValidStates() []T {
-	var states []T
-	for _, transition := range sm.transitions {
-		if transition.From == sm.currentState {
-			states = append(states, transition.To)
+func (sm *StateMachine[T]) to(target T) (Transition[T], bool) {
+	for _, t := range sm.transitions {
+		if t.From == sm.state && t.To == target {
+			return t, true
 		}
 	}
-	return states
-}
-
-// GetAllStates returns all unique states in the state machine.
-func (sm *StateMachine[T]) GetAllStates() []T {
-	stateSet := make(map[T]bool)
-
-	// Add current state
-	stateSet[sm.currentState] = true
-
-	// Add all states from transitions
-	for _, transition := range sm.transitions {
-		stateSet[transition.From] = true
-		stateSet[transition.To] = true
-	}
-
-	states := make([]T, 0, len(stateSet))
-	for state := range stateSet {
-		states = append(states, state)
-	}
-
-	return states
-}
-
-// GetTransitionByName finds a transition by name from the current state.
-func (sm *StateMachine[T]) GetTransitionByName(name string) (Transition[T], bool) {
-	for _, transition := range sm.transitions {
-		if transition.Name == name && transition.From == sm.currentState {
-			return transition, true
-		}
-	}
-	var zero Transition[T]
-	return zero, false
-}
-
-// Clone creates a copy of the state machine with the same configuration but reset to initial state.
-func (sm *StateMachine[T]) Clone(initialState T) *StateMachine[T] {
-	transitions := make([]Transition[T], len(sm.transitions))
-	copy(transitions, sm.transitions)
-
-	return &StateMachine[T]{
-		currentState: initialState,
-		transitions:  transitions,
-		listeners:    make([]StateChangeListener[T], 0),
-	}
-}
-
-// findTransitionByName finds any transition with the given name.
-func (sm *StateMachine[T]) findTransitionByName(name string) (Transition[T], bool) {
-	for _, transition := range sm.transitions {
-		if transition.Name == name {
-			return transition, true
-		}
-	}
-	var zero Transition[T]
-	return zero, false
-}
-
-// HasCycle detects if there are any cycles in the state machine.
-func (sm *StateMachine[T]) HasCycle() bool {
-	states := sm.GetAllStates()
-	visited := make(map[T]bool)
-	recStack := make(map[T]bool)
-
-	for _, state := range states {
-		if !visited[state] {
-			if sm.hasCycleDFS(state, visited, recStack) {
-				return true
-			}
-		}
-	}
-
-	return false
-}
-
-// hasCycleDFS performs depth-first search to detect cycles.
-func (sm *StateMachine[T]) hasCycleDFS(state T, visited, recStack map[T]bool) bool {
-	visited[state] = true
-	recStack[state] = true
-
-	// Get all states reachable from current state
-	for _, transition := range sm.transitions {
-		if transition.From == state {
-			neighbor := transition.To
-			if !visited[neighbor] {
-				if sm.hasCycleDFS(neighbor, visited, recStack) {
-					return true
-				}
-			} else if recStack[neighbor] {
-				return true
-			}
-		}
-	}
-
-	recStack[state] = false
-	return false
-}
-
-// String returns a string representation of the state machine.
-func (sm *StateMachine[T]) String() string {
-	return fmt.Sprintf("StateMachine[current: %v, transitions: %d]",
-		sm.currentState, len(sm.transitions))
+	return Transition[T]{}, false
 }

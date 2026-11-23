@@ -1,278 +1,120 @@
-# Sets
+# sets
 
-The `sets` package provides a generic, thread-safe Set data structure with comprehensive set operations. Built with Go generics, it supports any comparable type and offers both mathematical set operations and functional programming patterns.
+A generic set of comparable values with union, intersection, difference, and
+subset tests, an order-preserving `Unique`, and a mutex-guarded `Sync` variant.
 
-## Features
+**Use it for:** membership checks and set algebra over IDs, tags, permissions,
+and similar values.
 
-- **Generic Implementation**: Works with any comparable type (`comparable` constraint)
-- **Rich Set Operations**: Union, intersection, difference, symmetric difference
-- **Set Relationships**: Subset, superset, disjoint, equal checks
-- **Functional Helpers**: Map-like operations (Any, Every/All, Filter, ForEach)
-- **Convenient Constructors**: Create sets from slices, other sets, or individual elements
-- **Memory Efficient**: Uses Go's built-in map with empty struct values
+**Don't use it for:** ordered collections (a `Set` has no order; use `Sorted`
+when you need one) or values that are not comparable. For removing adjacent
+duplicates from sorted input, `slices.Compact` avoids the map.
 
-## Quick Start
+## Installation
+
+```sh
+go get github.com/alextanhongpin/core/types
+```
+
+All `types` packages ship in the one `github.com/alextanhongpin/core/types`
+module. Import this one as `github.com/alextanhongpin/core/types/sets`. Check
+the module's `go.mod` for the required Go version.
+
+## Quick start
 
 ```go
 package main
 
 import (
-    "fmt"
-    "github.com/alextanhongpin/core/types/sets"
+	"fmt"
+
+	"github.com/alextanhongpin/core/types/sets"
 )
 
 func main() {
-    // Create sets
-    numbers := sets.From([]int{1, 2, 3, 4, 5})
-    evens := sets.From([]int{2, 4, 6, 8})
-    
-    // Basic operations
-    fmt.Println("Len:", numbers.Len())           // 5
-    fmt.Println("Contains 3:", numbers.Has(3))    // true
-    
-    // Set operations
-    intersection := numbers.Intersect(evens)
-    fmt.Println("Intersect:", intersection.Slice()) // [2, 4]
-    
-    union := numbers.Union(evens)
-    fmt.Println("Union size:", union.Len())             // 7
+	fmt.Println(sets.Unique([]string{"b", "a", "b", "c", "a"}))
+
+	admins := sets.Of("alice", "bob")
+	active := sets.Of("bob", "carol")
+	fmt.Println(sets.Sorted(sets.Intersection(admins, active)))
+	fmt.Println(sets.Sorted(sets.Union(admins, active)))
+	fmt.Println(sets.IsSubset(sets.Of("bob"), admins))
 }
 ```
 
-## API Reference
+It prints:
 
-### Constructors
-
-```go
-// Create empty set
-s := sets.New[int]()
-
-// Create from slice
-s := sets.From([]string{"a", "b", "c"})
-
-// Create from individual elements  
-s := sets.Of("x", "y", "z")
+```
+[b a c]
+[bob]
+[alice bob carol]
+true
 ```
 
-### Basic Operations
+## API
 
 ```go
-// Add elements
-s.Add("new")
-s.Add("a", "b")
+func Unique[T comparable](vals []T) []T
 
-// Remove elements
-s.Remove("old")
-s.Remove("x", "y")
+type Set[T comparable] struct{ /* unexported */ }
+func New[T comparable]() *Set[T]
+func From[T comparable](s []T) *Set[T]
+func Of[T comparable](vs ...T) *Set[T]
+func (s *Set[T]) Add(v T) bool
+func (s *Set[T]) AddMany(vs ...T) int
+func (s *Set[T]) Remove(v T) bool
+func (s *Set[T]) RemoveMany(vs ...T) int
+func (s *Set[T]) Clear()
+func (s *Set[T]) Len() int
+func (s *Set[T]) IsEmpty() bool
+func (s *Set[T]) Has(v T) bool
+func (s *Set[T]) All() []T
+func (s *Set[T]) Values() iter.Seq[T]
+func (s *Set[T]) Filter(keep func(T) bool) *Set[T]
+func (s *Set[T]) Clone() *Set[T]
+func (s *Set[T]) String() string
+func Sorted[T cmp.Ordered](s *Set[T]) []T
 
-// Check membership
-exists := s.Has("item")
+func Union[T comparable](a *Set[T], bs ...*Set[T]) *Set[T]
+func Intersection[T comparable](a *Set[T], bs ...*Set[T]) *Set[T]
+func Difference[T comparable](a *Set[T], bs ...*Set[T]) *Set[T]
+func SymmetricDifference[T comparable](a, b *Set[T]) *Set[T]
+func Equal[T comparable](a, b *Set[T]) bool
+func IsSubset[T comparable](a, b *Set[T]) bool
+func IsSuperset[T comparable](a, b *Set[T]) bool
+func IsProperSubset[T comparable](a, b *Set[T]) bool
+func IsProperSuperset[T comparable](a, b *Set[T]) bool
+func IsDisjoint[T comparable](a, b *Set[T]) bool
 
-// Len and emptiness
-size := s.Len()
-empty := s.IsEmpty()
-
-// Clear all elements
-s.Clear()
+type Sync[T comparable] struct{ /* unexported */ }
+func NewSync[T comparable](s *Set[T]) *Sync[T]
+// Add, AddMany, Remove, RemoveMany, Clear, Has, Len, IsEmpty, All, String
+func (s *Sync[T]) Clone() *Set[T]
 ```
 
-### Set Operations
+## Behavior and guarantees
 
-```go
-a := sets.From([]int{1, 2, 3, 4})
-b := sets.From([]int{3, 4, 5, 6})
+- `Unique` keeps the first occurrence of each value, in input order. It returns
+  nil for nil input.
+- The zero values of `Set` and `Sync` are empty sets ready to use.
+- `Add`/`Remove` report whether the set changed; `AddMany`/`RemoveMany` return
+  how many values changed it.
+- `All`, `Values`, and `String` use an unspecified order that can differ
+  between calls. `Sorted` returns ascending order.
+- `Union`, `Intersection`, `Difference`, `SymmetricDifference`, `Filter`, and
+  `Clone` never modify their arguments and always return a new set, even when
+  given a single set.
+- Modifying a set while iterating `Values` is not allowed, except deleting the
+  current value.
+- A `Set` is not safe for concurrent use. `Sync` guards every method with a
+  mutex. `NewSync` copies its argument (nil is allowed), and `Sync.Clone`
+  returns an unsynchronized snapshot to pass to the set operations.
 
-// Union: {1, 2, 3, 4, 5, 6}
-union := a.Union(b)
+## Testing
 
-// Intersect: {3, 4}
-intersection := a.Intersect(b)
-
-// Difference: {1, 2}
-diff := a.Difference(b)
-
-// Symmetric difference: {1, 2, 5, 6}
-symDiff := a.SymmetricDifference(b)
+```sh
+go vet ./sets/...
+go test -race -count=1 ./sets/...
 ```
 
-### Set Relationships
-
-```go
-a := sets.From([]int{1, 2})
-b := sets.From([]int{1, 2, 3, 4})
-c := sets.From([]int{5, 6})
-
-// Subset checks
-fmt.Println(a.IsSubset(b))    // true
-fmt.Println(a.IsSuperset(b))  // false
-
-// Disjoint sets (no common elements)
-fmt.Println(a.IsDisjoint(c))  // true
-
-// Set equality
-fmt.Println(a.Equal(b))       // false
-```
-
-### Functional Operations
-
-```go
-numbers := sets.From([]int{1, 2, 3, 4, 5})
-
-// Check conditions
-hasEven := numbers.Any(func(n int) bool { return n%2 == 0 })
-allPositive := numbers.Every(func(n int) bool { return n > 0 })
-
-// Filter elements
-evens := numbers.Filter(func(n int) bool { return n%2 == 0 })
-
-// Iterate over elements
-numbers.ForEach(func(n int) {
-    fmt.Printf("Number: %d\n", n)
-})
-```
-
-### Conversion and Cloning
-
-```go
-s := sets.From([]string{"a", "b", "c"})
-
-// Convert to slice (order not guaranteed)
-slice := s.Slice()
-
-// Create independent copy
-clone := s.Clone()
-```
-
-## Real-World Examples
-
-### User Permission System
-
-```go
-// Define user roles and permissions
-adminPerms := sets.From([]string{"read", "write", "delete", "admin"})
-editorPerms := sets.From([]string{"read", "write"})
-viewerPerms := sets.From([]string{"read"})
-
-// Check if user can perform action
-func canPerform(userPerms, requiredPerms *sets.Set[string]) bool {
-    return userPerms.IsSuperset(requiredPerms)
-}
-
-// Usage
-required := sets.From([]string{"read", "write"})
-fmt.Println("Editor can edit:", canPerform(editorPerms, required)) // true
-fmt.Println("Viewer can edit:", canPerform(viewerPerms, required)) // false
-```
-
-### Tag-Based Content Filtering
-
-```go
-// Content with tags
-type Content struct {
-    ID   string
-    Tags *sets.Set[string]
-}
-
-articles := []Content{
-    {"1", sets.From([]string{"tech", "programming", "go"})},
-    {"2", sets.From([]string{"tech", "ai", "machine-learning"})},
-    {"3", sets.From([]string{"lifestyle", "health"})},
-}
-
-// Filter content by tags
-techFilter := sets.From([]string{"tech"})
-filtered := make([]Content, 0)
-
-for _, article := range articles {
-    if !article.Tags.IsDisjoint(techFilter) {
-        filtered = append(filtered, article)
-    }
-}
-// Result: articles 1 and 2
-```
-
-### Feature Flag Management
-
-```go
-// Feature flags for different environments
-prodFeatures := sets.From([]string{"auth", "payments", "analytics"})
-stagingFeatures := sets.From([]string{"auth", "payments", "analytics", "debug"})
-devFeatures := sets.From([]string{"auth", "payments", "analytics", "debug", "mock-data"})
-
-// Check environment-specific features
-func isFeatureEnabled(env string, feature string) bool {
-    switch env {
-    case "prod":
-        return prodFeatures.Has(feature)
-    case "staging":
-        return stagingFeatures.Has(feature)
-    case "dev":
-        return devFeatures.Has(feature)
-    default:
-        return false
-    }
-}
-
-// Find features only in development
-devOnlyFeatures := devFeatures.Difference(prodFeatures)
-fmt.Println("Dev-only features:", devOnlyFeatures.Slice()) // ["debug", "mock-data"]
-```
-
-### Data Deduplication
-
-```go
-// Combine data from multiple sources while avoiding duplicates
-source1 := []string{"apple", "banana", "cherry"}
-source2 := []string{"banana", "date", "elderberry"}
-source3 := []string{"cherry", "fig", "grape"}
-
-// Combine all unique items
-combined := sets.New[string]()
-combined.Add(source1...)
-combined.Add(source2...)
-combined.Add(source3...)
-
-uniqueItems := combined.Slice()
-fmt.Printf("Unique items: %v\n", uniqueItems)
-// Result: All unique fruits from all sources
-```
-
-## Performance Characteristics
-
-- **Add/Remove/Contains**: O(1) average case
-- **Set Operations**: O(n) where n is the size of the larger set
-- **Memory**: O(n) where n is the number of unique elements
-- **Thread Safety**: Not thread-safe by default (use external synchronization if needed)
-
-## Thread Safety
-
-The Set is not thread-safe. For concurrent access, wrap operations with appropriate synchronization:
-
-```go
-import "sync"
-
-type SafeSet[T comparable] struct {
-    set *sets.Set[T]
-    mu  sync.RWMutex
-}
-
-func (s *SafeSet[T]) Add(item T) {
-    s.mu.Lock()
-    defer s.mu.Unlock()
-    s.set.Add(item)
-}
-
-func (s *SafeSet[T]) Has(item T) bool {
-    s.mu.RLock()
-    defer s.mu.RUnlock()
-    return s.set.Has(item)
-}
-```
-
-## Best Practices
-
-1. **Use appropriate constructors**: `From()` for slices, `Of()` for individual elements
-2. **Check emptiness**: Use `IsEmpty()` rather than `Len() == 0`
-3. **Immutable operations**: Set operations return new sets, leaving originals unchanged
-4. **Memory management**: Use `Clear()` to reuse sets rather than creating new ones
-5. **Type safety**: Leverage Go's type system - all elements must be the same comparable type
+Run from the `types` directory.

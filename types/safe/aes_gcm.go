@@ -1,6 +1,3 @@
-// Package safe provides AES-GCM encryption and decryption utilities.
-// AES-GCM provides both confidentiality and authenticity, making it suitable
-// for encrypting sensitive data.
 package safe
 
 import (
@@ -33,29 +30,7 @@ var (
 //	rand.Read(key)
 //	ciphertext, err := safe.Encrypt(key, []byte("secret message"))
 func Encrypt(secret, plaintext []byte) ([]byte, error) {
-	if len(secret) != 16 && len(secret) != 24 && len(secret) != 32 {
-		return nil, ErrInvalidKeySize
-	}
-
-	aes, err := aes.NewCipher(secret)
-	if err != nil {
-		return nil, fmt.Errorf("safe: failed to create cipher: %w", err)
-	}
-
-	gcm, err := cipher.NewGCM(aes)
-	if err != nil {
-		return nil, fmt.Errorf("safe: failed to create GCM: %w", err)
-	}
-
-	// Generate a random nonce
-	nonce := make([]byte, gcm.NonceSize())
-	if _, err := rand.Read(nonce); err != nil {
-		return nil, fmt.Errorf("safe: failed to generate nonce: %w", err)
-	}
-
-	// Encrypt and authenticate
-	ciphertext := gcm.Seal(nonce, nonce, plaintext, nil)
-	return ciphertext, nil
+	return EncryptWithAAD(secret, plaintext, nil)
 }
 
 // EncryptString encrypts a string and returns the result as a base64-encoded string.
@@ -79,35 +54,7 @@ func EncryptString(secret []byte, plaintext string) (string, error) {
 //
 //	plaintext, err := safe.Decrypt(key, ciphertext)
 func Decrypt(secret, ciphertext []byte) ([]byte, error) {
-	if len(secret) != 16 && len(secret) != 24 && len(secret) != 32 {
-		return nil, ErrInvalidKeySize
-	}
-
-	aes, err := aes.NewCipher(secret)
-	if err != nil {
-		return nil, fmt.Errorf("safe: failed to create cipher: %w", err)
-	}
-
-	gcm, err := cipher.NewGCM(aes)
-	if err != nil {
-		return nil, fmt.Errorf("safe: failed to create GCM: %w", err)
-	}
-
-	nonceSize := gcm.NonceSize()
-	if len(ciphertext) < nonceSize {
-		return nil, ErrInvalidCiphertext
-	}
-
-	// Extract nonce and actual ciphertext
-	nonce, ciphertext := ciphertext[:nonceSize], ciphertext[nonceSize:]
-
-	// Decrypt and verify
-	plaintext, err := gcm.Open(nil, nonce, ciphertext, nil)
-	if err != nil {
-		return nil, ErrDecryptionFailed
-	}
-
-	return plaintext, nil
+	return DecryptWithAAD(secret, ciphertext, nil)
 }
 
 // DecryptString decrypts a base64-encoded ciphertext and returns the result as a string.
@@ -156,27 +103,15 @@ func GenerateKey(size int) ([]byte, error) {
 //	aad := []byte("user-id:123")
 //	ciphertext, err := safe.EncryptWithAAD(key, plaintext, aad)
 func EncryptWithAAD(secret, plaintext, aad []byte) ([]byte, error) {
-	if len(secret) != 16 && len(secret) != 24 && len(secret) != 32 {
-		return nil, ErrInvalidKeySize
-	}
-
-	aes, err := aes.NewCipher(secret)
+	gcm, err := newGCM(secret)
 	if err != nil {
-		return nil, fmt.Errorf("safe: failed to create cipher: %w", err)
+		return nil, err
 	}
-
-	gcm, err := cipher.NewGCM(aes)
-	if err != nil {
-		return nil, fmt.Errorf("safe: failed to create GCM: %w", err)
-	}
-
-	nonce := make([]byte, gcm.NonceSize())
+	nonce := make([]byte, gcm.NonceSize(), gcm.NonceSize()+len(plaintext)+gcm.Overhead())
 	if _, err := rand.Read(nonce); err != nil {
 		return nil, fmt.Errorf("safe: failed to generate nonce: %w", err)
 	}
-
-	ciphertext := gcm.Seal(nonce, nonce, plaintext, aad)
-	return ciphertext, nil
+	return gcm.Seal(nonce, nonce, plaintext, aad), nil
 }
 
 // DecryptWithAAD decrypts ciphertext that was encrypted with EncryptWithAAD.
@@ -187,31 +122,34 @@ func EncryptWithAAD(secret, plaintext, aad []byte) ([]byte, error) {
 //	aad := []byte("user-id:123")
 //	plaintext, err := safe.DecryptWithAAD(key, ciphertext, aad)
 func DecryptWithAAD(secret, ciphertext, aad []byte) ([]byte, error) {
-	if len(secret) != 16 && len(secret) != 24 && len(secret) != 32 {
-		return nil, ErrInvalidKeySize
-	}
-
-	aes, err := aes.NewCipher(secret)
+	gcm, err := newGCM(secret)
 	if err != nil {
-		return nil, fmt.Errorf("safe: failed to create cipher: %w", err)
+		return nil, err
 	}
-
-	gcm, err := cipher.NewGCM(aes)
-	if err != nil {
-		return nil, fmt.Errorf("safe: failed to create GCM: %w", err)
-	}
-
-	nonceSize := gcm.NonceSize()
-	if len(ciphertext) < nonceSize {
+	if len(ciphertext) < gcm.NonceSize()+gcm.Overhead() {
 		return nil, ErrInvalidCiphertext
 	}
-
-	nonce, ciphertext := ciphertext[:nonceSize], ciphertext[nonceSize:]
-
-	plaintext, err := gcm.Open(nil, nonce, ciphertext, aad)
+	nonce, sealed := ciphertext[:gcm.NonceSize()], ciphertext[gcm.NonceSize():]
+	plaintext, err := gcm.Open(nil, nonce, sealed, aad)
 	if err != nil {
 		return nil, ErrDecryptionFailed
 	}
-
 	return plaintext, nil
+}
+
+func newGCM(secret []byte) (cipher.AEAD, error) {
+	switch len(secret) {
+	case 16, 24, 32:
+	default:
+		return nil, ErrInvalidKeySize
+	}
+	block, err := aes.NewCipher(secret)
+	if err != nil {
+		return nil, fmt.Errorf("safe: failed to create cipher: %w", err)
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, fmt.Errorf("safe: failed to create GCM: %w", err)
+	}
+	return gcm, nil
 }

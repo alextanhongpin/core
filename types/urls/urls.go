@@ -2,14 +2,16 @@ package urls
 
 import (
 	"crypto/sha256"
-	"fmt"
+	"encoding/hex"
 	"io"
+	"net"
 	"net/url"
 	"strings"
 
 	"golang.org/x/net/html"
 )
 
+// IsEqual reports whether a and b parse and have the same normalized form.
 func IsEqual(a, b string) bool {
 	c, err := Normalize(a)
 	if err != nil {
@@ -22,59 +24,90 @@ func IsEqual(a, b string) bool {
 	return c.String() == d.String()
 }
 
-// Normalize removes trailing slash, as well as removing fragments and query
-// string in the URL.
+// Normalize parses link and returns it without query string, fragment,
+// trailing slash, or default port (80 for http, 443 for https), with the
+// scheme and host in lower case.
 func Normalize(link string) (*url.URL, error) {
-	u, err := url.Parse(strings.TrimSuffix(link, "/"))
+	u, err := url.Parse(link)
 	if err != nil {
 		return nil, err
 	}
-	u.Fragment = ""
-	u.RawQuery = ""
-	return u, nil
+	return normalize(u), nil
 }
 
-func IsScopedDomain(root, u *url.URL) bool {
-	return root.Host == u.Host &&
-		root.Scheme == u.Scheme
-}
-
-func IsScopedPrefix(root, u *url.URL) bool {
-	path := strings.TrimPrefix(u.String(), root.String())
-	return strings.HasPrefix(path, "/")
-}
-
-func Hash(u *url.URL) string {
-	v, err := Normalize(u.String())
-	if err != nil {
-		panic(err)
+func normalize(u *url.URL) *url.URL {
+	v := *u
+	v.User = nil
+	if u.User != nil {
+		user := *u.User
+		v.User = &user
 	}
-	sum := sha256.Sum256([]byte(v.String()))
-	return fmt.Sprintf("%x", sum)
+	v.RawQuery = ""
+	v.ForceQuery = false
+	v.Fragment = ""
+	v.RawFragment = ""
+	v.Scheme = strings.ToLower(v.Scheme)
+	v.Host = strings.ToLower(v.Host)
+	if host, port, err := net.SplitHostPort(v.Host); err == nil &&
+		(v.Scheme == "http" && port == "80" || v.Scheme == "https" && port == "443") {
+		v.Host = host
+		if strings.Contains(host, ":") {
+			v.Host = "[" + host + "]"
+		}
+	}
+	v.Path = strings.TrimRight(v.Path, "/")
+	if v.RawPath != "" {
+		v.RawPath = strings.TrimRight(v.RawPath, "/")
+	}
+	return &v
 }
 
-// Extract parses HTML and returns all href values.
-func Extract(htmlContent io.Reader) []string {
-	var urls []string
-	tokenizer := html.NewTokenizer(htmlContent)
+// IsScopedDomain reports whether u has the same scheme and host as root,
+// ignoring case and default ports.
+func IsScopedDomain(root, u *url.URL) bool {
+	r, v := normalize(root), normalize(u)
+	return r.Scheme == v.Scheme && r.Host == v.Host
+}
 
+// IsScopedPrefix reports whether u is strictly below root: it has the same
+// scheme and host, and its path continues root's path after a "/". A URL is
+// not scoped under itself, and "/path-is" is not under "/path".
+func IsScopedPrefix(root, u *url.URL) bool {
+	if !IsScopedDomain(root, u) {
+		return false
+	}
+	rest, ok := strings.CutPrefix(normalize(u).EscapedPath(), normalize(root).EscapedPath())
+	return ok && len(rest) > 1 && rest[0] == '/'
+}
+
+// Hash returns the hex SHA-256 of u's normalized form, so URLs that differ
+// only in what Normalize removes have the same hash.
+func Hash(u *url.URL) string {
+	sum := sha256.Sum256([]byte(normalize(u).String()))
+	return hex.EncodeToString(sum[:])
+}
+
+// Extract returns the href attribute values of the <a> elements in an HTML
+// document, in document order. Values are returned as written: relative
+// links are not resolved and fragment-only or mailto: links are included.
+// Reading stops at the end of the input or the first read error.
+func Extract(r io.Reader) []string {
+	var hrefs []string
+	z := html.NewTokenizer(r)
 	for {
-		tokenType := tokenizer.Next()
-
-		switch tokenType {
+		switch z.Next() {
 		case html.ErrorToken:
-			// End of the document or invalid HTML
-			return urls
-
+			return hrefs
 		case html.StartTagToken, html.SelfClosingTagToken:
-			token := tokenizer.Token()
-
-			// Check if the tag is an anchor tag <a>
-			if token.Data == "a" {
-				for _, attr := range token.Attr {
-					if attr.Key == "href" {
-						urls = append(urls, attr.Val)
-					}
+			name, hasAttr := z.TagName()
+			if string(name) != "a" {
+				continue
+			}
+			for hasAttr {
+				var key, val []byte
+				key, val, hasAttr = z.TagAttr()
+				if string(key) == "href" {
+					hrefs = append(hrefs, string(val))
 				}
 			}
 		}

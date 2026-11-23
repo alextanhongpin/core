@@ -8,30 +8,31 @@ import (
 
 func TestStringCaseConversions(t *testing.T) {
 	tests := []struct {
-		name    string
-		input   string
-		kebab   string
-		snake   string
-		camel   string
-		pascal  string
-		title   string
-		fromKeb string
-		fromSnk string
+		name   string
+		input  string
+		kebab  string
+		snake  string
+		camel  string
+		pascal string
+		title  string
 	}{
-		{"simple words", "hello world", "hello-world", "hello_world", "helloWorld", "HelloWorld", "Hello World", "hello world", "hello world"},
-		{"single word", "hello", "hello", "hello", "hello", "Hello", "Hello", "hello", "hello"},
-		{"PascalCase", "HelloWorld", "hello-world", "hello_world", "helloWorld", "HelloWorld", "Hello World", "hello world", "hello world"},
-		{"camelCase", "helloWorld", "hello-world", "hello_world", "helloWorld", "HelloWorld", "Hello World", "hello world", "hello world"},
-		{"snake_case", "hello_world", "hello-world", "hello_world", "helloWorld", "HelloWorld", "Hello World", "hello world", "hello world"},
-		{"kebab-case", "hello-world", "hello-world", "hello_world", "helloWorld", "HelloWorld", "Hello World", "hello world", "hello world"},
-		{"Title Case", "Hello World", "hello-world", "hello_world", "helloWorld", "HelloWorld", "Hello World", "hello world", "hello world"},
-		{"with initialism", "userID", "user-id", "user_id", "userID", "UserID", "User ID", "user id", "user id"},
-		{"with initialism 2", "apiResponseID", "api-response-id", "api_response_id", "apiResponseID", "APIResponseID", "API Response ID", "api response id", "api response id"},
-		{"with initialism 3", "HTTPsServerID", "https-server-id", "https_server_id", "httpsServerID", "HTTPsServerID", "HTTPs Server ID", "https server id", "https server id"},
+		{"simple words", "hello world", "hello-world", "hello_world", "helloWorld", "HelloWorld", "Hello World"},
+		{"single word", "hello", "hello", "hello", "hello", "Hello", "Hello"},
+		{"PascalCase", "HelloWorld", "hello-world", "hello_world", "helloWorld", "HelloWorld", "Hello World"},
+		{"camelCase", "helloWorld", "hello-world", "hello_world", "helloWorld", "HelloWorld", "Hello World"},
+		{"snake_case", "hello_world", "hello-world", "hello_world", "helloWorld", "HelloWorld", "Hello World"},
+		{"kebab-case", "hello-world", "hello-world", "hello_world", "helloWorld", "HelloWorld", "Hello World"},
+		{"Title Case", "Hello World", "hello-world", "hello_world", "helloWorld", "HelloWorld", "Hello World"},
+		{"with initialism", "userID", "user-id", "user_id", "userID", "UserID", "User ID"},
+		{"with initialism 2", "apiResponseID", "api-response-id", "api_response_id", "apiResponseID", "APIResponseID", "API Response ID"},
+		// "HTTPS" and "HTTPs" share a lowercase form; the first listed wins.
+		{"with initialism 3", "HTTPsServerID", "https-server-id", "https_server_id", "httpsServerID", "HTTPSServerID", "HTTPS Server ID"},
+		// Regression: an initialism directly followed by another used to stay joined.
+		{"adjacent initialisms", "XMLHTTPRequest", "xml-http-request", "xml_http_request", "xmlHTTPRequest", "XMLHTTPRequest", "XML HTTP Request"},
 		// Edge-case.
-		{"with initialism 4", "HTTPServerID", "http-server-id", "http_server_id", "httpServerID", "HTTPServerID", "HTTP Server ID", "http server id", "http server id"},
-		{"with numbers", "user1ID", "user1-id", "user1_id", "user1ID", "User1ID", "User1 ID", "user1 id", "user1 id"},
-		{"with underscores and dashes", "user_id-test", "user-id-test", "user_id_test", "userIDTest", "UserIDTest", "User ID Test", "user id test", "user id test"},
+		{"with initialism 4", "HTTPServerID", "http-server-id", "http_server_id", "httpServerID", "HTTPServerID", "HTTP Server ID"},
+		{"with numbers", "user1ID", "user1-id", "user1_id", "user1ID", "User1ID", "User1 ID"},
+		{"with underscores and dashes", "user_id-test", "user-id-test", "user_id_test", "userIDTest", "UserIDTest", "User ID Test"},
 	}
 
 	for _, tt := range tests {
@@ -60,17 +61,6 @@ func TestStringCaseConversions(t *testing.T) {
 				t.Errorf("ToTitle(%q) = %q, want %q", tt.input, got, tt.title)
 			}
 		})
-		t.Run(tt.name+"_FromKebab", func(t *testing.T) {
-			if got := FromKebab(tt.kebab); got != tt.fromKeb {
-				t.Errorf("FromKebab(%q) = %q, want %q", tt.kebab, got, tt.fromKeb)
-			}
-		})
-		t.Run(tt.name+"_FromSnake", func(t *testing.T) {
-			if got := FromSnake(tt.snake); got != tt.fromSnk {
-				t.Errorf("FromSnake(%q) = %q, want %q", tt.snake, got, tt.fromSnk)
-			}
-		})
-
 		t.Run(tt.name+"_Cycle", func(t *testing.T) {
 			funcs := []func(string) string{
 				ToSnake,
@@ -99,7 +89,7 @@ func TestStringCaseConversions(t *testing.T) {
 }
 
 func TestTokenizer(t *testing.T) {
-	withInitialism := NewTokenizer(append(DefaultInitialisms, "HTTPS")...)
+	withInitialism := NewTokenizer(DefaultInitialisms...)
 	withoutInitialism := NewTokenizer()
 
 	word := "https_server_api"
@@ -107,4 +97,17 @@ func TestTokenizer(t *testing.T) {
 	is := assert.New(t)
 	is.Equal("httpsServerAPI", withInitialism.Camel(word))
 	is.Equal("httpsServerApi", withoutInitialism.Camel(word))
+}
+
+func TestTokenize(t *testing.T) {
+	tests := map[string][]string{
+		"userIDsAPIURL":   {"user", "ids", "api", "url"},
+		"getHTTPResponse": {"get", "http", "response"},
+		"userID1":         {"user", "id", "1"},
+		"ÄpfelBaum":       {"äpfel", "baum"},
+		"  --  ":          nil,
+	}
+	for in, want := range tests {
+		assert.Equal(t, want, Tokenize(in, DefaultInitialisms), in)
+	}
 }

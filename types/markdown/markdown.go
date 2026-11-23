@@ -1,7 +1,7 @@
 package markdown
 
 import (
-	"cmp"
+	"bytes"
 	"errors"
 	"io"
 	"log/slog"
@@ -12,145 +12,135 @@ import (
 	"time"
 )
 
-// rw defines the interface required for reading and writing the loader state.
-// It must support reading content from an io.ReaderFrom context and writing/reading
-// metadata via WriterTo/ReaderFrom mechanisms, assuming it wraps the final file I/O.
-type rw interface {
+// Content produces a file's body with WriteTo and receives the body read
+// back from disk with ReadFrom.
+type Content interface {
 	io.WriterTo
 	io.ReaderFrom
 }
 
-// Loader manages the lifecycle, reading, writing, and syncing of markdown loader metadata.
+// Loader caches generated content in a Markdown file. The file's frontmatter
+// holds the configured metadata plus a created_at timestamp; when the file is
+// missing or older than the TTL, Loader regenerates it from Content.WriteTo.
+// A Loader is safe for concurrent use.
 type Loader struct {
-	meta map[string]any // Metadata stored with the file (e.g., creation timestamps)
-	path string         // Absolute path to the markdown file
-	rw   rw             // The underlying IO mechanism for reading/writing the file content
-	ttl  time.Duration  // Time-to-live for metadata refresh check
+	mu      sync.Mutex
+	meta    map[string]any
+	path    string
+	content Content
+	ttl     time.Duration
 }
 
-// NewLoader creates a new Loader instance.
-func NewLoader(path string, meta map[string]any, ttl time.Duration, rw rw) *Loader {
+// NewLoader returns a Loader for the file at path. meta is copied into the
+// frontmatter of every saved file. A nonpositive ttl regenerates the file on
+// every Load.
+func NewLoader(path string, meta map[string]any, ttl time.Duration, content Content) *Loader {
 	return &Loader{
-		meta: meta,
-		path: path,
-		rw:   rw,
-		ttl:  ttl,
+		meta:    maps.Clone(meta),
+		path:    path,
+		content: content,
+		ttl:     ttl,
 	}
 }
 
-// Sync starts a background routine to periodically check if the metadata needs updating
-// (i.e., if the underlying content has changed since the metadata was written).
-// It returns a function that, when called, stops the background syncing process.
-func (l *Loader) Sync() func() {
-	var wg sync.WaitGroup
-
-	// We use a context/cancellation pattern here in a real app, but for this scope,
-	// we'll rely on the pattern of returning a cleanup function.
+// Sync calls Load every ttl in a background goroutine, logging errors with
+// slog. The returned function stops the goroutine and waits for it to exit;
+// it is safe to call more than once. Sync panics if ttl is not positive.
+func (l *Loader) Sync() (stop func()) {
 	ticker := time.NewTicker(l.ttl)
-
-	// Start the background monitoring routine
+	done := make(chan struct{})
+	var wg sync.WaitGroup
 	wg.Go(func() {
 		defer ticker.Stop()
-
-		for range ticker.C {
-			if err := l.Load(); err != nil {
-				// Log synchronization errors but do not crash the background routine
-				slog.Default().Error("sync error while loading markdown loader", "error", err.Error())
+		for {
+			select {
+			case <-done:
+				return
+			case <-ticker.C:
+				if err := l.Load(); err != nil {
+					slog.Error("markdown: sync failed", "path", l.path, "error", err)
+				}
 			}
 		}
 	})
 
-	// Return the cleanup function
+	var once sync.Once
 	return func() {
-		ticker.Stop()
-		wg.Done() // Decrement counter when cleanup function is called
+		once.Do(func() { close(done) })
+		wg.Wait()
 	}
 }
 
-// Load attempts to load the metadata and content from the file system.
-// Returns an error if loading fails.
+// Load regenerates the file if it is missing or expired, then passes the
+// file's body to Content.ReadFrom.
 func (l *Loader) Load() error {
-	f, err := os.Open(l.path)
-	if errors.Is(err, os.ErrNotExist) {
-		return cmp.Or(
-			l.Save(),
-			l.Load(),
-		)
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	meta, body, err := l.read()
+	if errors.Is(err, os.ErrNotExist) || (err == nil && l.expired(meta)) {
+		if err := l.save(); err != nil {
+			return err
+		}
+		_, body, err = l.read()
 	}
 	if err != nil {
 		return err
 	}
-	defer func() {
-		_ = f.Close()
-	}()
-
-	// 1. Parse Frontmatter
-	meta, reader, err := ParseFrontmatter[map[string]any](f)
-	if err != nil {
-		return err
-	}
-
-	// 2. Check if metadata indicates an update is needed
-	if l.shouldUpdate(meta) {
-		return cmp.Or(
-			// If metadata is stale, save first to update it, then reload to get the new state.
-			l.Save(),
-			// After saving, we must reload to ensure we read the newly written metadata
-			l.Load(),
-		)
-	}
-
-	// 3. Read the main content using the buffered reader
-	_, err = l.rw.ReadFrom(reader)
+	_, err = l.content.ReadFrom(body)
 	return err
 }
 
-// Save writes the current metadata state and the content provided by rw.WriterTo to the file.
-// It updates the 'created_at' field with the current timestamp.
+// Save regenerates the file from Content.WriteTo, creating parent
+// directories as needed.
 func (l *Loader) Save() error {
-	// Ensure the directory structure exists
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.save()
+}
+
+func (l *Loader) read() (map[string]any, io.Reader, error) {
+	b, err := os.ReadFile(l.path)
+	if err != nil {
+		return nil, nil, err
+	}
+	return ParseFrontmatter[map[string]any](bytes.NewReader(b))
+}
+
+func (l *Loader) save() error {
 	if err := os.MkdirAll(filepath.Dir(l.path), 0o755); err != nil {
 		return err
 	}
-
-	// Create the file handle
 	f, err := os.Create(l.path)
 	if err != nil {
 		return err
 	}
-	defer func() {
-		_ = f.Close()
-	}()
+	defer f.Close()
 
-	// Update metadata
 	meta := maps.Clone(l.meta)
-	meta["created_at"] = time.Now().Format(time.RFC3339)
-
-	// 1. Write the frontmatter header
+	if meta == nil {
+		meta = make(map[string]any)
+	}
+	meta["created_at"] = time.Now().UTC().Format(time.RFC3339Nano)
 	if err := WriteFrontmatter(f, meta); err != nil {
 		return err
 	}
-
-	// 2. Write the main content
-	_, err = l.rw.WriteTo(f)
-	return err
+	if _, err := l.content.WriteTo(f); err != nil {
+		return err
+	}
+	return f.Close()
 }
 
-// shouldUpdate checks if the metadata provided is older than the configured TTL.
-// If the file doesn't contain a valid 'created_at' timestamp, it defaults to false.
-func (l *Loader) shouldUpdate(meta map[string]any) bool {
-	// Check if 'created_at' exists and is a string
+// expired reports whether meta's created_at is older than the TTL. A file
+// without a parsable created_at never expires.
+func (l *Loader) expired(meta map[string]any) bool {
 	s, ok := meta["created_at"].(string)
 	if !ok {
 		return false
 	}
-
-	// Parse the timestamp
-	t, err := time.Parse(time.RFC3339, s)
+	t, err := time.Parse(time.RFC3339Nano, s)
 	if err != nil {
-		return false // Cannot parse, assume no change or handle error elsewhere
+		return false
 	}
-
-	// Check if the time elapsed since creation exceeds the TTL
-	return time.Since(t) > l.ttl
+	return time.Now().Sub(t) >= l.ttl
 }

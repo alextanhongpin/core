@@ -1,67 +1,116 @@
 package sets_test
 
 import (
+	"fmt"
+	"slices"
+	"sync"
 	"testing"
 
 	"github.com/alextanhongpin/core/types/sets"
 	"github.com/go-openapi/testify/assert"
 )
 
+func TestUnique(t *testing.T) {
+	is := assert.New(t)
+	// Regression: Unique went through a map and lost the input order.
+	for range 20 {
+		is.Equal([]int{3, 1, 2}, sets.Unique([]int{3, 1, 3, 2, 1}))
+	}
+	is.Nil(sets.Unique[int](nil))
+	is.Equal([]int{}, sets.Unique([]int{}))
+}
+
 func TestSet(t *testing.T) {
+	is := assert.New(t)
+	var s sets.Set[string] // zero value is usable
+	is.True(s.IsEmpty())
+	is.False(s.Has("a"))
+	is.False(s.Remove("a"))
+	is.True(s.Add("a"))
+	is.False(s.Add("a"))
+	is.Equal(2, s.AddMany("a", "b", "c"))
+	is.Equal(3, s.Len())
+	is.Equal(1, s.RemoveMany("b", "x"))
+	is.Equal([]string{"a", "c"}, sets.Sorted(&s))
+	is.Equal([]string{"a", "c"}, slices.Sorted(s.Values()))
+	is.Equal([]string{"c"}, s.Filter(func(v string) bool { return v > "b" }).All())
 
-	t.Run("two equal sets", func(t *testing.T) {
-		assert := assert.New(t)
+	c := s.Clone()
+	c.Add("z")
+	is.False(s.Has("z"), "clone is independent")
 
-		s1 := sets.Of(1, 2, 3)
-		s2 := sets.Of(1, 2, 3)
+	s.Clear()
+	is.Equal(0, s.Len())
+	is.Equal("{}", s.String())
+	is.Equal("{1}", sets.Of(1).String())
+}
 
-		assert.Equal([]int{1, 2, 3}, sets.Sorted(sets.Union(s1, s2)).All())
-		assert.Equal([]int{1, 2, 3}, sets.Sorted(sets.Intersection(s1, s2)).All())
-		assert.Equal([]int(nil), sets.Difference(s1, s2).All())
-		assert.True(sets.Equal(sets.Union(s1, s2), s1))
-		assert.True(sets.Equal(s1, s2))
-		assert.True(sets.Equal(sets.Intersection(s1, s2), s1))
-		assert.True(sets.Equal(sets.Difference(s1, s2), sets.Of[int]()))
-		assert.Equal(3, s1.Len())
-		assert.Equal([]int{1, 2, 3}, sets.Sorted(s1).All())
-		assert.True(s1.Has(1))
-		assert.True(s1.Has(2))
-		assert.True(s1.Has(3))
-		assert.True(!s1.Has(4))
-	})
+func TestOperations(t *testing.T) {
+	is := assert.New(t)
+	a, b, c := sets.Of(1, 2, 3), sets.Of(2, 3, 4), sets.Of(3, 4, 5)
 
-	t.Run("two partial overlapping sets", func(t *testing.T) {
-		assert := assert.New(t)
+	is.Equal([]int{3}, sets.Sorted(sets.Intersection(a, b, c)))
+	is.Equal([]int{1, 2, 3, 4, 5}, sets.Sorted(sets.Union(a, b, c)))
+	is.Equal([]int{1}, sets.Sorted(sets.Difference(a, b, c)))
+	is.Equal([]int{1, 4}, sets.Sorted(sets.SymmetricDifference(a, b)))
+	is.Equal([]int{1, 2, 3}, sets.Sorted(a), "inputs are not modified")
 
-		s1 := sets.Of(1, 2, 3)
-		s2 := sets.Of(2, 3, 4)
+	// Regression: Intersection with one argument returned the argument
+	// itself, so changing the result changed the input.
+	got := sets.Intersection(a)
+	got.Add(99)
+	is.False(a.Has(99))
 
-		assert.Equal([]int{1, 2, 3, 4}, sets.Sorted(sets.Union(s1, s2)).All())
-		assert.Equal([]int{2, 3}, sets.Sorted(sets.Intersection(s1, s2)).All())
-		assert.Equal([]int{1}, sets.Difference(s1, s2).All())
-	})
+	is.True(sets.Equal(a, sets.Of(3, 2, 1)))
+	is.False(sets.Equal(a, b))
+	is.True(sets.IsSubset(sets.Of(1, 2), a))
+	is.True(sets.IsSubset(a, a))
+	is.False(sets.IsProperSubset(a, a))
+	is.True(sets.IsProperSubset(sets.Of(1), a))
+	is.True(sets.IsSuperset(a, sets.Of(1)))
+	is.True(sets.IsProperSuperset(a, sets.Of(1)))
+	is.True(sets.IsDisjoint(a, sets.Of(9)))
+	is.False(sets.IsDisjoint(a, c))
 
-	t.Run("two non-overlapping sets", func(t *testing.T) {
-		assert := assert.New(t)
+	var empty sets.Set[int]
+	is.Equal(0, sets.Union(&empty).Len())
+	is.True(sets.IsSubset(&empty, a))
+}
 
-		s1 := sets.Of(1, 2, 3)
-		s2 := sets.Of(4, 5, 6)
+func TestSync(t *testing.T) {
+	is := assert.New(t)
+	src := sets.Of(1)
+	s := sets.NewSync(src)
+	src.Add(2)
+	is.False(s.Has(2), "NewSync copies its argument")
 
-		assert.Equal([]int{1, 2, 3, 4, 5, 6}, sets.Sorted(sets.Union(s1, s2)).All())
-		assert.Equal([]int(nil), sets.Intersection(s1, s2).All())
-		assert.Equal([]int{1, 2, 3}, sets.Sorted(sets.Difference(s1, s2)).All())
-	})
+	// Regression: NewSync(nil) panicked on first use.
+	var wg sync.WaitGroup
+	n := sets.NewSync[int](nil)
+	for i := range 100 {
+		wg.Go(func() {
+			n.Add(i)
+			n.Has(i)
+			n.Len()
+		})
+	}
+	wg.Wait()
+	is.Equal(100, n.Len())
+	is.Equal(100, n.Clone().Len())
 
-	t.Run("empty set", func(t *testing.T) {
-		is := assert.New(t)
-		is.True(sets.New[int]().IsEmpty())
-		is.True(sets.Of[int]().IsEmpty())
-		is.True((&sets.Set[int]{}).IsEmpty())
-	})
+	var zero sets.Sync[string]
+	is.True(zero.Add("a"))
+	is.Equal("{a}", zero.String())
+}
 
-	t.Run("unique", func(t *testing.T) {
-		s := sets.Of(1, 2, 1, 2)
-		is := assert.New(t)
-		is.Equal(2, s.Len())
-	})
+func ExampleUnique() {
+	fmt.Println(sets.Unique([]string{"b", "a", "b", "c", "a"}))
+	// Output: [b a c]
+}
+
+func ExampleIntersection() {
+	admins := sets.Of("alice", "bob")
+	active := sets.Of("bob", "carol")
+	fmt.Println(sets.Sorted(sets.Intersection(admins, active)))
+	// Output: [bob]
 }

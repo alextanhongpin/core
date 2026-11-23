@@ -2,34 +2,31 @@ package random
 
 import (
 	"math/rand/v2"
+	"sync"
 	"time"
+	"unicode/utf8"
 )
 
+// RNG is a pseudo-random generator backed by a PCG source. It is safe for
+// concurrent use. It is not cryptographically secure.
 type RNG struct {
+	mu   sync.Mutex
 	rand *rand.Rand
 }
 
-// New creates a new RNG instance seeded with two random values.
+// New returns an RNG with a random seed.
 func New() *RNG {
 	return new(RNG).WithSeeds(rand.Uint64(), rand.Uint64())
 }
 
-// SeedFromTime seeds the RNG using the current time in nanoseconds.
-func SeedFromTime() *RNG {
-	seed := uint64(time.Now().UnixNano())
-	return New().WithSeed(seed)
-}
-
-// WithSeed seeds the RNG with a single value, returning a new RNG instance.
-// The returned RNG will produce the same sequence of values as the original
-// RNG if seeded with the same value.
+// WithSeed returns a new RNG seeded with seed; the receiver is unchanged.
+// RNGs with the same seed produce the same sequence.
 func (r *RNG) WithSeed(seed uint64) *RNG {
 	return r.WithSeeds(seed, seed)
 }
 
-// WithSeeds seeds the RNG with two values, returning a new RNG instance.
-// The returned RNG will produce the same sequence of values as the original
-// RNG if seeded with the same values.
+// WithSeeds returns a new RNG seeded with seed1 and seed2; the receiver is
+// unchanged. RNGs with the same seeds produce the same sequence.
 func (r *RNG) WithSeeds(seed1, seed2 uint64) *RNG {
 	return &RNG{
 		rand: rand.New(rand.NewPCG(seed1, seed2)),
@@ -46,7 +43,9 @@ func (r *RNG) Duration(max time.Duration) time.Duration {
 	if max <= 0 {
 		return 0
 	}
-	return time.Duration(r.rand.Int64N(max.Nanoseconds())) * time.Nanosecond
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return time.Duration(r.rand.Int64N(int64(max)))
 }
 
 // DurationBetween generates a random duration between the given minimum and maximum durations (inclusive of min, exclusive of max).
@@ -58,7 +57,15 @@ func (r *RNG) DurationBetween(min, max time.Duration) time.Duration {
 	if max <= min {
 		return min
 	}
-	return r.Duration(max-min) + min
+	return min + time.Duration(r.uint64N(uint64(max)-uint64(min)))
+}
+
+// uint64N returns a value in [0, n). Using unsigned arithmetic lets the
+// Between methods handle spans wider than the maximum signed value.
+func (r *RNG) uint64N(n uint64) uint64 {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.rand.Uint64N(n)
 }
 
 // Int generates a random integer between 0 and max (exclusive).
@@ -71,6 +78,8 @@ func (r *RNG) Int(max int) int {
 	if max <= 0 {
 		return 0
 	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	return r.rand.IntN(max)
 }
 
@@ -83,7 +92,7 @@ func (r *RNG) IntBetween(min, max int) int {
 	if max <= min {
 		return min
 	}
-	return r.Int(max-min) + min
+	return min + int(r.uint64N(uint64(max)-uint64(min)))
 }
 
 // Float generates a random float64 between 0.0 and max (exclusive).
@@ -95,6 +104,8 @@ func (r *RNG) Float(max float64) float64 {
 	if max <= 0 {
 		return 0
 	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	return r.rand.Float64() * max
 }
 
@@ -116,6 +127,8 @@ func (r *RNG) FloatBetween(min, max float64) float64 {
 //
 //	coinFlip := random.Bool() // true or false
 func (r *RNG) Bool() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	return r.rand.IntN(2) == 1
 }
 
@@ -133,11 +146,14 @@ func (r *RNG) BoolWithProbability(probability float64) bool {
 	if probability >= 1 {
 		return true
 	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	return r.rand.Float64() < probability
 }
 
-// String generates a random string of the given length using the provided character set.
-// If charset is empty, uses alphanumeric characters.
+// String returns length characters drawn uniformly from charset, or from
+// [a-zA-Z0-9] if charset is empty. Multi-byte characters in charset are
+// treated as single characters. Do not use it for secrets; see package safe.
 //
 // Example:
 //
@@ -149,14 +165,42 @@ func (r *RNG) String(length int, charset string) string {
 	}
 
 	if charset == "" {
-		charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+		charset = alphaNumeric
 	}
 
-	result := make([]byte, length)
-	for i := 0; i < length; i++ {
-		result[i] = charset[r.rand.IntN(len(charset))]
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if !isASCII(charset) {
+		runes := []rune(charset)
+		out := make([]rune, length)
+		for i := range out {
+			out[i] = runes[r.rand.IntN(len(runes))]
+		}
+		return string(out)
 	}
-	return string(result)
+	out := make([]byte, length)
+	for i := range out {
+		out[i] = charset[r.rand.IntN(len(charset))]
+	}
+	return string(out)
+}
+
+const alphaNumeric = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+
+func isASCII(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] >= utf8.RuneSelf {
+			return false
+		}
+	}
+	return true
+}
+
+// shuffle shuffles n elements with swap under the RNG's lock.
+func (r *RNG) shuffle(n int, swap func(i, j int)) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.rand.Shuffle(n, swap)
 }
 
 // AlphaNumeric generates a random alphanumeric string of the given length.
@@ -165,7 +209,7 @@ func (r *RNG) String(length int, charset string) string {
 //
 //	sessionID := random.AlphaNumeric(16) // "a1B2c3D4e5F6g7H8"
 func (r *RNG) AlphaNumeric(length int) string {
-	return r.String(length, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
+	return r.String(length, alphaNumeric)
 }
 
 // Hex generates a random hexadecimal string of the given length.

@@ -10,14 +10,13 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
-var delimiter = "---"
+const delimiter = "---"
 
-// WriteFrontmatter writes frontmatter data to the writer in the format:
-// ---
-// key: value
-// key2: value2
-// ---
-// The input map 'meta' should ideally be a map[string]any.
+// ErrUnterminated is returned by ParseFrontmatter when the opening
+// delimiter has no closing delimiter.
+var ErrUnterminated = errors.New("markdown: unterminated frontmatter")
+
+// WriteFrontmatter writes meta as YAML between "---" lines.
 func WriteFrontmatter(w io.Writer, meta any) error {
 	b, err := yaml.Marshal(meta)
 	if err != nil {
@@ -27,70 +26,58 @@ func WriteFrontmatter(w io.Writer, meta any) error {
 	return err
 }
 
-// Write writes both frontmatter and bytes content to the writer.
+// Write writes the frontmatter followed by content.
 func Write(w io.Writer, meta any, content []byte) error {
-	err := WriteFrontmatter(w, meta)
-	if err != nil {
+	if err := WriteFrontmatter(w, meta); err != nil {
 		return err
 	}
-	_, err = w.Write(content)
+	_, err := w.Write(content)
 	return err
 }
 
-// WriteString writes both frontmatter and string content to the writer.
+// WriteString writes the frontmatter followed by content.
 func WriteString(w io.Writer, meta any, content string) error {
-	err := WriteFrontmatter(w, meta)
-	if err != nil {
-		return err
-	}
-	_, err = io.WriteString(w, content)
-	return err
+	return Write(w, meta, []byte(content))
 }
 
-// ParseFrontmatter reads YAML frontmatter from an io.Reader.
-// It returns the parsed data, the *remaining* io.Reader containing the main content, and an error.
+// ParseFrontmatter decodes the YAML frontmatter at the start of r into T and
+// returns a reader positioned at the body. Frontmatter starts with a "---"
+// line and ends at the next "---" line; "\r\n" line endings are accepted.
+// Without frontmatter it returns the zero T and a reader over all of r.
 func ParseFrontmatter[T any](r io.Reader) (T, io.Reader, error) {
 	var zero T
+	br := bufio.NewReader(r)
 
-	reader := bufio.NewReader(r)
-
-	delimiter := []byte(delimiter + "\n")
-	// Step 1: Look for the starting delimiter.
-	b, err := reader.Peek(len(delimiter))
-	if err != nil {
+	first, err := br.ReadBytes('\n')
+	if err != nil && !errors.Is(err, io.EOF) {
 		return zero, nil, err
 	}
-	// No frontmatter found at the beginning, return nil data and the original reader
-	if !bytes.Equal(b, delimiter) {
-		return zero, reader, nil
+	if !isDelimiter(first) || errors.Is(err, io.EOF) {
+		return zero, io.MultiReader(bytes.NewReader(first), br), nil
 	}
-
-	// Consume the starting delimiter.
-	_, _ = reader.Discard(len(delimiter))
 
 	var data []byte
-	// Step 2: Read content until the closing delimiter.
 	for {
-		b, err := reader.ReadBytes('\n')
-		if err != nil {
-			return zero, nil, fmt.Errorf("error reading content line: %w", err)
-		}
-		if bytes.Equal(b, delimiter) {
+		line, err := br.ReadBytes('\n')
+		if isDelimiter(line) {
 			break
 		}
-		data = append(data, b...)
+		data = append(data, line...)
+		if errors.Is(err, io.EOF) {
+			return zero, nil, ErrUnterminated
+		}
+		if err != nil {
+			return zero, nil, err
+		}
 	}
 
-	if len(data) == 0 {
-		// Should not happen if delimiters are properly structured, but safe guard
-		return zero, nil, errors.New("found start delimiter but no content found before end delimiter")
-	}
-
-	// Step 3: Parse YAML
 	var meta T
 	if err := yaml.Unmarshal(data, &meta); err != nil {
-		return zero, nil, fmt.Errorf("failed to unmarshal frontmatter YAML: %w", err)
+		return zero, nil, fmt.Errorf("markdown: decode frontmatter: %w", err)
 	}
+	return meta, br, nil
+}
 
-	return meta, reader, nil
+func isDelimiter(line []byte) bool {
+	return string(bytes.TrimRight(line, "\r\n")) == delimiter
 }

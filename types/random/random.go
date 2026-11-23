@@ -1,8 +1,10 @@
-// Package random provides cryptographically secure random value generation utilities.
-// It leverages Go's math/rand/v2 package which uses ChaCha8 as its PRNG for security.
+// Package random generates pseudo-random durations, numbers in ranges,
+// strings, and slice samples on top of math/rand/v2. Package-level functions
+// use a shared, randomly seeded RNG; use New().WithSeed for reproducible
+// sequences in tests and simulations.
 //
-// This package is designed for generating random values in testing, simulations,
-// load testing, and other scenarios where controlled randomness is needed.
+// It is not cryptographically secure. Use package safe (crypto/rand) for
+// tokens, keys, and other secrets.
 package random
 
 import (
@@ -30,16 +32,6 @@ func DurationBetween(min, max time.Duration) time.Duration {
 	return rng.DurationBetween(min, max)
 }
 
-// Int generates a random integer between 0 and max (exclusive).
-// Returns 0 if max <= 0.
-//
-// Example:
-//
-//	dice := random.Int(6) + 1 // 1 to 6
-func Int(max int) int {
-	return rng.Int(max)
-}
-
 // IntBetween generates a random integer between min (inclusive) and max (exclusive).
 //
 // Example:
@@ -49,15 +41,6 @@ func IntBetween(min, max int) int {
 	return rng.IntBetween(min, max)
 }
 
-// Float generates a random float64 between 0.0 and max (exclusive).
-//
-// Example:
-//
-//	percentage := random.Float(100.0) // 0.0 to 100.0
-func Float(max float64) float64 {
-	return rng.Float(max)
-}
-
 // FloatBetween generates a random float64 between min (inclusive) and max (exclusive).
 //
 // Example:
@@ -65,15 +48,6 @@ func Float(max float64) float64 {
 //	temperature := random.FloatBetween(20.0, 30.0) // 20.0 to 30.0
 func FloatBetween(min, max float64) float64 {
 	return rng.FloatBetween(min, max)
-}
-
-// Bool generates a random boolean value with 50% probability for each.
-//
-// Example:
-//
-//	coinFlip := random.Bool() // true or false
-func Bool() bool {
-	return rng.Bool()
 }
 
 // BoolWithProbability generates a random boolean with the given probability of being true.
@@ -159,8 +133,6 @@ func Hex(length int) string {
 	return rng.Hex(length)
 }
 
-// Only keep WithRNG for generic (slice-based) methods
-
 // ChoiceWithRNG returns a random element from the given slice using the provided RNG.
 func ChoiceWithRNG[T any](r *RNG, items []T) T {
 	var zero T
@@ -201,7 +173,7 @@ func SampleWithRNG[T any](r *RNG, items []T, n int) []T {
 
 // ShuffleWithRNG shuffles the elements in the given slice in place using the provided RNG.
 func ShuffleWithRNG[T any](r *RNG, items []T) {
-	r.rand.Shuffle(len(items), func(i, j int) {
+	r.shuffle(len(items), func(i, j int) {
 		items[i], items[j] = items[j], items[i]
 	})
 }

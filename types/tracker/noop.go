@@ -2,29 +2,26 @@ package tracker
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 )
 
 var _ tracker = (*Noop)(nil)
 
-type Noop struct {
-}
+// Noop has the methods of Tracker and logs nothing. Error and Errorf still
+// return the error, so `return t.Error(err)` behaves the same with either.
+type Noop struct{}
 
+// NewNoop returns a Noop.
 func NewNoop() *Noop {
 	return new(Noop)
 }
 
-func (n *Noop) Debug(msg string, attrs ...slog.Attr) {
-}
-func (n *Noop) Done(msg string, attrs ...slog.Attr) {}
-func (n *Noop) Error(err error, attrs ...slog.Attr) error {
-	return nil
-}
-func (n *Noop) Errorf(format string, args ...any) error {
-	return nil
-}
-func (n *Noop) Info(msg string, attrs ...slog.Attr) {}
-func (n *Noop) Log(ctx context.Context, depth int, level slog.Level, msg string, attrs ...slog.Attr) {
-}
-func (n *Noop) SetAttrs(attrs ...slog.Attr)         {}
-func (n *Noop) Warn(msg string, attrs ...slog.Attr) {}
+func (*Noop) Debug(string, ...slog.Attr)                                 {}
+func (*Noop) Done(string, ...slog.Attr)                                  {}
+func (*Noop) Info(string, ...slog.Attr)                                  {}
+func (*Noop) Warn(string, ...slog.Attr)                                  {}
+func (*Noop) SetAttrs(...slog.Attr)                                      {}
+func (*Noop) Log(context.Context, int, slog.Level, string, ...slog.Attr) {}
+func (*Noop) Error(err error, _ ...slog.Attr) error                      { return err }
+func (*Noop) Errorf(format string, args ...any) error                    { return fmt.Errorf(format, args...) }

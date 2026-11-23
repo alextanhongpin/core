@@ -64,7 +64,6 @@ func main() {
 | Enforce per-key quotas within one process | [sync/ratelimit](sync/ratelimit/) |
 | Coordinate replicas using Redis | [dsync](dsync/) |
 | Transform, filter, or group slices | [types/list](types/list/) |
-| Compose internal request handlers | [types/handlers](types/handlers/) |
 
 ## Errors and pitfalls
 
@@ -120,7 +119,7 @@ are safe to repeat.
 - Telemetry and logging helpers, including Prometheus and slog integration.
 
 ### types
-- Utilities for common types: assert, email, env, number, random, result, safe, sets, sliceutil, states, structs, etc.
+- Utilities for common types: assert, email, env, list, number, random, safe, sets, states, structs, etc.
 
 ---
 

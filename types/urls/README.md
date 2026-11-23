@@ -1,6 +1,14 @@
 # urls
 
-Normalize, compare, hash, and extract URLs.
+Normalize, compare, scope, and hash URLs, and extract links from HTML. Built
+for crawlers that must decide whether two links point to the same page.
+
+**Use it for:** deduplicating crawled pages, restricting a crawl to a site
+or a path, and collecting `<a href>` values.
+
+**Don't use it for:** URLs whose query string identifies the resource
+(`?id=42`): normalization drops it. It does not resolve relative links, so
+use `(*url.URL).ResolveReference` for that.
 
 ## Installation
 
@@ -8,27 +16,64 @@ Normalize, compare, hash, and extract URLs.
 go get github.com/alextanhongpin/core/types/urls
 ```
 
-Check the containing module's `go.mod` for its required Go version.
+The package is part of the `github.com/alextanhongpin/core/types` module;
+check its `go.mod` for the required Go version.
 
-## Usage
+## Quick start
 
 ```go
 package main
 
 import (
 	"fmt"
+	"net/url"
+
 	"github.com/alextanhongpin/core/types/urls"
 )
 
 func main() {
-	u, err := urls.Normalize("https://example.com/page/?q=1#section")
-	if err != nil {
-		panic(err)
-	}
-	fmt.Println(u.String(), urls.Hash(u))
+	u, _ := urls.Normalize("HTTPS://Example.com:443/docs/?page=2#intro")
+	fmt.Println(u)
+
+	root, _ := url.Parse("https://example.com/docs")
+	child, _ := url.Parse("https://example.com/docs/install")
+	sibling, _ := url.Parse("https://example.com/docs-old")
+	fmt.Println(urls.IsScopedPrefix(root, child), urls.IsScopedPrefix(root, sibling))
 }
 ```
 
-## Behavior and limits
+It prints `https://example.com/docs` and `true false`.
 
-Normalize trims one trailing slash from the input before parsing, then removes query and fragment. IsEqual compares normalized strings and returns false on parse errors. Hash returns a SHA-256 hex digest of the normalized URL. IsScopedDomain compares scheme and host exactly. IsScopedPrefix performs a string prefix check and is not a general URL containment validator. Extract returns anchor href values from HTML, without resolving relative links.
+## API
+
+```go
+func Normalize(link string) (*url.URL, error)
+func IsEqual(a, b string) bool
+func Hash(u *url.URL) string
+func IsScopedDomain(root, u *url.URL) bool
+func IsScopedPrefix(root, u *url.URL) bool
+func Extract(r io.Reader) []string
+```
+
+## Behavior and guarantees
+
+- `Normalize` removes the query string, fragment, trailing slashes, and the
+  default port (`:80` for http, `:443` for https), and lowercases the scheme
+  and host. The path's case and escaping are kept.
+- `IsEqual` compares normalized forms; it is false if either fails to
+  parse. `Hash` is the hex SHA-256 of the normalized form, so equal URLs
+  hash alike.
+- `IsScopedDomain` compares scheme and host after normalization.
+  `IsScopedPrefix` additionally requires `u`'s path to continue `root`'s
+  after a `/`: a URL is not under itself, and `/docs-old` is not under
+  `/docs`. Both accept unnormalized input and never modify their arguments.
+- `Extract` returns `<a>` `href` values in document order exactly as
+  written, including relative, fragment-only, and `mailto:` links. It stops
+  at the end of input or on a read error, returning what it found.
+
+## Testing
+
+```sh
+go vet ./urls
+go test -race -count=1 ./urls
+```

@@ -1,167 +1,169 @@
-// Package states provides utilities for managing sequential state validation
-// and state machine transitions. It ensures all required steps are completed
-// before proceeding to the next step in a workflow.
+// Package states validates boolean conditions and workflow state.
+//
+// It has three parts:
+//
+//   - counting helpers (ExactlyOne, AtLeastN, AllOrNone, Majority, ...) for
+//     validating combinations of optional fields or flags;
+//   - Sequence, which checks that ordered steps were completed in order;
+//   - StateMachine, which allows only declared transitions between states.
 package states
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
-// Handler represents a condition function that returns true when satisfied.
-type Handler func() bool
+// Status is the state of a Sequence.
+type Status int
 
-// Step represents a single step in a sequence with a name and condition.
+const (
+	// Idle means no step is complete.
+	Idle Status = iota
+	// Pending means some, but not all, leading steps are complete.
+	Pending
+	// Success means every step is complete.
+	Success
+	// Failed means a step is complete while an earlier one is not.
+	Failed
+)
+
+// String returns the lowercase name of the status.
+func (s Status) String() string {
+	switch s {
+	case Idle:
+		return "idle"
+	case Pending:
+		return "pending"
+	case Success:
+		return "success"
+	case Failed:
+		return "failed"
+	default:
+		return fmt.Sprintf("unknown(%d)", int(s))
+	}
+}
+
+// IsComplete reports whether the status is final: Success or Failed.
+func (s Status) IsComplete() bool {
+	return s == Success || s == Failed
+}
+
+// Step is a named condition in a Sequence.
 type Step struct {
-	name      string
-	condition Handler
+	name string
+	cond func() bool
+}
+
+// NewStep returns a step whose condition is fixed.
+func NewStep(name string, done bool) Step {
+	return Step{name: name, cond: func() bool { return done }}
+}
+
+// NewStepFunc returns a step whose condition is evaluated on every check.
+func NewStepFunc(name string, cond func() bool) Step {
+	return Step{name: name, cond: cond}
 }
 
 // Name returns the step's name.
-func (s Step) Name() string {
-	return s.name
-}
+func (s Step) Name() string { return s.name }
 
-// Check evaluates the step's condition.
-func (s Step) Check() bool {
-	return s.condition()
-}
+// Check evaluates the step's condition. A step with no condition is not done.
+func (s Step) Check() bool { return s.cond != nil && s.cond() }
 
-// NewStep creates a new step with a static boolean condition.
-func NewStep(name string, satisfied bool) Step {
-	return Step{
-		name: name,
-		condition: func() bool {
-			return satisfied
-		},
-	}
-}
-
-// NewStepFunc creates a new step with a dynamic condition function.
-func NewStepFunc(name string, condition Handler) Step {
-	return Step{
-		name:      name,
-		condition: condition,
-	}
-}
-
-// Sequence manages a series of steps that must be completed in order.
-// Each step must be satisfied before the next step becomes available.
+// Sequence checks ordered steps, such as "email verified, then profile
+// filled, then payment added". Steps must be completed from the start with no
+// gaps; a later step done before an earlier one makes the sequence Failed.
+//
+// Every method evaluates each step's condition exactly once, so a result is
+// consistent even when conditions change between calls.
 type Sequence struct {
 	steps []Step
 }
 
-// NewSequence creates a new sequence with the given steps.
+// NewSequence returns a sequence of the given steps in order.
 func NewSequence(steps ...Step) *Sequence {
-	return &Sequence{
-		steps: steps,
-	}
+	return &Sequence{steps: append([]Step(nil), steps...)}
 }
 
-// Status returns the current status of the sequence.
-func (s *Sequence) Status() Status {
-	if !s.IsValid() {
-		return Failed
-	}
+type snapshot struct {
+	done      []bool
+	completed int // number of true entries
+	next      int // index of the first false entry, or len(done)
+}
 
-	nextIndex := s.nextStepIndex()
+func (s *Sequence) eval() snapshot {
+	snap := snapshot{done: make([]bool, len(s.steps)), next: -1}
+	for i, step := range s.steps {
+		ok := step.Check()
+		snap.done[i] = ok
+		if ok {
+			snap.completed++
+		} else if snap.next < 0 {
+			snap.next = i
+		}
+	}
+	if snap.next < 0 {
+		snap.next = len(s.steps)
+	}
+	return snap
+}
+
+func (snap snapshot) valid() bool { return snap.completed == snap.next }
+
+func (snap snapshot) status() Status {
 	switch {
-	case nextIndex == 0:
-		return Idle
-	case nextIndex == len(s.steps):
+	case !snap.valid():
+		return Failed
+	case snap.next == len(snap.done):
 		return Success
+	case snap.next == 0:
+		return Idle
 	default:
 		return Pending
 	}
 }
 
-// Next returns the next step that needs to be completed and whether one exists.
-// Returns false if the sequence is invalid or complete.
+// Status returns Success when all steps are done (including for an empty
+// sequence), Idle when none are, Pending when a leading run is done, and
+// Failed when steps were done out of order.
+func (s *Sequence) Status() Status { return s.eval().status() }
+
+// IsValid reports whether completed steps form an unbroken run from the
+// first step, that is, whether Status is not Failed.
+func (s *Sequence) IsValid() bool { return s.eval().valid() }
+
+// Next returns the first step that is not done. It returns false when every
+// step is done or the sequence is Failed.
 func (s *Sequence) Next() (Step, bool) {
-	if !s.IsValid() {
+	snap := s.eval()
+	if !snap.valid() || snap.next == len(s.steps) {
 		return Step{}, false
 	}
-
-	nextIndex := s.nextStepIndex()
-	if nextIndex >= len(s.steps) {
-		return Step{}, false
-	}
-
-	return s.steps[nextIndex], true
+	return s.steps[snap.next], true
 }
 
-// IsValid checks if the sequence is in a valid state.
-// A sequence is valid if all completed steps form a contiguous sequence from the beginning.
-func (s *Sequence) IsValid() bool {
-	progress := s.calculateProgress()
-	nextIndex := s.nextStepIndex()
+// CompletedSteps returns how many steps are done, in any order.
+func (s *Sequence) CompletedSteps() int { return s.eval().completed }
 
-	// Valid if progress matches the expected cumulative pattern
-	// For example: if next step is index 2, progress should be 0b11 (3)
-	expectedProgress := (1 << nextIndex) - 1
-	return progress == expectedProgress
-}
+// TotalSteps returns the number of steps.
+func (s *Sequence) TotalSteps() int { return len(s.steps) }
 
-// Progress returns the current progress as a bitmask.
-func (s *Sequence) Progress() int {
-	return s.calculateProgress()
-}
+// Steps returns a copy of the steps.
+func (s *Sequence) Steps() []Step { return append([]Step(nil), s.steps...) }
 
-// CompletedSteps returns the number of completed steps.
-func (s *Sequence) CompletedSteps() int {
-	count := 0
-	for _, step := range s.steps {
-		if step.Check() {
-			count++
-		}
-	}
-	return count
-}
-
-// TotalSteps returns the total number of steps in the sequence.
-func (s *Sequence) TotalSteps() int {
-	return len(s.steps)
-}
-
-// GetStep returns the step at the given index.
-func (s *Sequence) GetStep(index int) (Step, bool) {
-	if index < 0 || index >= len(s.steps) {
-		return Step{}, false
-	}
-	return s.steps[index], true
-}
-
-// AllSteps returns all steps in the sequence.
-func (s *Sequence) AllSteps() []Step {
-	result := make([]Step, len(s.steps))
-	copy(result, s.steps)
-	return result
-}
-
-// nextStepIndex finds the index of the next incomplete step.
-func (s *Sequence) nextStepIndex() int {
-	for i, step := range s.steps {
-		if !step.Check() {
-			return i
-		}
-	}
-	return len(s.steps)
-}
-
-// calculateProgress creates a bitmask representing which steps are complete.
-func (s *Sequence) calculateProgress() int {
-	var progress int
-	for i, step := range s.steps {
-		if step.Check() {
-			progress |= 1 << i
-		}
-	}
-	return progress
-}
-
-// String returns a string representation of the sequence status.
+// String describes the status and each step, for example
+// "pending [x] email [ ] profile".
 func (s *Sequence) String() string {
-	status := s.Status()
-	completed := s.CompletedSteps()
-	total := s.TotalSteps()
-
-	return fmt.Sprintf("Sequence[%s: %d/%d steps completed]",
-		status.String(), completed, total)
+	snap := s.eval()
+	var b strings.Builder
+	b.WriteString(snap.status().String())
+	for i, step := range s.steps {
+		if snap.done[i] {
+			b.WriteString(" [x] ")
+		} else {
+			b.WriteString(" [ ] ")
+		}
+		b.WriteString(step.name)
+	}
+	return b.String()
 }

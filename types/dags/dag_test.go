@@ -89,3 +89,33 @@ func TestDAG(t *testing.T) {
 		is.Equal([]string{"a", "b", "c"}, order)
 	})
 }
+
+func TestCycle(t *testing.T) {
+	is := assert.New(t)
+
+	g := dags.Graph[string]{"a": {"b"}, "b": {"c"}, "c": {"a"}, "d": {}}
+	_, err := g.TopologicalSort()
+	is.ErrorIs(err, dags.ErrCycle)
+
+	self := dags.Graph[string]{"a": {"a"}}
+	_, err = self.TopologicalSort()
+	is.ErrorIs(err, dags.ErrCycle)
+}
+
+func TestInvertIsDeterministic(t *testing.T) {
+	is := assert.New(t)
+
+	g := dags.Graph[int]{}
+	for i := range 20 {
+		g.AddEdge(i, 100)
+	}
+	for range 10 {
+		inv := g.Invert()
+		is.IsIncreasing(inv[100])
+	}
+}
+
+func TestVertices(t *testing.T) {
+	g := dags.Graph[string]{"b": {"c"}, "a": nil}
+	assert.Equal(t, []string{"a", "b", "c"}, g.Vertices())
+}

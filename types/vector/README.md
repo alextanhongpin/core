@@ -1,6 +1,13 @@
 # vector
 
-Compute dot products, magnitudes, and cosine similarity.
+Dot product, Euclidean magnitude, and cosine similarity for dense `float64`
+vectors.
+
+**Use it for:** comparing small embedding or feature vectors without a numeric
+library.
+
+**Don't use it for:** large-scale nearest-neighbor search or anything that
+needs SIMD, sparse vectors, or `float32` storage.
 
 ## Installation
 
@@ -8,25 +15,51 @@ Compute dot products, magnitudes, and cosine similarity.
 go get github.com/alextanhongpin/core/types/vector
 ```
 
-Check the containing module's `go.mod` for its required Go version.
+This package is part of the `types` module; check its `go.mod` for the required Go version.
 
-## Usage
+## Quick start
 
 ```go
 package main
 
 import (
 	"fmt"
+
 	"github.com/alextanhongpin/core/types/vector"
 )
 
 func main() {
 	a := vector.Vector{1, 0}
-	b := vector.Vector{0, 1}
-	fmt.Println(a.Dot(b), a.Magnitude(), a.CosineSimilarity(b))
+	b := vector.Vector{1, 1}
+	fmt.Printf("%.4f\n", a.CosineSimilarity(b))
 }
 ```
 
-## Behavior and limits
+It prints `0.7071`.
 
-Dot panics for unequal lengths. CosineSimilarity returns zero when either magnitude is zero; otherwise it uses Dot and requires equal lengths. Vector is a mutable []float64 and does not normalize or copy its inputs.
+## API
+
+```go
+type Vector []float64
+
+func (v Vector) Dot(o Vector) float64
+func (v Vector) Magnitude() float64 // L2 norm
+func (v Vector) CosineSimilarity(o Vector) float64
+```
+
+## Behavior and guarantees
+
+- `Dot` and `CosineSimilarity` panic if the lengths differ.
+- `CosineSimilarity` is in `[-1, 1]` (up to rounding) and returns 0 if either
+  vector has zero magnitude.
+- Values are not modified; methods are safe for concurrent use on a vector
+  that is not being written.
+
+## Testing
+
+```sh
+go vet ./vector/
+go test -race -count=1 ./vector/
+```
+
+Run from the `types` directory.

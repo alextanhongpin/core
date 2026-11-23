@@ -1,7 +1,10 @@
 package ahocorasick
 
 import (
+	"bytes"
+	"math/rand/v2"
 	"reflect"
+	"slices"
 	"sort"
 	"testing"
 )
@@ -23,8 +26,8 @@ func TestStandardMatching(t *testing.T) {
 	matches := matcher.FindAll(text)
 
 	expected := []Match{
-		{Start: 2, End: 4, PatternIndex: 0}, // "he"
 		{Start: 1, End: 4, PatternIndex: 1}, // "she"
+		{Start: 2, End: 4, PatternIndex: 0}, // "he"
 		{Start: 2, End: 6, PatternIndex: 3}, // "hers"
 	}
 
@@ -165,5 +168,51 @@ func BenchmarkMatcherMatchFunc(b *testing.B) {
 		matcher.MatchFunc(text, func(m Match) bool {
 			return true
 		})
+	}
+}
+
+// naive returns the matches in MatchFunc order.
+func naive(patterns [][]byte, text []byte) []Match {
+	var ms []Match
+	for end := 1; end <= len(text); end++ {
+		for i, p := range patterns {
+			if len(p) > 0 && len(p) <= end && bytes.Equal(text[end-len(p):end], p) {
+				ms = append(ms, Match{Start: end - len(p), End: end, PatternIndex: i})
+			}
+		}
+		at := ms[len(ms)-countEnd(ms, end):]
+		slices.SortStableFunc(at, func(a, b Match) int { return a.Start - b.Start })
+	}
+	return ms
+}
+
+func countEnd(ms []Match, end int) int {
+	n := 0
+	for i := len(ms) - 1; i >= 0 && ms[i].End == end; i-- {
+		n++
+	}
+	return n
+}
+
+func TestMatchesNaive(t *testing.T) {
+	r := rand.New(rand.NewPCG(1, 2))
+	randBytes := func(n int) []byte {
+		b := make([]byte, n)
+		for i := range b {
+			b[i] = "abc"[r.IntN(3)]
+		}
+		return b
+	}
+	for range 500 {
+		patterns := make([][]byte, 1+r.IntN(6))
+		for i := range patterns {
+			patterns[i] = randBytes(r.IntN(4))
+		}
+		text := randBytes(r.IntN(30))
+		got := NewMatcher(patterns).FindAll(text)
+		want := naive(patterns, text)
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("patterns %q text %q:\ngot  %v\nwant %v", patterns, text, got, want)
+		}
 	}
 }
