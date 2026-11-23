@@ -80,6 +80,43 @@ func TestTrackerHandler(t *testing.T) {
 	}
 }
 
+func TestTrackerStatsMissingDay(t *testing.T) {
+	tracker := metrics.NewTracker(t.Name(), redistest.Client(t))
+	ctx := context.Background()
+	is := assert.New(t)
+
+	// Nothing recorded yet.
+	stats, err := tracker.Stats(ctx, time.Now())
+	is.Nil(err)
+	is.Empty(stats)
+
+	day1 := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
+	day2 := day1.AddDate(0, 0, 1)
+
+	tracker.Now = func() time.Time { return day1 }
+	is.Nil(tracker.Record(ctx, "GET /foo", "a", time.Second))
+	is.Nil(tracker.Record(ctx, "GET /bar", "a", time.Second))
+
+	tracker.Now = func() time.Time { return day2 }
+	is.Nil(tracker.Record(ctx, "GET /foo", "b", 2*time.Second))
+	is.Nil(tracker.Record(ctx, "GET /foo", "c", 2*time.Second))
+
+	// A top path without requests on day2 is skipped instead of failing on
+	// its missing latency digest.
+	stats, err = tracker.Stats(ctx, day2)
+	is.Nil(err)
+	is.Len(stats, 1)
+	is.Equal("GET /foo", stats[0].Path)
+	is.Equal(int64(2), stats[0].Total)
+	is.Equal(int64(2), stats[0].Unique)
+	is.Equal(2.0, stats[0].P50)
+
+	// A day without any requests returns no stats.
+	stats, err = tracker.Stats(ctx, day2.AddDate(0, 0, 1))
+	is.Nil(err)
+	is.Empty(stats)
+}
+
 func randDuration(duration time.Duration) time.Duration {
 	return time.Duration(rand.Int64N(duration.Milliseconds())) * time.Millisecond
 }

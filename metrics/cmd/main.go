@@ -38,7 +38,10 @@ func main() {
 	mux.Handle("GET /debug/vars", expvar.Handler())
 	mux.Handle("GET /", metrics.TrackerHandler(http.HandlerFunc(hello), tracker, userFn, logger))
 	logger.Info("listening to port *:8080. press ctrl+c to cancel.")
-	http.ListenAndServe(":8080", mux)
+	if err := http.ListenAndServe(":8080", mux); err != nil {
+		logger.Error("server stopped", slog.String("err", err.Error()))
+		os.Exit(1)
+	}
 }
 
 func hello(w http.ResponseWriter, r *http.Request) {
