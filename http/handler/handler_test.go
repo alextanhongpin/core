@@ -59,7 +59,7 @@ func TestHandler(t *testing.T) {
 		wantBody string
 	}{
 		"success":   {`{"name":"john"}`, http.StatusOK, `{"data":{"message":"Hello, john"}}`},
-		"failed":    {`{}`, http.StatusInternalServerError, `{"error":{"code":"INTERNAL_SERVER_ERROR","message":"An unexpected error occurred. Please try again later."}}`},
+		"failed":    {`{}`, http.StatusBadRequest, `{"error":{"code":"VALIDATION_ERROR","message":"Validation failed","errors":{"name":"required"}}}`},
 		"not found": {`{"name":"bob"}`, http.StatusNotFound, `{"error":{"code":"user/not_found","message":"User not found"}}`},
 	}
 	for name, tc := range tests {

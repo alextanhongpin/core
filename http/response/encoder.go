@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"net/http"
 	"time"
 
@@ -43,18 +44,34 @@ func RawJSON(w http.ResponseWriter, data []byte, code int) {
 	}
 }
 
-// JSON sends a JSON response
+// JSON encodes data and sends it with the given status code (200 if 0).
+// data is encoded before anything is written, so an encoding failure produces
+// a clean 500 error response instead of a partial body with the wrong status.
 func JSON(w http.ResponseWriter, data any, code int) {
+	b, err := json.Marshal(data)
+	if err != nil {
+		slog.Default().Error("failed to encode JSON response", "error", err)
+		b = internalServerError
+		code = http.StatusInternalServerError
+	}
+
 	w.Header().Set("Content-Type", ContentTypeJSON)
 	w.WriteHeader(cmp.Or(code, http.StatusOK))
-
-	err := json.MarshalWrite(w, data)
-	if err != nil {
-		ErrorJSON(w, err)
-
-		return
+	if _, err := w.Write(b); err != nil {
+		slog.Default().Error("failed to write response", "error", err)
 	}
 }
+
+var internalServerError = func() []byte {
+	b, err := json.Marshal(Body[any]{Error: &Error{
+		Code:    "INTERNAL_SERVER_ERROR",
+		Message: "An unexpected error occurred. Please try again later.",
+	}})
+	if err != nil {
+		panic(err)
+	}
+	return b
+}()
 
 // Text sends a plain text response
 func Text(w http.ResponseWriter, text string, code int) {
@@ -76,7 +93,10 @@ func HTML(w http.ResponseWriter, html string, code int) {
 	}
 }
 
-// ErrorJSON sends a JSON error response with proper error handling
+// ErrorJSON sends err as a JSON error body. Validation errors (anything with a
+// Map() map[string][]string or Map() map[string]any method) give 400 with the
+// field errors, *cause.Error gives its mapped status, code and message, and
+// anything else gives a generic 500 that does not leak err.
 func ErrorJSON(w http.ResponseWriter, err error) {
 	var (
 		c  *cause.Error
@@ -84,14 +104,21 @@ func ErrorJSON(w http.ResponseWriter, err error) {
 		ve interface {
 			Map() map[string][]string
 		}
+		va interface {
+			Map() map[string]any
+		}
 		code = http.StatusInternalServerError
 	)
 
 	switch {
-	case errors.As(err, &ve):
+	case errors.As(err, &ve), errors.As(err, &va):
 		m := make(map[string]any)
-		for k, v := range ve.Map() {
-			m[k] = v
+		if ve != nil {
+			for k, v := range ve.Map() {
+				m[k] = v
+			}
+		} else {
+			maps.Copy(m, va.Map())
 		}
 
 		e = &Error{
