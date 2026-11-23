@@ -4,6 +4,7 @@ package handler
 import (
 	"cmp"
 	"encoding/json"
+	"math"
 	"net/http"
 	"slices"
 	"strconv"
@@ -134,17 +135,24 @@ type PaginationParams struct {
 // Example:
 //
 //	pagination := c.ParsePaginationParams(r, 20, 100) // default limit 20, max 100
+//
+// The limit is clamped to [1, maxLimit], offset and page to non-negative and
+// at least 1. When only page is given, offset is (page-1)*limit, with page
+// clamped so the multiplication cannot overflow.
 func (h BaseHandler) ParsePaginationParams(r *http.Request, defaultLimit, maxLimit int) PaginationParams {
-	limit := min(request.QueryValue(r, "limit").IntOr(defaultLimit), maxLimit)
+	limit := h.QueryValue(r, "limit").IntOr(defaultLimit)
 	if limit < 1 {
 		limit = defaultLimit
 	}
+	limit = max(min(limit, maxLimit), 1)
 
 	offset := max(h.QueryValue(r, "offset").IntOr(0), 0)
 	page := max(h.QueryValue(r, "page").IntOr(1), 1)
 
-	// If page is provided, calculate offset
+	// If page is provided, calculate offset, clamping instead of overflowing.
 	if r.URL.Query().Has("page") && !r.URL.Query().Has("offset") {
+		maxPage := math.MaxInt/limit + 1
+		page = min(page, maxPage)
 		offset = (page - 1) * limit
 	}
 

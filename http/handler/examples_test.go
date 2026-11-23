@@ -310,7 +310,7 @@ func TestUserController_Integration(t *testing.T) {
 
 		w := httptest.NewRecorder()
 		r := httptest.NewRequest(http.MethodGet, "/users/1", nil)
-		r.Header.Set("X-Correlation-ID", "correlation-456")
+		r.Header.Set("X-Request-ID", "correlation-456")
 
 		http.HandlerFunc(controller.GetUser).ServeHTTP(w, r)
 
@@ -319,7 +319,7 @@ func TestUserController_Integration(t *testing.T) {
 		}
 
 		if w.Header().Get("X-Request-ID") != "correlation-456" {
-			t.Error("Correlation ID should be set as request ID in response header")
+			t.Error("Request ID should be set in response header")
 		}
 
 		_ = user // Use the user variable to avoid unused variable error

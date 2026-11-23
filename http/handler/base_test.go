@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/alextanhongpin/core/http/handler"
+	"github.com/alextanhongpin/core/http/requestid"
 	"github.com/alextanhongpin/errors/cause"
 	"github.com/alextanhongpin/errors/codes"
 	"github.com/alextanhongpin/errors/validator"
@@ -320,43 +321,27 @@ func TestBaseHandler_GetRequestID(t *testing.T) {
 
 	tests := []struct {
 		name     string
-		headers  map[string]string
+		header   string
+		context  string
 		expected string
 	}{
-		{
-			name: "X-Request-ID header",
-			headers: map[string]string{
-				"X-Request-ID": "test-request-id",
-			},
-			expected: "test-request-id",
-		},
-		{
-			name: "X-Correlation-ID header",
-			headers: map[string]string{
-				"X-Correlation-ID": "test-correlation-id",
-			},
-			expected: "test-correlation-id",
-		},
-		{
-			name: "both headers - X-Request-ID takes precedence",
-			headers: map[string]string{
-				"X-Request-ID":     "request-id",
-				"X-Correlation-ID": "correlation-id",
-			},
-			expected: "request-id",
-		},
-		{
-			name:     "no headers",
-			headers:  map[string]string{},
-			expected: "",
-		},
+		{name: "X-Request-ID header", header: "test-request-id", expected: "test-request-id"},
+		{name: "context takes precedence", header: "header-id", context: "context-id", expected: "context-id"},
+		// Regression: raw client headers (including X-Correlation-ID) were
+		// returned and echoed without validation.
+		{name: "invalid header ignored", header: strings.Repeat("a", 1000), expected: ""},
+		{name: "no headers", expected: ""},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			r := httptest.NewRequest(http.MethodGet, "/", nil)
-			for key, value := range tt.headers {
-				r.Header.Set(key, value)
+			r.Header.Set("X-Correlation-ID", "ignored")
+			if tt.header != "" {
+				r.Header.Set("X-Request-ID", tt.header)
+			}
+			if tt.context != "" {
+				r = r.WithContext(requestid.Context.WithValue(r.Context(), tt.context))
 			}
 
 			result := base.GetRequestID(r)
@@ -364,6 +349,21 @@ func TestBaseHandler_GetRequestID(t *testing.T) {
 				t.Errorf("GetRequestID() = %v, want %v", result, tt.expected)
 			}
 		})
+	}
+}
+
+func TestBaseHandler_ParsePaginationParamsDoesNotOverflow(t *testing.T) {
+	// Regression: a huge page overflowed (page-1)*limit into a negative offset.
+	r := httptest.NewRequest(http.MethodGet, "/?page=9223372036854775807&limit=50", nil)
+	p := handler.BaseHandler{}.ParsePaginationParams(r, 20, 100)
+	if p.Offset < 0 || p.Limit != 50 {
+		t.Fatalf("got %+v, want non-negative offset and limit 50", p)
+	}
+
+	r = httptest.NewRequest(http.MethodGet, "/?limit=0", nil)
+	p = handler.BaseHandler{}.ParsePaginationParams(r, 500, 100)
+	if p.Limit != 100 {
+		t.Fatalf("limit = %d, want default clamped to 100", p.Limit)
 	}
 }
 
