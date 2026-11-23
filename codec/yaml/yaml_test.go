@@ -1,12 +1,16 @@
 package yaml_test
 
 import (
-	codec "github.com/core/codec/yaml"
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
+	"testing/fstest"
+
+	codec "github.com/alextanhongpin/core/codec/yaml"
 )
 
 func TestLoad(t *testing.T) {
@@ -30,6 +34,17 @@ func TestLoad(t *testing.T) {
 		{"mismatched kinds", map[string]string{"main.yaml": "!include [a.yaml, b.yaml]", "a.yaml": "[1]", "b.yaml": "a: 1"}, nil, "matching"},
 		{"invalid merge", map[string]string{"main.yaml": "\"!merge\": a.yaml", "a.yaml": "[1]"}, nil, "must contain a mapping"},
 		{"missing file", map[string]string{"main.yaml": "!include missing.yaml"}, nil, "missing.yaml"},
+		{"parent within root", map[string]string{"main.yaml": "!include sub/a.yaml", "sub/a.yaml": "!include ../b.yaml", "b.yaml": "b: 1"}, map[string]any{"b": 1}, ""},
+		{"cycle through dot segments", map[string]string{"main.yaml": "!include sub/../main.yaml"}, nil, "cycle"},
+		{"parent escape", map[string]string{"main.yaml": "!include ../secret.yaml"}, nil, "escapes"},
+		{"merge escape", map[string]string{"main.yaml": "\"!merge\": sub/../../secret.yaml"}, nil, "escapes"},
+		{"absolute path", map[string]string{"main.yaml": "!include /etc/hostname"}, nil, "escapes"},
+		{"fan-out limit", map[string]string{
+			"main.yaml": "!include [a.yaml, a.yaml, a.yaml, a.yaml, a.yaml, a.yaml, a.yaml, a.yaml, a.yaml, a.yaml]",
+			"a.yaml":    "!include [b.yaml, b.yaml, b.yaml, b.yaml, b.yaml, b.yaml, b.yaml, b.yaml, b.yaml, b.yaml]",
+			"b.yaml":    "!include [c.yaml, c.yaml, c.yaml, c.yaml, c.yaml, c.yaml, c.yaml, c.yaml, c.yaml, c.yaml]",
+			"c.yaml":    "c: 1",
+		}, nil, "more than 1000 files"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -58,6 +73,68 @@ func TestLoad(t *testing.T) {
 				t.Fatalf("got %#v, want %#v", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestLoadSymlinks(t *testing.T) {
+	outside := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outside, "secret.yaml"), []byte("secret: 1"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	write := func(name, data string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(data), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	link := func(target, name string) {
+		t.Helper()
+		if err := os.Symlink(target, filepath.Join(dir, name)); err != nil {
+			t.Skip("symlinks unsupported:", err)
+		}
+	}
+
+	t.Run("escape", func(t *testing.T) {
+		link(filepath.Join(outside, "secret.yaml"), "secret.yaml")
+		write("escape.yaml", "!include secret.yaml")
+		var got map[string]any
+		if err := codec.LoadExtendedYAML(filepath.Join(dir, "escape.yaml"), &got); err == nil {
+			t.Fatalf("symlink escape was followed: %v", got)
+		}
+	})
+
+	t.Run("directory loop", func(t *testing.T) {
+		link(".", "loop")
+		write("loop.yaml", "!include loop/loop.yaml")
+		var got map[string]any
+		err := codec.LoadExtendedYAML(filepath.Join(dir, "loop.yaml"), &got)
+		// Stopped by the depth limit or the OS symlink limit, whichever is first.
+		if err == nil {
+			t.Fatalf("symlink loop terminated without error: %v", got)
+		}
+	})
+}
+
+func TestLoadFS(t *testing.T) {
+	fsys := fstest.MapFS{
+		"app/main.yaml":    {Data: []byte("\"!merge\": ../shared/base.yaml\nname: app")},
+		"shared/base.yaml": {Data: []byte("name: base\nport: 80")},
+	}
+	var got map[string]any
+	if err := codec.Load(fsys, "app/main.yaml", &got); err != nil {
+		t.Fatal(err)
+	}
+	if want := map[string]any{"name": "app", "port": 80}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %#v, want %#v", got, want)
+	}
+
+	err := codec.Load(fsys, "app/missing.yaml", &got)
+	if !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("want fs.ErrNotExist, got %v", err)
+	}
+	if err := codec.Load(fsys, "../main.yaml", &got); !errors.Is(err, codec.ErrPathEscape) {
+		t.Fatalf("want ErrPathEscape, got %v", err)
 	}
 }
 

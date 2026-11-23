@@ -1,4 +1,4 @@
-module github.com/core/codec/yaml
+module github.com/alextanhongpin/core/codec/yaml
 
 go 1.27.0
 

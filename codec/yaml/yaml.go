@@ -2,74 +2,112 @@
 package yaml
 
 import (
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
-	"strings"
 
 	yamlv3 "gopkg.in/yaml.v3"
 )
 
-// LoadExtendedYAML resolves directives before decoding into out. Included paths
-// are relative to the file containing the directive. Merges are shallow and
-// processed in source order, with later values replacing earlier values.
-// Only trusted files should be loaded: directives may read arbitrary paths.
+const (
+	maxDepth = 100  // nested includes
+	maxFiles = 1000 // files loaded in total, including repeats
+)
+
+// ErrPathEscape is returned for a directive whose path is absolute or leaves
+// the root directory.
+var ErrPathEscape = errors.New("include path escapes the root directory")
+
+// LoadExtendedYAML loads filename and decodes it into out. Includes may only
+// reach files in filename's directory and below (symlinks included); use
+// Load with a wider fs.FS to include from parent directories.
 func LoadExtendedYAML(filename string, out any) error {
-	node, err := load(filename, make(map[string]bool), 0)
+	root, err := os.OpenRoot(filepath.Dir(filename))
+	if err != nil {
+		return err
+	}
+	defer root.Close()
+	return Load(root.FS(), filepath.Base(filename), out)
+}
+
+// Load loads name from fsys, resolves directives and decodes the result into
+// out. Directive paths are slash-separated and relative to the file that
+// contains them; they must stay within fsys. Merges are shallow and processed
+// in source order, with later values replacing earlier values.
+func Load(fsys fs.FS, name string, out any) error {
+	l := &loader{fsys: fsys, active: make(map[string]bool)}
+	node, err := l.load(name, 0)
 	if err != nil {
 		return err
 	}
 	if err := node.Decode(out); err != nil {
-		return fmt.Errorf("decode %s: %w", filename, err)
+		return fmt.Errorf("decode %s: %w", name, err)
 	}
 	return nil
 }
 
-func load(filename string, active map[string]bool, depth int) (*yamlv3.Node, error) {
-	if depth >= 100 {
-		return nil, fmt.Errorf("include depth exceeds 100 at %s", filename)
+type loader struct {
+	fsys   fs.FS
+	active map[string]bool // files on the current include path
+	loaded int
+}
+
+func (l *loader) load(name string, depth int) (*yamlv3.Node, error) {
+	if depth >= maxDepth {
+		return nil, fmt.Errorf("include depth exceeds %d at %s", maxDepth, name)
 	}
-	path, err := filepath.Abs(filename)
+	if l.loaded++; l.loaded > maxFiles {
+		return nil, fmt.Errorf("more than %d files loaded at %s", maxFiles, name)
+	}
+	if !fs.ValidPath(name) {
+		return nil, fmt.Errorf("%w: %s", ErrPathEscape, name)
+	}
+	if l.active[name] {
+		return nil, fmt.Errorf("include cycle at %s", name)
+	}
+	l.active[name] = true
+	defer delete(l.active, name)
+
+	f, err := l.fsys.Open(name)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("read %s: %w", name, err)
 	}
-	// Canonicalize symlinks so cycles through alternate names are detected.
-	path, err = filepath.EvalSymlinks(path)
-	if err != nil {
-		return nil, fmt.Errorf("resolve %s: %w", filename, err)
-	}
-	if active[path] {
-		return nil, fmt.Errorf("include cycle at %s", path)
-	}
-	active[path] = true
-	defer delete(active, path)
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("read %s: %w", path, err)
-	}
-	decoder := yamlv3.NewDecoder(strings.NewReader(string(data)))
+	defer f.Close()
+
+	decoder := yamlv3.NewDecoder(f)
 	var doc yamlv3.Node
 	if err := decoder.Decode(&doc); err != nil {
-		return nil, fmt.Errorf("parse %s: %w", path, err)
+		return nil, fmt.Errorf("parse %s: %w", name, err)
 	}
 	var extra yamlv3.Node
 	if err := decoder.Decode(&extra); err != io.EOF {
 		if err == nil {
-			return nil, fmt.Errorf("%s: multiple YAML documents are unsupported", path)
+			return nil, fmt.Errorf("%s: multiple YAML documents are unsupported", name)
 		}
-		return nil, fmt.Errorf("parse %s: %w", path, err)
+		return nil, fmt.Errorf("parse %s: %w", name, err)
 	}
 	if len(doc.Content) == 0 {
-		return nil, fmt.Errorf("%s: empty YAML document", path)
+		return nil, fmt.Errorf("%s: empty YAML document", name)
 	}
-	if err := resolve(doc.Content[0], filepath.Dir(path), active, depth); err != nil {
-		return nil, fmt.Errorf("resolve %s: %w", path, err)
+	if err := l.resolve(doc.Content[0], path.Dir(name), depth); err != nil {
+		return nil, fmt.Errorf("resolve %s: %w", name, err)
 	}
 	return doc.Content[0], nil
 }
 
-func resolve(node *yamlv3.Node, dir string, active map[string]bool, depth int) error {
+// include loads name relative to dir.
+func (l *loader) include(dir, name string, depth int) (*yamlv3.Node, error) {
+	if path.IsAbs(name) || filepath.IsAbs(name) {
+		return nil, fmt.Errorf("%w: %s", ErrPathEscape, name)
+	}
+	return l.load(path.Join(dir, name), depth+1)
+}
+
+func (l *loader) resolve(node *yamlv3.Node, dir string, depth int) error {
 	if node.Tag == "!include" {
 		names, err := filenames(node)
 		if err != nil {
@@ -77,7 +115,7 @@ func resolve(node *yamlv3.Node, dir string, active map[string]bool, depth int) e
 		}
 		var merged *yamlv3.Node
 		for _, name := range names {
-			target, err := load(filepath.Join(dir, name), active, depth+1)
+			target, err := l.include(dir, name, depth)
 			if err != nil {
 				return err
 			}
@@ -111,7 +149,7 @@ func resolve(node *yamlv3.Node, dir string, active map[string]bool, depth int) e
 					return err
 				}
 				for _, name := range names {
-					target, err := load(filepath.Join(dir, name), active, depth+1)
+					target, err := l.include(dir, name, depth)
 					if err != nil {
 						return err
 					}
@@ -132,7 +170,7 @@ func resolve(node *yamlv3.Node, dir string, active map[string]bool, depth int) e
 				return fmt.Errorf("duplicate key %q at line %d", key.Value, key.Line)
 			}
 			seen[id] = true
-			if err := resolve(value, dir, active, depth); err != nil {
+			if err := l.resolve(value, dir, depth); err != nil {
 				return err
 			}
 			appendPair(key, value)
@@ -141,7 +179,7 @@ func resolve(node *yamlv3.Node, dir string, active map[string]bool, depth int) e
 		return nil
 	}
 	for _, child := range node.Content {
-		if err := resolve(child, dir, active, depth); err != nil {
+		if err := l.resolve(child, dir, depth); err != nil {
 			return err
 		}
 	}
