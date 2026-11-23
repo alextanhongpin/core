@@ -36,8 +36,8 @@ func Example() {
 		return true
 	})
 	// Output:
-	// Matched pattern #0 (he) at [2:4]
 	// Matched pattern #1 (she) at [1:4]
+	// Matched pattern #0 (he) at [2:4]
 	// Matched pattern #3 (hers) at [2:6]
 	// Found 'she', stopping early.
 }

@@ -1,6 +1,7 @@
 package ahocorasick
 
-// Match represents a pattern match found in the input text.
+// Match is one occurrence of a pattern: text[Start:End] equals
+// patterns[PatternIndex].
 type Match struct {
 	Start        int
 	End          int
@@ -14,15 +15,15 @@ type Matcher struct {
 	// Fail links for BFS construction
 	fail []uint32
 
-	// Compressed output list representation
-	outputHead []int32 // state -> index into outputPatterns (-1 if no match)
-	outputList []int32 // pattern indices stored in linked list form
-	outputNext []int32 // pointer to next pattern index for the state (-1 if end)
+	// outputs[state] lists the patterns ending at state, longest first.
+	outputs [][]int32
 
 	patternLens []int // length of each pattern by index
 }
 
-// NewMatcher constructs and compiles an Aho-Corasick automaton from a slice of patterns.
+// NewMatcher compiles patterns into a Matcher. Empty patterns never match.
+// The automaton uses 1 KiB per trie node, about one node per pattern byte.
+// The patterns are not retained.
 func NewMatcher(patterns [][]byte) *Matcher {
 	m := &Matcher{
 		patternLens: make([]int, len(patterns)),
@@ -47,7 +48,7 @@ func NewMatcher(patterns [][]byte) *Matcher {
 			}
 			curr = next
 		}
-		m.addOutput(curr, int32(patIdx))
+		m.outputs[curr] = append(m.outputs[curr], int32(patIdx))
 	}
 
 	// 3. Build Failure Links & Compile Full DFA Transitions
@@ -59,20 +60,11 @@ func NewMatcher(patterns [][]byte) *Matcher {
 func (m *Matcher) addState() uint32 {
 	state := uint32(len(m.fail))
 	m.fail = append(m.fail, 0)
-	m.outputHead = append(m.outputHead, -1)
+	m.outputs = append(m.outputs, nil)
 
 	// Allocate 256 byte transitions for the new state
 	m.transitions = append(m.transitions, make([]uint32, 256)...)
 	return state
-}
-
-func (m *Matcher) addOutput(state uint32, patternIdx int32) {
-	head := m.outputHead[state]
-	newHead := int32(len(m.outputList))
-
-	m.outputList = append(m.outputList, patternIdx)
-	m.outputNext = append(m.outputNext, head)
-	m.outputHead[state] = newHead
 }
 
 func (m *Matcher) buildDFA() {
@@ -101,8 +93,8 @@ func (m *Matcher) buildDFA() {
 				// Set fail link of child to transition of failState
 				m.fail[child] = m.transitions[failState*256+uint32(b)]
 
-				// Merge outputs from fail state into child state
-				m.mergeOutputs(child, m.fail[child])
+				// Patterns ending at the fail state are shorter suffixes.
+				m.outputs[child] = append(m.outputs[child], m.outputs[m.fail[child]]...)
 
 				queue = append(queue, child)
 			} else {
@@ -113,16 +105,8 @@ func (m *Matcher) buildDFA() {
 	}
 }
 
-func (m *Matcher) mergeOutputs(toState, fromState uint32) {
-	outIdx := m.outputHead[fromState]
-	for outIdx != -1 {
-		patIdx := m.outputList[outIdx]
-		m.addOutput(toState, patIdx)
-		outIdx = m.outputNext[outIdx]
-	}
-}
-
-// FindAll scans text and returns all matches.
+// FindAll returns every match in text, including overlapping ones, in the
+// order MatchFunc reports them.
 func (m *Matcher) FindAll(text []byte) []Match {
 	var matches []Match
 	m.MatchFunc(text, func(match Match) bool {
@@ -132,30 +116,25 @@ func (m *Matcher) FindAll(text []byte) []Match {
 	return matches
 }
 
-// MatchFunc streams matches through a callback to eliminate slice allocations.
-// Returning false from the callback stops scanning immediately.
+// MatchFunc calls fn for every match in text, ordered by End and, for
+// matches with the same End, longest first, then by pattern index.
+// Returning false from fn stops the scan. A Matcher is safe for concurrent
+// use.
 func (m *Matcher) MatchFunc(text []byte, fn func(Match) bool) {
 	var state uint32 = 0
 
 	for i, b := range text {
 		state = m.transitions[state*256+uint32(b)]
 
-		outIdx := m.outputHead[state]
-		for outIdx != -1 {
-			patIdx := m.outputList[outIdx]
-			patLen := m.patternLens[patIdx]
-
+		for _, patIdx := range m.outputs[state] {
 			match := Match{
-				Start:        i - patLen + 1,
+				Start:        i - m.patternLens[patIdx] + 1,
 				End:          i + 1,
 				PatternIndex: int(patIdx),
 			}
-
 			if !fn(match) {
 				return
 			}
-
-			outIdx = m.outputNext[outIdx]
 		}
 	}
 }

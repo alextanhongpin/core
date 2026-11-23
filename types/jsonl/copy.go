@@ -1,28 +1,22 @@
 package jsonl
 
+// Copy writes every value of from to to. from and to must be different
+// files.
 func Copy[T any](from, to *File[T]) error {
-	seq, stop := from.ReadLines()
-	for line := range seq {
-		err := to.Write(line)
-		if err != nil {
-			return err
-		}
-	}
-
-	return stop()
+	return CopyFunc(from, to, func(T) bool { return true })
 }
 
-func CopyFunc[T any](from, to *File[T], fn func(T) bool) error {
+// CopyFunc writes the values of from for which keep returns true to to.
+// from and to must be different files.
+func CopyFunc[T any](from, to *File[T], keep func(T) bool) error {
 	seq, stop := from.ReadLines()
-	for line := range seq {
-		if !fn(line) {
+	for v := range seq {
+		if !keep(v) {
 			continue
 		}
-		err := to.Write(line)
-		if err != nil {
+		if err := to.Write(v); err != nil {
 			return err
 		}
 	}
-
 	return stop()
 }

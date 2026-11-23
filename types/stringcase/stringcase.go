@@ -44,25 +44,24 @@ func ToTitle(s string) string {
 	return tokenizer.Title(s)
 }
 
-// FromKebab converts kebab-case to space-separated words.
-func FromKebab(s string) string {
-	return strings.ReplaceAll(s, "-", " ")
-}
-
-// FromSnake converts snake_case to space-separated words.
-func FromSnake(s string) string {
-	return strings.ReplaceAll(s, "_", " ")
-}
-
+// Tokenizer splits identifiers and phrases into lowercase words, keeping
+// configured initialisms such as "ID" or "HTTP" as single words, and
+// rejoins them in a chosen case.
 type Tokenizer struct {
 	initialisms  []string
 	lowerToUpper map[string]string
 }
 
+// NewTokenizer returns a Tokenizer for the given case-sensitive initialisms.
+// When two initialisms differ only by case, such as "HTTPS" and "HTTPs",
+// output uses the first.
 func NewTokenizer(initialisms ...string) *Tokenizer {
 	m := make(map[string]string)
 	for _, i := range initialisms {
-		m[strings.ToLower(i)] = i
+		k := strings.ToLower(i)
+		if _, ok := m[k]; !ok {
+			m[k] = i
+		}
 	}
 
 	return &Tokenizer{
@@ -71,6 +70,8 @@ func NewTokenizer(initialisms ...string) *Tokenizer {
 	}
 }
 
+// Title joins the words with spaces, writing initialisms in upper case and
+// capitalizing other words.
 func (t *Tokenizer) Title(text string) string {
 	caser := cases.Title(language.English)
 	var result []string
@@ -86,6 +87,8 @@ func (t *Tokenizer) Title(text string) string {
 	return strings.Join(result, " ")
 }
 
+// Pascal joins the words without separators, writing initialisms in upper
+// case and capitalizing other words.
 func (t *Tokenizer) Pascal(text string) string {
 	var result []string
 	for _, token := range t.Tokenize(text) {
@@ -100,6 +103,7 @@ func (t *Tokenizer) Pascal(text string) string {
 	return strings.Join(result, "")
 }
 
+// Camel is like Pascal but leaves the first word in lower case.
 func (t *Tokenizer) Camel(text string) string {
 	var result []string
 	for _, token := range t.Tokenize(text) {
@@ -119,14 +123,17 @@ func (t *Tokenizer) Camel(text string) string {
 	return strings.Join(result, "")
 }
 
+// Snake joins the lowercase words with underscores.
 func (t *Tokenizer) Snake(text string) string {
 	return strings.Join(t.Tokenize(text), "_")
 }
 
+// Kebab joins the lowercase words with hyphens.
 func (t *Tokenizer) Kebab(text string) string {
 	return strings.Join(t.Tokenize(text), "-")
 }
 
+// Tokenize returns the lowercase words of text.
 func (t *Tokenizer) Tokenize(text string) []string {
 	return Tokenize(text, t.initialisms)
 }
@@ -140,6 +147,9 @@ func uppercaseFirst(s string) string {
 	return string(r)
 }
 
+// Tokenize splits s into lowercase words. Characters other than letters and
+// digits separate words; within a word it splits at case and digit
+// boundaries, preferring the split that matches the most initialisms.
 func Tokenize(s string, initialisms []string) []string {
 	// Replace all special characters with space.
 	s = strings.Map(func(r rune) rune {
@@ -171,12 +181,8 @@ type item struct {
 	after  []string
 }
 
-func (i item) String() string {
-	return fmt.Sprintf("%d:%s", i.score, strings.Join(append(append(i.before, i.text), i.after...), " "))
-}
-
 func (i item) Tokens() []string {
-	result := append(i.before, i.text)
+	result := append(slices.Clip(i.before), i.text)
 	result = append(result, i.after...)
 	return strings.Fields(strings.Join(result, " "))
 }
@@ -211,11 +217,11 @@ func segment(s string, initialisms []string) []string {
 			continue
 		}
 		for _, d := range initialisms {
-			if after, ok := strings.CutPrefix(h.text, d); ok && isValidAfter(after) {
+			if after, ok := strings.CutPrefix(h.text, d); ok && isValidAfter(after, initialisms) {
 				q = append(q, item{
 					score:  h.score + 1,
 					text:   after,
-					before: append(h.before, d),
+					before: append(slices.Clip(h.before), d),
 					after:  h.after,
 				})
 			}
@@ -230,16 +236,22 @@ func segment(s string, initialisms []string) []string {
 		}
 		q = append(q, item{
 			score:  h.score,
-			before: append(h.before, h.text),
+			before: append(slices.Clip(h.before), h.text),
 			after:  h.after,
 		})
 	}
 	return bestResult
 }
 
-// isValid checks if the segment that follows the initialism is valid.
-// it must start with uppercase or a digit.
-func isValidAfter(s string) bool {
+// isValidAfter reports whether s can follow an initialism: it is empty,
+// starts with another initialism or a digit, or starts with an upper-case
+// letter followed by a lower-case letter or digit.
+func isValidAfter(s string, initialisms []string) bool {
+	for _, i := range initialisms {
+		if strings.HasPrefix(s, i) {
+			return true
+		}
+	}
 	r := []rune(s)
 	if len(r) == 0 {
 		return true
