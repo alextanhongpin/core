@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/alextanhongpin/core/http/requestid"
@@ -31,6 +32,12 @@ func TestRequestID(t *testing.T) {
 	}{
 		"new": {"", "random-token"},
 		"old": {"abc", "abc"},
+		// Regression: any client value was trusted and echoed verbatim.
+		"too long":      {strings.Repeat("a", requestid.MaxLength+1), "random-token"},
+		"max length":    {strings.Repeat("a", requestid.MaxLength), strings.Repeat("a", requestid.MaxLength)},
+		"space":         {"abc def", "random-token"},
+		"non-ascii":     {"abcé", "random-token"},
+		"control chars": {"abc\x7f", "random-token"},
 	}
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -41,6 +48,9 @@ func TestRequestID(t *testing.T) {
 			}
 			h.ServeHTTP(w, r)
 
+			if got := r.Header.Get("X-Request-Id"); got != tc.header {
+				t.Fatalf("caller's request header changed to %q", got)
+			}
 			if got := w.Header().Get("X-Request-Id"); got != tc.want {
 				t.Fatalf("X-Request-Id = %q, want %q", got, tc.want)
 			}
