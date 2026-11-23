@@ -4,15 +4,67 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"log/slog"
+	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/exp/event"
 	"golang.org/x/exp/event/eventtest"
-	"golang.org/x/exp/slog"
 )
+
+func TestSlogHandlerTraceIDs(t *testing.T) {
+	var buf bytes.Buffer
+	h, err := NewSlogHandler(slog.New(slog.NewJSONHandler(&buf, nil)))
+	require.NoError(t, err)
+
+	sc := trace.NewSpanContext(trace.SpanContextConfig{
+		TraceID: trace.TraceID{1},
+		SpanID:  trace.SpanID{2},
+	})
+	ctx := trace.ContextWithSpanContext(context.Background(), sc)
+	ctx = event.WithExporter(ctx, event.NewExporter(h, nil))
+	event.Log(ctx, "hello")
+
+	var entry map[string]any
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &entry))
+	// Same keys as SlogAttrsFromSpanContext.
+	assert.Equal(t, sc.TraceID().String(), entry["trace_id"])
+	assert.Equal(t, sc.SpanID().String(), entry["span_id"])
+}
+
+func TestSlogHandlerSource(t *testing.T) {
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{AddSource: true}))
+	h, err := NewSlogHandler(logger)
+	require.NoError(t, err)
+
+	for name, eh := range map[string]event.Handler{
+		"direct":  h,
+		"wrapped": &MultiHandler{Log: h},
+	} {
+		t.Run(name, func(t *testing.T) {
+			buf.Reset()
+			ctx := event.WithExporter(context.Background(), event.NewExporter(eh, nil))
+			_, _, line, _ := runtime.Caller(0)
+			event.Log(ctx, "hello")
+
+			var entry struct {
+				Source struct {
+					File string `json:"file"`
+					Line int    `json:"line"`
+				} `json:"source"`
+			}
+			require.NoError(t, json.Unmarshal(buf.Bytes(), &entry))
+			assert.Equal(t, "slog_test.go", filepath.Base(entry.Source.File))
+			assert.Equal(t, line+1, entry.Source.Line)
+		})
+	}
+}
 
 func TestNewSlogHandler(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
@@ -237,7 +289,7 @@ func TestSlogHandlerConcurrency(t *testing.T) {
 	require.NoError(t, err)
 
 	ctx := context.Background()
-	ctx = event.WithExporter(ctx, event.NewExporter(handler, eventtest.ExporterOptions()))
+	ctx = event.WithExporter(ctx, event.NewExporter(handler, nil))
 
 	// Test concurrent logging
 	done := make(chan bool, 10)

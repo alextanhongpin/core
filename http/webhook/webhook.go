@@ -1,40 +1,57 @@
-// Package webhook provides secure webhook handling with HMAC signature verification,
-// supporting multiple secrets for key rotation, timestamp validation for replay attack
-// prevention, and compatibility with popular webhook providers like GitHub and Stripe.
+// Package webhook signs and verifies webhook requests with HMAC-SHA256.
+//
+// A signature covers "<id>.<unix-nano-timestamp>.<body>" and is sent in
+// X-Webhook-Signature (base64url), with the ID and timestamp in X-Webhook-Id
+// and X-Webhook-Timestamp. Several signature headers may be sent and several
+// secrets configured, to rotate keys. This is a custom scheme: it does not
+// verify GitHub or Stripe signatures.
 package webhook
 
 import (
 	"crypto/hmac"
 	"crypto/sha256"
-	"crypto/subtle"
 	"encoding/base64"
-	"encoding/hex"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/alextanhongpin/core/http/request"
 	"github.com/google/uuid"
 )
 
+// Verification errors. Verify wraps one of these.
+var (
+	ErrMissingHeader    = errors.New("webhook: missing header")
+	ErrInvalidTimestamp = errors.New("webhook: invalid timestamp")
+	ErrExpired          = errors.New("webhook: payload outside the accepted age")
+	ErrInvalidSignature = errors.New("webhook: invalid signature")
+	ErrBodyTooLarge     = errors.New("webhook: body too large")
+)
+
+// Handler verifies requests with DefaultConfig(secrets...) before calling h.
 func Handler(h http.Handler, secrets ...[]byte) http.Handler {
-	config := DefaultConfig(secrets...)
-	return HandlerWithConfig(h, config)
+	return HandlerWithConfig(h, DefaultConfig(secrets...))
 }
 
-// Config holds webhook verification configuration
+// Config holds webhook verification configuration.
 type Config struct {
-	// Secrets for signature verification (supports key rotation)
+	// Secrets for signature verification (supports key rotation).
 	Secrets [][]byte
-	// MaxAge is the maximum age of a webhook payload to accept (default: 5 minutes)
+	// MaxAge is the maximum age of a payload (default 5 minutes; negative
+	// disables the check). While the check is enabled, payloads more than a
+	// minute in the future are rejected too.
 	MaxAge time.Duration
-	// ErrorHandler handles verification errors (optional)
+	// MaxBodySize limits the body read for verification (default and upper
+	// bound: request.MaxBodySize).
+	MaxBodySize int64
+	// ErrorHandler handles verification errors. By default it replies 413
+	// for ErrBodyTooLarge and 401 otherwise.
 	ErrorHandler func(w http.ResponseWriter, r *http.Request, err error)
 }
 
-// DefaultConfig returns a configuration with sensible defaults
+// DefaultConfig returns a configuration with sensible defaults.
 func DefaultConfig(secrets ...[]byte) Config {
 	return Config{
 		Secrets: secrets,
@@ -42,24 +59,18 @@ func DefaultConfig(secrets ...[]byte) Config {
 	}
 }
 
-// HandlerWithConfig creates a webhook handler with custom configuration
+// HandlerWithConfig verifies each request with config before calling h. The
+// body is restored for h. Payload IDs are not tracked: deduplicate by
+// X-Webhook-Id in h if replays within MaxAge matter.
 func HandlerWithConfig(h http.Handler, config Config) http.Handler {
-	if config.MaxAge == 0 {
-		config.MaxAge = 5 * time.Minute
+	onError := config.ErrorHandler
+	if onError == nil {
+		onError = defaultErrorHandler
 	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ok, err := verifyWithConfig(r, config)
-		if err != nil {
-			if config.ErrorHandler != nil {
-				config.ErrorHandler(w, r, err)
-				return
-			}
-			http.Error(w, "Webhook verification failed", http.StatusUnauthorized)
-			return
-		}
-		if !ok {
-			w.WriteHeader(http.StatusUnauthorized)
+		if err := Verify(r, config); err != nil {
+			onError(w, r, err)
 			return
 		}
 
@@ -67,77 +78,95 @@ func HandlerWithConfig(h http.Handler, config Config) http.Handler {
 	})
 }
 
-func verifyWithConfig(r *http.Request, config Config) (bool, error) {
-	content, err := NewPayloadFromRequest(r)
+func defaultErrorHandler(w http.ResponseWriter, _ *http.Request, err error) {
+	if errors.Is(err, ErrBodyTooLarge) {
+		http.Error(w, "Webhook payload too large", http.StatusRequestEntityTooLarge)
+		return
+	}
+	http.Error(w, "Webhook verification failed", http.StatusUnauthorized)
+}
+
+// Verify checks the headers, age and signature of r and restores its body.
+// Header and age checks run before the body is read.
+func Verify(r *http.Request, config Config) error {
+	if config.MaxAge == 0 {
+		config.MaxAge = 5 * time.Minute
+	}
+	if config.MaxBodySize <= 0 || config.MaxBodySize > request.MaxBodySize {
+		config.MaxBodySize = request.MaxBodySize
+	}
+
+	id, at, err := parseHeaders(r)
 	if err != nil {
-		return false, err
+		return err
 	}
 
-	// Validate timestamp to prevent replay attacks
 	if config.MaxAge > 0 {
-		age := time.Since(content.At)
-		if age > config.MaxAge {
-			return false, fmt.Errorf("webhook payload too old: %v", age)
-		}
-		if age < -time.Minute {
-			return false, fmt.Errorf("webhook payload from future: %v", -age)
+		age := time.Since(at)
+		if age > config.MaxAge || age < -time.Minute {
+			return fmt.Errorf("%w: %v", ErrExpired, age)
 		}
 	}
 
-	signatures := getSignaturesFromRequest(r)
+	signatures := r.Header.Values("X-Webhook-Signature")
 	if len(signatures) == 0 {
-		return false, fmt.Errorf("no webhook signature provided")
+		return fmt.Errorf("%w: X-Webhook-Signature", ErrMissingHeader)
 	}
 
+	if r.ContentLength > config.MaxBodySize {
+		return ErrBodyTooLarge
+	}
+	b, err := request.Read(r)
+	if errors.Is(err, request.ErrBodyTooLarge) || int64(len(b)) > config.MaxBodySize {
+		return ErrBodyTooLarge
+	}
+	if err != nil {
+		return err
+	}
+
+	content := &Payload{ID: id, At: at, Body: b}
 	for _, signature := range signatures {
-		signedContent, err := base64.URLEncoding.DecodeString(signature)
+		signed, err := base64.URLEncoding.DecodeString(signature)
 		if err != nil {
-			continue // Try next signature
+			continue
 		}
 		for _, secret := range config.Secrets {
-			if content.Verify(signedContent, secret) {
-				return true, nil
+			if content.Verify(signed, secret) {
+				return nil
 			}
 		}
 	}
 
-	return false, nil
+	return ErrInvalidSignature
 }
 
-// getSignaturesFromRequest extracts signatures from various standard webhook headers
-func getSignaturesFromRequest(r *http.Request) []string {
-	var signatures []string
-
-	// Custom format: X-Webhook-Signature (base64 encoded)
-	if sigs := r.Header.Values("X-Webhook-Signature"); len(sigs) > 0 {
-		signatures = append(signatures, sigs...)
+func parseHeaders(r *http.Request) (string, time.Time, error) {
+	id := r.Header.Get("X-Webhook-Id")
+	if id == "" {
+		return "", time.Time{}, fmt.Errorf("%w: X-Webhook-Id", ErrMissingHeader)
 	}
 
-	// GitHub format: X-Hub-Signature-256 (sha256=<hex>)
-	if sig := r.Header.Get("X-Hub-Signature-256"); sig != "" {
-		// Convert from "sha256=<hex>" to base64
-		if strings.HasPrefix(sig, "sha256=") {
-			hexSig := sig[7:] // Remove "sha256=" prefix
-			if decoded, err := hex.DecodeString(hexSig); err == nil {
-				signatures = append(signatures, base64.URLEncoding.EncodeToString(decoded))
-			}
-		}
+	ts := r.Header.Get("X-Webhook-Timestamp")
+	if ts == "" {
+		return "", time.Time{}, fmt.Errorf("%w: X-Webhook-Timestamp", ErrMissingHeader)
 	}
 
-	// Stripe format: X-Signature-256
-	if sig := r.Header.Get("X-Signature-256"); sig != "" {
-		signatures = append(signatures, sig)
+	nsec, err := strconv.ParseInt(ts, 10, 64)
+	if err != nil {
+		return "", time.Time{}, fmt.Errorf("%w: %w", ErrInvalidTimestamp, err)
 	}
 
-	return signatures
+	return id, time.Unix(0, nsec), nil
 }
 
+// Payload is a webhook message and the metadata covered by its signature.
 type Payload struct {
 	ID   string
 	At   time.Time
 	Body []byte
 }
 
+// NewPayload returns a payload with a random ID, timestamped now.
 func NewPayload(body []byte) *Payload {
 	return &Payload{
 		ID:   uuid.New().String(),
@@ -146,18 +175,12 @@ func NewPayload(body []byte) *Payload {
 	}
 }
 
+// NewPayloadFromRequest reads the ID, timestamp and body (up to
+// request.MaxBodySize) of a signed request without verifying it.
 func NewPayloadFromRequest(r *http.Request) (*Payload, error) {
-	var (
-		id = r.Header.Get("X-Webhook-Id")
-		ts = r.Header.Get("X-Webhook-Timestamp")
-	)
-
-	// Validate required headers
-	if id == "" {
-		return nil, fmt.Errorf("missing X-Webhook-Id header")
-	}
-	if ts == "" {
-		return nil, fmt.Errorf("missing X-Webhook-Timestamp header")
+	id, at, err := parseHeaders(r)
+	if err != nil {
+		return nil, err
 	}
 
 	b, err := request.Read(r)
@@ -165,37 +188,28 @@ func NewPayloadFromRequest(r *http.Request) (*Payload, error) {
 		return nil, err
 	}
 
-	nsec, err := strconv.ParseInt(ts, 10, 64)
-	if err != nil {
-		return nil, fmt.Errorf("invalid timestamp format: %w", err)
-	}
-
-	return &Payload{
-		ID:   id,
-		At:   time.Unix(0, nsec),
-		Body: b,
-	}, nil
+	return &Payload{ID: id, At: at, Body: b}, nil
 }
 
+// SignRequest sets the ID and timestamp headers on r and adds one
+// X-Webhook-Signature per secret. r's body must equal s.Body.
 func (s *Payload) SignRequest(r *http.Request, secrets ...[]byte) {
 	r.Header.Set("X-Webhook-Id", s.ID)
-	r.Header.Set("X-Webhook-Timestamp", fmt.Sprint(s.At.UnixNano()))
+	r.Header.Set("X-Webhook-Timestamp", strconv.FormatInt(s.At.UnixNano(), 10))
 	for _, secret := range secrets {
 		r.Header.Add("X-Webhook-Signature", base64.URLEncoding.EncodeToString(s.Sign(secret)))
 	}
 }
 
+// Sign returns the HMAC-SHA256 of "<id>.<unix-nano>.<body>" under secret.
 func (s *Payload) Sign(secret []byte) []byte {
-	content := fmt.Sprintf("%s.%d.%s", s.ID, s.At.UnixNano(), string(s.Body))
-	return hmacSHA256(secret, []byte(content))
+	mac := hmac.New(sha256.New, secret)
+	fmt.Fprintf(mac, "%s.%d.", s.ID, s.At.UnixNano())
+	mac.Write(s.Body)
+	return mac.Sum(nil)
 }
 
+// Verify reports, in constant time, whether signature is s signed with secret.
 func (s *Payload) Verify(signature, secret []byte) bool {
-	return subtle.ConstantTimeCompare(s.Sign(secret), signature) == 1
-}
-
-func hmacSHA256(secret, data []byte) []byte {
-	hmac := hmac.New(sha256.New, secret)
-	hmac.Write([]byte(data))
-	return hmac.Sum(nil)
+	return hmac.Equal(s.Sign(secret), signature)
 }

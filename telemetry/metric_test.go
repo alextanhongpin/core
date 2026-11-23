@@ -8,6 +8,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/metric/noop"
 	"golang.org/x/exp/event"
 	"golang.org/x/exp/event/eventtest"
 )
@@ -185,7 +187,7 @@ func TestMetricHandlerConcurrency(t *testing.T) {
 	require.NoError(t, err)
 
 	ctx := context.Background()
-	ctx = event.WithExporter(ctx, event.NewExporter(handler, eventtest.ExporterOptions()))
+	ctx = event.WithExporter(ctx, event.NewExporter(handler, nil))
 
 	// Test concurrent access to the same metric
 	c := event.NewCounter("concurrent_counter", &event.MetricOptions{
@@ -216,6 +218,63 @@ func TestMetricHandlerClose(t *testing.T) {
 
 	err = handler.Close()
 	assert.NoError(t, err)
+}
+
+type recordingMeter struct {
+	noop.Meter
+	units  map[string]string
+	values map[string][]float64
+}
+
+type recordingGauge struct {
+	noop.Float64Gauge
+	name string
+	m    *recordingMeter
+}
+
+func (r recordingGauge) Record(_ context.Context, v float64, _ ...metric.RecordOption) {
+	r.m.values[r.name] = append(r.m.values[r.name], v)
+}
+
+type recordingHistogram struct {
+	noop.Float64Histogram
+	name string
+	m    *recordingMeter
+}
+
+func (r recordingHistogram) Record(_ context.Context, v float64, _ ...metric.RecordOption) {
+	r.m.values[r.name] = append(r.m.values[r.name], v)
+}
+
+func (m *recordingMeter) Float64Gauge(name string, opts ...metric.Float64GaugeOption) (metric.Float64Gauge, error) {
+	m.units[name] = metric.NewFloat64GaugeConfig(opts...).Unit()
+	return recordingGauge{name: name, m: m}, nil
+}
+
+func (m *recordingMeter) Float64Histogram(name string, opts ...metric.Float64HistogramOption) (metric.Float64Histogram, error) {
+	m.units[name] = metric.NewFloat64HistogramConfig(opts...).Unit()
+	return recordingHistogram{name: name, m: m}, nil
+}
+
+func TestMetricHandlerRecordsGaugeAndDurationUnits(t *testing.T) {
+	m := &recordingMeter{units: map[string]string{}, values: map[string][]float64{}}
+	h, err := NewMetricHandler(m, WithErrorHandler(func(err error) { t.Error(err) }))
+	require.NoError(t, err)
+	ctx := event.WithExporter(context.Background(), event.NewExporter(h, nil))
+
+	// Gauges record the latest value; they must not accumulate.
+	g := event.NewFloatGauge("temp", &event.MetricOptions{Namespace: "app"})
+	g.Record(ctx, 10)
+	g.Record(ctx, 3)
+	assert.Equal(t, []float64{10, 3}, m.values["app_temp"])
+
+	event.NewDuration("latency", &event.MetricOptions{Namespace: "app"}).Record(ctx, 1500*time.Millisecond)
+	assert.Equal(t, "s", m.units["app_latency"])
+	assert.Equal(t, []float64{1.5}, m.values["app_latency"])
+
+	event.NewDuration("latency_ms", &event.MetricOptions{Namespace: "app", Unit: event.UnitMilliseconds}).Record(ctx, 1500*time.Microsecond)
+	assert.Equal(t, "ms", m.units["app_latency_ms"])
+	assert.Equal(t, []float64{1.5}, m.values["app_latency_ms"])
 }
 
 func TestLabelToAttribute(t *testing.T) {

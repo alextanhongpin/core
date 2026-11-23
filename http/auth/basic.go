@@ -4,16 +4,16 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
-	"fmt"
 	"net/http"
+	"strings"
 )
 
 // BasicAuthConfig holds configuration for HTTP Basic Authentication middleware.
 // Basic authentication uses username/password credentials encoded in the
 // Authorization header as specified in RFC 7617.
 type BasicAuthConfig struct {
-	// Credentials maps usernames to their corresponding passwords.
-	// Passwords should be stored securely (hashed) in production environments.
+	// Credentials maps usernames to hex-encoded SHA-256 password hashes, as
+	// returned by HashPasswordSHA256. Plain-text passwords never match.
 	Credentials map[string]string
 
 	// Realm is the authentication realm displayed to users in browser dialogs.
@@ -23,8 +23,7 @@ type BasicAuthConfig struct {
 }
 
 // BasicHandler creates an HTTP Basic Authentication middleware using the provided
-// username/password credentials. This is a convenience function that uses default
-// configuration with realm "User Visible Realm".
+// username/password-hash credentials, using the realm "User Visible Realm".
 //
 // The middleware performs constant-time password comparison to prevent timing attacks.
 // Upon successful authentication, the username is stored in the request context
@@ -70,19 +69,24 @@ func BasicHandlerWithConfig(h http.Handler, config BasicAuthConfig) http.Handler
 		realm = "Restricted"
 	}
 
+	challenge := `Basic realm=` + quote(realm) + `, charset="UTF-8"`
+
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Extract username and password from Authorization header
 		username, password, ok := r.BasicAuth()
 		if !ok {
-			w.Header().Set("WWW-Authenticate", fmt.Sprintf(`Basic realm="%s"`, realm))
+			w.Header().Set("WWW-Authenticate", challenge)
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
 
-		// Check if username exists and password matches (SHA-256 hashed)
+		// Always compare against a hash, so the response time does not reveal
+		// whether the username exists.
 		hashedPassword, exists := config.Credentials[username]
-		if !exists || !ComparePasswordHashSHA256(hashedPassword, password) {
-			w.Header().Set("WWW-Authenticate", fmt.Sprintf(`Basic realm="%s"`, realm))
+		if !exists {
+			hashedPassword = unknownUserHash
+		}
+		if !ComparePasswordHashSHA256(hashedPassword, password) || !exists {
+			w.Header().Set("WWW-Authenticate", challenge)
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
@@ -92,8 +96,33 @@ func BasicHandlerWithConfig(h http.Handler, config BasicAuthConfig) http.Handler
 	})
 }
 
-// HashPasswordSHA256 hashes a plain-text password using SHA-256.
-// Use this when storing credentials in production.
+// unknownUserHash is compared against when the username is not configured.
+// No password hashes to it, because it is not valid hex.
+var unknownUserHash = strings.Repeat("x", sha256.Size*2)
+
+// quote returns s as an RFC 9110 quoted-string.
+func quote(s string) string {
+	var b strings.Builder
+	b.WriteByte('"')
+	for _, c := range []byte(s) {
+		switch {
+		case c == '"' || c == '\\':
+			b.WriteByte('\\')
+			b.WriteByte(c)
+		case c < ' ' || c == 0x7f:
+			// Control characters are not allowed in header values.
+		default:
+			b.WriteByte(c)
+		}
+	}
+	b.WriteByte('"')
+	return b.String()
+}
+
+// HashPasswordSHA256 returns the hex-encoded SHA-256 hash of password, the
+// format BasicHandler expects in its credentials map. SHA-256 is fast and
+// unsalted, so use it for high-entropy secrets (API keys, generated
+// passwords), not for user-chosen passwords.
 func HashPasswordSHA256(password string) string {
 	hash := sha256.Sum256([]byte(password))
 	return hex.EncodeToString(hash[:])

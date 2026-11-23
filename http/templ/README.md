@@ -1,80 +1,35 @@
-# HTTP Template Package
+# templ
 
-The HTTP Template package provides a flexible, hot-reloadable HTML template system for Go web applications with support for layout composition and embedded files.
-
-## Features
-
-- **Hot-Reload**: Automatic template reloading during development
-- **Layout Composition**: Support for base layouts and template extension
-- **Embedded Files**: Compatible with Go 1.16+ `embed.FS`
-- **Template Functions**: Custom function maps for template rendering
-- **Caching**: Production-ready template caching
-- **Error Handling**: Robust error handling for template issues
-- **Cross-Package Integration**: Works with `handler`, `server`, and logging middleware
-
-## Quick Start
+Load HTML templates from an `fs.FS`, compose layouts and partials, and
+optionally re-parse on every render during development. Templates use
+`html/template`, so data is escaped for its context.
 
 ```go
-package main
+base := (&templ.Template{
+	FS:        os.DirFS("templates"), // or an embed.FS (fs.Sub it to the template root)
+	HotReload: os.Getenv("ENV") == "dev",
+	Funcs:     template.FuncMap{"upper": strings.ToUpper},
+}).Compile("base.html", "partials/*.html")
 
-import (
-    "net/http"
-    "os"
-    "github.com/alextanhongpin/core/http/templ"
-)
+home := base.Clone().Compile("pages/home.html")
+about := base.Clone().Compile("pages/about.html")
 
-func main() {
-    tpl := &templ.Template{
-        FS:        os.DirFS("templates"),
-        HotReload: true, // Set to false in production
-    }
-    homePage := tpl.Compile("base.html", "pages/home.html")
-    aboutPage := tpl.Compile("base.html", "pages/about.html")
-    http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-        data := map[string]any{
-            "Title": "Home Page",
-            "User":  "John Doe",
-        }
-        homePage.Execute(w, data)
-    })
-    http.HandleFunc("/about", func(w http.ResponseWriter, r *http.Request) {
-        data := map[string]any{
-            "Title": "About Us",
-        }
-        aboutPage.Execute(w, data)
-    })
-    http.ListenAndServe(":8080", nil)
-}
+mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
+	if err := home.Execute(w, map[string]any{"Title": "Home"}); err != nil {
+		http.Error(w, "render failed", http.StatusInternalServerError)
+	}
+})
 ```
 
-## API Reference
+- `Compile(patterns...)` appends patterns, parses them, and panics on error
+  (call it at startup). The first pattern must be a file name: `Execute`
+  renders the template named after its base name.
+- `Execute(w, data)` / `ExecuteTemplate(w, name, data)` render. With
+  `HotReload` they re-parse first and return parse errors instead of
+  panicking.
+- `Clone()` copies the patterns and functions without the compiled state, so
+  pages can extend a shared layout.
 
-### Template Initialization
-
-#### `Template{FS: fs.FS, HotReload: bool}`
-Creates a new template instance.
-
-### Compile
-
-#### `Compile(layout string, files ...string) *CompiledTemplate`
-Compiles templates with optional layout.
-
-### Execute
-
-#### `Execute(w http.ResponseWriter, data any) error`
-Renders template to response writer.
-
-## Best Practices
-
-- Use hot-reload in development, caching in production.
-- Organize templates with layouts and partials for maintainability.
-- Integrate with `handler` for structured error handling.
-
-## Related Packages
-
-- [`handler`](../handler/README.md): Base handler utilities
-- [`server`](../server/README.md): HTTP server utilities
-
-## License
-
-MIT
+A `Template` must not be compiled while it is being executed concurrently.
+Execution writes directly to `w`: render into a buffer first if a failed
+render must not leave a partial response.

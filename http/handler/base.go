@@ -8,6 +8,7 @@ import (
 	"net/http"
 
 	"github.com/alextanhongpin/core/http/request"
+	"github.com/alextanhongpin/core/http/requestid"
 	"github.com/alextanhongpin/core/http/response"
 	"github.com/alextanhongpin/errors/cause"
 	"github.com/alextanhongpin/errors/codes"
@@ -84,13 +85,6 @@ func (h BaseHandler) ReadJSON(r *http.Request, req any) error {
 	return request.DecodeJSON(r, req)
 }
 
-// JSON writes a JSON response with status code.
-// This is an alias for OK method for better semantic clarity.
-//
-// Example:
-//
-//	c.JSON(w, users, 200)
-
 // ErrorJSON writes an error response in JSON format.
 // It automatically determines the appropriate HTTP status code based on the error type.
 //
@@ -102,8 +96,6 @@ func (h BaseHandler) ReadJSON(r *http.Request, req any) error {
 // Example:
 //
 //	c.ErrorJSON(w, cause.New(codes.NotFound, "user/not_found", "User not found"))
-//
-// ErrorJSON is a helper method to standardize error responses
 func (h BaseHandler) ErrorJSON(w http.ResponseWriter, err error) {
 	response.ErrorJSON(w, err)
 }
@@ -145,14 +137,23 @@ func (h BaseHandler) Next(w http.ResponseWriter, r *http.Request, err error) {
 		var ve interface {
 			Map() map[string][]string
 		}
+		var va interface {
+			Map() map[string]any
+		}
 		var c *cause.Error
 
 		switch {
-		case errors.As(err, &ve):
-			// If the error is a validation error, we log it as a warning.
+		case errors.As(err, &ve), errors.As(err, &va):
+			// Validation errors are client errors: log them as warnings.
+			var fields any
+			if ve != nil {
+				fields = ve.Map()
+			} else {
+				fields = va.Map()
+			}
 			h.logger.WarnContext(r.Context(), "validation error occurred",
 				append(attrs,
-					slog.Any("errors", ve.Map()),
+					slog.Any("errors", fields),
 					slog.Int("code", http.StatusBadRequest),
 				)...,
 			)
@@ -167,7 +168,7 @@ func (h BaseHandler) Next(w http.ResponseWriter, r *http.Request, err error) {
 			// For any other error, we log it as an error.
 			h.logger.ErrorContext(r.Context(), "internal error occurred",
 				append(attrs,
-					slog.Any("err", err.Error()),
+					slog.Any("err", err),
 					slog.Int("code", http.StatusInternalServerError),
 				)...,
 			)
@@ -177,8 +178,9 @@ func (h BaseHandler) Next(w http.ResponseWriter, r *http.Request, err error) {
 	h.ErrorJSON(w, err)
 }
 
-// GetRequestID extracts the request ID from the request context.
-// This is useful for correlation logging and tracing.
+// GetRequestID returns the request ID stored by requestid.Handler, or else
+// the X-Request-ID header if it passes requestid.Valid. Unvalidated client
+// headers are never returned, so the value is safe to log and echo.
 //
 // Example:
 //
@@ -186,10 +188,10 @@ func (h BaseHandler) Next(w http.ResponseWriter, r *http.Request, err error) {
 //		// Use request ID for logging or response headers
 //	}
 func (h BaseHandler) GetRequestID(r *http.Request) string {
-	if id := r.Header.Get("X-Request-ID"); id != "" {
+	if id, ok := requestid.Context.Value(r.Context()); ok {
 		return id
 	}
-	if id := r.Header.Get("X-Correlation-ID"); id != "" {
+	if id := r.Header.Get("X-Request-ID"); requestid.Valid(id) {
 		return id
 	}
 	return ""

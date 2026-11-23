@@ -1,3 +1,4 @@
-// Package ab provides A/B experiments, fixed-split statistical reports, adaptive bandits,
-// feature flags, analytics, and recommendation engines.
+// Package ab provides stable hashing and rollouts, fixed-split conversion
+// tests with statistical reports, a weighted multi-variant experiment engine,
+// and multi-armed bandits.
 package ab

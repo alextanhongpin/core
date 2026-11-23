@@ -14,19 +14,11 @@ import (
 	"time"
 
 	"github.com/alextanhongpin/core/metrics"
-	"github.com/alextanhongpin/core/storage/redis/redistest"
 	"github.com/stretchr/testify/assert"
 )
 
-func TestMain(m *testing.M) {
-	stop := redistest.Init(redistest.Image("redis/redis-stack:6.2.6-v17"))
-	defer stop()
-
-	m.Run()
-}
-
 func TestTracker(t *testing.T) {
-	tracker := metrics.NewTracker(t.Name(), redistest.Client(t))
+	tracker := metrics.NewTracker(t.Name(), redisClient(t))
 	ctx := context.Background()
 
 	is := assert.New(t)
@@ -52,7 +44,7 @@ func TestTrackerHandler(t *testing.T) {
 		return "user-id"
 	}
 
-	tracker := metrics.NewTracker(t.Name(), redistest.Client(t))
+	tracker := metrics.NewTracker(t.Name(), redisClient(t))
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	h = metrics.TrackerHandler(h, tracker, userFn, logger)
 	mux := http.NewServeMux()
@@ -78,6 +70,50 @@ func TestTrackerHandler(t *testing.T) {
 		is.Nil(err)
 		t.Log(string(b))
 	}
+}
+
+func TestTrackerStatsMissingDay(t *testing.T) {
+	tracker := metrics.NewTracker(t.Name(), redisClient(t))
+	ctx := context.Background()
+	is := assert.New(t)
+
+	// Nothing recorded yet.
+	stats, err := tracker.Stats(ctx, time.Now())
+	is.Nil(err)
+	is.Empty(stats)
+
+	day1 := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
+	day2 := day1.AddDate(0, 0, 1)
+
+	tracker.Now = func() time.Time { return day1 }
+	is.Nil(tracker.Record(ctx, "GET /foo", "a", time.Second))
+	is.Nil(tracker.Record(ctx, "GET /bar", "a", time.Second))
+
+	tracker.Now = func() time.Time { return day2 }
+	is.Nil(tracker.Record(ctx, "GET /foo", "b", 2*time.Second))
+	is.Nil(tracker.Record(ctx, "GET /foo", "c", 2*time.Second))
+
+	// A top path without requests on day2 is skipped instead of failing on
+	// its missing latency digest.
+	stats, err = tracker.Stats(ctx, day2)
+	is.Nil(err)
+	is.Len(stats, 1)
+	is.Equal("GET /foo", stats[0].Path)
+	is.Equal(int64(2), stats[0].Total)
+	is.Equal(int64(2), stats[0].Unique)
+	is.Equal(2.0, stats[0].P50)
+
+	// Paths are ranked by all-time frequency: /foo (3) before /bar (1).
+	stats, err = tracker.Stats(ctx, day1)
+	is.Nil(err)
+	is.Len(stats, 2)
+	is.Equal("GET /foo", stats[0].Path)
+	is.Equal("GET /bar", stats[1].Path)
+
+	// A day without any requests returns no stats.
+	stats, err = tracker.Stats(ctx, day2.AddDate(0, 0, 1))
+	is.Nil(err)
+	is.Empty(stats)
 }
 
 func randDuration(duration time.Duration) time.Duration {

@@ -1,6 +1,7 @@
 package ab
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"math/rand"
@@ -79,8 +80,10 @@ type BanditStorage interface {
 	ListResults(expID string, limit int) ([]BanditResult, error)
 }
 
-// InMemoryBanditStorage is a simple in-memory implementation
+// InMemoryBanditStorage is a BanditStorage for tests and development. It is
+// safe for concurrent use.
 type InMemoryBanditStorage struct {
+	mu          sync.RWMutex
 	experiments map[string]*BanditExperiment
 	results     map[string][]BanditResult // expID -> results
 }
@@ -93,6 +96,8 @@ func NewInMemoryBanditStorage() *InMemoryBanditStorage {
 }
 
 func (s *InMemoryBanditStorage) SaveExperiment(exp *BanditExperiment) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.experiments[exp.ID] = exp
 	return nil
 }
@@ -101,15 +106,22 @@ func (s *InMemoryBanditStorage) SaveArm(expID string, arm *BanditArm) error {
 	return nil
 }
 func (s *InMemoryBanditStorage) SaveResult(result BanditResult) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.results[result.ExperimentID] = append(s.results[result.ExperimentID], result)
 	return nil
 }
+
+// ListResults returns a copy of the oldest limit results, or all of them
+// when limit <= 0.
 func (s *InMemoryBanditStorage) ListResults(expID string, limit int) ([]BanditResult, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	results := s.results[expID]
-	if len(results) > limit {
+	if limit > 0 && len(results) > limit {
 		results = results[:limit]
 	}
-	return results, nil
+	return append([]BanditResult(nil), results...), nil
 }
 
 // BanditMetrics tracks operational metrics for bandit engine
@@ -120,28 +132,23 @@ type BanditMetrics struct {
 	Regret  []float64
 }
 
-// BanditEngine manages multi-armed bandit experiments
+// BanditEngine manages multi-armed bandit experiments. It is safe for
+// concurrent use. Arms returned by SelectArm are snapshots.
 type BanditEngine struct {
 	experiments map[string]*BanditExperiment
-	results     []BanditResult
 	rng         *rand.Rand
 	storage     BanditStorage
 	metrics     BanditMetrics
-	mu          sync.RWMutex
+	mu          sync.Mutex
 }
 
-// NewBanditEngine creates a new bandit engine
+// NewBanditEngine creates a new bandit engine with in-memory storage.
 func NewBanditEngine() *BanditEngine {
-	return &BanditEngine{
-		experiments: make(map[string]*BanditExperiment),
-		results:     make([]BanditResult, 0),
-		rng:         rand.New(rand.NewSource(time.Now().UnixNano())),
-		storage:     NewInMemoryBanditStorage(),
-		metrics:     BanditMetrics{},
-	}
+	return NewBanditEngineWithStorage(nil, nil)
 }
 
-// NewBanditEngineWithStorage creates a new bandit engine with custom storage and metrics
+// NewBanditEngineWithStorage creates a new bandit engine with custom storage
+// and initial metrics. Nil arguments use in-memory storage and zero metrics.
 func NewBanditEngineWithStorage(storage BanditStorage, metrics *BanditMetrics) *BanditEngine {
 	if storage == nil {
 		storage = NewInMemoryBanditStorage()
@@ -151,20 +158,55 @@ func NewBanditEngineWithStorage(storage BanditStorage, metrics *BanditMetrics) *
 	}
 	return &BanditEngine{
 		experiments: make(map[string]*BanditExperiment),
-		results:     make([]BanditResult, 0),
 		rng:         rand.New(rand.NewSource(time.Now().UnixNano())),
 		storage:     storage,
 		metrics:     *metrics,
 	}
 }
 
-// CreateBanditExperiment creates a new bandit experiment
+// CreateBanditExperiment validates and registers exp. The engine takes
+// ownership of exp: callers must not modify it afterwards. Arms need unique,
+// non-empty IDs and Epsilon must be in [0, 1].
 func (b *BanditEngine) CreateBanditExperiment(exp *BanditExperiment) error {
+	if exp == nil {
+		return errors.New("ab: experiment is nil")
+	}
+	if len(exp.Arms) == 0 {
+		return errors.New("ab: bandit experiment needs at least one arm")
+	}
+	ids := make(map[string]bool, len(exp.Arms))
+	for _, arm := range exp.Arms {
+		if arm.ID == "" {
+			return errors.New("ab: arm ID is required")
+		}
+		if ids[arm.ID] {
+			return fmt.Errorf("ab: duplicate arm ID %q", arm.ID)
+		}
+		ids[arm.ID] = true
+		if arm.Alpha < 0 || arm.Beta < 0 {
+			return fmt.Errorf("ab: arm %q has a negative prior", arm.ID)
+		}
+	}
+	if !(exp.Epsilon >= 0 && exp.Epsilon <= 1) {
+		return fmt.Errorf("ab: epsilon must be in [0, 1], got %v", exp.Epsilon)
+	}
+	switch exp.Algorithm {
+	case EpsilonGreedy, UCB, ThompsonSampling, BayesianBandit:
+	default:
+		return fmt.Errorf("unsupported bandit algorithm: %s", exp.Algorithm)
+	}
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
 	if exp.ID == "" {
 		exp.ID = generateID()
 	}
+	if _, ok := b.experiments[exp.ID]; ok {
+		return fmt.Errorf("ab: experiment %s already exists", exp.ID)
+	}
 
-	// Initialize arms with priors
+	now := time.Now()
 	for i := range exp.Arms {
 		arm := &exp.Arms[i]
 		if arm.Alpha == 0 {
@@ -173,11 +215,10 @@ func (b *BanditEngine) CreateBanditExperiment(exp *BanditExperiment) error {
 		if arm.Beta == 0 {
 			arm.Beta = 1 // Prior belief of 1 failure
 		}
-		arm.CreatedAt = time.Now()
-		arm.UpdatedAt = time.Now()
+		arm.CreatedAt = now
+		arm.UpdatedAt = now
 	}
 
-	// Set default algorithm parameters
 	if exp.Epsilon == 0 && exp.Algorithm == EpsilonGreedy {
 		exp.Epsilon = 0.1 // 10% exploration
 	}
@@ -189,17 +230,23 @@ func (b *BanditEngine) CreateBanditExperiment(exp *BanditExperiment) error {
 	}
 
 	exp.Status = "active"
-	exp.StartTime = time.Now()
-	exp.CreatedAt = time.Now()
-	exp.UpdatedAt = time.Now()
+	exp.StartTime = now
+	exp.CreatedAt = now
+	exp.UpdatedAt = now
 
+	if err := b.storage.SaveExperiment(exp); err != nil {
+		return fmt.Errorf("failed to save experiment to storage: %w", err)
+	}
 	b.experiments[exp.ID] = exp
-	_ = b.storage.SaveExperiment(exp)
 	return nil
 }
 
-// SelectArm selects an arm based on the bandit algorithm
+// SelectArm selects an arm with the experiment's algorithm and counts a pull.
+// Report its outcome once with RecordReward.
 func (b *BanditEngine) SelectArm(experimentID, userID string, context map[string]any) (*BanditArm, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
 	exp, exists := b.experiments[experimentID]
 	if !exists {
 		b.metrics.Errors++
@@ -212,43 +259,43 @@ func (b *BanditEngine) SelectArm(experimentID, userID string, context map[string
 	}
 
 	var selectedArm *BanditArm
-
 	switch exp.Algorithm {
 	case EpsilonGreedy:
 		selectedArm = b.selectEpsilonGreedy(exp)
 	case UCB:
 		selectedArm = b.selectUCB(exp)
-	case ThompsonSampling:
+	case ThompsonSampling, BayesianBandit:
 		selectedArm = b.selectThompsonSampling(exp)
-	case BayesianBandit:
-		selectedArm = b.selectBayesian(exp)
 	default:
 		return nil, fmt.Errorf("unsupported bandit algorithm: %s", exp.Algorithm)
 	}
 
-	if selectedArm == nil {
-		return nil, fmt.Errorf("failed to select arm")
-	}
-
+	now := time.Now()
 	selectedArm.Pulls++
 	exp.TotalPulls++
-	selectedArm.UpdatedAt = time.Now()
-	exp.UpdatedAt = time.Now()
-	_ = b.storage.SaveArm(experimentID, selectedArm)
+	selectedArm.UpdatedAt = now
+	exp.UpdatedAt = now
 	b.metrics.Pulls++
+	if err := b.storage.SaveArm(experimentID, selectedArm); err != nil {
+		b.metrics.Errors++
+		return nil, fmt.Errorf("failed to save arm to storage: %w", err)
+	}
 
-	return selectedArm, nil
+	arm := *selectedArm
+	return &arm, nil
 }
 
-// RecordReward records the reward for a bandit arm pull
+// RecordReward records the outcome of one pull of an arm.
 func (b *BanditEngine) RecordReward(experimentID, armID, userID string, reward float64, success bool, context map[string]any) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
 	exp, exists := b.experiments[experimentID]
 	if !exists {
 		b.metrics.Errors++
 		return fmt.Errorf("experiment %s not found", experimentID)
 	}
 
-	// Find the arm
 	var arm *BanditArm
 	for i := range exp.Arms {
 		if exp.Arms[i].ID == armID {
@@ -256,24 +303,23 @@ func (b *BanditEngine) RecordReward(experimentID, armID, userID string, reward f
 			break
 		}
 	}
-
 	if arm == nil {
+		b.metrics.Errors++
 		return fmt.Errorf("arm %s not found in experiment %s", armID, experimentID)
 	}
 
-	// Update arm statistics
 	arm.TotalReward += reward
 	if success {
 		arm.Rewards++
-		arm.Alpha++ // Increment success count for Bayesian
+		arm.Alpha++
 		b.metrics.Rewards++
 	} else {
-		arm.Beta++ // Increment failure count for Bayesian
+		arm.Beta++
 	}
-	arm.UpdatedAt = time.Now()
-	exp.UpdatedAt = time.Now()
+	now := time.Now()
+	arm.UpdatedAt = now
+	exp.UpdatedAt = now
 
-	// Record the result
 	result := BanditResult{
 		ExperimentID: experimentID,
 		ArmID:        armID,
@@ -281,31 +327,28 @@ func (b *BanditEngine) RecordReward(experimentID, armID, userID string, reward f
 		Reward:       reward,
 		Success:      success,
 		Context:      context,
-		Timestamp:    time.Now(),
+		Timestamp:    now,
 	}
-	b.results = append(b.results, result)
-	_ = b.storage.SaveResult(result)
+	if err := b.storage.SaveResult(result); err != nil {
+		b.metrics.Errors++
+		return fmt.Errorf("failed to save result to storage: %w", err)
+	}
 
 	return nil
 }
 
 // selectEpsilonGreedy implements epsilon-greedy arm selection
 func (b *BanditEngine) selectEpsilonGreedy(exp *BanditExperiment) *BanditArm {
-	// Explore with probability epsilon
 	if b.rng.Float64() < exp.Epsilon {
-		// Random exploration
 		return &exp.Arms[b.rng.Intn(len(exp.Arms))]
 	}
 
-	// Exploit: select arm with highest average reward
 	bestArm := &exp.Arms[0]
 	bestReward := b.getAverageReward(bestArm)
-
 	for i := 1; i < len(exp.Arms); i++ {
 		arm := &exp.Arms[i]
-		avgReward := b.getAverageReward(arm)
-		if avgReward > bestReward {
-			bestReward = avgReward
+		if avg := b.getAverageReward(arm); avg > bestReward {
+			bestReward = avg
 			bestArm = arm
 		}
 	}
@@ -317,11 +360,9 @@ func (b *BanditEngine) selectEpsilonGreedy(exp *BanditExperiment) *BanditArm {
 func (b *BanditEngine) selectUCB(exp *BanditExperiment) *BanditArm {
 	bestArm := &exp.Arms[0]
 	bestUCB := b.calculateUCB(bestArm, exp.TotalPulls, exp.Confidence)
-
 	for i := 1; i < len(exp.Arms); i++ {
 		arm := &exp.Arms[i]
-		ucb := b.calculateUCB(arm, exp.TotalPulls, exp.Confidence)
-		if ucb > bestUCB {
+		if ucb := b.calculateUCB(arm, exp.TotalPulls, exp.Confidence); ucb > bestUCB {
 			bestUCB = ucb
 			bestArm = arm
 		}
@@ -330,27 +371,20 @@ func (b *BanditEngine) selectUCB(exp *BanditExperiment) *BanditArm {
 	return bestArm
 }
 
-// selectThompsonSampling implements Thompson Sampling arm selection
+// selectThompsonSampling picks the arm with the largest draw from its Beta
+// posterior.
 func (b *BanditEngine) selectThompsonSampling(exp *BanditExperiment) *BanditArm {
 	bestArm := &exp.Arms[0]
 	bestSample := b.sampleBeta(bestArm.Alpha, bestArm.Beta)
-
 	for i := 1; i < len(exp.Arms); i++ {
 		arm := &exp.Arms[i]
-		sample := b.sampleBeta(arm.Alpha, arm.Beta)
-		if sample > bestSample {
+		if sample := b.sampleBeta(arm.Alpha, arm.Beta); sample > bestSample {
 			bestSample = sample
 			bestArm = arm
 		}
 	}
 
 	return bestArm
-}
-
-// selectBayesian implements Bayesian bandit arm selection
-func (b *BanditEngine) selectBayesian(exp *BanditExperiment) *BanditArm {
-	// Similar to Thompson Sampling but with additional considerations
-	return b.selectThompsonSampling(exp)
 }
 
 // getAverageReward calculates the average reward for an arm
@@ -367,37 +401,58 @@ func (b *BanditEngine) calculateUCB(arm *BanditArm, totalPulls int64, confidence
 		return math.Inf(1) // Infinite UCB for unplayed arms
 	}
 
-	avgReward := b.getAverageReward(arm)
 	confidenceBound := confidence * math.Sqrt(math.Log(float64(totalPulls))/float64(arm.Pulls))
-
-	return avgReward + confidenceBound
+	return b.getAverageReward(arm) + confidenceBound
 }
 
-// sampleBeta samples from a Beta distribution
+// sampleBeta draws from Beta(alpha, beta) as X/(X+Y) with X ~ Gamma(alpha)
+// and Y ~ Gamma(beta).
 func (b *BanditEngine) sampleBeta(alpha, beta float64) float64 {
-	// Simple approximation using ratio of Gamma samples
-	// For production use, consider a proper Beta distribution sampler
 	x := b.sampleGamma(alpha, 1.0)
 	y := b.sampleGamma(beta, 1.0)
+	if x+y == 0 {
+		return alpha / (alpha + beta)
+	}
 	return x / (x + y)
 }
 
-// sampleGamma samples from a Gamma distribution (simplified implementation)
+// sampleGamma draws from Gamma(shape, scale) with the Marsaglia-Tsang
+// method. Shapes below 1 use the boost Gamma(shape+1) * U^(1/shape).
 func (b *BanditEngine) sampleGamma(shape, scale float64) float64 {
-	// Simplified Gamma sampling using normal approximation for large shape
-	if shape > 10 {
-		// Normal approximation
-		mean := shape * scale
-		stddev := math.Sqrt(shape) * scale
-		return math.Max(0, b.rng.NormFloat64()*stddev+mean)
+	if shape < 1 {
+		u := b.rng.Float64()
+		return b.sampleGamma(shape+1, scale) * math.Pow(u, 1/shape)
 	}
 
-	// For small shape, use exponential approximation
-	return -math.Log(b.rng.Float64()) * scale
+	d := shape - 1.0/3
+	c := 1 / math.Sqrt(9*d)
+	for {
+		x := b.rng.NormFloat64()
+		v := 1 + c*x
+		if v <= 0 {
+			continue
+		}
+		v = v * v * v
+		u := b.rng.Float64()
+		if u < 1-0.0331*x*x*x*x {
+			return d * v * scale
+		}
+		if math.Log(u) < 0.5*x*x+d*(1-v+math.Log(v)) {
+			return d * v * scale
+		}
+	}
 }
 
-// GetBanditResults returns analysis of bandit experiment results
+// GetBanditResults returns analysis of bandit experiment results, with arms
+// sorted by conversion rate, highest first.
 func (b *BanditEngine) GetBanditResults(experimentID string) (*BanditAnalysis, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	return b.analyze(experimentID)
+}
+
+func (b *BanditEngine) analyze(experimentID string) (*BanditAnalysis, error) {
 	exp, exists := b.experiments[experimentID]
 	if !exists {
 		return nil, fmt.Errorf("experiment %s not found", experimentID)
@@ -409,39 +464,30 @@ func (b *BanditEngine) GetBanditResults(experimentID string) (*BanditAnalysis, e
 		Arms:         make([]BanditArmAnalysis, len(exp.Arms)),
 	}
 
-	for i, arm := range exp.Arms {
-		conversionRate := 0.0
-		if arm.Pulls > 0 {
-			conversionRate = float64(arm.Rewards) / float64(arm.Pulls)
-		}
-
-		avgReward := b.getAverageReward(&arm)
-
-		// Calculate confidence intervals
+	bestRate := bestConversionRate(exp.Arms)
+	for i := range exp.Arms {
+		arm := &exp.Arms[i]
 		lowerBound, upperBound := b.calculateBetaConfidenceInterval(arm.Alpha, arm.Beta, 0.95)
 
 		analysis.Arms[i] = BanditArmAnalysis{
 			ArmID:          arm.ID,
 			Pulls:          arm.Pulls,
 			Rewards:        arm.Rewards,
-			ConversionRate: conversionRate,
-			AverageReward:  avgReward,
+			ConversionRate: conversionRate(arm),
+			AverageReward:  b.getAverageReward(arm),
 			ConfidenceInterval: ConfidenceInterval{
 				Lower: lowerBound,
 				Upper: upperBound,
 			},
 			PosteriorMean: arm.Alpha / (arm.Alpha + arm.Beta),
-			Regret:        b.calculateRegret(&arm, analysis),
+			Regret:        (bestRate - conversionRate(arm)) * float64(arm.Pulls),
 		}
+		analysis.TotalRegret += analysis.Arms[i].Regret
 	}
 
-	// Sort arms by conversion rate
-	sort.Slice(analysis.Arms, func(i, j int) bool {
+	sort.SliceStable(analysis.Arms, func(i, j int) bool {
 		return analysis.Arms[i].ConversionRate > analysis.Arms[j].ConversionRate
 	})
-
-	// Calculate total regret
-	analysis.TotalRegret = b.calculateTotalRegret(exp)
 
 	return analysis, nil
 }
@@ -454,7 +500,8 @@ type BanditAnalysis struct {
 	Arms         []BanditArmAnalysis `json:"arms"`
 }
 
-// BanditArmAnalysis contains analysis for a single bandit arm
+// BanditArmAnalysis contains analysis for a single bandit arm. Regret is
+// the empirical regret: (best observed rate - this arm's rate) * pulls.
 type BanditArmAnalysis struct {
 	ArmID              string             `json:"arm_id"`
 	Pulls              int64              `json:"pulls"`
@@ -466,77 +513,36 @@ type BanditArmAnalysis struct {
 	Regret             float64            `json:"regret"`
 }
 
-// calculateBetaConfidenceInterval calculates confidence interval for Beta distribution
+// calculateBetaConfidenceInterval approximates the central credible interval
+// of Beta(alpha, beta) with a normal distribution.
 func (b *BanditEngine) calculateBetaConfidenceInterval(alpha, beta, confidence float64) (float64, float64) {
-	// Simplified calculation using normal approximation
 	mean := alpha / (alpha + beta)
 	variance := (alpha * beta) / ((alpha + beta) * (alpha + beta) * (alpha + beta + 1))
-	stddev := math.Sqrt(variance)
-
-	// Z-score for confidence level
-	z := 1.96 // For 95% confidence
-	switch confidence {
-	case 0.99:
-		z = 2.576
-	case 0.90:
-		z = 1.645
-	}
-
-	margin := z * stddev
+	margin := zScore(confidence) * math.Sqrt(variance)
 
 	return math.Max(0, mean-margin), math.Min(1, mean+margin)
 }
 
-// calculateRegret calculates regret for an arm compared to the best arm
-func (b *BanditEngine) calculateRegret(arm *BanditArm, analysis *BanditAnalysis) float64 {
-	if len(analysis.Arms) == 0 {
-		return 0.0
+func conversionRate(arm *BanditArm) float64 {
+	if arm.Pulls == 0 {
+		return 0
 	}
-
-	// Find the best arm's conversion rate
-	bestRate := 0.0
-	for _, armAnalysis := range analysis.Arms {
-		if armAnalysis.ConversionRate > bestRate {
-			bestRate = armAnalysis.ConversionRate
-		}
-	}
-
-	currentRate := 0.0
-	if arm.Pulls > 0 {
-		currentRate = float64(arm.Rewards) / float64(arm.Pulls)
-	}
-
-	return (bestRate - currentRate) * float64(arm.Pulls)
+	return float64(arm.Rewards) / float64(arm.Pulls)
 }
 
-// calculateTotalRegret calculates total regret for the experiment
-func (b *BanditEngine) calculateTotalRegret(exp *BanditExperiment) float64 {
-	// Find the best arm's true conversion rate
-	bestRate := 0.0
-	for _, arm := range exp.Arms {
-		rate := 0.0
-		if arm.Pulls > 0 {
-			rate = float64(arm.Rewards) / float64(arm.Pulls)
-		}
-		if rate > bestRate {
-			bestRate = rate
-		}
+func bestConversionRate(arms []BanditArm) float64 {
+	best := 0.0
+	for i := range arms {
+		best = max(best, conversionRate(&arms[i]))
 	}
-
-	totalRegret := 0.0
-	for _, arm := range exp.Arms {
-		currentRate := 0.0
-		if arm.Pulls > 0 {
-			currentRate = float64(arm.Rewards) / float64(arm.Pulls)
-		}
-		totalRegret += (bestRate - currentRate) * float64(arm.Pulls)
-	}
-
-	return totalRegret
+	return best
 }
 
 // StopExperiment stops a bandit experiment
 func (b *BanditEngine) StopExperiment(experimentID string) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
 	exp, exists := b.experiments[experimentID]
 	if !exists {
 		return fmt.Errorf("experiment %s not found", experimentID)
@@ -550,14 +556,16 @@ func (b *BanditEngine) StopExperiment(experimentID string) error {
 	return nil
 }
 
-// GetExperimentRecommendation provides recommendations for experiment decisions
+// GetExperimentRecommendation suggests stopping once there are at least 100
+// pulls and the best arm's 95% interval lies above the runner-up's.
 func (b *BanditEngine) GetExperimentRecommendation(experimentID string) (*BanditRecommendation, error) {
-	analysis, err := b.GetBanditResults(experimentID)
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	analysis, err := b.analyze(experimentID)
 	if err != nil {
 		return nil, err
 	}
-
-	exp := b.experiments[experimentID]
 
 	recommendation := &BanditRecommendation{
 		ExperimentID: experimentID,
@@ -566,18 +574,15 @@ func (b *BanditEngine) GetExperimentRecommendation(experimentID string) (*Bandit
 		Reasons:      make([]string, 0),
 	}
 
-	// Check if we have enough data
-	if exp.TotalPulls < 100 {
+	if analysis.TotalPulls < 100 {
 		recommendation.Reasons = append(recommendation.Reasons, "Need more data (minimum 100 pulls)")
 		return recommendation, nil
 	}
 
-	// Check if there's a clear winner
 	if len(analysis.Arms) >= 2 {
 		best := analysis.Arms[0]
 		second := analysis.Arms[1]
 
-		// If confidence intervals don't overlap and we have enough data
 		if best.ConfidenceInterval.Lower > second.ConfidenceInterval.Upper && best.Pulls > 50 {
 			recommendation.Decision = "stop"
 			recommendation.WinnerArmID = best.ArmID
@@ -594,26 +599,35 @@ func (b *BanditEngine) GetExperimentRecommendation(experimentID string) (*Bandit
 // BanditRecommendation provides recommendations for bandit experiment decisions
 type BanditRecommendation struct {
 	ExperimentID string   `json:"experiment_id"`
-	Decision     string   `json:"decision"` // "continue", "stop", "need_more_data"
+	Decision     string   `json:"decision"` // "continue" or "stop"
 	WinnerArmID  string   `json:"winner_arm_id,omitempty"`
-	Confidence   string   `json:"confidence"` // "low", "medium", "high"
+	Confidence   string   `json:"confidence"` // "medium" or "high"
 	Reasons      []string `json:"reasons"`
 }
 
+// Experiments returns snapshots of all experiments.
 func (b *BanditEngine) Experiments() []*BanditExperiment {
-	b.mu.RLock()
-	defer b.mu.RUnlock()
+	b.mu.Lock()
+	defer b.mu.Unlock()
 	exps := make([]*BanditExperiment, 0, len(b.experiments))
 	for _, exp := range b.experiments {
-		exps = append(exps, exp)
+		c := *exp
+		c.Arms = append([]BanditArm(nil), exp.Arms...)
+		exps = append(exps, &c)
 	}
 	return exps
 }
 
+// Metrics returns a snapshot of the engine's operational counters.
 func (b *BanditEngine) Metrics() BanditMetrics {
-	return b.metrics
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	m := b.metrics
+	m.Regret = append([]float64(nil), b.metrics.Regret...)
+	return m
 }
 
+// DeleteExperiment removes an experiment and reports whether it existed.
 func (b *BanditEngine) DeleteExperiment(id string) bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()

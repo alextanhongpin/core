@@ -1,14 +1,21 @@
 package templ
 
 import (
+	"fmt"
+	"html/template"
 	"io"
 	"io/fs"
 	"maps"
-	"path/filepath"
+	"path"
 	"slices"
-	"text/template"
 )
 
+// Template parses a set of files from FS with html/template, so values are
+// escaped for their HTML, JavaScript, CSS or URL context.
+//
+// The first pattern names the entry template: Execute runs the template
+// named after its base name (for example "base.html"), so it must be a file
+// name, not a glob.
 type Template struct {
 	cached   *template.Template
 	Patterns []string
@@ -19,42 +26,79 @@ type Template struct {
 	// Funcs provides custom functions available in templates
 	Funcs template.FuncMap
 
-	// HotReload reloads templates on each render (for development)
-	// Only works with os.DirFS, not embed.FS.
+	// HotReload re-parses templates on each render (for development). Parse
+	// errors are then returned by Execute instead of panicking.
 	HotReload bool
 }
 
-func (t *Template) Compile(Patterns ...string) *Template {
-	t.Patterns = append(t.Patterns, Patterns...)
-	// ParseFS returns the first file, which is the "" in the template.New("").
-	// We want to lookup the first file we passed in instead.
-	t.cached = t.compile()
+// Compile adds patterns and parses the templates. It panics if parsing
+// fails, so call it during startup; it returns t for chaining.
+func (t *Template) Compile(patterns ...string) *Template {
+	t.Patterns = append(t.Patterns, patterns...)
+
+	tpl, err := t.compile()
+	if err != nil {
+		panic(err)
+	}
+	t.cached = tpl
 
 	return t
 }
 
+// Execute renders the entry template.
 func (t *Template) Execute(wr io.Writer, data any) error {
-	if t.HotReload {
-		// If hot reload is enabled, compile the template each time
-		return t.compile().Execute(wr, data)
+	tpl, err := t.template()
+	if err != nil {
+		return err
 	}
 
-	return t.cached.Execute(wr, data)
+	return tpl.Execute(wr, data)
 }
 
+// ExecuteTemplate renders the named template.
 func (t *Template) ExecuteTemplate(wr io.Writer, name string, data any) error {
-	if t.HotReload {
-		// If hot reload is enabled, compile the template each time
-		return t.compile().ExecuteTemplate(wr, name, data)
+	tpl, err := t.template()
+	if err != nil {
+		return err
 	}
 
-	return t.cached.ExecuteTemplate(wr, name, data)
+	return tpl.ExecuteTemplate(wr, name, data)
 }
 
-func (t *Template) compile() *template.Template {
-	return template.Must(template.New("").Funcs(t.Funcs).ParseFS(t.FS, t.Patterns...)).Lookup(filepath.Base(t.Patterns[0]))
+func (t *Template) template() (*template.Template, error) {
+	if t.HotReload {
+		return t.compile()
+	}
+	if t.cached == nil {
+		return nil, fmt.Errorf("templ: template not compiled")
+	}
+
+	return t.cached, nil
 }
 
+func (t *Template) compile() (*template.Template, error) {
+	if len(t.Patterns) == 0 {
+		return nil, fmt.Errorf("templ: no patterns")
+	}
+
+	tpl, err := template.New("").Funcs(t.Funcs).ParseFS(t.FS, t.Patterns...)
+	if err != nil {
+		return nil, err
+	}
+
+	// ParseFS names each template after its file's base name; the entry
+	// point is the first pattern.
+	name := path.Base(t.Patterns[0])
+	entry := tpl.Lookup(name)
+	if entry == nil {
+		return nil, fmt.Errorf("templ: entry template %q not found; the first pattern must be a file name", name)
+	}
+
+	return entry, nil
+}
+
+// Clone returns an uncompiled copy with the same patterns, so more files can
+// be added with Compile without affecting t.
 func (t *Template) Clone() *Template {
 	return &Template{
 		FS:        t.FS,

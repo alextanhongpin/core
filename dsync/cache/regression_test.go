@@ -3,9 +3,11 @@ package cache_test
 import (
 	"context"
 	"errors"
+	"io"
+	"os"
 	"path/filepath"
+	"strings"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -56,81 +58,6 @@ func TestRedisLoadOrCreateReturnsCopies(t *testing.T) {
 	require.Error(t, err)
 }
 
-// Running out of Wait must be recognisable as ErrLocked.
-func TestLockWaitTimeoutIsErrLocked(t *testing.T) {
-	l := cache.MustNewLock(newClient(t))
-	ctx := t.Context()
-	held := make(chan struct{})
-	release := make(chan struct{})
-	done := make(chan error, 1)
-	go func() {
-		done <- l.AdvisoryLock(ctx, "k", cache.AdvisoryLockConfig{Do: func(context.Context, string, []byte) error {
-			close(held)
-			<-release
-			return nil
-		}})
-	}()
-	<-held
-	err := l.AdvisoryLock(ctx, "k", cache.AdvisoryLockConfig{Wait: 30 * time.Millisecond, Do: func(context.Context, string, []byte) error { return nil }})
-	require.ErrorIs(t, err, cache.ErrLocked)
-	require.ErrorIs(t, err, context.DeadlineExceeded)
-	close(release)
-	require.NoError(t, <-done)
-}
-
-// Losing a lease (renewal fails) must be recognisable as ErrLocked.
-func TestLockLostLeaseIsErrLocked(t *testing.T) {
-	client := newClient(t)
-	l := cache.MustNewLock(client)
-	ctx := t.Context()
-	err := l.AdvisoryLock(ctx, "k", cache.AdvisoryLockConfig{Lock: 100 * time.Millisecond, RefreshRatio: .3, Do: func(work context.Context, _ string, _ []byte) error {
-		keys, err := client.Keys(ctx, "cache:lease:*").Result()
-		require.NoError(t, err)
-		require.NoError(t, client.Del(ctx, keys...).Err())
-		<-work.Done()
-		return nil
-	}})
-	require.ErrorIs(t, err, cache.ErrLocked)
-
-	// Without renewal, running past the lease also reports ErrLocked.
-	_, _, err = l.LoadOrCreate(ctx, "v", cache.LoadOrCreateConfig[[]byte]{Lock: 20 * time.Millisecond, Create: func(context.Context, string) ([]byte, time.Duration, error) {
-		time.Sleep(50 * time.Millisecond)
-		return []byte("late"), 0, nil
-	}})
-	require.ErrorIs(t, err, cache.ErrLocked)
-}
-
-// FuncConfig.Wait lets concurrent callers share one fill instead of failing.
-func TestFuncWaitSharesFill(t *testing.T) {
-	var calls atomic.Int32
-	fn := cache.MustFunc(func(ctx context.Context, id int) (string, time.Duration, error) {
-		calls.Add(1)
-		time.Sleep(50 * time.Millisecond)
-		return "user", time.Minute, nil
-	}, cache.FuncConfig[int]{
-		Lock:  cache.MustNewLock(newClient(t)),
-		KeyFn: func(_ context.Context, id int) (string, error) { return "user:1", nil },
-		Wait:  5 * time.Second,
-	})
-	var wg sync.WaitGroup
-	for range 5 {
-		wg.Go(func() {
-			v, _, err := fn(t.Context(), 1)
-			require.NoError(t, err)
-			require.Equal(t, "user", v)
-		})
-	}
-	wg.Wait()
-	require.EqualValues(t, 1, calls.Load())
-
-	_, err := cache.Func(func(context.Context, int) (string, time.Duration, error) { return "", 0, nil }, cache.FuncConfig[int]{
-		Lock:  cache.MustNewLock(newClient(t)),
-		KeyFn: func(context.Context, int) (string, error) { return "", nil },
-		Wait:  -1,
-	})
-	require.Error(t, err)
-}
-
 func TestGoFuncNilCodecDefaultsToJSON(t *testing.T) {
 	fs, err := cache.NewFS(t.TempDir())
 	require.NoError(t, err)
@@ -149,4 +76,47 @@ func TestNewFSCreatesDirectory(t *testing.T) {
 	require.NoError(t, fs.Store(t.Context(), "k", []byte("v"), 0))
 	_, err = fs.Load(t.Context(), "missing")
 	require.True(t, errors.Is(err, cache.ErrNotExist))
+}
+
+// FS must replace value files atomically: a reader holding the old file sees
+// the old bytes, never a truncated or partially rewritten file.
+func TestFSReplacesFilesAtomically(t *testing.T) {
+	dir := t.TempDir()
+	fs, err := cache.NewFS(dir)
+	require.NoError(t, err)
+	defer fs.Close()
+	ctx := t.Context()
+	require.NoError(t, fs.Store(ctx, "k", []byte("old"), 0))
+
+	entries, err := os.ReadDir(dir)
+	require.NoError(t, err)
+	var name string
+	for _, e := range entries {
+		if !strings.HasPrefix(e.Name(), ".") {
+			name = e.Name()
+		}
+	}
+	require.NotEmpty(t, name)
+	old, err := os.Open(filepath.Join(dir, name))
+	require.NoError(t, err)
+	defer old.Close()
+
+	require.NoError(t, fs.Store(ctx, "k", []byte("new and longer"), time.Hour))
+	b, err := io.ReadAll(old)
+	require.NoError(t, err)
+	require.Equal(t, "old", string(b))
+
+	v, err := fs.Load(ctx, "k")
+	require.NoError(t, err)
+	require.Equal(t, "new and longer", string(v))
+	n, err := fs.Size(ctx)
+	require.NoError(t, err)
+	require.Equal(t, 1, n)
+}
+
+// DEL with no keys is a Redis error; Delete() must report zero like File and FS.
+func TestRedisDeleteNoKeys(t *testing.T) {
+	n, err := cache.MustNewRedis(newClient(t)).Delete(t.Context())
+	require.NoError(t, err)
+	require.Zero(t, n)
 }

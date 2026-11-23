@@ -86,19 +86,10 @@ func (t *FixedTest) Report() FixedReport {
 	r := FixedReport{ExperimentID: t.id, Variants: t.counts, PValue: 1, Ready: true}
 	for i := range r.Variants {
 		v := &r.Variants[i]
-		n := float64(v.Impressions)
-		if n == 0 {
-			v.ConfidenceInterval = ConfidenceInterval{Upper: 1}
-		} else {
-			p := float64(v.Conversions) / n
-			v.ConversionRate = p
-			z := 1.959963984540054
-			z2 := z * z
-			d := 1 + z2/n
-			center := (p + z2/(2*n)) / d
-			margin := z * math.Sqrt(p*(1-p)/n+z2/(4*n*n)) / d
-			v.ConfidenceInterval = ConfidenceInterval{Lower: math.Max(0, center-margin), Upper: math.Min(1, center+margin)}
+		if v.Impressions > 0 {
+			v.ConversionRate = float64(v.Conversions) / float64(v.Impressions)
 		}
+		v.ConfidenceInterval = wilson(v.Conversions, v.Impressions, 1.959963984540054)
 		r.Ready = r.Ready && v.Conversions >= 10 && v.Impressions-v.Conversions >= 10
 	}
 	a, b := r.Variants[0], r.Variants[1]

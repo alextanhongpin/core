@@ -7,11 +7,16 @@
 --
 -- Each breaker is one hash:
 --   status      CLOSED/HALF_OPEN/OPENED/DISABLED/FORCED_OPEN (missing = CLOSED)
---   generation  incremented on every transition; results from calls admitted
---               in an older generation are ignored
+--   generation  changed on every transition (to a value above both the old
+--               one and the Redis time in ms); results from calls admitted in
+--               another generation are ignored (missing = 0)
 --   counter     failure weight (CLOSED) or successes (HALF_OPEN); the field
 --               expires after the failure/success period without updates
 --   timeout     Redis time in ms when an OPENED breaker may go HALF_OPEN
+--
+-- After a transition to CLOSED, status and generation expire after the open
+-- timeout, so a healthy breaker's hash disappears once its counter lapses
+-- instead of staying in Redis forever. Other states persist until changed.
 
 local CLOSED, HALF_OPEN, OPENED, DISABLED, FORCED_OPEN = 1, 2, 3, 4, 5
 
@@ -26,12 +31,20 @@ end
 -- transition the circuit breaker to a new status, incrementing the generation
 -- and setting the timeout if necessary
 local function transition(key, status, timeout)
-	redis.call("HINCRBY", key, "generation", 1)
-	redis.call("HSET", key, "status", status)
+	local now = now_ms()
+	-- Time-based generations stay unique even after the hash has expired and
+	-- been recreated, so a stale result can never match a later generation.
+	local generation = tonumber(redis.call("HGET", key, "generation") or 0)
+	redis.call("HSET", key, "generation", math.max(generation + 1, now), "status", status)
 	redis.call("HDEL", key, "counter", "timeout")
 
+	if status == CLOSED then
+		redis.call("HPEXPIRE", key, math.max(timeout, 1), "FIELDS", 2, "status", "generation")
+	else
+		redis.call("HPERSIST", key, "FIELDS", 2, "status", "generation")
+	end
 	if status == OPENED then
-		redis.call("HSET", key, "timeout", now_ms() + timeout)
+		redis.call("HSET", key, "timeout", now + timeout)
 	end
 
 	return status
@@ -41,16 +54,16 @@ end
 -- generation
 local function begin(keys, args)
 	local key = keys[1]
-	redis.call("HSETNX", key, "generation", 0)
-	local result = redis.call("HMGET", key, "status", "timeout")
+	local result = redis.call("HMGET", key, "status", "timeout", "generation")
 	local status = tonumber(result[1] or CLOSED)
 	local timeout = tonumber(result[2] or 0)
+	local generation = tonumber(result[3] or 0)
 
 	if status == OPENED and now_ms() >= timeout then
 		status = transition(key, HALF_OPEN, 0)
+		generation = tonumber(redis.call("HGET", key, "generation"))
 	end
 
-	local generation = tonumber(redis.call("HGET", key, "generation") or 0)
 	return { status, generation }
 end
 
@@ -95,7 +108,7 @@ local function commit(keys, args)
 		if status == CLOSED then
 			return transition(key, OPENED, timeout)
 		end
-		return transition(key, CLOSED, 0)
+		return transition(key, CLOSED, timeout)
 	end
 	return status
 end

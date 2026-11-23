@@ -53,23 +53,17 @@ const (
 	handlerTimeout = 5 * time.Second
 )
 
-// ListenAndServe starts an HTTP server with default settings and graceful shutdown.
-//
-// This is a convenience function that creates a new server with sensible defaults
-// and waits for it to complete. The server will handle SIGINT and SIGTERM signals
-// for graceful shutdown.
-//
-// Parameters:
-//   - port: The port to listen on (e.g., ":8080", ":443")
-//   - handler: The HTTP handler to serve requests
-//
-// This function blocks until the server shuts down or encounters an error.
+// ListenAndServe runs New(port, handler) with WaitGroup: it blocks until
+// SIGINT/SIGTERM or a listen failure, then shuts down gracefully. It returns
+// the listen error, if any.
 //
 // Example:
 //
-//	server.ListenAndServe(":8080", myHandler)
-func ListenAndServe(port string, handler http.Handler) {
-	WaitGroup(New(port, handler))
+//	if err := server.ListenAndServe(":8080", myHandler); err != nil {
+//		log.Fatal(err)
+//	}
+func ListenAndServe(port string, handler http.Handler) error {
+	return WaitGroup(New(port, handler))
 }
 
 // New creates a new HTTP server with production-ready default settings.
@@ -112,83 +106,84 @@ func New(port string, handler http.Handler) *http.Server {
 	}
 }
 
-// WaitGroup starts multiple HTTP servers concurrently and waits for them to shut down gracefully.
+// WaitGroup runs servers concurrently until SIGINT or SIGTERM is received, or
+// until any server fails to listen, and then shuts all of them down,
+// allowing in-flight requests up to 5 seconds to finish. It returns the
+// listen errors, joined (nil after a clean signal-driven shutdown).
 //
-// This function handles the lifecycle of multiple HTTP servers:
-// 1. Starts all servers in separate goroutines
-// 2. Sets up signal handling for SIGINT and SIGTERM
-// 3. On signal reception, initiates graceful shutdown of all servers
-// 4. Waits for all servers to complete shutdown or timeout
-// 5. Logs any errors that occur during startup or shutdown
-//
-// Parameters:
-//   - servers: Variable number of *http.Server instances to run
-//
-// The function blocks until all servers have shut down or the process is terminated.
+// Unless a server already sets BaseContext, request contexts are derived from
+// a context that is canceled only after the shutdown grace period, so
+// in-flight requests are not canceled the moment the signal arrives.
 //
 // Example:
 //
-//	apiServer := server.New(":8080", apiHandler)
-//	adminServer := server.New(":8081", adminHandler)
-//	metricsServer := server.New(":9090", metricsHandler)
-//
-//	server.WaitGroup(apiServer, adminServer, metricsServer)
-//
-// Signal handling:
-// - SIGINT (Ctrl+C): Initiates graceful shutdown
-// - SIGTERM: Initiates graceful shutdown (common in container environments)
-func WaitGroup(servers ...*http.Server) {
-	// SIGINT: When a process is interrupted from keyboard by pressing CTRL+C.
-	//         Use os.Interrupt instead for OS-agnostic interrupt.
-	//         Reference: https://github.com/edgexfoundry/edgex-go/issues/995
-	// SIGTERM: A process is killed. Kubernetes sends this when performing a rolling update.
+//	err := server.WaitGroup(
+//		server.New(":8080", apiHandler),
+//		server.New(":9090", metricsHandler),
+//	)
+func WaitGroup(servers ...*http.Server) error {
+	// SIGINT: Ctrl+C (os.Interrupt is the portable name).
+	// SIGTERM: sent by Kubernetes and most process managers on shutdown.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	var wg sync.WaitGroup
-	wg.Add(len(servers))
+	baseCtx, cancelBase := context.WithCancel(context.Background())
+	defer cancelBase()
+
+	var (
+		wg   sync.WaitGroup
+		mu   sync.Mutex
+		errs []error
+	)
+	// Any listen failure triggers shutdown of the other servers.
+	ctx, fail := context.WithCancel(ctx)
+	defer fail()
 
 	for _, srv := range servers {
 		if srv.BaseContext == nil {
-			srv.BaseContext = func(_ net.Listener) context.Context {
-				// https://www.rudderstack.com/blog/implementing-graceful-shutdown-in-go/
-				// Pass the main ctx as the context for every request.
-				return ctx
-			}
+			srv.BaseContext = func(net.Listener) context.Context { return baseCtx }
 		}
 
-		go func() {
-			defer wg.Done()
-
-			if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-				slog.Default().ErrorContext(ctx, "Error starting server",
+		wg.Go(func() {
+			slog.Default().Info("Server starting", slog.String("addr", srv.Addr))
+			err := srv.ListenAndServe()
+			if err != nil && !errors.Is(err, http.ErrServerClosed) {
+				slog.Default().Error("Error starting server",
 					slog.String("err", err.Error()),
 					slog.String("addr", srv.Addr))
-			} else {
-				slog.Default().InfoContext(ctx, "Server started",
-					slog.String("addr", srv.Addr))
+				mu.Lock()
+				errs = append(errs, err)
+				mu.Unlock()
+				fail()
+				return
 			}
-		}()
+			slog.Default().Info("Server stopped", slog.String("addr", srv.Addr))
+		})
 	}
 
-	// Listen for the interrupt signal.
 	<-ctx.Done()
 
-	// Restore default behaviour on the interrupt signal and notify user of shutdown.
+	// Restore default signal behaviour: a second Ctrl+C kills the process.
 	stop()
 
-	// The context is used to inform the server it has 5 seconds to finish
-	// the request it is currently handling
-	ctx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
 
+	var shutdown sync.WaitGroup
 	for _, srv := range servers {
-		if err := srv.Shutdown(ctx); err != nil {
-			slog.Default().WarnContext(ctx, "Error shutting down server",
-				slog.String("err", err.Error()),
-				slog.String("addr", srv.Addr))
-		}
+		shutdown.Go(func() {
+			if err := srv.Shutdown(shutdownCtx); err != nil {
+				slog.Default().Warn("Error shutting down server",
+					slog.String("err", err.Error()),
+					slog.String("addr", srv.Addr))
+			}
+		})
 	}
+	shutdown.Wait()
 
+	// Cancel the requests that outlived the grace period.
+	cancelBase()
 	wg.Wait()
+
+	return errors.Join(errs...)
 }

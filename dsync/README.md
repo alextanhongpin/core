@@ -1,8 +1,8 @@
 # dsync
 
 Building blocks for coordinating work **across processes and replicas** using
-Redis: locks, rate limits, circuit breakers, idempotency, cache fills, broadcast
-streams and probabilistic counters.
+Redis: locks, rate limits, circuit breakers, idempotency, cache fills and
+broadcast streams.
 
 Each directory is its own Go module, so you install only what you use:
 
@@ -18,10 +18,13 @@ go get github.com/alextanhongpin/core/dsync/ratelimit
 | Stop calling a failing dependency from every replica at once | [circuitbreaker](circuitbreaker/) |
 | Make sure only one replica runs a job / touches a key at a time | [lock](lock/) |
 | Return the same result when a client retries a request (idempotency keys) | [idempotent](idempotent/) |
-| Store typed values in Redis or on disk, and let only one caller refill a missing entry | [cache](cache/) |
-| Collapse duplicate concurrent calls, locally or across replicas | [singleflight](singleflight/) |
+| Store typed values in Redis or on disk behind one interface | [cache](cache/) |
+| Collapse duplicate concurrent calls or cache fills, locally or across replicas | [singleflight](singleflight/) |
 | Broadcast events where every reader keeps its own position (replayable) | [channel](channel/) |
-| Ask "have I seen this?", "how many?", "what's popular?" cheaply (Bloom, Cuckoo, Count-Min, Top-K, t-digest) | [probs](probs/) |
+
+For Bloom/Cuckoo filters, Count-Min Sketch, Top-K, t-digest and HyperLogLog,
+call go-redis directly (`BFAdd`, `CFAdd`, `CMSIncrBy`, `TopKAdd`, `TDigestAdd`,
+`PFAdd`, ...); Redis 8 ships those data types.
 
 Each package README has a copy-paste quick start, an explanation of how it works,
 the configuration table and the errors you should handle.
@@ -63,10 +66,9 @@ if err != nil {
 
   | Package | Minimum Redis | Why |
   | --- | --- | --- |
-  | cache (compare-and-swap, leases), idempotent, lock, singleflight | 8.4 | token-checked `SET IFDEQ` / `DELEX` |
+  | cache (compare-and-swap), idempotent, lock, singleflight | 8.4 | token-checked `SET IFDEQ` / `DELEX` |
   | circuitbreaker | 7.4 | Redis Functions + hash field expiry |
   | ratelimit | 7.0 | Redis Functions |
-  | probs | 8.0 (or Redis Stack) | built-in Bloom/Cuckoo/CMS/Top-K/t-digest |
   | channel | 5.0 | Streams |
 - **Locks are leases, not fencing tokens.** If a process pauses longer than the
   lease TTL, or Redis fails over, two processes can briefly both believe they

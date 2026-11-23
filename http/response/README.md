@@ -1,94 +1,43 @@
-# HTTP Response Package
+# response
 
-The HTTP Response package provides a robust and standardized way to handle HTTP responses in Go applications. It offers structured JSON responses, error handling, response recording, and utilities for building consistent APIs.
-
-## Features
-
-- **Structured JSON Responses**: Standardized response format with data, error, and pagination information
-- **Smart Error Handling**: Automatic error type detection and appropriate HTTP status code mapping
-- **Response Recording**: Capture and inspect HTTP responses for middleware and testing
-- **Pagination Support**: Built-in pagination metadata for list endpoints
-- **Type Safety**: Generic support and clear interfaces
-- **Cross-Package Integration**: Works with `pagination`, `handler`, and `request` packages
-
-## Quick Start
+JSON response envelopes and writers.
 
 ```go
-package main
+// {"data": {...}}
+response.JSON(w, response.Body[User]{Data: user}, http.StatusCreated)
 
-import (
-    "net/http"
-    "github.com/alextanhongpin/core/http/response"
-)
+// {"data": [...], "pageInfo": {"hasNextPage": true, ...}}
+response.JSON(w, response.Body[[]User]{
+	Data:     users,
+	PageInfo: &response.PageInfo{HasNextPage: true, EndCursor: cursor},
+}, http.StatusOK)
 
-func GetUserHandler(w http.ResponseWriter, r *http.Request) {
-    user := User{ID: "123", Name: "Alice"}
-    response.OK(w, user)
-}
-
-func CreateUserHandler(w http.ResponseWriter, r *http.Request) {
-    user := User{ID: "456", Name: "Bob"}
-    response.OK(w, user, http.StatusCreated)
-}
+// {"error": {"code": "...", "message": "...", "errors": {...}}}
+response.ErrorJSON(w, err)
 ```
 
-## Response Structure
+## Functions
 
-All JSON responses follow a consistent structure:
+| Function | Description |
+| --- | --- |
+| `JSON(w, v, code)` | Encode `v` first, then write it (`code` 0 means 200). An encoding error gives a generic 500 body instead of a partial response. |
+| `ErrorJSON(w, err)` | Map `err` to a status and error body (see below). |
+| `RawJSON(w, b, code)` | Write pre-encoded JSON; invalid JSON gives a 500 error. |
+| `Text`, `HTML` | Write a string with the matching `Content-Type`. |
+| `NoContent(w)` | 204. |
+| `SetCacheHeaders(w, maxAge)` | `public, max-age=N`, or no-store when `maxAge <= 0`. |
+| `SetSecurityHeaders(w)` | `nosniff`, `X-Frame-Options: DENY`, `X-XSS-Protection`, referrer policy. |
+| `Read(resp)` | Read a client `*http.Response` body and restore it (unbounded; only for trusted responses). |
+| `NewResponseWriterRecorder(w)` | Wrap a writer to record the status and, with `SetWriteBody(true)`, the full body. |
 
-```json
-{
-  "data": {},
-  "error": {
-    "code": "string",
-    "message": "string", 
-    "errors": {}
-  },
-  "pageInfo": {
-    "hasPrevPage": false,
-    "hasNextPage": true,
-    "startCursor": "string",
-    "endCursor": "string"
-  }
-}
-```
+`ErrorJSON` mapping:
 
-## API Reference
+- errors with `Map() map[string][]string` or `Map() map[string]any`
+  (validation errors from `github.com/alextanhongpin/errors`) → 400
+  `VALIDATION_ERROR` with the field errors;
+- `*cause.Error` → `codes.HTTP(code)` with the error's name and message;
+- anything else → 500 `INTERNAL_SERVER_ERROR` with a generic message; the
+  original error is never exposed.
 
-### Success Responses
-
-#### `OK(w http.ResponseWriter, v any, status ...int)`
-
-Sends a successful JSON response.
-
-#### `JSON(w http.ResponseWriter, v any, status ...int)`
-
-Sends a custom JSON response.
-
-### Error Responses
-
-#### `ErrorJSON(w http.ResponseWriter, err error, status ...int)`
-
-Sends a standardized error response.
-
-### Pagination
-
-#### `PageInfo` struct
-
-Includes pagination metadata in responses.
-
-## Best Practices
-
-- Use standardized response formats for all endpoints.
-- Include pagination metadata for list APIs.
-- Integrate with `handler` and `pagination` for full API lifecycle.
-
-## Related Packages
-
-- [`pagination`](../pagination/README.md): Cursor-based pagination
-- [`handler`](../handler/README.md): Base handler utilities
-- [`request`](../request/README.md): Request parsing utilities
-
-## License
-
-MIT
+Errors are matched with `errors.As`, so wrapped and joined errors work.
+For CORS use [`middleware.CORS`](../middleware/).

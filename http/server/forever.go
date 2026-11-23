@@ -1,3 +1,5 @@
+//go:build unix
+
 // Package server provides production-ready HTTP server utilities with graceful shutdown and zero-downtime upgrades.
 package server
 

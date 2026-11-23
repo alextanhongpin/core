@@ -175,8 +175,9 @@ func TestReady_WithMixedChecks(t *testing.T) {
 
 	h.Ready(w, req)
 
-	if w.Code != http.StatusServiceUnavailable {
-		t.Errorf("Expected status 503, got %d", w.Code)
+	// Regression: degraded checks were reported as unhealthy (503).
+	if w.Code != http.StatusOK {
+		t.Errorf("Expected status 200, got %d", w.Code)
 	}
 
 	var response health.Response
@@ -184,8 +185,8 @@ func TestReady_WithMixedChecks(t *testing.T) {
 		t.Fatalf("Failed to decode response: %v", err)
 	}
 
-	if response.Status != health.StatusUnhealthy {
-		t.Errorf("Expected status unhealthy, got %s", response.Status)
+	if response.Status != health.StatusDegraded {
+		t.Errorf("Expected status degraded, got %s", response.Status)
 	}
 }
 
@@ -266,17 +267,4 @@ func TestHTTPCheck(t *testing.T) {
 			t.Errorf("Expected status unhealthy, got %s", check.Status)
 		}
 	})
-}
-
-func TestMemoryCheck(t *testing.T) {
-	checker := health.MemoryCheck(1024)
-	check := checker()
-
-	if check.Status != health.StatusHealthy {
-		t.Errorf("Expected status healthy, got %s", check.Status)
-	}
-
-	if check.Message != "Memory usage OK" {
-		t.Errorf("Expected message 'Memory usage OK', got %s", check.Message)
-	}
 }

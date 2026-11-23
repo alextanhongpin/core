@@ -1,82 +1,59 @@
-# HTTP Request Package
+# request
 
-The HTTP Request package provides utilities for parsing, validating, and accessing HTTP request data in Go web applications, with a focus on type-safe value handling.
-
-## Features
-
-- **JSON Body Parsing**: Decode and validate JSON request bodies
-- **Value Extraction**: Get values from URL parameters, forms, and headers
-- **Type-Safe Conversion**: Fluent API for converting string values to various types
-- **Validation Support**: Integrated validation for request structures
-- **Request Body Reading**: Read and restore request body content
-- **Default Values**: Convenient handling of missing or empty values
-- **Cross-Package Integration**: Works with `handler`, `response`, and `pagination` packages
-
-## Quick Start
+Bounded request body decoding and typed access to query, path, form and
+header values.
 
 ```go
-package main
-
-import (
-    "net/http"
-    "github.com/alextanhongpin/core/http/request"
-    "github.com/alextanhongpin/core/http/response"
-)
-
 type CreateUserRequest struct {
-    Name  string `json:"name"`
-    Email string `json:"email"`
-    Age   int    `json:"age"`
+	Name  string `json:"name"`
+	Email string `json:"email"`
 }
 
-func (r CreateUserRequest) Validate() error {
-    // Your validation logic here
-    return nil
+func (r *CreateUserRequest) Validate() error { /* ... */ }
+
+func createUser(w http.ResponseWriter, r *http.Request) {
+	var req CreateUserRequest
+	if err := request.DecodeJSON(r, &req, request.WithRequired()); err != nil {
+		response.ErrorJSON(w, err)
+		return
+	}
+	// or: req, err := request.Parse[CreateUserRequest](r)
 }
 
-func CreateUserHandler(w http.ResponseWriter, r *http.Request) {
-    var req CreateUserRequest
-    if err := request.DecodeJSON(r, &req); err != nil {
-        response.ErrorJSON(w, err)
-        return
-    }
-    response.OK(w, map[string]string{"status": "success"})
-}
-
-func GetUserHandler(w http.ResponseWriter, r *http.Request) {
-    userID := request.PathValue(r, "id").Int()
-    page := request.QueryValue(r, "page").IntN(1)
-    since := request.QueryValue(r, "since").Time("2006-01-02")
-    // ...
+func getUser(w http.ResponseWriter, r *http.Request) {
+	id, err := request.PathValue(r, "id").Int64Range(1, math.MaxInt64)
+	limit := request.QueryValue(r, "limit").IntRangeOr(1, 100, 20)
+	tags := request.QueryValue(r, "tags").CSV()
+	// ...
 }
 ```
 
-## API Reference
+## Bodies
 
-### JSON Decoding
+- `DecodeJSON(r, v, opts...)` reads at most `MaxBodySize` (10 MiB;
+  `WithMaxBodySize` overrides) and fails with `ErrBodyTooLarge` beyond it.
+  An empty body fails with `ErrEmptyBody` under `WithRequired`, otherwise
+  `v` keeps its zero value. `v.Bind(r)` and `v.Validate()` run after
+  decoding when implemented, also for an empty body. Decoding errors are
+  `*BodyError` (with the raw body) wrapping `ErrInvalidJSON`, `ErrBodyTooLarge`
+  or the JSON error. The body is restored for later readers.
+- `Parse[T](r, opts...)` is `DecodeJSON` into a new `T`.
+- `DecodeForm` / `DecodeQuery` bind `form` (or `json`) tagged fields of a
+  struct pointer from form or query values, then call `Validate`. Numbers are
+  parsed at the field's size, so out-of-range values are errors.
+- `Read(r)` / `Clone(r)` buffer the body (up to `MaxBodySize`) so it can be
+  read again.
 
-#### `DecodeJSON(r *http.Request, v any) error`
-Decodes JSON body into struct.
+## Values
 
-### Value Extraction
+`QueryValue`, `QueryValues`, `PathValue`, `FormValue` and `HeaderValue`
+return `Value`, a string with helpers:
 
-#### `PathValue(r *http.Request, key string) Value`
-#### `QueryValue(r *http.Request, key string) Value`
-#### `HeaderValue(r *http.Request, key string) Value`
-Type-safe value extraction and conversion.
-
-## Best Practices
-
-- Always validate incoming request payloads.
-- Use type-safe value extraction for robust code.
-- Integrate with `handler` and `response` for full request/response lifecycle.
-
-## Related Packages
-
-- [`handler`](../handler/README.md): Base handler utilities
-- [`response`](../response/README.md): Response formatting
-- [`pagination`](../pagination/README.md): Cursor-based pagination
-
-## License
-
-MIT
+- conversion: `Int`, `Int32`, `Int64`, `Float64`, `Bool` return the zero
+  value for invalid input;
+- defaults: `IntOr`, `Int64Or`, `Float64Or`, `BoolOr`, `StringOr`, ... return
+  the default only for empty or invalid input (an explicit `0` is kept);
+- validation: `IntRange`, `Float64Range`, ... return an error for invalid,
+  out-of-range, NaN or infinite input; `Required`, `Length`, `Email`;
+- `Trim`, `Lower`, `Upper`, `CSV`, `Split`, `Time`, `Date`, `RFC3339`, `URL`,
+  `FromBase64`, `ToBase64`, `Match`, `InSlice`.

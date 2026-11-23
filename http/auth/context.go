@@ -13,15 +13,15 @@ var (
 	// ClaimsContext stores JWT claims in the request context.
 	// Set by BearerHandler after successful token verification.
 	// Use: claims, ok := auth.ClaimsContext.Value(ctx)
-	ClaimsContext contextkey.Key[*Claims] = "claims"
+	ClaimsContext = contextkey.New[*Claims]("claims")
 
 	// UsernameContext stores the authenticated username in the request context.
 	// Set by BasicHandler after successful basic authentication.
 	// Use: username, ok := auth.UsernameContext.Value(ctx)
-	UsernameContext contextkey.Key[string] = "username"
+	UsernameContext = contextkey.New[string]("username")
 
 	// LoggerContext stores a structured logger in the request context.
 	// Used by authentication middleware for consistent logging.
 	// Use: logger, ok := auth.LoggerContext.Value(ctx)
-	LoggerContext contextkey.Key[*slog.Logger] = "logger"
+	LoggerContext = contextkey.New[*slog.Logger]("logger")
 )

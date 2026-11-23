@@ -5,13 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"log/slog"
 	"runtime"
+	"strings"
 	"time"
 
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/exp/event"
-	"golang.org/x/exp/slog"
 )
 
 var (
@@ -109,22 +110,9 @@ func (h *SlogHandler) Event(ctx context.Context, ev *event.Event) context.Contex
 		level = slog.LevelError
 	}
 
-	// https://github.com/uptrace/opentelemetry-go-extra/blob/main/otellogrus/otellogrus.go#L91
-	span := trace.SpanFromContext(ctx)
-	if span.IsRecording() {
-		// Adds TraceIds and SpanIds to logs.
-		spanCtx := span.SpanContext()
-		if spanCtx.HasTraceID() {
-			attrs = append(attrs, slog.String("traceId", spanCtx.TraceID().String()))
-		}
-
-		if spanCtx.HasSpanID() {
-			attrs = append(attrs, slog.String("spanId", spanCtx.SpanID().String()))
-		}
-
-		if isError {
-			span.SetStatus(codes.Error, msg)
-		}
+	attrs = SlogAttrsFromSpanContext(ctx, attrs...)
+	if span := trace.SpanFromContext(ctx); isError && span.IsRecording() {
+		span.SetStatus(codes.Error, msg)
 	}
 
 	h.logAttrs(ctx, ev.At, level, msg, attrs...)
@@ -144,16 +132,34 @@ func (h *SlogHandler) logAttrs(ctx context.Context, at time.Time, level slog.Lev
 		return
 	}
 
-	var pcs [1]uintptr
-	// skip [runtime.Callers, this function logAttrs, this function's caller Event]
-	runtime.Callers(7, pcs[:])
-	pc := pcs[0]
-	r := slog.NewRecord(at, level, msg, pc)
+	r := slog.NewRecord(at, level, msg, callerPC())
 	r.AddAttrs(attrs...)
-	if ctx == nil {
-		ctx = context.Background()
+	if err := l.Handler().Handle(ctx, r); err != nil {
+		h.handleError(err)
 	}
-	_ = l.Handler().Handle(ctx, r)
+}
+
+// callerPC returns the program counter of the first frame outside the event
+// library and the handlers in this package, so that slog's AddSource reports
+// the event.Log call site however many handlers wrap this one.
+func callerPC() uintptr {
+	var pcs [32]uintptr
+	n := runtime.Callers(3, pcs[:]) // skip runtime.Callers, callerPC, logAttrs
+	frames := runtime.CallersFrames(pcs[:n])
+	for {
+		f, more := frames.Next()
+		if !isInternalFrame(f.Function) {
+			return f.PC
+		}
+		if !more {
+			return 0
+		}
+	}
+}
+
+func isInternalFrame(fn string) bool {
+	return strings.HasPrefix(fn, "golang.org/x/exp/event.") ||
+		strings.HasPrefix(fn, "github.com/alextanhongpin/core/telemetry.(*")
 }
 
 func label(l event.Label) slog.Attr {

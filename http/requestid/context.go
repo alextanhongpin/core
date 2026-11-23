@@ -17,4 +17,4 @@ import "github.com/alextanhongpin/core/http/contextkey"
 //			logger.Info("handling request", "request_id", requestID)
 //		}
 //	}
-var Context contextkey.Key[string] = "request_id"
+var Context = contextkey.New[string]("request_id")

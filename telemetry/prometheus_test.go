@@ -280,7 +280,7 @@ func TestPrometheusHandlerConcurrency(t *testing.T) {
 	handler, err := NewPrometheusHandler(reg)
 	require.NoError(t, err)
 
-	ctx := event.WithExporter(ctx, event.NewExporter(handler, eventtest.ExporterOptions()))
+	ctx := event.WithExporter(ctx, event.NewExporter(handler, nil))
 
 	// Test concurrent access to the same metric
 	c := event.NewCounter("concurrent_counter", &event.MetricOptions{
@@ -333,6 +333,84 @@ func TestPrometheusHandlerCollector(t *testing.T) {
 		collector, exists := handler.Collector("test_collector_metric")
 		assert.NotNil(t, collector)
 		assert.True(t, exists)
+	})
+}
+
+func TestPrometheusHandlerRegressions(t *testing.T) {
+	newHandler := func(t *testing.T, reg prometheus.Registerer) (*PrometheusHandler, *[]error, context.Context) {
+		t.Helper()
+		var errs []error
+		h, err := NewPrometheusHandler(reg, WithPrometheusErrorHandler(func(err error) { errs = append(errs, err) }))
+		require.NoError(t, err)
+		return h, &errs, event.WithExporter(context.Background(), event.NewExporter(h, nil))
+	}
+
+	t.Run("label set mismatch reports instead of panicking", func(t *testing.T) {
+		_, errs, ctx := newHandler(t, prometheus.NewRegistry())
+		c := event.NewCounter("req", &event.MetricOptions{Namespace: "app"})
+		c.Record(ctx, 1, event.String("a", "1"))
+		assert.NotPanics(t, func() {
+			c.Record(ctx, 1, event.String("a", "1"), event.String("b", "2"))
+			c.Record(ctx, 1)
+		})
+		assert.Len(t, *errs, 2)
+	})
+
+	t.Run("label order does not matter", func(t *testing.T) {
+		h, errs, ctx := newHandler(t, prometheus.NewRegistry())
+		c := event.NewCounter("req", &event.MetricOptions{Namespace: "app"})
+		c.Record(ctx, 1, event.String("method", "GET"), event.String("code", "200"))
+		c.Record(ctx, 2, event.String("code", "200"), event.String("method", "GET"))
+		assert.Empty(t, *errs)
+
+		col, _ := h.Collector("req")
+		b, err := testutil.CollectAndFormat(col, expfmt.TypeTextPlain, "app_req")
+		require.NoError(t, err)
+		assert.Contains(t, string(b), `app_req{code="200",method="GET"} 3`)
+	})
+
+	t.Run("same name in another namespace is a conflict", func(t *testing.T) {
+		_, errs, ctx := newHandler(t, prometheus.NewRegistry())
+		event.NewCounter("req", &event.MetricOptions{Namespace: "a"}).Record(ctx, 1)
+		event.NewCounter("req", &event.MetricOptions{Namespace: "b"}).Record(ctx, 1)
+		require.Len(t, *errs, 1)
+		assert.ErrorIs(t, (*errs)[0], ErrMetricConflict)
+	})
+
+	t.Run("milliseconds are not truncated", func(t *testing.T) {
+		h, errs, ctx := newHandler(t, prometheus.NewRegistry())
+		d := event.NewDuration("lat", &event.MetricOptions{Namespace: "app", Unit: event.UnitMilliseconds})
+		d.Record(ctx, 1500*time.Microsecond)
+		assert.Empty(t, *errs)
+
+		col, _ := h.Collector("lat")
+		b, err := testutil.CollectAndFormat(col, expfmt.TypeTextPlain, "app_lat_milliseconds")
+		require.NoError(t, err)
+		assert.Contains(t, string(b), "app_lat_milliseconds_sum 1.5")
+	})
+
+	t.Run("failed registration is not cached", func(t *testing.T) {
+		reg := prometheus.NewRegistry()
+		// Same name, different label names: Register fails outright.
+		reg.MustRegister(prometheus.NewCounterVec(prometheus.CounterOpts{Namespace: "app", Name: "req"}, []string{"x"}))
+
+		h, errs, ctx := newHandler(t, reg)
+		event.NewCounter("req", &event.MetricOptions{Namespace: "app"}).Record(ctx, 1)
+		assert.Len(t, *errs, 1)
+		_, ok := h.Collector("req")
+		assert.False(t, ok)
+	})
+
+	t.Run("close leaves collectors registered by others", func(t *testing.T) {
+		reg := prometheus.NewRegistry()
+		existing := prometheus.NewCounterVec(prometheus.CounterOpts{Namespace: "app", Name: "req"}, nil)
+		reg.MustRegister(existing)
+
+		h, errs, ctx := newHandler(t, reg)
+		event.NewCounter("req", &event.MetricOptions{Namespace: "app"}).Record(ctx, 1)
+		require.NoError(t, h.Close())
+		assert.Empty(t, *errs)
+		assert.False(t, reg.Register(existing) == nil, "existing collector must stay registered")
 	})
 }
 

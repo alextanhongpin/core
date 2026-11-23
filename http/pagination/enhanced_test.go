@@ -2,7 +2,6 @@ package pagination_test
 
 import (
 	"testing"
-	"time"
 
 	"github.com/alextanhongpin/core/http/pagination"
 	"github.com/stretchr/testify/assert"
@@ -271,31 +270,6 @@ func TestCursorFromString(t *testing.T) {
 	t.Run("invalid last parameter", func(t *testing.T) {
 		_, err := pagination.CursorFromString("", "", "", "invalid")
 		assert.Error(t, err)
-	})
-}
-
-func TestTimeCursor(t *testing.T) {
-	t.Run("create time cursor", func(t *testing.T) {
-		now := time.Now()
-		cursor := pagination.NewTimeCursor(10).
-			WithAfter(now).
-			WithBefore(now.Add(time.Hour))
-
-		assert.Equal(t, 10, cursor.First)
-		assert.Equal(t, now, *cursor.After)
-		assert.Equal(t, now.Add(time.Hour), *cursor.Before)
-		assert.True(t, cursor.IsForward())
-		assert.False(t, cursor.IsBackward())
-	})
-
-	t.Run("backward time cursor", func(t *testing.T) {
-		cursor := &pagination.TimeCursor{
-			Last: 5,
-		}
-
-		assert.False(t, cursor.IsForward())
-		assert.True(t, cursor.IsBackward())
-		assert.Equal(t, 6, cursor.Limit()) // Last + 1
 	})
 }
 
