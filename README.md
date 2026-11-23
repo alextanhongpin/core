@@ -89,34 +89,42 @@ are safe to repeat.
 - **Adapters**: Function decorators and HTTP middleware for enforcing quotas.
 
 ### dsync/singleflight
-- Coalesce local calls and coordinate cross-process work with Redis leases.
+- Coalesce local calls and coordinate cross-process cache fills with Redis leases.
 
 ### dsync/lock
 - Token-checked Redis leases with optional renewal.
 
 ### dsync/cache
-- Typed storage wrappers, file persistence, and Redis cache-fill leases.
+- Typed Redis, file, and FS storage with pluggable codecs; use dsync/singleflight for cross-process fills.
 
-### http/auth
-- HTTP authentication middlewares (Basic, Bearer, JWT, etc.).
+### http
+- **auth**: Basic, Bearer, and JWT middleware.
+- **chain**: Middleware composition.
+- **contextkey**: Collision-free typed context keys (`contextkey.New[T](name)`).
+- **handler**: Base controller helpers.
+- **health**: Liveness and readiness checks.
+- **middleware**: CORS, recovery, and logging (rate limiting lives in [sync/ratelimit](sync/ratelimit/)).
+- **pagination**: Cursor and offset pagination.
+- **request** / **response**: Bounded body decoding, binding, validation, and JSON responses.
+- **requestid**: Validated request ID propagation.
+- **server**: `net/http` servers with timeouts and graceful shutdown.
+- **templ**: html/template rendering with optional hot reload.
+- **webhook**: HMAC-SHA256 request signing and verification with key rotation and replay windows.
 
-### http/chain
-- Middleware chaining for HTTP handlers.
-
-### http/contextkey
-- Type-safe context key utilities for HTTP and general use.
-
-### http/handler
-- Base handler patterns and test helpers.
-
-### http/pagination
-- Cursor-based pagination helpers for APIs.
+### ab
+- A/B rollouts, fixed-split conversion tests, weighted experiments, and multi-armed bandits.
 
 ### metrics
-- Metrics helpers and Prometheus integration utilities.
+- Prometheus HTTP and RED metrics, an expvar request counter, and a Redis-backed per-path request tracker.
 
 ### telemetry
-- Telemetry and logging helpers, including Prometheus and slog integration.
+- Route `x/exp/event` logs and metrics to log/slog, OpenTelemetry, and Prometheus, plus OpenTelemetry HTTP and SQL tracing helpers.
+
+### codec/yaml
+- YAML loading with `!include` and `!merge`, confined to the root directory.
+
+### text/mhtml
+- Read metadata and a self-contained HTML document from MHTML (RFC 2557) archives.
 
 ### types
 - Utilities for common types: assert, email, env, list, number, random, safe, sets, states, structs, etc.

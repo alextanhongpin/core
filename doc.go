@@ -14,7 +14,7 @@
 // HTTP helpers for authentication, middleware, requests, responses, and servers:
 // https://pkg.go.dev/github.com/alextanhongpin/core/http
 //
-// A/B experiments, adaptive bandits, analytics, and recommendations:
+// A/B rollouts, conversion tests, weighted experiments, and multi-armed bandits:
 // https://pkg.go.dev/github.com/alextanhongpin/core/ab
 //
 // In-process concurrency and coordination:
@@ -34,14 +34,13 @@
 //   - https://pkg.go.dev/github.com/alextanhongpin/core/sync/snapshot
 //   - https://pkg.go.dev/github.com/alextanhongpin/core/sync/throttle
 //
-// Redis-backed coordination and probabilistic structures:
+// Redis-backed coordination:
 //
 //   - https://pkg.go.dev/github.com/alextanhongpin/core/dsync/cache
 //   - https://pkg.go.dev/github.com/alextanhongpin/core/dsync/channel
 //   - https://pkg.go.dev/github.com/alextanhongpin/core/dsync/circuitbreaker
 //   - https://pkg.go.dev/github.com/alextanhongpin/core/dsync/idempotent
 //   - https://pkg.go.dev/github.com/alextanhongpin/core/dsync/lock
-//   - https://pkg.go.dev/github.com/alextanhongpin/core/dsync/probs
 //   - https://pkg.go.dev/github.com/alextanhongpin/core/dsync/ratelimit
 //   - https://pkg.go.dev/github.com/alextanhongpin/core/dsync/singleflight
 //
