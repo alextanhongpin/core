@@ -1,6 +1,0 @@
-name: denylist only, matching input
-input:
-  value: write
-  denylist:
-  - read
-  - write
