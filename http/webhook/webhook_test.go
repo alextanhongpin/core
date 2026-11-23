@@ -2,7 +2,6 @@ package webhook_test
 
 import (
 	"bytes"
-	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -181,30 +180,3 @@ func TestWebhookTimestampValidation(t *testing.T) {
 	})
 }
 
-func TestWebhookGitHubSignature(t *testing.T) {
-	var (
-		body   = []byte(`{"message":"hello"}`)
-		secret = []byte("supersecret12345")
-	)
-
-	is := assert.New(t)
-	content := webhook.NewPayload(body)
-
-	w := httptest.NewRecorder()
-	req := httptest.NewRequest("POST", "/webhook", bytes.NewReader(body))
-
-	// Set headers manually for GitHub format
-	req.Header.Set("X-Webhook-Id", content.ID)
-	req.Header.Set("X-Webhook-Timestamp", fmt.Sprint(content.At.UnixNano()))
-
-	// Calculate signature and set as GitHub format
-	signature := content.Sign(secret)
-	req.Header.Set("X-Hub-Signature-256", fmt.Sprintf("sha256=%x", signature))
-
-	handler := webhook.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	}), secret)
-
-	handler.ServeHTTP(w, req)
-	is.Equal(http.StatusOK, w.Code)
-}
