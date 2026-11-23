@@ -81,7 +81,6 @@ func TestExperimentEngine(t *testing.T) {
 	assert.Len(t, results.Variants, 2)
 }
 
-
 func TestBanditEngine(t *testing.T) {
 	engine := NewBanditEngine()
 

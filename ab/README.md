@@ -1,409 +1,109 @@
-# Enhanced A/B Testing and Recommendation Framework
+# ab
 
-This Go package provides a comprehensive A/B testing and recommendation system with advanced features for experimentation, analytics, and configuration management.
-
-## Features
-
-### 🧪 A/B Testing Engine
-- **Experiment Management**: Create, manage, and analyze A/B tests
-- **Consistent User Assignment**: Hash-based user assignment ensuring consistency
-- **Statistical Analysis**: Built-in statistical significance testing
-- **Multi-variate Testing**: Support for experiments with multiple variants
-- **Quality Control**: Sample ratio mismatch detection and bias analysis
-
-### 🎯 Multi-Armed Bandits
-- **Multiple Algorithms**: Epsilon-greedy, UCB, Thompson Sampling, Bayesian bandits
-- **Real-time Optimization**: Dynamic allocation based on performance
-- **Regret Analysis**: Track and minimize exploration costs
-- **Automated Stopping**: Smart recommendations for when to stop experiments
-
-### 🔍 Recommendation Engine
-- **Multiple Algorithms**: Content-based, collaborative filtering, popularity, trending
-- **Hybrid Recommendations**: Combine multiple algorithms with configurable weights
-- **Real-time Learning**: Update preferences based on user interactions
-- **Contextual Recommendations**: Support for contextual information
-
-### 📊 Advanced Analytics
-- **Comprehensive Metrics**: Conversion, revenue, engagement, retention metrics
-- **Statistical Testing**: T-tests, confidence intervals, effect size calculations
-- **Segmentation Analysis**: Analyze performance across user segments
-- **Time Series Data**: Track metrics over time for trend analysis
-- **Export Capabilities**: JSON and CSV export formats
-
-### ⚙️ Configuration Management
-- **Feature Flags**: Dynamic feature toggling with targeting rules
-- **Experiment Configuration**: Centralized experiment settings
-- **Real-time Updates**: Watch for configuration changes
-- **Rollout Control**: Gradual feature rollouts with percentage-based targeting
-
-## Quick Start
-
-### Basic A/B Testing
+A/B testing primitives: stable hashing and rollouts, a fixed 50/50 conversion
+test with an HTML report, a weighted multi-variant experiment engine, and
+multi-armed bandits. All state is in memory and every type is safe for
+concurrent use.
 
 ```go
-package main
-
-import (
-    "context"
-    "fmt"
-    "time"
-    
-    "github.com/alextanhongpin/core/ab"
-)
-
-func main() {
-    ctx := context.Background()
-    engine := ab.NewExperimentEngine()
-    
-    // Create an experiment
-    exp := &ab.Experiment{
-        ID:          "button_color_test",
-        Name:        "Button Color Experiment",
-        Description: "Testing blue vs red button colors",
-        Status:      ab.StatusActive,
-        Variants: []ab.Variant{
-            {ID: "control", Name: "Blue Button", Weight: 0.5},
-            {ID: "treatment", Name: "Red Button", Weight: 0.5},
-        },
-        TargetPercentage: 1.0, // 100% of users
-        ConfidenceLevel:  0.95,
-    }
-    
-    engine.CreateExperiment(exp)
-    
-    // Assign a user to a variant
-    userAttributes := map[string]string{"country": "US"}
-    assignment, _ := engine.AssignVariant(ctx, "user123", "button_color_test", userAttributes)
-    
-    fmt.Printf("User assigned to variant: %s\n", assignment.VariantID)
-    
-    // Record a conversion
-    conversion := &ab.ConversionEvent{
-        UserID:       "user123",
-        ExperimentID: "button_color_test",
-        VariantID:    assignment.VariantID,
-        EventType:    "button_click",
-        Value:        1.0,
-    }
-    
-    engine.RecordConversion(ctx, conversion)
-    
-    // Get results
-    results, _ := engine.GetExperimentResults("button_color_test")
-    fmt.Printf("Experiment results: %+v\n", results)
-}
+import "github.com/alextanhongpin/core/ab"
 ```
 
-### Multi-Armed Bandits
+## Hashing and rollouts
 
 ```go
-// Create a bandit experiment
-banditEngine := ab.NewBanditEngine()
-
-exp := &ab.BanditExperiment{
-    ID:        "ad_banner_test",
-    Name:      "Ad Banner Optimization",
-    Algorithm: ab.EpsilonGreedy,
-    Arms: []ab.BanditArm{
-        {ID: "banner_a", Name: "Banner A"},
-        {ID: "banner_b", Name: "Banner B"},
-        {ID: "banner_c", Name: "Banner C"},
-    },
-    Epsilon: 0.1, // 10% exploration
-}
-
-banditEngine.CreateBanditExperiment(exp)
-
-// Select an arm for a user
-arm, _ := banditEngine.SelectArm("ad_banner_test", "user123", nil)
-fmt.Printf("Selected arm: %s\n", arm.ID)
-
-// Record reward
-banditEngine.RecordReward("ad_banner_test", arm.ID, "user123", 1.0, true, nil)
+bucket := ab.Hash("user-42", 10)           // stable value in [0, 10)
+enabled := ab.Rollout("new-checkout:user-42", 20) // first 20 of 100 buckets
 ```
 
-### Recommendations
+Prefix the key with the feature or experiment name so that different rollouts
+pick independent users.
 
-```go
-// Create recommendation engine
-recEngine := ab.NewRecommendationEngine()
+## Fixed 50/50 conversion test
 
-// Add users and items
-user := &ab.User{
-    ID: "user123",
-    Preferences: map[string]float64{
-        "action": 0.8,
-        "comedy": 0.3,
-    },
-}
-recEngine.AddUser(user)
-
-item := &ab.Item{
-    ID:    "movie1",
-    Title: "Action Movie",
-    Features: map[string]float64{
-        "action": 0.9,
-        "comedy": 0.1,
-    },
-}
-recEngine.AddItem(item)
-
-// Get recommendations
-recommendations, _ := recEngine.GetRecommendations(
-    ctx, "user123", 5, ab.RecommendationContentBased)
-
-for _, rec := range recommendations {
-    fmt.Printf("Recommended: %s (Score: %.2f)\n", rec.ItemID, rec.Score)
-}
-```
-
-### Feature Flags
-
-```go
-// Setup configuration
-provider := ab.NewInMemoryConfigProvider()
-configManager := ab.NewConfigManager(provider)
-
-// Create feature flag
-flag := &ab.FeatureFlag{
-    ID:      "new_checkout",
-    Name:    "New Checkout Flow",
-    Enabled: true,
-    Rules: []ab.FeatureFlagRule{
-        {
-            Conditions: []ab.RuleCondition{
-                {
-                    Attribute: "user_type",
-                    Operator:  "equals",
-                    Value:     "premium",
-                },
-            },
-            Action: ab.RuleAction{Type: "enable"},
-        },
-    },
-}
-
-configManager.CreateFeatureFlag(ctx, flag)
-
-// Evaluate flag for user
-userAttrs := map[string]interface{}{"user_type": "premium"}
-result, _ := configManager.EvaluateFeatureFlag(ctx, "new_checkout", "user123", userAttrs)
-
-if result.Enabled {
-    fmt.Println("Show new checkout flow")
-}
-```
-
-## Advanced Features
-
-### Statistical Analysis
-
-The framework includes comprehensive statistical testing:
-
-- **T-tests**: Compare means between variants
-- **Confidence Intervals**: Calculate confidence intervals for metrics
-- **Effect Size**: Measure practical significance of differences
-- **Power Analysis**: Determine required sample sizes
-
-### Quality Control
-
-Built-in quality control mechanisms:
-
-- **Sample Ratio Mismatch (SRM)**: Detect unexpected traffic distribution
-- **Outlier Detection**: Identify and handle outliers in data
-- **Bias Detection**: Check for biases across user segments
-- **Novelty Effect**: Monitor for short-term novelty effects
-
-### Analytics and Reporting
-
-Comprehensive analytics capabilities:
-
-- **Custom Metrics**: Define and track custom business metrics
-- **Segmentation**: Analyze results across different user segments
-- **Time Series**: Track metric trends over time
-- **Export**: Export data in JSON or CSV formats
-
-## Architecture
-
-The framework is designed with modularity and extensibility in mind:
-
-```
-┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐
-│   Experiment    │  │     Bandit      │  │ Recommendation  │
-│     Engine      │  │     Engine      │  │     Engine      │
-└─────────────────┘  └─────────────────┘  └─────────────────┘
-         │                     │                     │
-         └─────────────────────┼─────────────────────┘
-                               │
-┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐
-│   Analytics     │  │     Config      │  │   Storage       │
-│     Engine      │  │    Manager      │  │   Providers     │
-└─────────────────┘  └─────────────────┘  └─────────────────┘
-```
-
-### Components
-
-1. **Experiment Engine**: Core A/B testing functionality
-2. **Bandit Engine**: Multi-armed bandit algorithms
-3. **Recommendation Engine**: Personalization and recommendations
-4. **Analytics Engine**: Statistical analysis and reporting
-5. **Config Manager**: Feature flags and experiment configuration
-6. **Storage Providers**: Pluggable storage backends
-
-## Configuration
-
-### Environment Variables
-
-```bash
-# Redis configuration (if using Redis provider)
-REDIS_HOST=localhost
-REDIS_PORT=6379
-REDIS_PASSWORD=
-
-# Analytics settings
-ANALYTICS_BATCH_SIZE=100
-ANALYTICS_FLUSH_INTERVAL=60s
-
-# Experiment settings
-DEFAULT_CONFIDENCE_LEVEL=0.95
-MIN_SAMPLE_SIZE=100
-```
-
-### Provider Configuration
-
-The framework supports multiple storage providers:
-
-- **In-Memory**: For testing and development
-- **Redis**: For production with Redis backend
-- **Database**: For SQL database storage
-- **Custom**: Implement your own storage provider
-
-## Best Practices
-
-### A/B Testing
-
-1. **Plan Your Experiments**: Define clear hypotheses and success metrics
-2. **Sample Size Calculation**: Use power analysis to determine required sample sizes
-3. **Randomization**: Ensure proper randomization to avoid bias
-4. **Statistical Significance**: Wait for sufficient data before making decisions
-5. **Multiple Testing**: Adjust for multiple comparisons when running multiple tests
-
-### Feature Flags
-
-1. **Gradual Rollouts**: Start with small percentages and gradually increase
-2. **Monitoring**: Monitor key metrics during rollouts
-3. **Rollback Plans**: Have clear rollback procedures for problematic releases
-4. **Documentation**: Document flag purposes and cleanup schedules
-
-### Recommendations
-
-1. **Cold Start**: Handle new users and items gracefully
-2. **Diversity**: Balance relevance with diversity in recommendations
-3. **Freshness**: Include recent and trending content
-4. **Feedback Loops**: Collect and incorporate user feedback
-
-## Testing
-
-Run the test suite:
-
-```bash
-go test ./...
-```
-
-Run specific tests:
-
-```bash
-go test -run TestExperimentEngine
-go test -run TestRecommendationEngine
-go test -run TestBanditEngine
-```
-
-## Performance Considerations
-
-### Scalability
-
-- **Horizontal Scaling**: All engines are stateless and can be scaled horizontally
-- **Caching**: Built-in caching reduces database load
-- **Batch Processing**: Analytics support batch processing for high-throughput scenarios
-
-### Memory Usage
-
-- **Efficient Data Structures**: Optimized for memory usage
-- **Configurable Cache**: Adjustable cache sizes and TTL
-- **Garbage Collection**: Minimal allocations to reduce GC pressure
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Add tests for new functionality
-4. Ensure all tests pass
-5. Submit a pull request
-
-## License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
-
-## Support
-
-For questions and support:
-
-- Create an issue on GitHub
-- Check the documentation
-- Review the test files for examples
-
-## Roadmap
-
-- [ ] Additional bandit algorithms (Contextual bandits)
-- [ ] Deep learning-based recommendations
-- [ ] Real-time streaming analytics
-- [ ] Advanced statistical tests (Bayesian A/B testing)
-- [ ] Mobile SDK support
-- [ ] Dashboard and UI components
-
-### Fixed-split A/B conversion tests
-
-`NewFixedTest` provides conventional 50/50 control/treatment assignment, rather
-than adaptive bandit allocation. Call `Expose` when the variant is actually seen,
-then `Convert` for the binary goal (purchase, signup, click). Both calls deduplicate
-by user; conversions before exposure are rejected. The instance is concurrency
-safe and keeps its state in memory; restarting loses measurements.
+`NewFixedTest` is the recommended way to run a two-arm conversion experiment.
+Call `Expose` when the variant is actually seen and `Convert` for the binary
+goal (purchase, signup, click). Both deduplicate by user; conversions before
+exposure are rejected.
 
 ```go
 experiment, err := ab.NewFixedTest("checkout-v2")
 if err != nil { return err }
-variant, err := experiment.Expose(userID)
+variant, err := experiment.Expose(userID) // "control" or "treatment"
 if err != nil { return err }
-// Render variant ("control" or "treatment").
-_ = variant
 // On the goal event:
 if err := experiment.Convert(userID); err != nil { return err }
+
 report := experiment.Report() // JSON-serializable snapshot
-return report.WriteHTML(writer)
+return report.WriteHTML(w)
 ```
 
-Reports include unique exposures, conversions, conversion rates, 95% Wilson
-intervals, absolute lift (rate difference), relative lift (omitted for zero control
-rate), and a two-sided pooled proportion z-test. Significance is withheld until
-each arm has at least ten conversions and ten non-conversions. Plan the experiment
-endpoint before collecting data; repeatedly checking p-values and stopping on a
-significant result invalidates the fixed-horizon interpretation. Significance
-indicates a difference, not necessarily a treatment improvement.
-
-Generate a self-contained visual demo, with no external chart dependencies:
+Reports include unique exposures, conversions, rates, 95% Wilson intervals,
+absolute and relative lift, and a two-sided pooled two-proportion z-test.
+Significance is withheld until each arm has at least ten conversions and ten
+non-conversions. Fix the endpoint before collecting data: stopping when the
+p-value first drops below 0.05 invalidates the fixed-horizon test.
 
 ```sh
-cd ab # from the repository root
- go run ./example/fixed > report.html
-# Open report.html in your browser.
+go run ./example/fixed > report.html # synthetic demo report
 ```
 
-The demo uses synthetic data. The HTML shows conversion bars, confidence intervals,
-counts, lift and test readiness. `Report` can also be encoded with `encoding/json`
-for your own dashboard. Statistical formulas follow the NIST references for
+See [Interpreting results](INTERPRETING_RESULTS.md) for field definitions and a
+decision table. Formulas follow NIST for
 [Wilson intervals](https://www.itl.nist.gov/div898/handbook/prc/section2/prc241.htm)
 and [two-proportion tests](https://www.itl.nist.gov/div898/software/dataplot/refman2/auxillar/diffprop.htm).
 
-Read [Interpreting results](INTERPRETING_RESULTS.md) for field definitions, a
-worked example, a decision table and experiment best practices. HTML reports
-also include a plain-language interpretation and an embedded guide.
+## Experiment engine
+
+`ExperimentEngine` supports more than two weighted variants, a target
+percentage and attribute filters.
+
+```go
+engine := ab.NewExperimentEngine(ab.NewInMemoryExperimentStore()) // store may be nil
+err := engine.CreateExperiment(&ab.Experiment{
+	ID:               "button_color",
+	Status:           ab.StatusActive,
+	Variants:         []ab.Variant{{ID: "blue", Weight: 0.5}, {ID: "red", Weight: 0.5}},
+	TargetPercentage: 1.0,                           // (0, 1], rounded to whole percent
+	Filters:          map[string]string{"country": "US"},
+	ConfidenceLevel:  0.95,                          // default 0.95
+})
+
+a, err := engine.AssignVariant(ctx, userID, "button_color", attrs) // nil, nil if not targeted
+err = engine.RecordConversion(ctx, &ab.ConversionEvent{UserID: userID, ExperimentID: "button_color"})
+results, err := engine.GetExperimentResults("button_color")
+```
+
+- Variant IDs must be unique and weights non-negative, summing to 1.
+- An impression is a unique assigned user; a conversion is counted once per
+  assigned user and must match the user's variant. Every conversion event is
+  still passed to the store.
+- Results give Wilson intervals and a pooled z-test of each variant against
+  the first one, without correction for multiple comparisons.
+- The engine owns the `*Experiment` passed to `CreateExperiment`; change its
+  status with `SetStatus`.
+
+## Bandits
+
+`BanditEngine` adaptively allocates traffic with epsilon-greedy, UCB1 or
+Thompson sampling (`BayesianBandit` is an alias for Thompson sampling).
+
+```go
+engine := ab.NewBanditEngine()
+err := engine.CreateBanditExperiment(&ab.BanditExperiment{
+	ID:        "banner",
+	Algorithm: ab.ThompsonSampling,
+	Arms:      []ab.BanditArm{{ID: "a"}, {ID: "b"}, {ID: "c"}},
+})
+
+arm, err := engine.SelectArm("banner", userID, nil)
+err = engine.RecordReward("banner", arm.ID, userID, 1, true, nil)
+
+analysis, err := engine.GetBanditResults("banner")          // arms sorted by rate
+rec, err := engine.GetExperimentRecommendation("banner")    // "continue" or "stop"
+```
+
+Call `RecordReward` once per `SelectArm`. Rates are rewards / pulls, regret is
+empirical (best observed rate minus the arm's rate, times its pulls), and arm
+intervals are a normal approximation of the Beta posterior. Bandit allocation
+is not a substitute for a fixed-horizon significance test.
