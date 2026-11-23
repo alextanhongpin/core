@@ -99,8 +99,7 @@ func (*Snapshot) Send(p Policy) // exposed, but not meant for callers
 - **Stop:** idempotent and concurrent-safe; interrupts pending delivery and
   waits for `Go` callbacks. Callbacks must finish and must not call stop or
   blocking operations on the snapshot. `Add` after stop does nothing.
-  `Chan` after stop returns nil with the broadcast release this module depends
-  on (v0.0.3); do not range over it without checking.
+  `Chan` after stop returns a closed channel.
 - Notifications may be dropped during shutdown; they are triggers, not durable.
 
 ## Testing
