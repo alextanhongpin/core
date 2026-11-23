@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/alextanhongpin/core/http/auth"
-	"github.com/alextanhongpin/snapshot"
 )
 
 func TestBasicAuth(t *testing.T) {
@@ -22,15 +21,24 @@ func TestBasicAuth(t *testing.T) {
 		w := httptest.NewRecorder()
 		r := httptest.NewRequest(http.MethodGet, "/", nil)
 		r.SetBasicAuth("john", "123456")
+		h.ServeHTTP(w, r)
 
-		snapshot.HTTP(t, h).ServeHTTP(w, r)
+		if w.Code != http.StatusOK || w.Body.String() != "hello world" {
+			t.Fatalf("got %d %q, want 200 %q", w.Code, w.Body.String(), "hello world")
+		}
 	})
 
 	t.Run("failed", func(t *testing.T) {
 		w := httptest.NewRecorder()
 		r := httptest.NewRequest(http.MethodGet, "/", nil)
 		r.SetBasicAuth("john", "123")
+		h.ServeHTTP(w, r)
 
-		snapshot.HTTP(t, h).ServeHTTP(w, r)
+		if w.Code != http.StatusUnauthorized {
+			t.Fatalf("status = %d, want 401", w.Code)
+		}
+		if got, want := w.Header().Get("WWW-Authenticate"), `Basic realm="User Visible Realm"`; got != want {
+			t.Fatalf("WWW-Authenticate = %q, want %q", got, want)
+		}
 	})
 }

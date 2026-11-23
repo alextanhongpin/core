@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/alextanhongpin/core/http/requestid"
-	"github.com/alextanhongpin/snapshot"
 )
 
 func TestRequestID(t *testing.T) {
@@ -26,18 +25,28 @@ func TestRequestID(t *testing.T) {
 		return "random-token"
 	})
 
-	t.Run("new", func(t *testing.T) {
-		w := httptest.NewRecorder()
-		r := httptest.NewRequest(http.MethodGet, "/", nil)
+	tests := map[string]struct {
+		header string
+		want   string
+	}{
+		"new": {"", "random-token"},
+		"old": {"abc", "abc"},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			r := httptest.NewRequest(http.MethodGet, "/", nil)
+			if tc.header != "" {
+				r.Header.Set("X-Request-Id", tc.header)
+			}
+			h.ServeHTTP(w, r)
 
-		snapshot.HTTP(t, h).ServeHTTP(w, r)
-	})
-
-	t.Run("old", func(t *testing.T) {
-		w := httptest.NewRecorder()
-		r := httptest.NewRequest(http.MethodGet, "/", nil)
-		r.Header.Set("X-Request-Id", "abc")
-
-		snapshot.HTTP(t, h).ServeHTTP(w, r)
-	})
+			if got := w.Header().Get("X-Request-Id"); got != tc.want {
+				t.Fatalf("X-Request-Id = %q, want %q", got, tc.want)
+			}
+			if w.Body.String() != "hello world" {
+				t.Fatalf("body = %q", w.Body.String())
+			}
+		})
+	}
 }

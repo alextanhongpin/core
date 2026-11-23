@@ -14,7 +14,6 @@ import (
 	"github.com/alextanhongpin/errors/cause"
 	"github.com/alextanhongpin/errors/codes"
 	"github.com/alextanhongpin/errors/validation"
-	"github.com/alextanhongpin/snapshot"
 )
 
 // Real-world example: User management API
@@ -261,8 +260,7 @@ func TestUserController_Integration(t *testing.T) {
 		r.Header.Set("Content-Type", "application/json")
 		r.Header.Set("X-Request-ID", "test-request-123")
 
-		hd := snapshot.HTTP(t, http.HandlerFunc(controller.CreateUser))
-		hd.ServeHTTP(w, r)
+		http.HandlerFunc(controller.CreateUser).ServeHTTP(w, r)
 
 		if w.Code != http.StatusCreated {
 			t.Errorf("Expected status %d, got %d", http.StatusCreated, w.Code)
@@ -278,8 +276,7 @@ func TestUserController_Integration(t *testing.T) {
 		r := httptest.NewRequest(http.MethodPost, "/users", strings.NewReader(`{"name":"","email":"john@example.com"}`))
 		r.Header.Set("Content-Type", "application/json")
 
-		hd := snapshot.HTTP(t, http.HandlerFunc(controller.CreateUser))
-		hd.ServeHTTP(w, r)
+		http.HandlerFunc(controller.CreateUser).ServeHTTP(w, r)
 
 		if w.Code != http.StatusBadRequest {
 			t.Errorf("Expected status %d, got %d", http.StatusBadRequest, w.Code)
@@ -297,8 +294,7 @@ func TestUserController_Integration(t *testing.T) {
 		r := httptest.NewRequest(http.MethodPost, "/users", strings.NewReader(`{"name":"John Doe","email":"jane@example.com"}`))
 		r.Header.Set("Content-Type", "application/json")
 
-		hd := snapshot.HTTP(t, http.HandlerFunc(controller.CreateUser))
-		hd.ServeHTTP(w, r)
+		http.HandlerFunc(controller.CreateUser).ServeHTTP(w, r)
 
 		if w.Code != http.StatusConflict {
 			t.Errorf("Expected status %d, got %d", http.StatusConflict, w.Code)
@@ -316,8 +312,7 @@ func TestUserController_Integration(t *testing.T) {
 		r := httptest.NewRequest(http.MethodGet, "/users/1", nil)
 		r.Header.Set("X-Correlation-ID", "correlation-456")
 
-		hd := snapshot.HTTP(t, http.HandlerFunc(controller.GetUser))
-		hd.ServeHTTP(w, r)
+		http.HandlerFunc(controller.GetUser).ServeHTTP(w, r)
 
 		if w.Code != http.StatusOK {
 			t.Errorf("Expected status %d, got %d", http.StatusOK, w.Code)
@@ -334,8 +329,7 @@ func TestUserController_Integration(t *testing.T) {
 		w := httptest.NewRecorder()
 		r := httptest.NewRequest(http.MethodGet, "/users/999?id=999", nil)
 
-		hd := snapshot.HTTP(t, http.HandlerFunc(controller.GetUser))
-		hd.ServeHTTP(w, r)
+		http.HandlerFunc(controller.GetUser).ServeHTTP(w, r)
 
 		if w.Code != http.StatusNotFound {
 			t.Errorf("Expected status %d, got %d", http.StatusNotFound, w.Code)
@@ -353,8 +347,7 @@ func TestUserController_Integration(t *testing.T) {
 		r := httptest.NewRequest(http.MethodPut, "/users/1", strings.NewReader(`{"name":"Updated Name","email":"updated@example.com"}`))
 		r.Header.Set("Content-Type", "application/json")
 
-		hd := snapshot.HTTP(t, http.HandlerFunc(controller.UpdateUser))
-		hd.ServeHTTP(w, r)
+		http.HandlerFunc(controller.UpdateUser).ServeHTTP(w, r)
 
 		if w.Code != http.StatusOK {
 			t.Errorf("Expected status %d, got %d", http.StatusOK, w.Code)
@@ -371,8 +364,7 @@ func TestUserController_Integration(t *testing.T) {
 		w := httptest.NewRecorder()
 		r := httptest.NewRequest(http.MethodDelete, "/users/1", nil)
 
-		hd := snapshot.HTTP(t, http.HandlerFunc(controller.DeleteUser))
-		hd.ServeHTTP(w, r)
+		http.HandlerFunc(controller.DeleteUser).ServeHTTP(w, r)
 
 		if w.Code != http.StatusNoContent {
 			t.Errorf("Expected status %d, got %d", http.StatusNoContent, w.Code)
@@ -383,8 +375,7 @@ func TestUserController_Integration(t *testing.T) {
 		w := httptest.NewRecorder()
 		r := httptest.NewRequest(http.MethodDelete, "/users/999?id=999", nil)
 
-		hd := snapshot.HTTP(t, http.HandlerFunc(controller.DeleteUser))
-		hd.ServeHTTP(w, r)
+		http.HandlerFunc(controller.DeleteUser).ServeHTTP(w, r)
 
 		if w.Code != http.StatusNotFound {
 			t.Errorf("Expected status %d, got %d", http.StatusNotFound, w.Code)
@@ -395,8 +386,7 @@ func TestUserController_Integration(t *testing.T) {
 		w := httptest.NewRecorder()
 		r := httptest.NewRequest(http.MethodGet, "/users", nil)
 
-		hd := snapshot.HTTP(t, http.HandlerFunc(controller.ListUsers))
-		hd.ServeHTTP(w, r)
+		http.HandlerFunc(controller.ListUsers).ServeHTTP(w, r)
 
 		if w.Code != http.StatusOK {
 			t.Errorf("Expected status %d, got %d", http.StatusOK, w.Code)

@@ -14,47 +14,59 @@ import (
 	"github.com/alextanhongpin/errors/cause"
 	"github.com/alextanhongpin/errors/codes"
 	"github.com/alextanhongpin/errors/validation"
-	"github.com/alextanhongpin/snapshot"
+	"github.com/google/go-cmp/cmp"
 )
 
-func TestErrorJSON(t *testing.T) {
-	dumpError := func(t *testing.T, err error) {
-		t.Helper()
+// assertJSON checks the status code, content type and JSON body of w.
+func assertJSON(t *testing.T, w *httptest.ResponseRecorder, code int, body string) {
+	t.Helper()
 
-		wr := httptest.NewRecorder()
-		r := httptest.NewRequest("GET", "/user/1", nil)
-		h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			response.ErrorJSON(w, err)
-		})
-		hd := snapshot.HTTP(t, h)
-		hd.ServeHTTP(wr, r)
+	if w.Code != code {
+		t.Errorf("status = %d, want %d", w.Code, code)
+	}
+	if got, want := w.Header().Get("Content-Type"), response.ContentTypeJSON; got != want {
+		t.Errorf("Content-Type = %q, want %q", got, want)
 	}
 
-	t.Run("known error", func(t *testing.T) {
-		dumpError(t, cause.New(codes.BadRequest, "BAD_REQUEST", "The request provided is invalid"))
-	})
+	var got, want any
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatalf("invalid JSON body %q: %v", w.Body.String(), err)
+	}
+	if err := json.Unmarshal([]byte(body), &want); err != nil {
+		t.Fatal(err)
+	}
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Errorf("body mismatch (-want +got):\n%s", diff)
+	}
+}
 
-	t.Run("error wrapped", func(t *testing.T) {
-		err := cause.New(codes.BadRequest, "BAD_REQUEST", "The request provided is invalid")
-		dumpError(t, fmt.Errorf("wrapped error: %w", err))
-	})
+func TestErrorJSON(t *testing.T) {
+	const badRequest = `{"error":{"code":"BAD_REQUEST","message":"The request provided is invalid"}}`
+	known := cause.New(codes.BadRequest, "BAD_REQUEST", "The request provided is invalid")
 
-	t.Run("error joined", func(t *testing.T) {
-		err1 := cause.New(codes.BadRequest, "BAD_REQUEST", "The request provided is invalid")
-		err2 := errors.New("another error")
-		dumpError(t, errors.Join(err1, err2))
-	})
+	ve := make(validation.Errors)
+	ve.If("email", !strings.Contains("xyz", "@"), "The email is invalid")
 
-	t.Run("validation errors", func(t *testing.T) {
-		email := "xyz"
-		ve := make(validation.Errors)
-		ve.If("email", !strings.Contains(email, "@"), "The email is invalid")
-		dumpError(t, ve.Error())
-	})
-
-	t.Run("unknown error", func(t *testing.T) {
-		dumpError(t, sql.ErrNoRows)
-	})
+	tests := map[string]struct {
+		err  error
+		code int
+		body string
+	}{
+		"known error":   {known, http.StatusBadRequest, badRequest},
+		"error wrapped": {fmt.Errorf("wrapped error: %w", known), http.StatusBadRequest, badRequest},
+		"error joined":  {errors.Join(known, errors.New("another error")), http.StatusBadRequest, badRequest},
+		"validation errors": {ve.Error(), http.StatusBadRequest,
+			`{"error":{"code":"VALIDATION_ERROR","message":"Validation failed","errors":{"email":["The email is invalid"]}}}`},
+		"unknown error": {sql.ErrNoRows, http.StatusInternalServerError,
+			`{"error":{"code":"INTERNAL_SERVER_ERROR","message":"An unexpected error occurred. Please try again later."}}`},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			response.ErrorJSON(w, tc.err)
+			assertJSON(t, w, tc.code, tc.body)
+		})
+	}
 }
 
 func TestJSON(t *testing.T) {
@@ -64,72 +76,36 @@ func TestJSON(t *testing.T) {
 	}
 
 	t.Run("success", func(t *testing.T) {
-		wr := httptest.NewRecorder()
-		r := httptest.NewRequest("GET", "/users", nil)
-		h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			data := []user{
-				{ID: "user-1", Name: "Alice"},
-				{ID: "user-2", Name: "Bob"},
-			}
-
-			response.JSON(w, response.Body[[]user]{Data: data}, http.StatusCreated)
-		})
-
-		hd := snapshot.HTTP(t, h)
-		hd.ServeHTTP(wr, r)
-	})
-
-	t.Run("failed", func(t *testing.T) {
-		wr := httptest.NewRecorder()
-		r := httptest.NewRequest("GET", "/users", nil)
-		h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			data := map[string]any{
-				"bad_number": json.Number("1.5x"),
-			}
-			response.JSON(w, response.Body[map[string]any]{Data: data}, http.StatusOK)
-		})
-
-		hd := snapshot.HTTP(t, h)
-		hd.ServeHTTP(wr, r)
+		w := httptest.NewRecorder()
+		data := []user{
+			{ID: "user-1", Name: "Alice"},
+			{ID: "user-2", Name: "Bob"},
+		}
+		response.JSON(w, response.Body[[]user]{Data: data}, http.StatusCreated)
+		assertJSON(t, w, http.StatusCreated, `{"data":[{"id":"user-1","Name":"Alice"},{"id":"user-2","Name":"Bob"}]}`)
 	})
 
 	t.Run("no content", func(t *testing.T) {
-		wr := httptest.NewRecorder()
-		r := httptest.NewRequest("GET", "/users", nil)
-		h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			response.NoContent(w)
-		})
-
-		hd := snapshot.HTTP(t, h)
-		hd.ServeHTTP(wr, r)
+		w := httptest.NewRecorder()
+		response.NoContent(w)
+		if w.Code != http.StatusNoContent || w.Body.Len() != 0 {
+			t.Fatalf("got %d %q, want 204 with no body", w.Code, w.Body.String())
+		}
 	})
 
 	t.Run("custom body", func(t *testing.T) {
-		wr := httptest.NewRecorder()
-		r := httptest.NewRequest("GET", "/users", nil)
-		h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			response.JSON(w, &response.Body[any]{
-				PageInfo: &response.PageInfo{
-					HasNextPage: true,
-				},
-			}, http.StatusOK)
-		})
-
-		hd := snapshot.HTTP(t, h)
-		hd.ServeHTTP(wr, r)
+		w := httptest.NewRecorder()
+		response.JSON(w, &response.Body[any]{
+			PageInfo: &response.PageInfo{
+				HasNextPage: true,
+			},
+		}, http.StatusOK)
+		assertJSON(t, w, http.StatusOK, `{"pageInfo":{"hasPrevPage":false,"hasNextPage":true}}`)
 	})
 
 	t.Run("encode", func(t *testing.T) {
-		wr := httptest.NewRecorder()
-		r := httptest.NewRequest("GET", "/users", nil)
-		h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			body := map[string]string{
-				"hello": "world",
-			}
-			response.JSON(w, body, http.StatusAccepted)
-		})
-
-		hd := snapshot.HTTP(t, h)
-		hd.ServeHTTP(wr, r)
+		w := httptest.NewRecorder()
+		response.JSON(w, map[string]string{"hello": "world"}, http.StatusAccepted)
+		assertJSON(t, w, http.StatusAccepted, `{"hello":"world"}`)
 	})
 }

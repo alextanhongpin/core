@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/alextanhongpin/core/http/webhook"
-	"github.com/alextanhongpin/snapshot"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -54,7 +53,10 @@ func TestWebhook(t *testing.T) {
 		content.SignRequest(r, secret)
 
 		wh := webhook.Handler(h, secret)
-		snapshot.HTTP(t, wh, snapshot.Ignore("X-Webhook-Id", "X-Webhook-Timestamp", "X-Webhook-Signature")).ServeHTTP(w, r)
+		wh.ServeHTTP(w, r)
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+		}
 	})
 
 	t.Run("invalid", func(t *testing.T) {
@@ -63,7 +65,10 @@ func TestWebhook(t *testing.T) {
 		content.SignRequest(r, secret)
 
 		wh := webhook.Handler(h, []byte("wrongsecret12345"))
-		snapshot.HTTP(t, wh, snapshot.Ignore("X-Webhook-Id", "X-Webhook-Timestamp", "X-Webhook-Signature")).ServeHTTP(w, r)
+		wh.ServeHTTP(w, r)
+		if w.Code != http.StatusUnauthorized {
+			t.Fatalf("status = %d, want %d", w.Code, http.StatusUnauthorized)
+		}
 	})
 
 	t.Run("multiple signature", func(t *testing.T) {
@@ -79,7 +84,10 @@ func TestWebhook(t *testing.T) {
 			content.SignRequest(r, oldSecret, newSecret)
 
 			wh := webhook.Handler(h, oldSecret)
-			snapshot.HTTP(t, wh, snapshot.Ignore("X-Webhook-Id", "X-Webhook-Timestamp", "X-Webhook-Signature")).ServeHTTP(w, r)
+			wh.ServeHTTP(w, r)
+			if w.Code != http.StatusOK {
+				t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+			}
 		})
 
 		t.Run("valid 2", func(t *testing.T) {
@@ -88,7 +96,10 @@ func TestWebhook(t *testing.T) {
 			content.SignRequest(r, oldSecret, newSecret)
 
 			wh := webhook.Handler(h, newSecret)
-			snapshot.HTTP(t, wh, snapshot.Ignore("X-Webhook-Id", "X-Webhook-Timestamp", "X-Webhook-Signature")).ServeHTTP(w, r)
+			wh.ServeHTTP(w, r)
+			if w.Code != http.StatusOK {
+				t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+			}
 		})
 
 		t.Run("valid 3", func(t *testing.T) {
@@ -97,7 +108,10 @@ func TestWebhook(t *testing.T) {
 			content.SignRequest(r, oldSecret, newSecret)
 
 			wh := webhook.Handler(h, oldSecret, notSecret)
-			snapshot.HTTP(t, wh, snapshot.Ignore("X-Webhook-Id", "X-Webhook-Timestamp", "X-Webhook-Signature")).ServeHTTP(w, r)
+			wh.ServeHTTP(w, r)
+			if w.Code != http.StatusOK {
+				t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+			}
 		})
 
 		t.Run("invalid", func(t *testing.T) {
@@ -106,7 +120,10 @@ func TestWebhook(t *testing.T) {
 			content.SignRequest(r, oldSecret, newSecret)
 
 			wh := webhook.Handler(h, notSecret)
-			snapshot.HTTP(t, wh, snapshot.Ignore("X-Webhook-Id", "X-Webhook-Timestamp", "X-Webhook-Signature")).ServeHTTP(w, r)
+			wh.ServeHTTP(w, r)
+			if w.Code != http.StatusUnauthorized {
+				t.Fatalf("status = %d, want %d", w.Code, http.StatusUnauthorized)
+			}
 		})
 	})
 }

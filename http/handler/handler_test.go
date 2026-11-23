@@ -12,7 +12,6 @@ import (
 	"github.com/alextanhongpin/errors/cause"
 	"github.com/alextanhongpin/errors/codes"
 	"github.com/alextanhongpin/errors/validator"
-	"github.com/alextanhongpin/snapshot"
 )
 
 type HelloRequest struct {
@@ -54,27 +53,28 @@ func TestHandler(t *testing.T) {
 	c := new(Controller)
 	c.BaseHandler = c.WithLogger(slog.Default())
 
-	t.Run("success", func(t *testing.T) {
-		wr := httptest.NewRecorder()
-		r := httptest.NewRequest(http.MethodGet, "/", strings.NewReader(`{"name":"john"}`))
-		r.Header.Set("Content-Type", "application/json")
-		hd := snapshot.HTTP(t, http.HandlerFunc(c.Hello))
-		hd.ServeHTTP(wr, r)
-	})
+	tests := map[string]struct {
+		body     string
+		wantCode int
+		wantBody string
+	}{
+		"success":   {`{"name":"john"}`, http.StatusOK, `{"data":{"message":"Hello, john"}}`},
+		"failed":    {`{}`, http.StatusInternalServerError, `{"error":{"code":"INTERNAL_SERVER_ERROR","message":"An unexpected error occurred. Please try again later."}}`},
+		"not found": {`{"name":"bob"}`, http.StatusNotFound, `{"error":{"code":"user/not_found","message":"User not found"}}`},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			r := httptest.NewRequest(http.MethodGet, "/", strings.NewReader(tc.body))
+			r.Header.Set("Content-Type", "application/json")
+			http.HandlerFunc(c.Hello).ServeHTTP(w, r)
 
-	t.Run("failed", func(t *testing.T) {
-		wr := httptest.NewRecorder()
-		r := httptest.NewRequest(http.MethodGet, "/", strings.NewReader(`{}`))
-		r.Header.Set("Content-Type", "application/json")
-		hd := snapshot.HTTP(t, http.HandlerFunc(c.Hello))
-		hd.ServeHTTP(wr, r)
-	})
-
-	t.Run("not found", func(t *testing.T) {
-		wr := httptest.NewRecorder()
-		r := httptest.NewRequest(http.MethodGet, "/", strings.NewReader(`{"name":"bob"}`))
-		r.Header.Set("Content-Type", "application/json")
-		hd := snapshot.HTTP(t, http.HandlerFunc(c.Hello))
-		hd.ServeHTTP(wr, r)
-	})
+			if w.Code != tc.wantCode {
+				t.Fatalf("status = %d, want %d", w.Code, tc.wantCode)
+			}
+			if got := strings.TrimSpace(w.Body.String()); got != tc.wantBody {
+				t.Fatalf("body = %s, want %s", got, tc.wantBody)
+			}
+		})
+	}
 }

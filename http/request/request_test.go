@@ -9,7 +9,6 @@ import (
 
 	"github.com/alextanhongpin/core/http/request"
 	"github.com/alextanhongpin/errors/validation"
-	"github.com/alextanhongpin/snapshot"
 	"github.com/google/go-cmp/cmp"
 	"github.com/stretchr/testify/assert"
 )
@@ -55,7 +54,9 @@ func TestBody(t *testing.T) {
 		err = request.DecodeJSON(r, &req)
 		is.Error(err)
 		is.Empty(cmp.Diff(req, body))
-		snapshot.New(t).JSON(err)
+		var ve interface{ Map() map[string][]string }
+		is.ErrorAs(err, &ve)
+		is.Equal(map[string][]string{"email": {"The email is invalid"}}, ve.Map())
 	})
 }
 
