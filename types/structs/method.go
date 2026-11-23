@@ -1,39 +1,24 @@
 package structs
 
 import (
-	"fmt"
+	"errors"
 	"reflect"
-	"slices"
 )
 
-// GetMethodNames returns all exported method names for a struct or pointer to struct.
+// GetMethodNames returns the exported method names of v's pointer type, in
+// sorted order. This is the union of value- and pointer-receiver methods,
+// whether v is a T or a *T. It returns an error if v is nil.
 func GetMethodNames(v any) ([]string, error) {
 	if v == nil {
-		return nil, fmt.Errorf("value is nil")
+		return nil, errors.New("structs: value is nil")
 	}
 	t := reflect.TypeOf(v)
-	// If pointer, get the element type for value methods
-	if t.Kind() == reflect.Ptr {
-		t = t.Elem()
+	if t.Kind() != reflect.Pointer {
+		t = reflect.PointerTo(t)
 	}
-	var names []string
-	// Collect methods from both value and pointer receiver
-	for i := 0; i < t.NumMethod(); i++ {
-		m := t.Method(i)
-		if m.IsExported() {
-			names = append(names, m.Name)
-		}
-	}
-	// Also check pointer type for pointer receiver methods
-	pt := reflect.TypeOf(v)
-	if pt.Kind() != reflect.Ptr {
-		pt = reflect.PointerTo(t)
-	}
-	for i := 0; i < pt.NumMethod(); i++ {
-		m := pt.Method(i)
-		if m.IsExported() && !slices.Contains(names, m.Name) {
-			names = append(names, m.Name)
-		}
+	names := make([]string, 0, t.NumMethod())
+	for m := range t.Methods() {
+		names = append(names, m.Name)
 	}
 	return names, nil
 }

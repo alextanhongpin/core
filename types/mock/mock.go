@@ -2,7 +2,6 @@ package mock
 
 import (
 	"fmt"
-	"maps"
 	"runtime"
 	"slices"
 	"strings"
@@ -11,14 +10,17 @@ import (
 	"github.com/alextanhongpin/core/types/structs"
 )
 
-// Mock provides method-based option lookup for test doubles and helpers.
+// Mock returns canned string options per method and records call arguments.
+// Embed *Mock in a test double and call Call from each exported method.
+// It is safe for concurrent use.
 type Mock struct {
-	mu      sync.Mutex // Protects access to internal state (calls, options)
+	mu      sync.Mutex
 	options Options
 	calls   Calls
 }
 
-// New creates a new Mock for the exported methods of v, with the given options.
+// New returns a Mock for the exported methods of v (a struct or pointer to
+// one). It panics if options names a method that v does not have.
 func New(v any, options Options) *Mock {
 	methodNames, err := structs.GetMethodNames(v)
 	if err != nil {
@@ -30,46 +32,44 @@ func New(v any, options Options) *Mock {
 		}
 	}
 	return &Mock{
-		options: options,
+		options: options.clone(),
 		calls:   make(Calls),
 	}
 }
 
-// Calls returns a read-only copy of all recorded calls.
+// Calls returns a copy of the recorded arguments, keyed by method name.
 func (m *Mock) Calls() Calls {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return maps.Clone(m.calls)
+	return m.calls.clone()
 }
 
-// Call stores the caller args. This function is inherently risky due to reflection usage,
-// but we keep it as per the original design intent while adding thread safety.
+// Call records args under the name of the method that called it and returns
+// that method's next option. Options cycle: the nth call returns
+// options[n % len(options)]. It returns "" when the method has no options.
+//
+// Call must be invoked directly from the exported method; calling it from a
+// closure or helper records the wrong name.
 func (m *Mock) Call(args ...any) string {
+	name := callerMethodName(2)
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	name := m.getMethodName()
-	values := m.options.Values(name)
-	callCount := len(m.calls[name]) // Use the current count before appending
-
-	// Cycle through defined options if more calls are made than options exist
-	val := values[callCount%len(values)]
-
+	n := len(m.calls[name])
 	m.calls[name] = append(m.calls[name], args)
-	return val
+
+	values := m.options[name]
+	if len(values) == 0 {
+		return ""
+	}
+	return values[n%len(values)]
 }
 
-func (m *Mock) getMethodName() string {
-	// WARNING: This remains fragile due to runtime reflection usage.
-	// In a real-world scenario, this must be replaced by type-safe dependency injection.
-	name := callerName(2) // Skip [getMethodName, Option]
-	parts := strings.Split(name, ".")
-	return parts[len(parts)-1]
-}
-
-// callerName returns the name of the calling function. Requires 3rd level runtime inspection.
-func callerName(skip int) string {
-	pc, _, _, ok := runtime.Caller(skip + 1)
+// callerMethodName returns the unqualified name of the function skip frames
+// above its caller, e.g. "Foo" for "pkg.(*Service).Foo".
+func callerMethodName(skip int) string {
+	pc, _, _, ok := runtime.Caller(skip)
 	if !ok {
 		return ""
 	}
@@ -77,5 +77,6 @@ func callerName(skip int) string {
 	if f == nil {
 		return ""
 	}
-	return f.Name()
+	name := f.Name()
+	return name[strings.LastIndexByte(name, '.')+1:]
 }

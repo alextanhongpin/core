@@ -2,20 +2,9 @@ package structs
 
 import "reflect"
 
+// IsNilOrZero reports whether x is nil, a typed nil (pointer, map, slice,
+// channel, func), or the zero value of its type. A non-nil empty slice or map
+// is not zero.
 func IsNilOrZero(x any) bool {
-	if x == nil {
-		return true
-	}
-
-	v := reflect.ValueOf(x)
-	switch v.Kind() {
-	// Check types that can legally be nil
-	case reflect.Pointer, reflect.Map, reflect.Slice, reflect.Chan, reflect.Func, reflect.Interface:
-		if v.IsNil() {
-			return true
-		}
-	}
-
-	// Check if it's the default zero value for its type (works for structs, ints, etc.)
-	return v.IsZero()
+	return x == nil || reflect.ValueOf(x).IsZero()
 }

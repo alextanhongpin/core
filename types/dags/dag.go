@@ -2,18 +2,21 @@ package dags
 
 import (
 	"cmp"
-	"fmt"
+	"errors"
 	"maps"
 	"slices"
 )
 
-// Graph represents a directed acyclic graph.
+// ErrCycle is returned by TopologicalSort when the graph contains a cycle.
+var ErrCycle = errors.New("dags: graph contains a cycle")
+
+// Graph is an adjacency list: g[from] lists the vertices that from points to.
+// A vertex that appears only as an edge target is still a vertex. Graph is a
+// map, so create it with make or a literal before calling AddEdge.
 type Graph[T cmp.Ordered] map[T][]T
 
-func (g Graph[T]) Map() map[T][]T {
-	return g
-}
-
+// Invert returns a new graph with every edge reversed. Each vertex of g is a
+// key of the result, and each edge list is sorted.
 func (g Graph[T]) Invert() Graph[T] {
 	inv := make(Graph[T])
 	for node, edges := range g {
@@ -23,6 +26,9 @@ func (g Graph[T]) Invert() Graph[T] {
 		for _, edge := range edges {
 			inv[edge] = append(inv[edge], node)
 		}
+	}
+	for _, edges := range inv {
+		slices.Sort(edges)
 	}
 
 	return inv
@@ -39,7 +45,11 @@ func (g Graph[T]) AddEdge(from, to T) {
 	g[from] = append(g[from], to)
 }
 
-// TopologicalSort performs a topological sort using Kahn's algorithm.
+// TopologicalSort orders the vertices so that every edge points from an
+// earlier vertex to a later one, using Kahn's algorithm. Vertices with no
+// incoming edges start in ascending order; later vertices follow in the order
+// they become ready, by edge-list order. The result is deterministic. It
+// returns ErrCycle if the graph has a cycle, including a self-loop.
 func (g Graph[T]) TopologicalSort() ([]T, error) {
 	inDegrees := make(map[T]int)
 	for node, edges := range g {
@@ -79,12 +89,13 @@ func (g Graph[T]) TopologicalSort() ([]T, error) {
 
 	// Check for a cycle
 	if len(result) != len(inDegrees) {
-		return nil, fmt.Errorf("graph contains a cycle, topological sort not possible")
+		return nil, ErrCycle
 	}
 
 	return result, nil
 }
 
+// Vertices returns every vertex, keys and edge targets, in ascending order.
 func (g Graph[T]) Vertices() []T {
 	nodes := make(map[T]struct{})
 	for node, edges := range g {

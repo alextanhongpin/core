@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"path/filepath"
 	"slices"
 	"time"
 
@@ -27,6 +28,10 @@ func init() {
 			if a.Key == slog.TimeKey {
 				a.Value = slog.TimeValue(time.Time{})
 			}
+			// Keep golden output independent of the checkout location.
+			if src, ok := a.Value.Any().(*slog.Source); ok && a.Key == slog.SourceKey {
+				a.Value = slog.StringValue(fmt.Sprintf("%s:%d", filepath.Base(src.File), src.Line))
+			}
 			return a
 		},
 	})
@@ -41,12 +46,12 @@ func ExampleNew_error() {
 	fmt.Println(bb.String())
 
 	// Output:
-	// time=0001-01-01T00:00:00.000Z level=INFO source=/Users/alextanhongpin/Documents/go/core/types/tracker/tracker_test.go:138 msg=foo key=value
-	// time=0001-01-01T00:00:00.000Z level=INFO source=/Users/alextanhongpin/Documents/go/core/types/tracker/tracker_test.go:143 msg=retrying... api=bar attempts=0
-	// time=0001-01-01T00:00:00.000Z level=INFO source=/Users/alextanhongpin/Documents/go/core/types/tracker/tracker_test.go:143 msg=retrying... api=bar attempts=1
-	// time=0001-01-01T00:00:00.000Z level=INFO source=/Users/alextanhongpin/Documents/go/core/types/tracker/tracker_test.go:143 msg=retrying... api=bar attempts=2
-	// time=0001-01-01T00:00:00.000Z level=INFO source=/Users/alextanhongpin/Documents/go/core/types/tracker/tracker_test.go:145 msg=done api=bar took=0s
-	// time=0001-01-01T00:00:00.000Z level=ERROR source=/Users/alextanhongpin/Documents/go/core/types/tracker/tracker_test.go:148 msg="unsupported operation" key=value took=0s
+	// time=0001-01-01T00:00:00.000Z level=INFO source=tracker_test.go:143 msg=foo key=value
+	// time=0001-01-01T00:00:00.000Z level=INFO source=tracker_test.go:147 msg=retrying... api=bar attempts=0
+	// time=0001-01-01T00:00:00.000Z level=INFO source=tracker_test.go:147 msg=retrying... api=bar attempts=1
+	// time=0001-01-01T00:00:00.000Z level=INFO source=tracker_test.go:147 msg=retrying... api=bar attempts=2
+	// time=0001-01-01T00:00:00.000Z level=INFO source=tracker_test.go:149 msg=done api=bar took=0s
+	// time=0001-01-01T00:00:00.000Z level=ERROR source=tracker_test.go:152 msg="unsupported operation" key=value took=0s
 }
 
 func ExampleNew_success() {
@@ -55,12 +60,12 @@ func ExampleNew_success() {
 	_ = foo(context.Background(), nil, nil)
 	fmt.Println(bb.String())
 	// Output:
-	// time=0001-01-01T00:00:00.000Z level=INFO source=/Users/alextanhongpin/Documents/go/core/types/tracker/tracker_test.go:138 msg=foo key=value
-	// time=0001-01-01T00:00:00.000Z level=INFO source=/Users/alextanhongpin/Documents/go/core/types/tracker/tracker_test.go:143 msg=retrying... api=bar attempts=0
-	// time=0001-01-01T00:00:00.000Z level=INFO source=/Users/alextanhongpin/Documents/go/core/types/tracker/tracker_test.go:143 msg=retrying... api=bar attempts=1
-	// time=0001-01-01T00:00:00.000Z level=INFO source=/Users/alextanhongpin/Documents/go/core/types/tracker/tracker_test.go:143 msg=retrying... api=bar attempts=2
-	// time=0001-01-01T00:00:00.000Z level=INFO source=/Users/alextanhongpin/Documents/go/core/types/tracker/tracker_test.go:145 msg=done api=bar took=0s
-	// time=0001-01-01T00:00:00.000Z level=INFO source=/Users/alextanhongpin/Documents/go/core/types/tracker/tracker_test.go:151 msg=done key=value took=0s
+	// time=0001-01-01T00:00:00.000Z level=INFO source=tracker_test.go:143 msg=foo key=value
+	// time=0001-01-01T00:00:00.000Z level=INFO source=tracker_test.go:147 msg=retrying... api=bar attempts=0
+	// time=0001-01-01T00:00:00.000Z level=INFO source=tracker_test.go:147 msg=retrying... api=bar attempts=1
+	// time=0001-01-01T00:00:00.000Z level=INFO source=tracker_test.go:147 msg=retrying... api=bar attempts=2
+	// time=0001-01-01T00:00:00.000Z level=INFO source=tracker_test.go:149 msg=done api=bar took=0s
+	// time=0001-01-01T00:00:00.000Z level=INFO source=tracker_test.go:154 msg=done key=value took=0s
 }
 
 func ExampleNew_requestID() {
@@ -72,12 +77,12 @@ func ExampleNew_requestID() {
 	_ = foo(ctx, nil, nil)
 	fmt.Println(bb.String())
 	// Output:
-	// time=0001-01-01T00:00:00.000Z level=INFO source=/Users/alextanhongpin/Documents/go/core/types/tracker/tracker_test.go:138 msg=foo key=value request_id=req-123abc
-	// time=0001-01-01T00:00:00.000Z level=INFO source=/Users/alextanhongpin/Documents/go/core/types/tracker/tracker_test.go:143 msg=retrying... api=bar attempts=0 request_id=req-123abc
-	// time=0001-01-01T00:00:00.000Z level=INFO source=/Users/alextanhongpin/Documents/go/core/types/tracker/tracker_test.go:143 msg=retrying... api=bar attempts=1 request_id=req-123abc
-	// time=0001-01-01T00:00:00.000Z level=INFO source=/Users/alextanhongpin/Documents/go/core/types/tracker/tracker_test.go:143 msg=retrying... api=bar attempts=2 request_id=req-123abc
-	// time=0001-01-01T00:00:00.000Z level=INFO source=/Users/alextanhongpin/Documents/go/core/types/tracker/tracker_test.go:145 msg=done api=bar took=0s request_id=req-123abc
-	// time=0001-01-01T00:00:00.000Z level=INFO source=/Users/alextanhongpin/Documents/go/core/types/tracker/tracker_test.go:151 msg=done key=value took=0s request_id=req-123abc
+	// time=0001-01-01T00:00:00.000Z level=INFO source=tracker_test.go:143 msg=foo key=value request_id=req-123abc
+	// time=0001-01-01T00:00:00.000Z level=INFO source=tracker_test.go:147 msg=retrying... api=bar attempts=0 request_id=req-123abc
+	// time=0001-01-01T00:00:00.000Z level=INFO source=tracker_test.go:147 msg=retrying... api=bar attempts=1 request_id=req-123abc
+	// time=0001-01-01T00:00:00.000Z level=INFO source=tracker_test.go:147 msg=retrying... api=bar attempts=2 request_id=req-123abc
+	// time=0001-01-01T00:00:00.000Z level=INFO source=tracker_test.go:149 msg=done api=bar took=0s request_id=req-123abc
+	// time=0001-01-01T00:00:00.000Z level=INFO source=tracker_test.go:154 msg=done key=value took=0s request_id=req-123abc
 }
 
 func ExampleNew_discard() {
@@ -95,12 +100,12 @@ func ExampleNew_group() {
 	_ = foo(context.Background(), nil, slog.Default().WithGroup("group"))
 	fmt.Println(bb.String())
 	// Output:
-	// time=0001-01-01T00:00:00.000Z level=INFO source=/Users/alextanhongpin/Documents/go/core/types/tracker/tracker_test.go:138 msg=foo group.key=value
-	// time=0001-01-01T00:00:00.000Z level=INFO source=/Users/alextanhongpin/Documents/go/core/types/tracker/tracker_test.go:143 msg=retrying... group.api=bar group.attempts=0
-	// time=0001-01-01T00:00:00.000Z level=INFO source=/Users/alextanhongpin/Documents/go/core/types/tracker/tracker_test.go:143 msg=retrying... group.api=bar group.attempts=1
-	// time=0001-01-01T00:00:00.000Z level=INFO source=/Users/alextanhongpin/Documents/go/core/types/tracker/tracker_test.go:143 msg=retrying... group.api=bar group.attempts=2
-	// time=0001-01-01T00:00:00.000Z level=INFO source=/Users/alextanhongpin/Documents/go/core/types/tracker/tracker_test.go:145 msg=done group.api=bar group.took=0s
-	// time=0001-01-01T00:00:00.000Z level=INFO source=/Users/alextanhongpin/Documents/go/core/types/tracker/tracker_test.go:151 msg=done group.key=value group.took=0s
+	// time=0001-01-01T00:00:00.000Z level=INFO source=tracker_test.go:143 msg=foo group.key=value
+	// time=0001-01-01T00:00:00.000Z level=INFO source=tracker_test.go:147 msg=retrying... group.api=bar group.attempts=0
+	// time=0001-01-01T00:00:00.000Z level=INFO source=tracker_test.go:147 msg=retrying... group.api=bar group.attempts=1
+	// time=0001-01-01T00:00:00.000Z level=INFO source=tracker_test.go:147 msg=retrying... group.api=bar group.attempts=2
+	// time=0001-01-01T00:00:00.000Z level=INFO source=tracker_test.go:149 msg=done group.api=bar group.took=0s
+	// time=0001-01-01T00:00:00.000Z level=INFO source=tracker_test.go:154 msg=done group.key=value group.took=0s
 }
 
 func ExampleNew_idempotent() {
@@ -123,20 +128,19 @@ func ExampleNew_idempotent() {
 	tt.Done("retry ok")
 	fmt.Println(bb.String())
 	// Output:
-	// time=0001-01-01T00:00:00.000Z level=DEBUG source=/Users/alextanhongpin/Documents/go/core/types/tracker/tracker_test.go:111 msg=init key=value
-	// time=0001-01-01T00:00:00.000Z level=INFO source=/Users/alextanhongpin/Documents/go/core/types/tracker/tracker_test.go:113 msg=done key=value took=0s
-	// time=0001-01-01T00:00:00.000Z level=ERROR source=/Users/alextanhongpin/Documents/go/core/types/tracker/tracker_test.go:115 msg="bad request" key=value took=0s
-	// time=0001-01-01T00:00:00.000Z level=DEBUG source=/Users/alextanhongpin/Documents/go/core/types/tracker/tracker_test.go:119 msg=retrying key=value
-	// time=0001-01-01T00:00:00.000Z level=ERROR source=/Users/alextanhongpin/Documents/go/core/types/tracker/tracker_test.go:121 msg="retry error" key=value took=0s
-	// time=0001-01-01T00:00:00.000Z level=ERROR source=/Users/alextanhongpin/Documents/go/core/types/tracker/tracker_test.go:121 msg="retry error" key=value took=0s
-	// time=0001-01-01T00:00:00.000Z level=ERROR source=/Users/alextanhongpin/Documents/go/core/types/tracker/tracker_test.go:121 msg="retry error" key=value took=0s
+	// time=0001-01-01T00:00:00.000Z level=DEBUG source=tracker_test.go:116 msg=init key=value
+	// time=0001-01-01T00:00:00.000Z level=INFO source=tracker_test.go:118 msg=done key=value took=0s
+	// time=0001-01-01T00:00:00.000Z level=ERROR source=tracker_test.go:120 msg="bad request" key=value took=0s
+	// time=0001-01-01T00:00:00.000Z level=DEBUG source=tracker_test.go:124 msg=retrying key=value
+	// time=0001-01-01T00:00:00.000Z level=ERROR source=tracker_test.go:126 msg="retry error" key=value attempt=1 took=0s
+	// time=0001-01-01T00:00:00.000Z level=ERROR source=tracker_test.go:126 msg="retry error" key=value attempt=2 took=0s
+	// time=0001-01-01T00:00:00.000Z level=ERROR source=tracker_test.go:126 msg="retry error" key=value attempt=3 took=0s
 }
 
 func foo(ctx context.Context, err error, logger *slog.Logger) error {
 	logger = cmp.Or(logger, slog.Default())
 	t := tracker.NewWithLogger(ctx, logger, slog.String("key", "value"))
 	t.Info("foo")
-	defer t.Done("done")
 
 	tt := tracker.NewWithLogger(ctx, logger, slog.String("api", "bar"))
 	for i := range 3 {
@@ -147,7 +151,7 @@ func foo(ctx context.Context, err error, logger *slog.Logger) error {
 	if err != nil {
 		return t.Error(err)
 	}
-
+	t.Done("done") // Not deferred: a deferred call's line varies by build mode.
 	return nil
 }
 
@@ -198,4 +202,23 @@ func (h *ReqIDHandler) clone() *ReqIDHandler {
 		group: h.group,
 		attrs: slices.Clone(h.attrs),
 	}
+}
+
+func ExampleNoop() {
+	var t interface {
+		Error(error, ...slog.Attr) error
+	} = tracker.NewNoop()
+	fmt.Println(t.Error(errors.New("boom")))
+	// Output: boom
+}
+
+func ExampleTracker_Error_nil() {
+	bb.Reset()
+	t := tracker.New(context.Background())
+	fmt.Println(t.Error(nil))
+	t.Done("ok")
+	fmt.Print(bb.String())
+	// Output:
+	// <nil>
+	// time=0001-01-01T00:00:00.000Z level=INFO source=tracker_test.go:219 msg=ok took=0s
 }

@@ -86,8 +86,33 @@ func TestPriorityQueue_Duplicate(t *testing.T) {
 	pq.Push(&Leaderboard{Name: "charlie", Score: 100})
 	pq.Push(&Leaderboard{Name: "zeta", Score: 1000})
 	list := pq.Slice()
-	slices.Reverse(list)
-	for _, item := range list {
-		t.Log(item)
+	want := []Leaderboard{{"charlie", 100}, {"alice", 1000}, {"zeta", 1000}}
+	if len(list) != len(want) {
+		t.Fatalf("len = %d, want %d", len(list), len(want))
+	}
+	for i := range want {
+		if *list[i] != want[i] {
+			t.Fatalf("list[%d] = %v, want %v", i, *list[i], want[i])
+		}
+	}
+	if pq.Len() != 3 {
+		t.Fatal("Slice modified the queue")
+	}
+}
+
+func TestPriorityQueue_ZeroValue(t *testing.T) {
+	var pq queue.PriorityQueue[*Leaderboard]
+	if _, ok := pq.Pop(); ok {
+		t.Fatal("empty Pop: want false")
+	}
+	if _, ok := pq.Peek(); ok {
+		t.Fatal("empty Peek: want false")
+	}
+	pq.Push(&Leaderboard{Name: "b", Score: 2}, &Leaderboard{Name: "a", Score: 1})
+	if v, ok := pq.Peek(); !ok || v.Name != "a" || pq.Len() != 2 {
+		t.Fatalf("Peek = %v, %v", v, ok)
+	}
+	if !slices.Equal([]string{"a", "b"}, []string{pq.Slice()[0].Name, pq.Slice()[1].Name}) {
+		t.Fatal("Slice not ascending")
 	}
 }
