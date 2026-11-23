@@ -18,8 +18,8 @@ go get github.com/alextanhongpin/core/dsync/ratelimit
 | Stop calling a failing dependency from every replica at once | [circuitbreaker](circuitbreaker/) |
 | Make sure only one replica runs a job / touches a key at a time | [lock](lock/) |
 | Return the same result when a client retries a request (idempotency keys) | [idempotent](idempotent/) |
-| Store typed values in Redis or on disk, and let only one caller refill a missing entry | [cache](cache/) |
-| Collapse duplicate concurrent calls, locally or across replicas | [singleflight](singleflight/) |
+| Store typed values in Redis or on disk behind one interface | [cache](cache/) |
+| Collapse duplicate concurrent calls or cache fills, locally or across replicas | [singleflight](singleflight/) |
 | Broadcast events where every reader keeps its own position (replayable) | [channel](channel/) |
 
 For Bloom/Cuckoo filters, Count-Min Sketch, Top-K, t-digest and HyperLogLog,
@@ -66,7 +66,7 @@ if err != nil {
 
   | Package | Minimum Redis | Why |
   | --- | --- | --- |
-  | cache (compare-and-swap, leases), idempotent, lock, singleflight | 8.4 | token-checked `SET IFDEQ` / `DELEX` |
+  | cache (compare-and-swap), idempotent, lock, singleflight | 8.4 | token-checked `SET IFDEQ` / `DELEX` |
   | circuitbreaker | 7.4 | Redis Functions + hash field expiry |
   | ratelimit | 7.0 | Redis Functions |
   | channel | 5.0 | Streams |

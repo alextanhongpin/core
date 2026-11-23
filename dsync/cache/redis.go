@@ -103,7 +103,8 @@ func (r *Redis) LoadOrStore(ctx context.Context, key string, value []byte, ttl t
 // Concurrent callers in this process share one create call, which runs with
 // the first caller's context. Other processes may call create at the same
 // time; the first SET wins and the others load its value. Use
-// [Lock.LoadOrCreate] if create must run only once across processes.
+// github.com/alextanhongpin/core/dsync/singleflight if create must run only
+// once across processes.
 func (r *Redis) LoadOrCreate(ctx context.Context, key string, create func(context.Context, string) ([]byte, time.Duration, error)) (curr []byte, loaded bool, err error) {
 	if create == nil {
 		return nil, false, errors.New("cache: create is required")
