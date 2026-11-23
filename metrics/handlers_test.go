@@ -14,19 +14,11 @@ import (
 	"time"
 
 	"github.com/alextanhongpin/core/metrics"
-	"github.com/alextanhongpin/core/storage/redis/redistest"
 	"github.com/stretchr/testify/assert"
 )
 
-func TestMain(m *testing.M) {
-	stop := redistest.Init(redistest.Image("redis/redis-stack:6.2.6-v17"))
-	defer stop()
-
-	m.Run()
-}
-
 func TestTracker(t *testing.T) {
-	tracker := metrics.NewTracker(t.Name(), redistest.Client(t))
+	tracker := metrics.NewTracker(t.Name(), redisClient(t))
 	ctx := context.Background()
 
 	is := assert.New(t)
@@ -52,7 +44,7 @@ func TestTrackerHandler(t *testing.T) {
 		return "user-id"
 	}
 
-	tracker := metrics.NewTracker(t.Name(), redistest.Client(t))
+	tracker := metrics.NewTracker(t.Name(), redisClient(t))
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	h = metrics.TrackerHandler(h, tracker, userFn, logger)
 	mux := http.NewServeMux()
@@ -81,7 +73,7 @@ func TestTrackerHandler(t *testing.T) {
 }
 
 func TestTrackerStatsMissingDay(t *testing.T) {
-	tracker := metrics.NewTracker(t.Name(), redistest.Client(t))
+	tracker := metrics.NewTracker(t.Name(), redisClient(t))
 	ctx := context.Background()
 	is := assert.New(t)
 
@@ -110,6 +102,13 @@ func TestTrackerStatsMissingDay(t *testing.T) {
 	is.Equal(int64(2), stats[0].Total)
 	is.Equal(int64(2), stats[0].Unique)
 	is.Equal(2.0, stats[0].P50)
+
+	// Paths are ranked by all-time frequency: /foo (3) before /bar (1).
+	stats, err = tracker.Stats(ctx, day1)
+	is.Nil(err)
+	is.Len(stats, 2)
+	is.Equal("GET /foo", stats[0].Path)
+	is.Equal("GET /bar", stats[1].Path)
 
 	// A day without any requests returns no stats.
 	stats, err = tracker.Stats(ctx, day2.AddDate(0, 0, 1))

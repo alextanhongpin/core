@@ -1,7 +1,7 @@
 # metrics
 
 HTTP and operation metrics for Prometheus, an expvar request counter, and a
-Redis-backed request tracker built on [`dsync/probs`](../dsync/probs).
+Redis-backed request tracker using RedisBloom sketches.
 
 ```go
 import "github.com/alextanhongpin/core/metrics"
@@ -69,7 +69,7 @@ Expose them with `mux.Handle("GET /debug/vars", expvar.Handler())`.
 `Tracker` stores, per day and path, the request count (count-min sketch),
 unique users (HyperLogLog) and p50/p90/p95 latency (t-digest), plus an
 all-time top 10 of paths (top-k). It needs Redis with the RedisBloom module,
-e.g. Redis Stack.
+e.g. Redis Stack. Keys are created on first use and never expire.
 
 ```go
 tracker := metrics.NewTracker("api", redisClient)
@@ -80,7 +80,10 @@ mux.Handle("GET /admin/stats", metrics.TrackerStatsHandler(tracker)) // ?at=2024
 ```
 
 The tracked path is `"<pattern> - <status>"`. `Stats(ctx, at)` returns the
-statistics of the day of `at` for each all-time top path requested that day.
-The day is taken from `Tracker.Now` (local time by default) when recording.
+statistics of the day of `at` for each all-time top path requested that day,
+most frequent first. The day is taken from `Tracker.Now` (local time by
+default) when recording.
 
-See [`cmd/main.go`](cmd/main.go) for a runnable server.
+See [`cmd/main.go`](cmd/main.go) for a runnable server. Tracker tests use the
+Redis at `REDIS_ADDR`, or start `redis/redis-stack` with docker, and are
+skipped when neither is available.
