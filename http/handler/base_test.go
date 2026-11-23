@@ -90,7 +90,7 @@ func TestBaseHandler_ReadJSON(t *testing.T) {
 			body:        "",
 			contentType: "application/json",
 			target:      &ValidatableRequest{},
-			wantErr:     false, // Empty body is allowed by default unless WithRequired() option is used
+			wantErr:     true, // An empty body is decoded as the zero value, which must still pass Validate
 		},
 	}
 

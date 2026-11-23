@@ -70,7 +70,14 @@ func WithRequired() DecodeOption {
 	}
 }
 
-// DecodeJSON decodes JSON request body with validation and size limits
+// DecodeJSON decodes the JSON request body into v.
+//
+// The body is limited to MaxBodySize bytes (WithMaxBodySize overrides it);
+// larger bodies fail with ErrBodyTooLarge. An empty body fails with
+// ErrEmptyBody when WithRequired is set and otherwise leaves v unchanged.
+// After decoding, or for an empty body, v.Bind(r) and then v.Validate() are
+// called if v implements them, so an empty body cannot skip validation. The
+// body is restored so it can be read again.
 func DecodeJSON(r *http.Request, v any, opts ...DecodeOption) error {
 	options := &DecodeOptions{
 		MaxBodySize: MaxBodySize,
@@ -81,49 +88,66 @@ func DecodeJSON(r *http.Request, v any, opts ...DecodeOption) error {
 		opt(options)
 	}
 
-	// Limit the reader to prevent huge requests
-	limitedReader := io.LimitReader(r.Body, options.MaxBodySize+1)
-	b, err := io.ReadAll(limitedReader)
+	b, err := readAtMost(r, options.MaxBodySize)
 	if err != nil {
+		if errors.Is(err, ErrBodyTooLarge) {
+			return &BodyError{Body: b, err: ErrBodyTooLarge}
+		}
 		return err
 	}
 
-	if int64(len(b)) > options.MaxBodySize {
-		return &BodyError{Body: b[:options.MaxBodySize], err: ErrBodyTooLarge}
-	}
-
-	if len(b) == 0 && options.Required {
-		return &BodyError{Body: b, err: ErrEmptyBody}
-	}
-
 	if len(b) == 0 {
-		return nil
+		if options.Required {
+			return &BodyError{Body: b, err: ErrEmptyBody}
+		}
+	} else {
+		if !json.Valid(b) {
+			return &BodyError{Body: b, err: ErrInvalidJSON}
+		}
+
+		if err := json.Unmarshal(b, v); err != nil {
+			return &BodyError{Body: b, err: err}
+		}
 	}
 
-	// Restore the body for potential reuse
-	r.Body = io.NopCloser(bytes.NewBuffer(bytes.Clone(b)))
-
-	if !json.Valid(b) {
-		return &BodyError{Body: b, err: ErrInvalidJSON}
-	}
-
-	if err := json.Unmarshal(b, v); err != nil {
-		return &BodyError{Body: b, err: err}
-	}
-
-	// Check if the struct implements bindable interface
 	if binder, ok := v.(bindable); ok {
 		if err := binder.Bind(r); err != nil {
 			return err
 		}
 	}
 
-	// Check if the struct implements validatable interface
 	if validator, ok := v.(validatable); ok {
 		return validator.Validate()
 	}
 
 	return nil
+}
+
+// readAtMost reads the whole body if it is at most limit bytes and restores
+// it. For a larger body it returns the first limit bytes and ErrBodyTooLarge,
+// and r.Body still yields the complete original stream.
+func readAtMost(r *http.Request, limit int64) ([]byte, error) {
+	if r.Body == nil || r.Body == http.NoBody {
+		return nil, nil
+	}
+
+	b, err := io.ReadAll(io.LimitReader(r.Body, limit+1))
+	if err != nil {
+		return nil, err
+	}
+
+	if int64(len(b)) > limit {
+		r.Body = readCloser{io.MultiReader(bytes.NewReader(b), r.Body), r.Body}
+		return b[:limit], ErrBodyTooLarge
+	}
+
+	r.Body = io.NopCloser(bytes.NewReader(b))
+	return b, nil
+}
+
+type readCloser struct {
+	io.Reader
+	io.Closer
 }
 
 // DecodeForm parses form data into a struct using reflection
@@ -193,19 +217,21 @@ func setFieldValue(field reflect.Value, value string) error {
 	case reflect.String:
 		field.SetString(value)
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		intVal, err := strconv.ParseInt(value, 10, 64)
+		// Parse with the field's size so out-of-range values fail instead of
+		// silently wrapping.
+		intVal, err := strconv.ParseInt(value, 10, field.Type().Bits())
 		if err != nil {
 			return err
 		}
 		field.SetInt(intVal)
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-		uintVal, err := strconv.ParseUint(value, 10, 64)
+		uintVal, err := strconv.ParseUint(value, 10, field.Type().Bits())
 		if err != nil {
 			return err
 		}
 		field.SetUint(uintVal)
 	case reflect.Float32, reflect.Float64:
-		floatVal, err := strconv.ParseFloat(value, 64)
+		floatVal, err := strconv.ParseFloat(value, field.Type().Bits())
 		if err != nil {
 			return err
 		}

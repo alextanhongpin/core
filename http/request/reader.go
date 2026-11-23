@@ -3,7 +3,6 @@ package request
 
 import (
 	"bytes"
-	"encoding/json/v2"
 	"io"
 	"net/http"
 )
@@ -35,15 +34,14 @@ import (
 //	logger.Debug("request body", "body", string(body))
 //	// The request body is still available for the handler to read
 //
-// Note: This function loads the entire request body into memory, so it should
-// be used with caution for large request bodies to avoid memory issues.
+// Read reads at most MaxBodySize bytes. A larger body fails with
+// ErrBodyTooLarge; r.Body then still yields the complete original stream.
 func Read(r *http.Request) ([]byte, error) {
-	b, err := io.ReadAll(r.Body)
+	b, err := readAtMost(r, MaxBodySize)
 	if err != nil {
 		return nil, err
 	}
 
-	r.Body = io.NopCloser(bytes.NewReader(b))
 	return b, nil
 }
 
@@ -76,7 +74,7 @@ func Read(r *http.Request) ([]byte, error) {
 //	go processOriginal(r)
 //	go processClone(clonedReq)
 //
-// Note: Like Read(), this function loads the entire request body into memory.
+// Like Read, it fails with ErrBodyTooLarge for bodies over MaxBodySize.
 func Clone(r *http.Request) (*http.Request, error) {
 	b, err := Read(r)
 	if err != nil {
@@ -89,15 +87,14 @@ func Clone(r *http.Request) (*http.Request, error) {
 	return rc, nil
 }
 
-func Parse[T any](r *http.Request) (T, error) {
+// Parse decodes the JSON body into a new T. It is DecodeJSON for a value
+// type, with the same size limit, Bind/Validate hooks and options.
+func Parse[T any](r *http.Request, opts ...DecodeOption) (T, error) {
 	var v T
-	b := new(bytes.Buffer)
-	body := io.TeeReader(r.Body, b)
-	err := json.UnmarshalRead(body, &v)
-	if err != nil {
+	if err := DecodeJSON(r, &v, opts...); err != nil {
 		var zero T
 		return zero, err
 	}
-	r.Body = io.NopCloser(body)
+
 	return v, nil
 }
