@@ -11,17 +11,19 @@ import (
 	"strings"
 )
 
-// Dumper is the interface checked during reflection.
+// Dumper lets a type replace its own output, for example to redact secrets.
 type Dumper interface {
 	Dump() string
 }
 
+// Dump returns the pretty-printed form of v followed by a newline.
 func Dump(v any) []byte {
 	b := new(bytes.Buffer)
 	FPrettyPrint(b, v)
 	return b.Bytes()
 }
 
+// SDump is Dump returning a string.
 func SDump(v any) string {
 	b := new(bytes.Buffer)
 	FPrettyPrint(b, v)
@@ -35,7 +37,7 @@ func FPrettyPrint(w io.Writer, v any) {
 	fmt.Fprintln(w)
 }
 
-// PrettyPrint remains as a wrapper that directly outputs to standard output.
+// PrettyPrint writes v to standard output.
 func PrettyPrint(v any) {
 	FPrettyPrint(os.Stdout, v)
 }
@@ -50,6 +52,13 @@ func printRecursive(w io.Writer, v reflect.Value, indent int, visited map[visit]
 	pad := strings.Repeat("  ", indent)
 
 	if !v.IsValid() {
+		fmt.Fprint(w, "nil")
+		return
+	}
+
+	// Nil pointers and interfaces print as nil without calling Dump, which
+	// could dereference the nil receiver.
+	if (v.Kind() == reflect.Pointer || v.Kind() == reflect.Interface) && v.IsNil() {
 		fmt.Fprint(w, "nil")
 		return
 	}

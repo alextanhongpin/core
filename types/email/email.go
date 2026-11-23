@@ -1,6 +1,5 @@
-// Package email provides email address validation and utilities.
-// It offers both basic and comprehensive email validation patterns
-// suitable for different use cases.
+// Package email validates email address syntax and splits addresses into
+// local part and domain. It does not check that a mailbox or domain exists.
 package email
 
 import (
@@ -39,45 +38,56 @@ func Normalize(s string) string {
 	return strings.ToLower(strings.TrimSpace(s))
 }
 
-// Domain extracts the domain part from an email address.
-// Returns empty string if the email is invalid.
+// Domain returns the part after the last "@", or "" if s has no "@" or
+// either side is empty. It does not validate s.
 func Domain(s string) string {
-	parts := strings.Split(s, "@")
-	if len(parts) != 2 {
+	_, domain, ok := split(s)
+	if !ok {
 		return ""
 	}
-	return parts[1]
+	return domain
 }
 
-// LocalPart extracts the local part (before @) from an email address.
-// Returns empty string if the email is invalid.
+// LocalPart returns the part before the last "@", or "" if s has no "@" or
+// either side is empty. It does not validate s.
 func LocalPart(s string) string {
-	parts := strings.Split(s, "@")
-	if len(parts) != 2 {
+	local, _, ok := split(s)
+	if !ok {
 		return ""
 	}
-	return parts[0]
+	return local
 }
 
-// IsBusinessEmail checks if an email uses a business domain
-// (not a common consumer email provider).
+// split splits at the last "@" because a quoted local part may contain "@".
+func split(s string) (local, domain string, ok bool) {
+	i := strings.LastIndexByte(s, '@')
+	if i <= 0 || i == len(s)-1 {
+		return "", "", false
+	}
+	return s[:i], s[i+1:], true
+}
+
+// consumerDomains lists common free mailbox providers. It is deliberately
+// short; it is not a disposable-address or free-provider database.
+var consumerDomains = map[string]bool{
+	"gmail.com":      true,
+	"yahoo.com":      true,
+	"hotmail.com":    true,
+	"outlook.com":    true,
+	"aol.com":        true,
+	"icloud.com":     true,
+	"mail.com":       true,
+	"protonmail.com": true,
+	"yandex.com":     true,
+}
+
+// IsBusinessEmail reports whether s has a domain that is not one of a short,
+// fixed list of consumer providers (gmail.com, yahoo.com, outlook.com, ...).
+// It returns false when s has no domain. It does not validate s.
 func IsBusinessEmail(s string) bool {
 	domain := strings.ToLower(Domain(s))
 	if domain == "" {
 		return false
 	}
-
-	consumerDomains := map[string]bool{
-		"gmail.com":      true,
-		"yahoo.com":      true,
-		"hotmail.com":    true,
-		"outlook.com":    true,
-		"aol.com":        true,
-		"icloud.com":     true,
-		"mail.com":       true,
-		"protonmail.com": true,
-		"yandex.com":     true,
-	}
-
 	return !consumerDomains[domain]
 }

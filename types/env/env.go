@@ -1,20 +1,23 @@
-// Package env provides utilities for loading and parsing environment variables
-// with type safety and validation. It supports common Go types and provides
-// helpful error messages for configuration issues.
+// Package env loads environment variables into typed values. Load returns
+// errors wrapping ErrNotSet or ErrParseFailed, LoadOr falls back to a default,
+// and MustLoad panics. Values are trimmed of surrounding whitespace.
 package env
 
 import (
+	"errors"
 	"fmt"
 	"os"
+	"reflect"
+	"strconv"
 	"strings"
 	"time"
 )
 
 var (
 	// ErrNotSet is returned when a required environment variable is not set
-	ErrNotSet = fmt.Errorf("env: variable not set")
+	ErrNotSet = errors.New("env: variable not set")
 	// ErrParseFailed is returned when parsing an environment variable fails
-	ErrParseFailed = fmt.Errorf("env: parse failed")
+	ErrParseFailed = errors.New("env: parse failed")
 )
 
 // Parseable defines the types that can be parsed from environment variables
@@ -24,13 +27,41 @@ type Parseable interface {
 		~float32 | ~float64 | ~complex64 | ~complex128
 }
 
-// Parse converts a string to the specified type T.
-// Returns an error if the parsing fails.
+// Parse converts str to T using strconv. The whole string must be a valid
+// value: "12abc" is an error, and a string type receives str unchanged.
+// Integers accept base prefixes (0x, 0o, 0b) and underscores; booleans
+// accept the values strconv.ParseBool accepts.
 func Parse[T Parseable](str string) (T, error) {
 	var v T
-	_, err := fmt.Sscanf(str, "%v", &v)
+	rv := reflect.ValueOf(&v).Elem()
+	var err error
+	switch rv.Kind() {
+	case reflect.String:
+		rv.SetString(str)
+	case reflect.Bool:
+		var b bool
+		b, err = strconv.ParseBool(str)
+		rv.SetBool(b)
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		var n int64
+		n, err = strconv.ParseInt(str, 0, rv.Type().Bits())
+		rv.SetInt(n)
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+		var n uint64
+		n, err = strconv.ParseUint(str, 0, rv.Type().Bits())
+		rv.SetUint(n)
+	case reflect.Float32, reflect.Float64:
+		var f float64
+		f, err = strconv.ParseFloat(str, rv.Type().Bits())
+		rv.SetFloat(f)
+	case reflect.Complex64, reflect.Complex128:
+		var c complex128
+		c, err = strconv.ParseComplex(str, rv.Type().Bits())
+		rv.SetComplex(c)
+	}
 	if err != nil {
-		return v, fmt.Errorf("%w: %s", ErrParseFailed, err)
+		var zero T
+		return zero, fmt.Errorf("%w: %w", ErrParseFailed, err)
 	}
 	return v, nil
 }
@@ -170,6 +201,9 @@ func LoadSlice[T Parseable](name string, sep string) ([]T, error) {
 		return nil, err
 	}
 
+	if strings.TrimSpace(v) == "" {
+		return []T{}, nil
+	}
 	vs := strings.Split(v, sep)
 	res := make([]T, len(vs))
 	for i, s := range vs {

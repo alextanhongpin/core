@@ -1,7 +1,6 @@
-// Package assert provides utilities for building structured validation systems.
-// It enables creating composable validation logic that can be used for
-// API request validation, configuration validation, and other scenarios
-// where structured error reporting is needed.
+// Package assert builds field validation messages. Each check returns an
+// empty string when it passes and a message when it fails; Required and
+// Optional join messages for one field, and Map drops the fields that passed.
 package assert
 
 import (
@@ -10,6 +9,7 @@ import (
 	"reflect"
 	"slices"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/alextanhongpin/core/types/email"
 )
@@ -66,34 +66,30 @@ func Map(kv map[string]string) map[string]string {
 	return res
 }
 
-// IsZero checks if a value is the zero value for its type.
+// IsZero reports whether v is nil, a zero value, an empty map or slice, or a
+// pointer to a zero value.
 func IsZero(v any) bool {
 	if v == nil {
 		return true
 	}
 	val := reflect.ValueOf(v)
-	if slices.Contains([]reflect.Kind{reflect.Map, reflect.Slice, reflect.Array}, val.Kind()) {
+	switch val.Kind() {
+	case reflect.Map, reflect.Slice:
 		return val.Len() == 0
+	case reflect.Pointer:
+		return val.IsNil() || val.Elem().IsZero()
 	}
-	if val.IsZero() {
-		return true
-	}
-
-	if val.Kind() == reflect.Pointer {
-		return val.Elem().IsZero()
-	}
-
-	return false
+	return val.IsZero()
 }
 
-// MinLength validates that a string has at least the specified length.
+// MinLength validates that s has at least min characters (runes, not bytes).
 func MinLength(s string, min int) string {
-	return Is(len(s) >= min, "must be at least %d characters", min)
+	return Is(utf8.RuneCountInString(s) >= min, "must be at least %d characters", min)
 }
 
-// MaxLength validates that a string has at most the specified length.
+// MaxLength validates that s has at most max characters (runes, not bytes).
 func MaxLength(s string, max int) string {
-	return Is(len(s) <= max, "must be at most %d characters", max)
+	return Is(utf8.RuneCountInString(s) <= max, "must be at most %d characters", max)
 }
 
 // Range validates that a value is between min and max (inclusive).

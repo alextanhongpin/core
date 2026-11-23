@@ -1,396 +1,102 @@
-# Env - Environment Variable Management
+# env
 
-[![Go Reference](https://pkg.go.dev/badge/github.com/alextanhongpin/core/types/env.svg)](https://pkg.go.dev/github.com/alextanhongpin/core/types/env)
+Load environment variables into typed values with one of three failure modes:
+return an error, fall back to a default, or panic.
 
-Package `env` provides utilities for loading and parsing environment variables with type safety and validation. It supports common Go types, graceful error handling, and helpful error messages for configuration issues.
+**Use it for:** reading configuration at startup.
 
-## Features
-
-- **Type-Safe Parsing**: Load environment variables as specific Go types with compile-time safety
-- **Graceful Error Handling**: Choose between panic-on-error or return-error patterns
-- **Default Values**: Provide fallback values for optional configuration
-- **Slice Support**: Parse comma-separated or custom-delimited lists
-- **Duration Support**: Built-in support for time.Duration parsing
-- **Validation Helpers**: Check if variables exist or are set
-- **Zero Dependencies**: Pure Go implementation with no external dependencies
+**Don't use it for:** config files, struct-tag binding, or reloading
+configuration at runtime.
 
 ## Installation
 
-```bash
-go get github.com/alextanhongpin/core/types/env
+```sh
+go get github.com/alextanhongpin/core/types
 ```
 
-## Quick Start
+`env` is a package in the `types` module; import it as
+`github.com/alextanhongpin/core/types/env`. Check the module's `go.mod` for the
+required Go version.
+
+## Quick start
 
 ```go
 package main
 
 import (
-    "fmt"
-    "time"
-    "github.com/alextanhongpin/core/types/env"
+	"fmt"
+	"os"
+	"time"
+
+	"github.com/alextanhongpin/core/types/env"
 )
 
 func main() {
-    // Load required config (panics if missing)
-    port := env.MustLoad[int]("PORT")
-    
-    // Load optional config with defaults
-    host := env.LoadOr[string]("HOST", "localhost")
-    timeout := env.LoadDurationOr("TIMEOUT", 30*time.Second)
-    
-    // Load arrays
-    allowedHosts := env.LoadSliceOr[string]("ALLOWED_HOSTS", ",", []string{"localhost"})
-    
-    fmt.Printf("Server: %s:%d, Timeout: %v, Hosts: %v\n", 
-        host, port, timeout, allowedHosts)
+	os.Setenv("PORT", "8080")
+	os.Setenv("TIMEOUT", "5s")
+	os.Setenv("HOSTS", "a.internal, b.internal")
+
+	port := env.MustLoad[int]("PORT")
+	timeout := env.LoadDurationOr("TIMEOUT", 30*time.Second)
+	hosts := env.MustLoadSlice[string]("HOSTS", ",")
+	debug := env.LoadOr("DEBUG", false)
+
+	fmt.Println(port, timeout, hosts, debug)
+
+	_, err := env.Load[int]("MISSING")
+	fmt.Println(err)
 }
 ```
 
-## API Reference
+It prints:
 
-### Loading Functions
+```
+8080 5s [a.internal b.internal] false
+env: variable not set: "MISSING"
+```
 
-#### Panic-on-Error (Fail Fast)
-
-These functions panic if the environment variable is missing or invalid. Use for critical configuration that should cause the application to fail at startup.
-
-- **`MustLoad[T](name string) T`** - Load required variable
-- **`MustLoadDuration(name string) time.Duration`** - Load required duration
-- **`MustLoadSlice[T](name, sep string) []T`** - Load required slice
-- **`MustLoadTime(name, layout string) time.Time`** - Load required time
-- **`MustExist(names ...string)`** - Ensure variables exist
+## API
 
 ```go
-// Application will panic if PORT is not set or invalid
-port := env.MustLoad[int]("PORT")
-timeout := env.MustLoadDuration("REQUEST_TIMEOUT")
+var ErrNotSet, ErrParseFailed error
+
+type Parseable interface { ~string | ~bool | ~int... | ~uint... | ~float32 | ~float64 | ~complex64 | ~complex128 }
+
+func Parse[T Parseable](s string) (T, error)
+
+func Load[T Parseable](name string) (T, error)
+func LoadOr[T Parseable](name string, def T) T
+func MustLoad[T Parseable](name string) T
+
+func LoadDuration(name string) (time.Duration, error)          // also LoadDurationOr, MustLoadDuration
+func LoadTime(name, layout string) (time.Time, error)          // also LoadTimeOr, MustLoadTime
+func LoadSlice[T Parseable](name, sep string) ([]T, error)     // also LoadSliceOr, MustLoadSlice
+
+func MustExist(names ...string) // panics listing every missing name
+func Exists(name string) bool   // set, possibly empty
+func IsSet(name string) bool    // set and non-empty
 ```
 
-#### Error-Returning (Graceful)
+## Behavior and guarantees
 
-These functions return errors for missing or invalid variables. Use when you want to handle configuration errors gracefully.
+- `Load*` errors wrap `ErrNotSet` when the variable is unset and
+  `ErrParseFailed` when the value cannot be parsed; test with `errors.Is`.
+- A variable set to the empty string is set: `Load[string]` returns `""`,
+  `Load[int]` fails to parse, and `LoadSlice` returns an empty slice.
+- Values are trimmed of surrounding whitespace, and so is each slice element.
+- `Parse` uses `strconv` and must consume the whole string: `"12abc"` and
+  out-of-range values such as `"300"` for `uint8` are errors. Integers accept
+  base prefixes (`0x`, `0o`, `0b`) and `_` separators. Booleans accept
+  `1, t, T, TRUE, true, True` and their false counterparts.
+- Named types work: `env.Load[Port]("PORT")` for `type Port int`.
+- `*Or` variants return the default on any error, including a malformed value.
+  Use `Load` when a typo should not be silently ignored.
+- `LoadDuration` uses `time.ParseDuration`; `LoadTime` uses `time.Parse`.
 
-- **`Load[T](name string) (T, error)`** - Load with error handling
-- **`LoadDuration(name string) (time.Duration, error)`** - Load duration with error handling
-- **`LoadSlice[T](name, sep string) ([]T, error)`** - Load slice with error handling
-- **`LoadTime(name, layout string) (time.Time, error)`** - Load time with error handling
+## Testing
 
-```go
-port, err := env.Load[int]("PORT")
-if err != nil {
-    log.Printf("Failed to get port: %v", err)
-    port = 8080 // fallback
-}
+```sh
+cd types
+go vet ./env
+go test -race -count=1 ./env
 ```
-
-#### Default Values
-
-These functions provide fallback values if the environment variable is missing or invalid.
-
-- **`LoadOr[T](name string, defaultValue T) T`** - Load with default
-- **`LoadDurationOr(name string, defaultValue time.Duration) time.Duration`** - Load duration with default
-- **`LoadSliceOr[T](name, sep string, defaultValue []T) []T`** - Load slice with default
-- **`LoadTimeOr(name, layout string, defaultValue time.Time) time.Time`** - Load time with default
-
-```go
-host := env.LoadOr[string]("HOST", "0.0.0.0")
-maxConns := env.LoadOr[int]("MAX_CONNECTIONS", 100)
-```
-
-### Utility Functions
-
-- **`Exists(name string) bool`** - Check if variable exists (even if empty)
-- **`IsSet(name string) bool`** - Check if variable exists and is non-empty
-- **`Parse[T](str string) (T, error)`** - Parse string to specific type
-
-## Supported Types
-
-The package supports all basic Go types through the `Parseable` interface:
-
-- **Strings**: `string`
-- **Integers**: `int`, `int8`, `int16`, `int32`, `int64`
-- **Unsigned Integers**: `uint`, `uint8`, `uint16`, `uint32`, `uint64`, `uintptr`
-- **Floats**: `float32`, `float64`
-- **Complex**: `complex64`, `complex128`
-- **Boolean**: `bool` (accepts "true", "false", "1", "0", "t", "f", "T", "F")
-- **Duration**: `time.Duration` (via dedicated functions)
-
-## Real-World Examples
-
-### Web Server Configuration
-
-```go
-type ServerConfig struct {
-    Host         string        `json:"host"`
-    Port         int           `json:"port"`
-    ReadTimeout  time.Duration `json:"read_timeout"`
-    WriteTimeout time.Duration `json:"write_timeout"`
-    TLSEnabled   bool          `json:"tls_enabled"`
-    TLSCertFile  string        `json:"tls_cert_file,omitempty"`
-}
-
-func LoadServerConfig() *ServerConfig {
-    // Validate required variables exist
-    env.MustExist("PORT")
-
-    return &ServerConfig{
-        Host:         env.LoadOr[string]("HOST", "0.0.0.0"),
-        Port:         env.MustLoad[int]("PORT"),
-        ReadTimeout:  env.LoadDurationOr("READ_TIMEOUT", 10*time.Second),
-        WriteTimeout: env.LoadDurationOr("WRITE_TIMEOUT", 10*time.Second),
-        TLSEnabled:   env.LoadOr[bool]("TLS_ENABLED", false),
-        TLSCertFile:  env.LoadOr[string]("TLS_CERT_FILE", ""),
-    }
-}
-```
-
-### Database Configuration
-
-```go
-type DatabaseConfig struct {
-    Host            string        `json:"host"`
-    Port            int           `json:"port"`
-    Database        string        `json:"database"`
-    Username        string        `json:"username"`
-    Password        string        `json:"password"`
-    MaxConnections  int           `json:"max_connections"`
-    ConnMaxLifetime time.Duration `json:"conn_max_lifetime"`
-    SSLMode         string        `json:"ssl_mode"`
-}
-
-func LoadDatabaseConfig() (*DatabaseConfig, error) {
-    // Check for required variables
-    requiredVars := []string{"DB_HOST", "DB_DATABASE", "DB_USERNAME", "DB_PASSWORD"}
-    for _, v := range requiredVars {
-        if !env.IsSet(v) {
-            return nil, fmt.Errorf("required environment variable %s is not set", v)
-        }
-    }
-
-    // Load with error handling
-    host, err := env.Load[string]("DB_HOST")
-    if err != nil {
-        return nil, err
-    }
-
-    return &DatabaseConfig{
-        Host:            host,
-        Port:            env.LoadOr[int]("DB_PORT", 5432),
-        Database:        env.MustLoad[string]("DB_DATABASE"),
-        Username:        env.MustLoad[string]("DB_USERNAME"),
-        Password:        env.MustLoad[string]("DB_PASSWORD"),
-        MaxConnections:  env.LoadOr[int]("DB_MAX_CONNECTIONS", 25),
-        ConnMaxLifetime: env.LoadDurationOr("DB_CONN_MAX_LIFETIME", 30*time.Minute),
-        SSLMode:         env.LoadOr[string]("DB_SSL_MODE", "require"),
-    }, nil
-}
-```
-
-### Microservice Configuration
-
-```go
-type ServiceConfig struct {
-    ServiceName      string   `json:"service_name"`
-    Environment      string   `json:"environment"`
-    LogLevel         string   `json:"log_level"`
-    MetricsEnabled   bool     `json:"metrics_enabled"`
-    UpstreamServices []string `json:"upstream_services"`
-    RateLimits       []int    `json:"rate_limits"`
-}
-
-func LoadServiceConfig() *ServiceConfig {
-    return &ServiceConfig{
-        ServiceName:      env.MustLoad[string]("SERVICE_NAME"),
-        Environment:      env.LoadOr[string]("ENVIRONMENT", "development"),
-        LogLevel:         env.LoadOr[string]("LOG_LEVEL", "info"),
-        MetricsEnabled:   env.LoadOr[bool]("METRICS_ENABLED", true),
-        UpstreamServices: env.LoadSliceOr[string]("UPSTREAM_SERVICES", ",", []string{}),
-        RateLimits:       env.LoadSliceOr[int]("RATE_LIMITS", " ", []int{100, 1000}),
-    }
-}
-```
-
-### Complete Application Configuration
-
-```go
-type AppConfig struct {
-    Server   *ServerConfig
-    Database *DatabaseConfig
-    Service  *ServiceConfig
-}
-
-func LoadAppConfig() (*AppConfig, error) {
-    // Validate all critical environment variables are present
-    criticalVars := []string{
-        "SERVICE_NAME", "PORT",
-        "DB_HOST", "DB_DATABASE", "DB_USERNAME", "DB_PASSWORD",
-    }
-
-    var missing []string
-    for _, v := range criticalVars {
-        if !env.IsSet(v) {
-            missing = append(missing, v)
-        }
-    }
-
-    if len(missing) > 0 {
-        return nil, fmt.Errorf("missing required environment variables: %v", missing)
-    }
-
-    // Load configurations
-    dbConfig, err := LoadDatabaseConfig()
-    if err != nil {
-        return nil, fmt.Errorf("failed to load database config: %w", err)
-    }
-
-    return &AppConfig{
-        Server:   LoadServerConfig(),
-        Database: dbConfig,
-        Service:  LoadServiceConfig(),
-    }, nil
-}
-
-func main() {
-    config, err := LoadAppConfig()
-    if err != nil {
-        log.Fatalf("Failed to load configuration: %v", err)
-    }
-
-    // Start application with validated configuration
-    startServer(config)
-}
-```
-
-## Common Patterns
-
-### Fail-Fast Startup Validation
-
-```go
-func init() {
-    // Ensure critical environment variables are set at startup
-    env.MustExist("DATABASE_URL", "API_KEY", "SERVICE_NAME")
-}
-```
-
-### Graceful Degradation
-
-```go
-func setupOptionalFeatures() {
-    // Enable optional features based on environment
-    if env.LoadOr[bool]("REDIS_ENABLED", false) {
-        setupRedis()
-    }
-    
-    if env.LoadOr[bool]("METRICS_ENABLED", false) {
-        setupMetrics()
-    }
-}
-```
-
-### Environment-Specific Defaults
-
-```go
-func getLogLevel() string {
-    environment := env.LoadOr[string]("ENVIRONMENT", "development")
-    
-    switch environment {
-    case "production":
-        return env.LoadOr[string]("LOG_LEVEL", "warn")
-    case "staging":
-        return env.LoadOr[string]("LOG_LEVEL", "info")
-    default:
-        return env.LoadOr[string]("LOG_LEVEL", "debug")
-    }
-}
-```
-
-### Configuration Validation
-
-```go
-func validateConfig() error {
-    port := env.LoadOr[int]("PORT", 8080)
-    if port < 1 || port > 65535 {
-        return fmt.Errorf("invalid port: %d", port)
-    }
-
-    logLevel := env.LoadOr[string]("LOG_LEVEL", "info")
-    validLevels := []string{"debug", "info", "warn", "error"}
-    if !contains(validLevels, logLevel) {
-        return fmt.Errorf("invalid log level: %s", logLevel)
-    }
-
-    return nil
-}
-```
-
-## Error Handling
-
-The package provides two error handling patterns:
-
-### 1. Panic-on-Error (Fail Fast)
-Use when the application cannot continue without the configuration:
-
-```go
-// Will panic if PORT is not set or invalid
-port := env.MustLoad[int]("PORT")
-```
-
-### 2. Error-Returning (Graceful)
-Use when you want to handle configuration errors gracefully:
-
-```go
-port, err := env.Load[int]("PORT")
-if err != nil {
-    log.Printf("PORT not set, using default: %v", err)
-    port = 8080
-}
-```
-
-### Error Types
-
-- **`ErrNotSet`**: Environment variable is not set
-- **`ErrParseFailed`**: Environment variable value cannot be parsed to the requested type
-
-## Best Practices
-
-1. **Validate Early**: Use `MustExist()` or validation functions at application startup
-2. **Use Appropriate Error Handling**: Use `MustLoad*` for critical config, `Load*` for optional config with error handling
-3. **Provide Sensible Defaults**: Use `LoadOr*` for optional configuration with fallback values
-4. **Group Related Config**: Create config structs for related settings
-5. **Document Environment Variables**: Maintain a list of all environment variables your app uses
-6. **Use Type Safety**: Leverage the generic functions to catch type errors at compile time
-
-## Environment Variable Naming Conventions
-
-- Use UPPER_CASE with underscores
-- Group related variables with prefixes (e.g., `DB_HOST`, `DB_PORT`)
-- Use descriptive names (`MAX_CONNECTIONS` vs `MAX_CONN`)
-- Include units in duration variables (`TIMEOUT_SECONDS` vs `TIMEOUT`)
-
-Example environment file:
-```bash
-# Server Configuration
-HOST=0.0.0.0
-PORT=8080
-READ_TIMEOUT=30s
-WRITE_TIMEOUT=30s
-
-# Database Configuration  
-DB_HOST=localhost
-DB_PORT=5432
-DB_DATABASE=myapp
-DB_USERNAME=dbuser
-DB_PASSWORD=secretpass
-DB_MAX_CONNECTIONS=25
-
-# Service Configuration
-SERVICE_NAME=user-service
-ENVIRONMENT=production
-LOG_LEVEL=info
-METRICS_ENABLED=true
-```
-
-## License
-
-MIT License - see LICENSE file for details.

@@ -1,16 +1,14 @@
-// Package safe provides cryptographic utilities for secure operations.
-// It includes functions for generating secrets, creating HMAC signatures,
-// and other security-related operations commonly needed in applications.
+// Package safe wraps crypto/rand, AES-GCM, and HMAC-SHA256 for common tasks:
+// generating secrets and keys, encrypting with a random nonce prepended to
+// the ciphertext, and signing and verifying data in constant time.
 //
-// This package follows cryptographic best practices and uses secure
-// randomness sources for all operations.
+// String helpers use URL-safe base64 with padding (base64.URLEncoding).
 package safe
 
 import (
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
-	"crypto/subtle"
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
@@ -101,8 +99,7 @@ func SignatureHex(secret, data []byte) string {
 //
 //	valid := safe.VerifySignature(secret, data, signature)
 func VerifySignature(secret, data, signature []byte) bool {
-	expectedSignature := Signature(secret, data)
-	return subtle.ConstantTimeCompare(signature, expectedSignature) == 1
+	return hmac.Equal(signature, Signature(secret, data))
 }
 
 // VerifySignatureString verifies a base64-encoded HMAC-SHA256 signature.
@@ -129,24 +126,4 @@ func VerifySignatureHex(secret, data []byte, signature string) bool {
 		return false
 	}
 	return VerifySignature(secret, data, sig)
-}
-
-// CompareHash compares two byte slices in constant time to prevent timing attacks.
-// This is useful for comparing hashes, signatures, and other sensitive data.
-//
-// Example:
-//
-//	equal := safe.CompareHash(hash1, hash2)
-func CompareHash(a, b []byte) bool {
-	return subtle.ConstantTimeCompare(a, b) == 1
-}
-
-// CompareString compares two strings in constant time.
-// This is useful for comparing passwords, tokens, and other secrets.
-//
-// Example:
-//
-//	equal := safe.CompareString(token1, token2)
-func CompareString(a, b string) bool {
-	return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1
 }

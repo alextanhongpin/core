@@ -171,23 +171,19 @@ func ExampleShuffle_musicPlaylist() {
 	// 4. Hotel California
 }
 
-// Example: Session ID and Token Generation
-func ExampleAlphaNumeric_sessionManagement() {
-	fmt.Println("Session Management:")
+// Example: Reproducible test fixtures. Not for secrets; use package safe.
+func ExampleAlphaNumeric_testFixtures() {
+	fmt.Println("Test fixtures:")
 	rng := random.New().WithSeed(42)
-	sessionID := rng.AlphaNumeric(32)
-	fmt.Printf("Session ID: %s\n", sessionID)
-	csrfToken := rng.AlphaNumeric(16)
-	fmt.Printf("CSRF Token: %s\n", csrfToken)
-	tempPassword := rng.String(12, "ABCDEFGHJKMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789")
-	fmt.Printf("Temp Password: %s\n", tempPassword)
-	avatarColor := "#" + rng.Hex(6)
-	fmt.Printf("Avatar Color: %s\n", avatarColor)
+	fmt.Printf("Username: user_%s\n", rng.AlphaNumeric(32))
+	fmt.Printf("Order ref: %s\n", rng.AlphaNumeric(16))
+	fmt.Printf("Coupon: %s\n", rng.String(12, "ABCDEFGHJKMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789"))
+	fmt.Printf("Avatar Color: #%s\n", rng.Hex(6))
 	// Output:
-	// Session Management:
-	// Session ID: MxNF7qpUYEedN5my4P4Crvbmvw0bxFDO
-	// CSRF Token: 2YXC9L9CaxYJwgLO
-	// Temp Password: tJwehPkt7fXg
+	// Test fixtures:
+	// Username: user_MxNF7qpUYEedN5my4P4Crvbmvw0bxFDO
+	// Order ref: 2YXC9L9CaxYJwgLO
+	// Coupon: tJwehPkt7fXg
 	// Avatar Color: #b515a6
 }
 
@@ -245,7 +241,7 @@ func ExampleBoolWithProbability_chaosEngineering() {
 }
 
 // Example: Circuit Breaker Simulation
-func ExampleFloat_circuitBreaker() {
+func ExampleRNG_Float_circuitBreaker() {
 	fmt.Println("Circuit Breaker Simulation:")
 	rng := random.New().WithSeed(42)
 	failureThreshold := 0.5

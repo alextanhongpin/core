@@ -349,40 +349,6 @@ func TestGenerateKey_configEncryption(t *testing.T) {
 	// Configuration loaded successfully
 }
 
-// Test: Timing-Safe String Comparison
-func TestCompareString_timingSafeComparison(t *testing.T) {
-	t.Log("Timing-safe string comparison...")
-
-	// Simulate stored password hash
-	storedToken := "sk-1234567890abcdef1234567890abcdef"
-
-	// User-provided tokens
-	validToken := "sk-1234567890abcdef1234567890abcdef"
-	invalidToken := "sk-wrong-token-wrong-token-wrong"
-
-	// Compare tokens safely
-	isValid1 := safe.CompareString(storedToken, validToken)
-	isValid2 := safe.CompareString(storedToken, invalidToken)
-
-	assert.True(t, isValid1)
-	assert.False(t, isValid2)
-	t.Logf("Valid token check: %v\n", isValid1)
-	t.Logf("Invalid token check: %v\n", isValid2)
-
-	// Compare with different length (also safe)
-	shortToken := "sk-short"
-	isValid3 := safe.CompareString(storedToken, shortToken)
-	assert.False(t, isValid3)
-
-	t.Logf("Short token check: %v\n", isValid3)
-
-	// Output:
-	// Timing-safe string comparison...
-	// Valid token check: true
-	// Invalid token check: false
-	// Short token check: false
-}
-
 // Test comprehensive encryption/decryption
 func TestEncryptionRoundTrip(t *testing.T) {
 	testCases := []struct {
