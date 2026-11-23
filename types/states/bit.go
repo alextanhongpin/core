@@ -1,176 +1,50 @@
 package states
 
-// Predicate is a function that returns a boolean value.
-type Predicate func() bool
+// count returns how many conditions are true.
+func count(conditions []bool) int {
+	n := 0
+	for _, c := range conditions {
+		if c {
+			n++
+		}
+	}
+	return n
+}
 
-// ExactlyN returns true if exactly n conditions are true.
-// This is useful for checking polymorphic conditions where
-// you need a specific number of conditions to be satisfied.
+// ExactlyN reports whether exactly n conditions are true.
 func ExactlyN(n int, conditions ...bool) bool {
-	count := 0
-	for _, condition := range conditions {
-		if condition {
-			count++
-		}
-	}
-	return count == n
+	return count(conditions) == n
 }
 
-// ExactlyNFunc returns true if exactly n predicates return true.
-func ExactlyNFunc(n int, predicates ...Predicate) bool {
-	count := 0
-	for _, predicate := range predicates {
-		if predicate() {
-			count++
-		}
-	}
-	return count == n
-}
-
-// XOR returns true if exactly one condition is true.
-// This is an alias for ExactlyN(1, conditions...).
-func XOR(conditions ...bool) bool {
+// ExactlyOne reports whether exactly one condition is true, for fields that
+// are mutually exclusive but required (for example a party that must be
+// either a person or an organization). Unlike a chained ^, it is false when
+// three of three conditions are true.
+func ExactlyOne(conditions ...bool) bool {
 	return ExactlyN(1, conditions...)
 }
 
-// XORFunc returns true if exactly one predicate returns true.
-func XORFunc(predicates ...Predicate) bool {
-	return ExactlyNFunc(1, predicates...)
-}
-
-// AllOrNone returns true if all conditions are true or all are false.
-// This is useful for checking if a set of fields are all set or none are set.
-func AllOrNone(conditions ...bool) bool {
-	count := 0
-	for _, condition := range conditions {
-		if condition {
-			count++
-		}
-	}
-	return count == 0 || count == len(conditions)
-}
-
-// AllOrNoneFunc returns true if all predicates return true or all return false.
-func AllOrNoneFunc(predicates ...Predicate) bool {
-	count := 0
-	for _, predicate := range predicates {
-		if predicate() {
-			count++
-		}
-	}
-	return count == 0 || count == len(predicates)
-}
-
-// AtLeastN returns true if at least n conditions are true.
+// AtLeastN reports whether n or more conditions are true. It is true for
+// n <= 0.
 func AtLeastN(n int, conditions ...bool) bool {
-	count := 0
-	for _, condition := range conditions {
-		if condition {
-			count++
-		}
-		if count >= n {
-			return true
-		}
-	}
-	return false
+	return count(conditions) >= n
 }
 
-// AtLeastNFunc returns true if at least n predicates return true.
-func AtLeastNFunc(n int, predicates ...Predicate) bool {
-	count := 0
-	for _, predicate := range predicates {
-		if predicate() {
-			count++
-		}
-		if count >= n {
-			return true
-		}
-	}
-	return false
-}
-
-// AtMostN returns true if at most n conditions are true.
+// AtMostN reports whether no more than n conditions are true. It is false
+// for n < 0.
 func AtMostN(n int, conditions ...bool) bool {
-	count := 0
-	for _, condition := range conditions {
-		if condition {
-			count++
-		}
-		if count > n {
-			return false
-		}
-	}
-	return true
+	return count(conditions) <= n
 }
 
-// AtMostNFunc returns true if at most n predicates return true.
-func AtMostNFunc(n int, predicates ...Predicate) bool {
-	count := 0
-	for _, predicate := range predicates {
-		if predicate() {
-			count++
-		}
-		if count > n {
-			return false
-		}
-	}
-	return true
+// AllOrNone reports whether the conditions are all true or all false, for
+// fields that must be set together. It is true for no conditions.
+func AllOrNone(conditions ...bool) bool {
+	n := count(conditions)
+	return n == 0 || n == len(conditions)
 }
 
-// Majority returns true if more than half of the conditions are true.
+// Majority reports whether more than half of the conditions are true. It is
+// false for no conditions and for a tie.
 func Majority(conditions ...bool) bool {
-	if len(conditions) == 0 {
-		return false
-	}
-	required := (len(conditions) / 2) + 1
-	return AtLeastN(required, conditions...)
-}
-
-// MajorityFunc returns true if more than half of the predicates return true.
-func MajorityFunc(predicates ...Predicate) bool {
-	if len(predicates) == 0 {
-		return false
-	}
-	required := (len(predicates) / 2) + 1
-	return AtLeastNFunc(required, predicates...)
-}
-
-// Any returns true if any condition is true.
-func Any(conditions ...bool) bool {
-	for _, condition := range conditions {
-		if condition {
-			return true
-		}
-	}
-	return false
-}
-
-// AnyFunc returns true if any predicate returns true.
-func AnyFunc(predicates ...Predicate) bool {
-	for _, predicate := range predicates {
-		if predicate() {
-			return true
-		}
-	}
-	return false
-}
-
-// All returns true if all conditions are true.
-func All(conditions ...bool) bool {
-	for _, condition := range conditions {
-		if !condition {
-			return false
-		}
-	}
-	return len(conditions) > 0
-}
-
-// AllFunc returns true if all predicates return true.
-func AllFunc(predicates ...Predicate) bool {
-	for _, predicate := range predicates {
-		if !predicate() {
-			return false
-		}
-	}
-	return len(predicates) > 0
+	return count(conditions)*2 > len(conditions)
 }

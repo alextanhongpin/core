@@ -1,104 +1,72 @@
-// Package number provides mathematical utilities and operations for numeric types.
-// It includes functions for clipping values to ranges, mathematical operations,
-// and numeric utilities that work across different numeric types using generics.
+// Package number clamps, range-checks, interpolates, and rescales numeric
+// values of any integer or floating-point type.
+//
+// Functions that take a range accept its bounds in either order.
 package number
 
 import "golang.org/x/exp/constraints"
 
-// Number represents any numeric type (integers and floats)
+// Number is any integer or floating-point type.
 type Number interface {
 	constraints.Integer | constraints.Float
 }
 
-// Clip constrains a value to be within the specified range [lo, hi].
-// If the value is less than lo, returns lo.
-// If the value is greater than hi, returns hi.
-// Otherwise returns the value unchanged.
+// Clip returns v limited to the closed range between lo and hi.
+// The bounds may be given in either order. A NaN v is returned unchanged.
 func Clip[T Number](lo, hi, v T) T {
-	return min(hi, max(lo, v))
-}
-
-// ClipMin constrains a value to be at least the minimum value.
-func ClipMin[T Number](minVal, v T) T {
-	return max(minVal, v)
-}
-
-// ClipMax constrains a value to be at most the maximum value.
-func ClipMax[T Number](maxVal, v T) T {
-	return min(maxVal, v)
-}
-
-// InRange checks if a value is within the specified range [lo, hi] (inclusive).
-func InRange[T Number](lo, hi, v T) bool {
-	return v >= lo && v <= hi
-}
-
-// Abs returns the absolute value of a number.
-func Abs[T Number](v T) T {
-	if v < 0 {
-		return -v
+	if lo > hi {
+		lo, hi = hi, lo
+	}
+	if v < lo {
+		return lo
+	}
+	if v > hi {
+		return hi
 	}
 	return v
 }
 
-// Sign returns the sign of a number:
-// -1 if negative, 0 if zero, 1 if positive.
-func Sign[T Number](v T) int {
-	if v < 0 {
-		return -1
+// InRange reports whether v lies in the closed range between lo and hi.
+// The bounds may be given in either order. It is false for NaN.
+func InRange[T Number](lo, hi, v T) bool {
+	if lo > hi {
+		lo, hi = hi, lo
 	}
-	if v > 0 {
-		return 1
-	}
-	return 0
+	return v >= lo && v <= hi
 }
 
-// Lerp performs linear interpolation between two values.
-// t should be between 0 and 1, where 0 returns a and 1 returns b.
+// Sign returns -1 if v is negative, 1 if it is positive, and 0 otherwise
+// (including for zero and NaN).
+func Sign[T Number](v T) int {
+	switch {
+	case v < 0:
+		return -1
+	case v > 0:
+		return 1
+	default:
+		return 0
+	}
+}
+
+// Lerp linearly interpolates from a to b: t = 0 gives a and t = 1 gives b.
+// t is not clamped, so values outside [0, 1] extrapolate.
 func Lerp[T constraints.Float](a, b, t T) T {
 	return a + t*(b-a)
 }
 
-// Map maps a value from one range to another.
-// Maps value from range [inMin, inMax] to range [outMin, outMax].
-func Map[T constraints.Float](value, inMin, inMax, outMin, outMax T) T {
+// Map rescales v from the range [inMin, inMax] to [outMin, outMax]. The
+// result is not clamped; wrap it in Clip if needed. Reversed ranges work
+// (for example outMin > outMax inverts the mapping). If inMin == inMax the
+// input range is empty and Map returns outMin.
+func Map[T constraints.Float](v, inMin, inMax, outMin, outMax T) T {
 	if inMax == inMin {
-		return outMin // Avoid division by zero
+		return outMin
 	}
-	return outMin + (value-inMin)*(outMax-outMin)/(inMax-inMin)
+	return outMin + (v-inMin)*(outMax-outMin)/(inMax-inMin)
 }
 
-// Normalize maps a value from range [min, max] to range [0, 1].
-func Normalize[T constraints.Float](value, min, max T) T {
-	if max == min {
-		return 0
-	}
-	return (value - min) / (max - min)
-}
-
-// Denormalize maps a value from range [0, 1] to range [min, max].
-func Denormalize[T constraints.Float](normalizedValue, min, max T) T {
-	return min + normalizedValue*(max-min)
-}
-
-// Round rounds a float to the nearest integer.
-func Round[T constraints.Float](v T) T {
-	if v < 0 {
-		return T(int(v - 0.5))
-	}
-	return T(int(v + 0.5))
-}
-
-// Floor returns the largest integer value less than or equal to the input.
-func Floor[T constraints.Float](v T) T {
-	return T(int(v))
-}
-
-// Ceil returns the smallest integer value greater than or equal to the input.
-func Ceil[T constraints.Float](v T) T {
-	iv := int(v)
-	if v > T(iv) {
-		return T(iv + 1)
-	}
-	return T(iv)
+// Normalize rescales v from [lo, hi] to [0, 1]. It is Map(v, lo, hi, 0, 1):
+// unclamped, and 0 when lo == hi.
+func Normalize[T constraints.Float](v, lo, hi T) T {
+	return Map(v, lo, hi, 0, 1)
 }
