@@ -154,13 +154,18 @@ Each breaker key is one Redis hash with these fields:
 - `status`: the current state.
 - `counter`: failures while Closed, or successes while HalfOpen. The field expires after `FailurePeriod` or `SuccessPeriod` without updates.
 - `timeout`: when an Opened breaker may start probing.
-- `generation`: incremented on every state change.
+- `generation`: changed on every state change.
+
+A Closed breaker costs nothing in Redis until it records a failure, and its
+hash disappears again once the failure counter expires (and, after a state
+change back to Closed, once `OpenTimeout` has passed). Opened, HalfOpen,
+Disabled and ForcedOpen breakers stay in Redis until their state changes.
 
 A call does the following:
 
 1. `cb_begin` reads the state, moving Opened to HalfOpen once the timeout is over, and returns the state and generation.
 2. `fn` runs in your process.
-3. `cb_commit` records the result, but only after a failure or a HalfOpen probe. A result whose generation is older than the current one is ignored, so a slow call that started before a reset can't reopen the breaker.
+3. `cb_commit` records the result, but only after a failure or a HalfOpen probe. A result from another generation is ignored, so a slow call that started before a reset can't reopen the breaker. Generations are kept for `OpenTimeout` after the breaker closes; a failed call that outlives that window is not counted.
 
 All timing uses the Redis server clock.
 
@@ -243,7 +248,7 @@ status, err := cb.Status(ctx, "cb:payments-api")
 - `Do` makes one Redis round trip before every call, and a second one after failures and probes.
 - A failed result is recorded with its own 5-second timeout, detached from the caller's context, so cancelled requests are still counted.
 - If recording a *successful* probe fails, `Do` still returns `nil`, so a call that succeeded is never reported as failed.
-- Keys never expire. Use a small, fixed set of keys (one per dependency, not one per request). Deleting a key resets the breaker.
+- Keys of healthy (Closed) breakers expire on their own, so per-tenant keys are fine; keys in other states stay until their state changes. Deleting a key resets the breaker.
 - If `fn` panics, nothing is recorded.
 - State lives on one Redis primary. A failover that loses writes can reset a breaker.
 
