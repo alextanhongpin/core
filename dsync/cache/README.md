@@ -196,7 +196,7 @@ Errors from your callbacks, the codec and Redis are returned unchanged (use
 
 ## Running the tests
 
-Tests start a throwaway `redis:latest` container with Docker
+Tests start a throwaway Redis 8.6 container with Docker
 ([redistest](https://github.com/alextanhongpin/dbtx)), so Docker must be running:
 
 ```sh
