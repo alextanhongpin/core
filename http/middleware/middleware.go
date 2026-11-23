@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -66,7 +67,10 @@ func (rw *responseWriter) Unwrap() http.ResponseWriter {
 }
 
 // Recovery creates a panic recovery middleware that catches panics and returns
-// a 500 Internal Server Error response while logging the panic.
+// a 500 Internal Server Error response while logging the panic. If the handler
+// already started the response, the status cannot be changed and the error text
+// is appended to whatever was written. http.ErrAbortHandler is re-panicked so
+// net/http can abort the connection as intended.
 //
 // Example:
 //
@@ -76,6 +80,10 @@ func Recovery(logger *slog.Logger) func(http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			defer func() {
 				if err := recover(); err != nil {
+					if err == http.ErrAbortHandler {
+						// Let net/http abort the response silently.
+						panic(err)
+					}
 					logger.LogAttrs(r.Context(), slog.LevelError, "HTTP handler panic",
 						slog.Any("panic", err),
 						slog.String("method", r.Method),
@@ -92,20 +100,23 @@ func Recovery(logger *slog.Logger) func(http.Handler) http.Handler {
 	}
 }
 
-// CORS creates a CORS middleware with configurable options.
+// CORS creates a CORS middleware.
+//
+// CORS headers are only added for requests whose Origin is allowed. An allowed
+// origin is echoed back with "Vary: Origin"; a "*" entry allows every origin
+// and is answered with "Access-Control-Allow-Origin: *", which browsers refuse
+// for credentialed requests, so list origins explicitly when AllowCredentials
+// is true. Only real preflight requests (OPTIONS with Origin and
+// Access-Control-Request-Method) are answered with 204; other OPTIONS
+// requests reach next.
 //
 // Example:
 //
-//	corsConfig := middleware.CORSConfig{
-//		AllowedOrigins: []string{"https://example.com"},
-//		AllowedMethods: []string{"GET", "POST", "PUT", "DELETE"},
-//		AllowedHeaders: []string{"Content-Type", "Authorization"},
+//	handler = middleware.CORS(middleware.CORSConfig{
+//		AllowedOrigins:   []string{"https://example.com"},
 //		AllowCredentials: true,
-//		MaxAge: 3600,
-//	}
-//	handler = middleware.CORS(corsConfig)(handler)
+//	})(handler)
 func CORS(config CORSConfig) func(http.Handler) http.Handler {
-	// Set defaults
 	if len(config.AllowedOrigins) == 0 {
 		config.AllowedOrigins = []string{"*"}
 	}
@@ -119,30 +130,38 @@ func CORS(config CORSConfig) func(http.Handler) http.Handler {
 		config.MaxAge = 86400 // 24 hours
 	}
 
+	wildcard := slices.Contains(config.AllowedOrigins, "*")
+	methods := strings.Join(config.AllowedMethods, ", ")
+	headers := strings.Join(config.AllowedHeaders, ", ")
+
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			origin := r.Header.Get("Origin")
-
-			// Check if origin is allowed
-			if origin != "" && isOriginAllowed(origin, config.AllowedOrigins) {
-				w.Header().Set("Access-Control-Allow-Origin", origin)
-			} else if slices.Contains(config.AllowedOrigins, "*") {
-				w.Header().Set("Access-Control-Allow-Origin", "*")
+			h := w.Header()
+			if !wildcard {
+				h.Add("Vary", "Origin")
 			}
 
-			w.Header().Set("Access-Control-Allow-Methods", joinStrings(config.AllowedMethods, ", "))
-			w.Header().Set("Access-Control-Allow-Headers", joinStrings(config.AllowedHeaders, ", "))
-
-			if config.AllowCredentials {
-				w.Header().Set("Access-Control-Allow-Credentials", "true")
+			if origin == "" || !(wildcard || slices.Contains(config.AllowedOrigins, origin)) {
+				next.ServeHTTP(w, r)
+				return
 			}
 
-			if config.MaxAge > 0 {
-				w.Header().Set("Access-Control-Max-Age", strconv.Itoa(config.MaxAge))
+			if wildcard {
+				h.Set("Access-Control-Allow-Origin", "*")
+			} else {
+				h.Set("Access-Control-Allow-Origin", origin)
+				if config.AllowCredentials {
+					h.Set("Access-Control-Allow-Credentials", "true")
+				}
 			}
 
-			// Handle preflight requests
-			if r.Method == http.MethodOptions {
+			if r.Method == http.MethodOptions && r.Header.Get("Access-Control-Request-Method") != "" {
+				h.Set("Access-Control-Allow-Methods", methods)
+				h.Set("Access-Control-Allow-Headers", headers)
+				if config.MaxAge > 0 {
+					h.Set("Access-Control-Max-Age", strconv.Itoa(config.MaxAge))
+				}
 				w.WriteHeader(http.StatusNoContent)
 				return
 			}
@@ -154,11 +173,11 @@ func CORS(config CORSConfig) func(http.Handler) http.Handler {
 
 // CORSConfig holds the configuration for CORS middleware.
 type CORSConfig struct {
-	AllowedOrigins   []string // Allowed origins, use ["*"] for all
-	AllowedMethods   []string // Allowed HTTP methods
-	AllowedHeaders   []string // Allowed headers
-	AllowCredentials bool     // Whether to allow credentials
-	MaxAge           int      // Preflight cache duration in seconds
+	AllowedOrigins   []string // Allowed origins; "*" allows all (without credentials). Default ["*"].
+	AllowedMethods   []string // Allowed methods for preflight responses.
+	AllowedHeaders   []string // Allowed request headers for preflight responses.
+	AllowCredentials bool     // Send Access-Control-Allow-Credentials for listed origins.
+	MaxAge           int      // Preflight cache duration in seconds; negative omits the header. Default 86400.
 }
 
 // DefaultCORSConfig returns a permissive CORS configuration suitable for development.
@@ -170,29 +189,4 @@ func DefaultCORSConfig() CORSConfig {
 		AllowCredentials: false,
 		MaxAge:           86400,
 	}
-}
-
-// Helper functions
-func isOriginAllowed(origin string, allowedOrigins []string) bool {
-	for _, allowed := range allowedOrigins {
-		if allowed == "*" || allowed == origin {
-			return true
-		}
-	}
-	return false
-}
-
-func joinStrings(strs []string, sep string) string {
-	if len(strs) == 0 {
-		return ""
-	}
-	if len(strs) == 1 {
-		return strs[0]
-	}
-
-	result := strs[0]
-	for i := 1; i < len(strs); i++ {
-		result += sep + strs[i]
-	}
-	return result
 }

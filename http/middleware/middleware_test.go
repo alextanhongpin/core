@@ -100,6 +100,7 @@ func TestCORS(t *testing.T) {
 	t.Run("preflight request", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodOptions, "/test", nil)
 		req.Header.Set("Origin", "https://example.com")
+		req.Header.Set("Access-Control-Request-Method", "POST")
 		w := httptest.NewRecorder()
 
 		corsHandler.ServeHTTP(w, req)
