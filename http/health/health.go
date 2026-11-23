@@ -3,7 +3,9 @@ package health
 
 import (
 	"encoding/json"
+	"maps"
 	"net/http"
+	"sync"
 	"time"
 )
 
@@ -35,11 +37,14 @@ type Check struct {
 // Checker is a function that performs a health check.
 type Checker func() Check
 
-// Handler provides HTTP health check endpoints.
+// Handler provides HTTP health check endpoints. It is safe for concurrent
+// use; checks may be added while requests are served.
 type Handler struct {
 	version   string
 	startTime time.Time
-	checkers  map[string]Checker
+
+	mu       sync.RWMutex
+	checkers map[string]Checker
 }
 
 // New creates a new health check handler.
@@ -51,13 +56,14 @@ func New(version string) *Handler {
 	}
 }
 
-// AddCheck adds a named health check.
+// AddCheck adds or replaces a named health check.
 func (h *Handler) AddCheck(name string, checker Checker) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	h.checkers[name] = checker
 }
 
-// Live returns a simple liveness probe handler.
-// This endpoint should return 200 if the application is running.
+// Live is a liveness probe: it always responds 200 while the process runs.
 func (h *Handler) Live(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -72,38 +78,53 @@ func (h *Handler) Live(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(response)
 }
 
-// Ready returns a readiness probe handler.
-// This endpoint should return 200 if the application is ready to serve traffic.
+// Ready is a readiness probe. It runs all checks concurrently and responds:
+//   - 200 "healthy" when every check is healthy (or there are none);
+//   - 200 "degraded" when some check is degraded and none is unhealthy;
+//   - 503 "unhealthy" when any check is unhealthy (or reports an unknown
+//     status).
 func (h *Handler) Ready(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
+
+	h.mu.RLock()
+	checkers := maps.Clone(h.checkers)
+	h.mu.RUnlock()
 
 	response := Response{
 		Status:    StatusHealthy,
 		Timestamp: time.Now(),
 		Version:   h.version,
 		Uptime:    time.Since(h.startTime),
-		Checks:    make(map[string]Check),
+		Checks:    make(map[string]Check, len(checkers)),
 	}
 
-	// Run all health checks
-	overallHealthy := true
-	for name, checker := range h.checkers {
-		start := time.Now()
-		check := checker()
-		check.Latency = time.Since(start)
+	var (
+		mu sync.Mutex
+		wg sync.WaitGroup
+	)
+	for name, checker := range checkers {
+		wg.Go(func() {
+			start := time.Now()
+			check := checker()
+			check.Latency = time.Since(start)
 
-		response.Checks[name] = check
+			mu.Lock()
+			response.Checks[name] = check
+			mu.Unlock()
+		})
+	}
+	wg.Wait()
 
-		if check.Status != StatusHealthy {
-			overallHealthy = false
-			if response.Status != StatusUnhealthy {
+	for _, check := range response.Checks {
+		switch check.Status {
+		case StatusHealthy:
+		case StatusDegraded:
+			if response.Status == StatusHealthy {
 				response.Status = StatusDegraded
 			}
+		default:
+			response.Status = StatusUnhealthy
 		}
-	}
-
-	if !overallHealthy {
-		response.Status = StatusUnhealthy
 	}
 
 	statusCode := http.StatusOK
