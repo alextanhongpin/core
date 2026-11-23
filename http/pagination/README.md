@@ -1,74 +1,42 @@
-# HTTP Pagination Package
+# pagination
 
-The HTTP Pagination package provides robust cursor-based pagination for efficient handling of large datasets in Go web applications.
-
-## Features
-
-- **Cursor-Based Pagination**: Efficient navigation of large datasets using cursors instead of offset
-- **Type-Safe Implementations**: Generic support for different cursor types (string, int, time)
-- **Bidirectional Navigation**: Support for both forward and backward pagination
-- **Automatic Has-Next Detection**: Smart detection of additional pages
-- **Edge Case Handling**: Proper handling of empty results and boundaries
-- **Pagination Metadata**: Structured page information for API responses
-- **Cross-Package Integration**: Works with `response` and `request` packages
-
-## Quick Start
+Cursor (keyset) and offset pagination helpers.
 
 ```go
-package main
-
-import (
-    "net/http"
-    "github.com/alextanhongpin/core/http/pagination"
-    "github.com/alextanhongpin/core/http/response"
-)
-
-func ListUsersHandler(w http.ResponseWriter, r *http.Request) {
-    cursor := pagination.NewCursor[string](10)
-    if after := r.URL.Query().Get("after"); after != "" {
-        cursor.After = after
-    }
-    items := []User{...} // From database
-    paginated := pagination.Paginate(items, cursor)
-    response.JSON(w, &response.Body{
-        Data: paginated.Items,
-        PageInfo: &response.PageInfo{
-            HasNextPage: paginated.HasNextPage,
-            EndCursor:   paginated.EndCursor,
-        },
-    })
+cursor, err := pagination.CursorFromString(q.Get("after"), q.Get("before"), q.Get("first"), q.Get("last"))
+if err == nil {
+	err = cursor.Validate(100)
 }
+if err != nil { /* 400 */ }
+
+// Forward:  WHERE id > $after  ORDER BY id ASC  LIMIT cursor.Limit()
+// Backward: WHERE id < $before ORDER BY id DESC LIMIT cursor.Limit()
+rows := query(cursor)
+
+page := pagination.Paginate(rows, cursor)
+info := pagination.BuildPageInfo(page, func(id string) string {
+	return pagination.EncodeCursor(id)
+})
 ```
 
-## API Reference
+## Cursor
 
-### Cursor Types
+- `Cursor[T]{After, Before, First, Last}`; `Limit()` is `First+1` (or
+  `Last+1`): fetch one extra row to detect another page.
+- `Validate(max)` requires exactly one of `First`/`Last`, non-negative and at
+  most `max`.
+- `Paginate(items, cursor)` trims the extra row and returns a copy of the
+  page. Forward input is ascending and sets `HasNext`; backward input is
+  descending (nearest the cursor first), sets `HasPrev`, and is returned in
+  ascending order. The opposite flag is always `false`, since it needs
+  another query. `T` is both the item and the cursor type.
+- `EncodeCursor` / `DecodeCursor[T]` wrap a JSON value in base64url. Cursors
+  are opaque, not tamper-proof: validate decoded values like any input.
 
-```go
-// Create string-based cursor (good for UUIDs, slugs)
-cursor := pagination.NewCursor[string](10)
+## Offset
 
-// Create int-based cursor
-cursor := pagination.NewCursor[int](10)
-```
-
-### Paginate
-
-```go
-paginated := pagination.Paginate(items, cursor)
-```
-
-## Best Practices
-
-- Use cursor-based pagination for scalable APIs.
-- Return structured pagination metadata in all list endpoints.
-- Integrate with `response` for standardized output.
-
-## Related Packages
-
-- [`response`](../response/README.md): Response formatting and pagination metadata
-- [`request`](../request/README.md): Request parsing utilities
-
-## License
-
-MIT
+- `NewOffsetPagination(page, limit)` defaults invalid values (page 1,
+  limit 10) and clamps the page so the offset cannot overflow.
+- `Validate(max)`, `TotalPages()`, `HasNext()`, `HasPrev()` use `Total`.
+- `PaginateOffset(items, p)` slices an in-memory result set and sets
+  `p.Total`.

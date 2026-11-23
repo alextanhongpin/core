@@ -31,6 +31,8 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"math"
+	"slices"
 	"strconv"
 )
 
@@ -226,7 +228,9 @@ type OffsetPagination struct {
 	Page int `json:"page"`
 }
 
-// NewOffsetPagination creates offset pagination from page and limit
+// NewOffsetPagination creates offset pagination from page and limit. page
+// defaults to 1 and limit to 10 when smaller than 1; page is clamped so the
+// offset cannot overflow.
 func NewOffsetPagination(page, limit int) *OffsetPagination {
 	if page < 1 {
 		page = 1
@@ -234,6 +238,7 @@ func NewOffsetPagination(page, limit int) *OffsetPagination {
 	if limit < 1 {
 		limit = 10
 	}
+	page = min(page, math.MaxInt/limit+1)
 
 	offset := (page - 1) * limit
 
@@ -289,7 +294,18 @@ type OffsetPaginatedResult[T any] struct {
 	Pagination *OffsetPagination `json:"pagination"`
 }
 
-// Paginate performs cursor-based pagination on a slice
+// Paginate trims a page fetched with cursor.Limit() rows and reports whether
+// more rows exist beyond it. The input slice is not modified.
+//
+// Forward (First): items are in ascending cursor order, as fetched with
+// "WHERE key > after ORDER BY key ASC LIMIT first+1". HasNext reports the
+// extra row; Cursor.After is the last returned item.
+//
+// Backward (Last): items are in descending cursor order, as fetched with
+// "WHERE key < before ORDER BY key DESC LIMIT last+1", so items[0] is the
+// row nearest the cursor. HasPrev reports the extra row, and the returned
+// Items are reversed into ascending order; Cursor.Before is the first
+// returned item.
 func Paginate[T any](items []T, cursor *Cursor[T]) *Pagination[T] {
 	if cursor.IsBackward() {
 		return paginateBackward(items, cursor)
@@ -297,61 +313,44 @@ func Paginate[T any](items []T, cursor *Cursor[T]) *Pagination[T] {
 	return paginateForward(items, cursor)
 }
 
-// paginateForward handles forward pagination
 func paginateForward[T any](items []T, cursor *Cursor[T]) *Pagination[T] {
-	hasNext := len(items) > cursor.First
+	first := max(cursor.First, 0)
+	hasNext := len(items) > first
 	if hasNext {
-		items = items[:cursor.First]
+		items = items[:first]
 	}
 
 	result := &Pagination[T]{
-		Items:   items,
+		Items:   slices.Clone(items),
 		HasNext: hasNext,
-		HasPrev: false, // We'd need additional context to determine this
+		HasPrev: false, // Unknown without a query in the other direction.
+		Cursor:  &Cursor[T]{First: cursor.First},
 	}
-
 	if len(items) > 0 {
-		result.Cursor = &Cursor[T]{
-			After: items[len(items)-1],
-			First: cursor.First,
-		}
-	} else {
-		result.Cursor = &Cursor[T]{
-			First: cursor.First,
-		}
+		result.Cursor.After = items[len(items)-1]
 	}
 
 	return result
 }
 
-// paginateBackward handles backward pagination
 func paginateBackward[T any](items []T, cursor *Cursor[T]) *Pagination[T] {
 	hasPrev := len(items) > cursor.Last
 	if hasPrev {
-		items = items[1:] // Remove the first item (it's the indicator)
+		// The extra row is the one farthest from the cursor: the last one.
+		items = items[:cursor.Last]
 	}
 
-	// Reverse the items for backward pagination
-	for i := len(items)/2 - 1; i >= 0; i-- {
-		opp := len(items) - 1 - i
-		items[i], items[opp] = items[opp], items[i]
-	}
+	items = slices.Clone(items)
+	slices.Reverse(items)
 
 	result := &Pagination[T]{
 		Items:   items,
-		HasNext: false, // We'd need additional context to determine this
+		HasNext: false, // Unknown without a query in the other direction.
 		HasPrev: hasPrev,
+		Cursor:  &Cursor[T]{Last: cursor.Last},
 	}
-
 	if len(items) > 0 {
-		result.Cursor = &Cursor[T]{
-			Before: items[0],
-			Last:   cursor.Last,
-		}
-	} else {
-		result.Cursor = &Cursor[T]{
-			Last: cursor.Last,
-		}
+		result.Cursor.Before = items[0]
 	}
 
 	return result
@@ -364,13 +363,12 @@ func PaginateWithTotal[T any](items []T, cursor *Cursor[T], total int64) *Pagina
 	return result
 }
 
-// PaginateOffset performs offset-based pagination
+// PaginateOffset slices items (the full result set) by pagination.Offset and
+// Limit and sets pagination.Total. Negative offsets are treated as 0.
 func PaginateOffset[T any](items []T, pagination *OffsetPagination) *OffsetPaginatedResult[T] {
 	pagination.Total = int64(len(items))
 
-	start := pagination.Offset
-	end := start + pagination.Limit
-
+	start := max(pagination.Offset, 0)
 	if start >= len(items) {
 		return &OffsetPaginatedResult[T]{
 			Items:      []T{},
@@ -378,8 +376,9 @@ func PaginateOffset[T any](items []T, pagination *OffsetPagination) *OffsetPagin
 		}
 	}
 
-	if end > len(items) {
-		end = len(items)
+	end := len(items)
+	if limit := max(pagination.Limit, 0); limit < end-start {
+		end = start + limit
 	}
 
 	return &OffsetPaginatedResult[T]{
