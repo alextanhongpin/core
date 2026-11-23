@@ -220,7 +220,8 @@ func (c *Cache[T]) TTL(ctx context.Context, key string) (time.Duration, error) {
 // LoadOrCreate returns the cached value for key (loaded=true). On a miss it
 // calls create, stores the result with the TTL create returns, and returns it
 // (loaded=false). Concurrent callers in the same process share one create
-// call. To coordinate across processes use [Lock.LoadOrCreate].
+// call. To run create once across processes, use the Cache type in
+// github.com/alextanhongpin/core/dsync/singleflight.
 func (c *Cache[T]) LoadOrCreate(ctx context.Context, key string, create func(context.Context, string) (T, time.Duration, error)) (value T, loaded bool, err error) {
 	b, loaded, err := c.storage.LoadOrCreate(ctx, key, func(ctx context.Context, key string) ([]byte, time.Duration, error) {
 		v, ttl, err := create(ctx, key)

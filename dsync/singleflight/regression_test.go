@@ -111,3 +111,42 @@ func TestDoDidIsFalseForFailingLeaderAndLocalWaiters(t *testing.T) {
 	require.False(t, w.did)
 	require.ErrorIs(t, w.err, boom)
 }
+
+// A caller in another process whose leader's getter failed must try the fill
+// itself rather than return redis.Nil.
+func TestCacheRemoteWaiterRetriesAfterLeaderFails(t *testing.T) {
+	// Two Caches have separate Groups, like two processes.
+	a := singleflight.MustNewCache[string](redistest.Client(t), singleflight.CacheConfig{})
+	b := singleflight.MustNewCache[string](redistest.Client(t), singleflight.CacheConfig{})
+	boom := errors.New("boom")
+	started, release := make(chan struct{}), make(chan struct{})
+	leaderErr := make(chan error, 1)
+	go func() {
+		_, _, err := a.LoadOrStore(t.Context(), t.Name(), func(context.Context) (string, error) {
+			close(started)
+			<-release
+			return "", boom
+		}, time.Minute)
+		leaderErr <- err
+	}()
+	<-started
+	type result struct {
+		v      string
+		loaded bool
+		err    error
+	}
+	waiter := make(chan result, 1)
+	go func() {
+		v, loaded, err := b.LoadOrStore(t.Context(), t.Name(), func(context.Context) (string, error) {
+			return "fresh", nil
+		}, time.Minute)
+		waiter <- result{v, loaded, err}
+	}()
+	time.Sleep(30 * time.Millisecond) // let b start waiting on a's lease
+	close(release)
+	require.ErrorIs(t, <-leaderErr, boom)
+	w := <-waiter
+	require.NoError(t, w.err)
+	require.Equal(t, "fresh", w.v)
+	require.False(t, w.loaded)
+}

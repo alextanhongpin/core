@@ -45,7 +45,8 @@ type Storage[T any] interface {
 	// fn once per key within this process, stores the result with the TTL fn
 	// returns, and returns it (loaded=false). Concurrent callers for the same
 	// key wait for the first caller and share its result and error. Use
-	// [Lock.LoadOrCreate] to coordinate fills across processes.
+	// github.com/alextanhongpin/core/dsync/singleflight to coordinate fills
+	// across processes.
 	LoadOrCreate(ctx context.Context, key string, fn func(ctx context.Context, key string) (T, time.Duration, error)) (curr T, loaded bool, err error)
 
 	// Store sets key's value, overwriting any existing value.
