@@ -180,7 +180,7 @@ Check with `errors.Is`; errors can be joined. `lock` is
 |-------|------|------------|
 | `ErrTimeout` | Another process held the lease for longer than `WaitTTL`. | Retry later, or raise `WaitTTL` to cover your slowest `fn`. |
 | `ErrSubscriptionClosed` | The Pub/Sub connection closed while waiting. | Retry. |
-| `redis.Nil` (cache only) | The leader was in another process and its getter failed, so no value was stored. | Retry, or treat as a miss. |
+| `redis.Nil` (cache only) | Three leaders in other processes in a row finished without storing a value (their getters failed). After a single remote failure the caller retries the fill itself. | Retry, or treat as a miss. |
 | `lock.ErrExpired` (cache only) | The leader lost its fill lease before storing; nothing was stored. | Retry. Raise `LockTTL` if your getter is slow. |
 | `lock.ErrLocked` (+ `context.Canceled`, `lock.ErrExpired`) | Lease loss in `Do`: renewal found the lease taken over, deleted or expired while `fn` ran. `fn`'s context is canceled, and `Do` returns `did=false` with a joined error, e.g. `context canceled` + `lock.ErrLocked` (renewal) + `lock.ErrExpired` (release). | `fn`'s work may have overlapped with another caller; raise `LockTTL` if `fn` stalls. |
 | `context.Canceled` / `DeadlineExceeded` | Your `ctx` ended. | Normal shutdown path. |

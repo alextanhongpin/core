@@ -81,7 +81,10 @@ func MustNewCache[T any](client *redis.Client, cfg CacheConfig) *Cache[T] {
 // the value already stored when it rechecked. On error, loaded is false.
 //
 // If the leader's getter fails, callers on the same Cache get its error, while
-// callers in other processes find no value and get redis.Nil. If the fill lease
+// callers in other processes find no value and retry the fill, becoming the
+// leader themselves if the lease is free. They return redis.Nil only after
+// three leaders in other processes in a row finished without storing a value.
+// If the fill lease
 // was lost before the value was stored, nothing is stored and the error matches
 // lock.ErrExpired.
 func (c *Cache[T]) LoadOrStore(ctx context.Context, key string, getter func(ctx context.Context) (T, error), ttl time.Duration) (T, bool, error) {
@@ -101,35 +104,45 @@ func (c *Cache[T]) LoadOrStore(ctx context.Context, key string, getter func(ctx 
 		return t, false, err
 	}
 
-	created := false
-	did, err := c.group.Do(ctx, fmt.Sprintf("%s:%s", key, c.cfg.Suffix), func(ctx context.Context) error {
-		if _, err := c.load(ctx, key); err == nil {
+	for attempt := 1; ; attempt++ {
+		created := false
+		did, err := c.group.Do(ctx, fmt.Sprintf("%s:%s", key, c.cfg.Suffix), func(ctx context.Context) error {
+			if _, err := c.load(ctx, key); err == nil {
+				return nil
+			} else if !errors.Is(err, redis.Nil) {
+				return err
+			}
+			v, err := getter(ctx)
+			if err != nil {
+				return err
+			}
+
+			if err := c.store(ctx, key, v, ttl); err != nil {
+				return err
+			}
+			created = true
 			return nil
-		} else if !errors.Is(err, redis.Nil) {
-			return err
-		}
-		v, err := getter(ctx)
+		})
 		if err != nil {
-			return err
+			return zero, false, err
 		}
 
-		if err := c.store(ctx, key, v, ttl); err != nil {
-			return err
+		t, err = c.load(ctx, key)
+		if err == nil {
+			return t, !did || !created, nil
 		}
-		created = true
-		return nil
-	})
-	if err != nil {
-		return t, false, err
+		// A leader in another process finished without storing a value (its
+		// getter failed or it crashed). Try to become the leader ourselves
+		// instead of reporting a miss the caller cannot act on.
+		if did || !errors.Is(err, redis.Nil) || attempt == remoteFillAttempts {
+			return zero, false, err
+		}
 	}
-
-	t, err = c.load(ctx, key)
-	if err != nil {
-		return t, false, err
-	}
-
-	return t, !did || !created, nil
 }
+
+// remoteFillAttempts bounds how many times LoadOrStore waits for leaders in
+// other processes that finish without storing a value.
+const remoteFillAttempts = 3
 
 func (c *Cache[T]) load(ctx context.Context, key string) (t T, err error) {
 	b, err := c.client.Get(ctx, key).Bytes()
