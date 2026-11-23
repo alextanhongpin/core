@@ -165,15 +165,3 @@ func HTTPCheck(url string, timeout time.Duration) Checker {
 		}
 	}
 }
-
-// MemoryCheck creates a health check for memory usage.
-func MemoryCheck(maxMemoryMB int64) Checker {
-	return func() Check {
-		// This is a simplified memory check
-		// In production, you might want to use runtime.MemStats
-		return Check{
-			Status:  StatusHealthy,
-			Message: "Memory usage OK",
-		}
-	}
-}

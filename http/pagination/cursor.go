@@ -32,22 +32,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
-	"time"
-)
-
-// CursorType represents the type of cursor field used for pagination.
-//
-// This enumeration helps identify the data type of cursor values, enabling
-// proper encoding, decoding, and validation of cursor parameters.
-type CursorType string
-
-const (
-	// CursorTypeString indicates the cursor field is a string value
-	CursorTypeString CursorType = "string"
-	// CursorTypeInt indicates the cursor field is an integer value
-	CursorTypeInt CursorType = "int"
-	// CursorTypeTime indicates the cursor field is a timestamp value
-	CursorTypeTime CursorType = "time"
 )
 
 // Cursor represents cursor-based pagination parameters for forward and backward navigation.
@@ -463,51 +447,6 @@ func CursorFromString(after, before, first, last string) (*Cursor[string], error
 	}
 
 	return cursor, nil
-}
-
-// TimeCursor represents time-based cursor pagination
-type TimeCursor struct {
-	After  *time.Time `json:"after,omitempty"`
-	Before *time.Time `json:"before,omitempty"`
-	First  int        `json:"first"`
-	Last   int        `json:"last,omitempty"`
-}
-
-// NewTimeCursor creates a time-based cursor
-func NewTimeCursor(first int) *TimeCursor {
-	return &TimeCursor{
-		First: first,
-	}
-}
-
-// WithAfter sets the after time
-func (tc *TimeCursor) WithAfter(t time.Time) *TimeCursor {
-	tc.After = &t
-	return tc
-}
-
-// WithBefore sets the before time
-func (tc *TimeCursor) WithBefore(t time.Time) *TimeCursor {
-	tc.Before = &t
-	return tc
-}
-
-// Limit returns the query limit
-func (tc *TimeCursor) Limit() int {
-	if tc.Last > 0 {
-		return tc.Last + 1
-	}
-	return tc.First + 1
-}
-
-// IsForward returns true if this is forward pagination
-func (tc *TimeCursor) IsForward() bool {
-	return tc.First > 0
-}
-
-// IsBackward returns true if this is backward pagination
-func (tc *TimeCursor) IsBackward() bool {
-	return tc.Last > 0
 }
 
 // BuildPageInfo creates PageInfo from pagination results

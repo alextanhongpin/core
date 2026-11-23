@@ -63,19 +63,3 @@ func TestSecurityHeaders(t *testing.T) {
 		assert.Equal(t, "0", w.Header().Get("Expires"))
 	})
 }
-
-func TestCORS(t *testing.T) {
-	t.Run("set CORS headers", func(t *testing.T) {
-		w := httptest.NewRecorder()
-
-		origins := []string{"https://example.com"}
-		methods := []string{"GET", "POST", "PUT", "DELETE"}
-		headers := []string{"Content-Type", "Authorization"}
-
-		response.CORS(w, origins, methods, headers)
-
-		assert.Equal(t, "https://example.com", w.Header().Get("Access-Control-Allow-Origin"))
-		assert.Equal(t, "GET, POST, PUT, DELETE", w.Header().Get("Access-Control-Allow-Methods"))
-		assert.Equal(t, "Content-Type, Authorization", w.Header().Get("Access-Control-Allow-Headers"))
-	})
-}

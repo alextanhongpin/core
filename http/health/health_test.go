@@ -267,16 +267,3 @@ func TestHTTPCheck(t *testing.T) {
 		}
 	})
 }
-
-func TestMemoryCheck(t *testing.T) {
-	checker := health.MemoryCheck(1024)
-	check := checker()
-
-	if check.Status != health.StatusHealthy {
-		t.Errorf("Expected status healthy, got %s", check.Status)
-	}
-
-	if check.Message != "Memory usage OK" {
-		t.Errorf("Expected message 'Memory usage OK', got %s", check.Message)
-	}
-}
