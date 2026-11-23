@@ -1,3 +1,3 @@
-// Package metrics collects Prometheus application and HTTP metrics and provides
-// probabilistic structures for tracking request statistics.
+// Package metrics provides Prometheus HTTP and RED metrics, an expvar request
+// counter, and a Redis-backed per-path request tracker.
 package metrics
