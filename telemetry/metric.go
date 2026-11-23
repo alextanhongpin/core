@@ -1,4 +1,5 @@
-// This is a modified version of https://pkg.go.dev/golang.org/x/exp/event@v0.0.0-20230817173708-d852ddb80c63/otel, since the supported OTEL package is no longer the latest.
+// Derived from golang.org/x/exp/event/otel, which panics on bad events and
+// records gauges as up-down counters and durations as raw nanoseconds.
 package telemetry
 
 import (
@@ -7,6 +8,7 @@ import (
 	"fmt"
 	"log"
 	"sync"
+	"time"
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
@@ -178,25 +180,33 @@ func (m *MetricHandler) newRecordFunc(em event.Metric) (recordFunc, error) {
 		}, nil
 
 	case *event.FloatGauge:
-		otelOpts := []metric.Float64UpDownCounterOption{
+		// A FloatGauge event carries the current value, so it maps to a
+		// synchronous gauge (Record), not an up-down counter (Add).
+		otelOpts := []metric.Float64GaugeOption{
 			metric.WithDescription(opts.Description),
 			metric.WithUnit(string(opts.Unit)), // cast OK: same strings
 		}
-		g, err := m.meter.Float64UpDownCounter(name, otelOpts...)
+		g, err := m.meter.Float64Gauge(name, otelOpts...)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create gauge %s: %w", name, err)
 		}
 		return func(ctx context.Context, l event.Label, attrs []event.Label) error {
-			g.Add(ctx, l.Float64(), metric.WithAttributes(labelsToAttributes(attrs)...))
+			g.Record(ctx, l.Float64(), metric.WithAttributes(labelsToAttributes(attrs)...))
 			return nil
 		}, nil
 
 	case *event.DurationDistribution:
-		otelOpts := []metric.Int64HistogramOption{
-			metric.WithDescription(opts.Description),
-			metric.WithUnit(string(opts.Unit)), // cast OK: same strings
+		// Record in the declared unit: milliseconds for UnitMilliseconds,
+		// seconds otherwise (the OpenTelemetry convention for durations).
+		unit, scale := "s", float64(time.Second)
+		if opts.Unit == event.UnitMilliseconds {
+			unit, scale = "ms", float64(time.Millisecond)
 		}
-		r, err := m.meter.Int64Histogram(name, otelOpts...)
+		otelOpts := []metric.Float64HistogramOption{
+			metric.WithDescription(opts.Description),
+			metric.WithUnit(unit),
+		}
+		r, err := m.meter.Float64Histogram(name, otelOpts...)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create histogram %s: %w", name, err)
 		}
@@ -205,7 +215,7 @@ func (m *MetricHandler) newRecordFunc(em event.Metric) (recordFunc, error) {
 			if duration < 0 {
 				return fmt.Errorf("duration cannot be negative: %v", duration)
 			}
-			r.Record(ctx, duration.Nanoseconds(), metric.WithAttributes(labelsToAttributes(attrs)...))
+			r.Record(ctx, float64(duration)/scale, metric.WithAttributes(labelsToAttributes(attrs)...))
 			return nil
 		}, nil
 

@@ -26,15 +26,13 @@ type TracerConfig struct {
 	SampleRate     float64
 }
 
+// NewHTTPClient returns a client with a 30-second timeout whose requests are
+// traced and propagate the trace context.
 func NewHTTPClient() *http.Client {
 	return &http.Client{
 		Timeout: 30 * time.Second,
 		Transport: otelhttp.NewTransport(
-			&http.Transport{
-				IdleConnTimeout:     90 * time.Second,
-				MaxIdleConns:        100,
-				MaxIdleConnsPerHost: 10,
-			},
+			newTransport(),
 			otelhttp.WithClientTrace(func(ctx context.Context) *httptrace.ClientTrace {
 				return otelhttptrace.NewClientTrace(ctx)
 			}),
@@ -42,15 +40,24 @@ func NewHTTPClient() *http.Client {
 	}
 }
 
+// newTransport clones http.DefaultTransport so that proxy settings and dial,
+// TLS handshake and HTTP/2 defaults are kept.
+func newTransport() *http.Transport {
+	t := http.DefaultTransport.(*http.Transport).Clone()
+	t.MaxIdleConns = 100
+	t.MaxIdleConnsPerHost = 10
+	t.IdleConnTimeout = 90 * time.Second
+	return t
+}
+
+// HTTPHandler traces requests to next, except /health. Spans are named
+// "METHOD PATTERN" once an http.ServeMux inside next has matched a route,
+// and "METHOD" otherwise.
 func HTTPHandler(next http.Handler) http.Handler {
-	// Add HTTP instrumentation for the whole server.
 	return otelhttp.NewHandler(
 		next,
 		"http-server",
 		otelhttp.WithMessageEvents(otelhttp.ReadEvents, otelhttp.WriteEvents),
-		otelhttp.WithSpanNameFormatter(func(operation string, r *http.Request) string {
-			return fmt.Sprintf("%s %s", r.Method, r.Pattern)
-		}),
 		otelhttp.WithFilter(func(req *http.Request) bool {
 			return req.URL.Path != "/health"
 		}),

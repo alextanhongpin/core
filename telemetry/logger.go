@@ -7,6 +7,8 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
+// SlogAttrsFromSpanContext appends trace_id and span_id attributes for the
+// span in ctx, if any, to args.
 func SlogAttrsFromSpanContext(ctx context.Context, args ...slog.Attr) []slog.Attr {
 	spanContext := trace.SpanContextFromContext(ctx)
 	if spanContext.IsValid() {
