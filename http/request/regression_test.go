@@ -100,4 +100,3 @@ func TestValueOrKeepsExplicitZero(t *testing.T) {
 	assert.Equal(t, 10, request.Value("x").IntOr(10))
 	assert.True(t, request.Value("maybe").BoolOr(true))
 }
-

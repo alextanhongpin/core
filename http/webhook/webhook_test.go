@@ -179,4 +179,3 @@ func TestWebhookTimestampValidation(t *testing.T) {
 		is.Equal(http.StatusUnauthorized, w.Code)
 	})
 }
-
