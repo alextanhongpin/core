@@ -3,7 +3,7 @@ module github.com/alextanhongpin/core/sync/snapshot
 go 1.27.0
 
 require (
-	github.com/alextanhongpin/core/sync/broadcast v0.0.3
+	github.com/alextanhongpin/core/sync/broadcast v0.0.5-0.20261123014757-2ea02e9ad16d
 	github.com/stretchr/testify v1.10.0
 )
 
