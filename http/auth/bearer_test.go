@@ -40,7 +40,15 @@ func TestBearerHandler(t *testing.T) {
 	})
 
 	t.Run("no token but required", func(t *testing.T) {
-		wantUnauthorized(t, serve(auth.RequireBearerHandler(h), ""), `Bearer error="invalid_token"`)
+		wantUnauthorized(t, serve(auth.RequireBearerHandler(h), ""), "Bearer")
+	})
+
+	t.Run("required without OnError", func(t *testing.T) {
+		// Regression: a nil OnError panicked.
+		h := auth.BearerHandlerWithConfig(h, auth.BearerAuthConfig{Secret: secret})
+		wantUnauthorized(t, serve(h, ""), "Bearer")
+		wantUnauthorized(t, serve(h, "Bearer invalid"), `Bearer error="invalid_token"`)
+		wantOK(t, serve(h, "bearer "+token))
 	})
 }
 
